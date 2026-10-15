@@ -34,7 +34,9 @@ import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.services.follow.RedstoneDoorPolicy;
 import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.state.property.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -2935,6 +2937,10 @@ public final class MovementService {
         if (tryTraverseDoorway(bot, target, label)) return true;
         if (tryDoorSubgoalToward(bot, target, label)) return true;
         if (tryDoorEscapeToward(bot, target, null, label)) return true;
+        // 1.1.240: facing a rise of 2+ toward the goal, pick the cheapest of walk around / break /
+        // place (TerrainMovePolicy) instead of the fixed order below. A failed or NONE choice
+        // falls through to the old order unchanged.
+        if (tryTerrainMoveToward(bot, target, label, allowMineObstruction)) return true;
         if (tryStepUpToward(bot, target, label)) return true;
         if (tryLocalUnstick(bot, target, label)) return true;
         // NOTE: trySidestepAround intentionally NOT called here — it causes unbounded
@@ -2943,6 +2949,263 @@ public final class MovementService {
         // walkDirect invoke trySidestepAround directly when needed.
         if (allowMineObstruction && tryMineObstructionToward(bot, target, label)) return true;
         return false;
+    }
+
+    /**
+     * Cheap stair blocks for PLACE: the non-plank part of {@link ScaffoldService#SCAFFOLD_BLOCKS}, which it
+     * places first. A holder so MovementService's static init never touches {@code Items} (unit tests).
+     */
+    private static final class TerrainStairBlocks {
+        static final Set<Item> ITEMS = Set.of(
+                Items.DIRT, Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.NETHERRACK);
+    }
+
+    /**
+     * Stuck facing a rise of 2+ blocks toward {@code goal}: choose WALK_AROUND / BREAK / PLACE with
+     * {@link TerrainMovePolicy} and run it. Worker thread only (it nudges and pillars); returns false
+     * at once on the server thread, when there is no such rise, on NONE, or when the move fails.
+     *
+     * <p>BREAK and PLACE need {@code allowMutation}, a running skill task, no active construction
+     * protection and no obstruction-mine opt-out (the same gates as {@link #tryMineObstructionToward}).
+     * Every mined cell goes through {@link #tryMinePlannedStepTrim} (territory authorization incl. the
+     * Spawn base, protected zones, near-human-blocks, hazards, {@link ObstructionMinePolicy}). PLACE is
+     * {@link ScaffoldService#pillarUp} for one block, untracked (Bradley: the dirt step may stay), whose
+     * placement re-checks territory on the server thread.</p>
+     */
+    private static boolean tryTerrainMoveToward(ServerPlayerEntity bot, BlockPos goal, String label, boolean allowMutation) {
+        if (bot == null || goal == null || bot.getUuid() == null) {
+            return false;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null || server.isOnThread()) {
+            return false;
+        }
+        ServerWorld world = getWorld(bot);
+        if (world == null || bot.isTouchingWater() || bot.isClimbing() || bot.hasVehicle()) {
+            return false;
+        }
+        BlockPos origin = groundedOrigin(bot);
+        int dx = goal.getX() - origin.getX();
+        int dz = goal.getZ() - origin.getZ();
+        if (dx == 0 && dz == 0) {
+            return false;
+        }
+        Direction primary = Math.abs(dx) >= Math.abs(dz)
+                ? (dx >= 0 ? Direction.EAST : Direction.WEST)
+                : (dz >= 0 ? Direction.SOUTH : Direction.NORTH);
+        Direction secondary = Math.abs(dx) >= Math.abs(dz)
+                ? (dz == 0 ? null : (dz > 0 ? Direction.SOUTH : Direction.NORTH))
+                : (dx == 0 ? null : (dx > 0 ? Direction.EAST : Direction.WEST));
+
+        Direction dir = null;
+        int rise = 0;
+        for (Direction candidate : new Direction[] {primary, secondary}) {
+            if (candidate == null) {
+                continue;
+            }
+            int r = terrainRise(world, origin.offset(candidate));
+            if (r >= 2) {
+                dir = candidate;
+                rise = r;
+                break;
+            }
+        }
+        if (dir == null) {
+            return false;
+        }
+        BlockPos front = origin.offset(dir);
+        UUID botId = bot.getUuid();
+        boolean mutationOk = allowMutation
+                && !Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get())
+                && AutoFaceEntity.isBotExecutingTask()
+                && !ConstructionProtectionService.hasActiveProtection(botId);
+
+        // BREAK: a 2-rise loses its head-height cell (becomes a 1-block stair; the bot's own jump
+        // headroom too if blocked); a 3+ rise loses its foot and head cells (walk in, floor required).
+        List<BlockPos> breakCells = new ArrayList<>(3);
+        BlockPos breakStep;
+        boolean breakOk = mutationOk;
+        if (rise == 2) {
+            breakCells.add(front.up());
+            if (hasCollision(world, origin.up(2))) {
+                breakCells.add(origin.up(2));
+            }
+            breakStep = front.up();
+        } else {
+            breakCells.add(front);
+            breakCells.add(front.up());
+            breakOk &= hasCollision(world, front.down());
+            breakStep = front;
+        }
+        breakOk &= !isRememberedFailedRoute(botId, origin, breakStep);
+        long breakTicksSum = 0L;
+        int maxCellTicks = 0;
+        for (BlockPos cell : breakCells) {
+            BlockState state = world.getBlockState(cell);
+            int ticks = bestHotbarGroundBreakTicks(bot, world, cell, state);
+            breakTicksSum += ticks == Integer.MAX_VALUE ? 0L : ticks;
+            maxCellTicks = Math.max(maxCellTicks, ticks);
+            if (breakOk && (ProtectedStructureBlockHelper.isNeverBreakBlock(state)
+                    || !plannedStepTrimAllowed(bot, world, cell, state))) {
+                breakOk = false;
+            }
+        }
+
+        // PLACE (2-rise only): one block in the bot's own cell, then the rise is a 1-block step.
+        BlockPos placeStep = front.up(2);
+        boolean placeOk = mutationOk
+                && rise == 2
+                && !hasCollision(world, origin.up(2))
+                && !hasCollision(world, origin.up(3))
+                && !hasCollision(world, front.up(3))
+                && !isRememberedFailedRoute(botId, origin, origin.up())
+                && BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, origin).allowed()
+                && !ProtectedZoneService.isProtected(origin, world, BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot))
+                && ConstructionProtectionService.protectionReason(botId, origin) == null;
+        int scaffoldCount = countTerrainStairBlocks(bot);
+
+        LocalEscapeCandidate detour = findBestLocalEscapeCandidate(bot, goal);
+        int detourBlocks = detour == null ? 0
+                : Math.max(1, detour.route() == null ? 1 : detour.route().size());
+
+        TerrainMovePolicy.Decision decision = TerrainMovePolicy.choose(new TerrainMovePolicy.Inputs(
+                rise,
+                breakCells.size(),
+                breakTicksSum,
+                maxCellTicks,
+                breakOk,
+                scaffoldCount,
+                placeOk,
+                detour != null,
+                detourBlocks));
+        if (decision.move() == TerrainMovePolicy.Move.NONE) {
+            LOGGER.debug("terrain move: NONE [{}] bot={} from={} dir={} rise={} breakOk={} breakTicks={} scaffold={} placeOk={} detour=false",
+                    label, bot.getName().getString(), origin.toShortString(), dir, rise, breakOk, breakTicksSum,
+                    scaffoldCount, placeOk);
+            return false;
+        }
+        LOGGER.info("terrain move: {} cost={} [{}] bot={} from={} dir={} rise={} walk={} break={} place={} cells={} breakTicks={} scaffold={} goal={}",
+                decision.move(),
+                TerrainMovePolicy.Decision.fmt(decision.cost()),
+                label,
+                bot.getName().getString(),
+                origin.toShortString(),
+                dir,
+                rise >= 4 ? "4+" : String.valueOf(rise),
+                TerrainMovePolicy.Decision.fmt(decision.walkCost()),
+                TerrainMovePolicy.Decision.fmt(decision.breakCost()),
+                TerrainMovePolicy.Decision.fmt(decision.placeCost()),
+                breakCells.size(),
+                breakTicksSum,
+                scaffoldCount,
+                goal.toShortString());
+
+        boolean ok;
+        String detail;
+        switch (decision.move()) {
+            case WALK_AROUND -> {
+                ok = executeLocalEscapeCandidate(bot, detour, goal, label + "-terrain-walk");
+                detail = "route=" + describeBlockRoute(detour.route(), 4);
+            }
+            case BREAK -> {
+                boolean mined = true;
+                for (BlockPos cell : breakCells) {
+                    if (!hasCollision(world, cell)) {
+                        continue;
+                    }
+                    if (!tryMinePlannedStepTrim(bot, world, cell, label + "-terrain-break") && hasCollision(world, cell)) {
+                        mined = false;
+                        break;
+                    }
+                }
+                boolean stepped = false;
+                if (mined) {
+                    stepped = rise == 2
+                            ? nudgeTowardUntilClose(bot, breakStep, 2.25D, 1400L, 0.18D, label + "-terrain-step")
+                                    && groundedOrigin(bot).getY() >= breakStep.getY()
+                            : nudgeTowardExactBlock(bot, breakStep, false, label + "-terrain-step");
+                } else {
+                    recordFailedRoute(bot, origin, breakStep, label + "-terrain-break");
+                }
+                // The rise is gone once mined; the walk loop can take the step even if this nudge did not.
+                ok = mined;
+                detail = "mined=" + mined + " stepped=" + stepped;
+            }
+            case PLACE -> {
+                boolean placed = ScaffoldService.pillarUp(bot, 1, false);
+                boolean stepped = false;
+                if (placed) {
+                    stepped = nudgeTowardUntilClose(bot, placeStep, 2.25D, 1400L, 0.18D, label + "-terrain-step")
+                            && groundedOrigin(bot).getY() >= placeStep.getY();
+                } else {
+                    recordFailedRoute(bot, origin, origin.up(), label + "-terrain-place");
+                }
+                ok = placed;
+                detail = "placed=" + placed + " stepped=" + stepped;
+            }
+            default -> {
+                ok = false;
+                detail = "";
+            }
+        }
+        LOGGER.info("terrain move result: {} ok={} [{}] bot={} now={} {}",
+                decision.move(), ok, label, bot.getName().getString(), bot.getBlockPos().toShortString(), detail);
+        return ok;
+    }
+
+    /**
+     * Solid cells stacked at {@code front} from the bot's foot level, 0-4 (4 = four or more). Doors,
+     * fences, walls and other shapes taller than a block are not terrain (0).
+     */
+    private static int terrainRise(ServerWorld world, BlockPos front) {
+        BlockState feet = world.getBlockState(front);
+        if (feet.getBlock() instanceof DoorBlock || feet.getBlock() instanceof FenceGateBlock
+                || feet.isIn(BlockTags.FENCES) || feet.isIn(BlockTags.WALLS)) {
+            return 0;
+        }
+        var shape = feet.getCollisionShape(world, front);
+        if (shape.isEmpty() || shape.getMax(Direction.Axis.Y) > 1.01D) {
+            return 0;
+        }
+        int rise = 0;
+        while (rise < 4 && hasCollision(world, front.up(rise))) {
+            rise++;
+        }
+        return rise;
+    }
+
+    private static boolean hasCollision(ServerWorld world, BlockPos pos) {
+        return !world.getBlockState(pos).getCollisionShape(world, pos).isEmpty();
+    }
+
+    /** Fastest on-ground break with hand or a hotbar item ({@code selectHarvestToolOrHands} picks from the hotbar). */
+    private static int bestHotbarGroundBreakTicks(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, BlockState state) {
+        float hardness = state.getHardness(world, pos);
+        boolean requiresTool = state.isToolRequired();
+        int best = ObstructionMinePolicy.groundBreakTicks(1.0F, hardness, ObstructionMinePolicy.canHarvest(requiresTool, false));
+        var inventory = bot.getInventory();
+        for (int slot = 0; slot < 9; slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            int ticks = ObstructionMinePolicy.groundBreakTicks(stack.getMiningSpeedMultiplier(state), hardness,
+                    ObstructionMinePolicy.canHarvest(requiresTool, stack.isSuitableFor(state)));
+            best = Math.min(best, ticks);
+        }
+        return best;
+    }
+
+    private static int countTerrainStairBlocks(ServerPlayerEntity bot) {
+        var inventory = bot.getInventory();
+        int count = 0;
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (!stack.isEmpty() && TerrainStairBlocks.ITEMS.contains(stack.getItem())) {
+                count += stack.getCount();
+            }
+        }
+        return count;
     }
 
     /**
