@@ -873,6 +873,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService.restartExecutors();
             net.wcfcarolina13.GameAI.services.MovementService.restartExecutors();
             net.wcfcarolina13.GameAI.services.BotHomeService.restartExecutors();
+            net.wcfcarolina13.PathFinding.PathCompareService.restartExecutors();
             net.wcfcarolina13.GameAI.services.BotZzzSleepService.restartExecutor();
             serverInstance = server;
             net.wcfcarolina13.GameAI.souls.SoulRuntime.start(server, CONFIG);
@@ -959,6 +960,9 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotAutoHuntService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService.shutdownExecutors();
             net.wcfcarolina13.GameAI.services.MovementService.shutdownExecutors();
+            // 1.1.240 slice D debug A/B: in-memory only, gone with the server.
+            net.wcfcarolina13.PathFinding.PathCompareService.shutdownExecutors();
+            net.wcfcarolina13.PathFinding.PathFinderOverrides.clearAll();
             net.wcfcarolina13.GameAI.services.BotZzzSleepService.shutdownExecutor();
             AutoFaceEntity.onServerStopping(server);
             LearningModeService.onServerStopping(server);

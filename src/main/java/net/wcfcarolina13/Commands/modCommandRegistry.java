@@ -728,6 +728,29 @@ public class modCommandRegistry {
                                 )
                                 .then(literal("pathfinder")
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                // Per-bot override (debug/A-B only, in memory, 1.1.240 slice D).
+                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                        .executes(context -> {
+                                                            String mode = StringArgumentType.getString(context, "mode").toLowerCase();
+                                                            ServerPlayerEntity target = EntityArgumentType.getPlayer(context, "bot");
+                                                            String botName = target.getName().getString();
+                                                            net.wcfcarolina13.PathFinding.PathFinderChoice choice =
+                                                                    net.wcfcarolina13.PathFinding.PathFinderChoice.parse(mode);
+                                                            if (choice == null && !"default".equals(mode)) {
+                                                                context.getSource().sendFeedback(
+                                                                        () -> Text.literal("Usage: /bot config pathfinder <baritone|classic|default> <bot>"), false);
+                                                                return 0;
+                                                            }
+                                                            net.wcfcarolina13.PathFinding.PathFinderOverrides.set(target.getUuid(), choice);
+                                                            String shown = choice == null
+                                                                    ? "global default (" + (net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE ? "baritone" : "bidir") + ")"
+                                                                    : choice.label();
+                                                            LOGGER.info("[PathFinder] per-bot override bot={} finder={}",
+                                                                    botName, choice == null ? "default" : choice.label());
+                                                            context.getSource().sendFeedback(
+                                                                    () -> Text.literal("Pathfinder for " + botName + ": " + shown + " (debug override, not saved)"), true);
+                                                            return 1;
+                                                        }))
                                                 .executes(context -> {
                                                     String mode = StringArgumentType.getString(context, "mode").toLowerCase();
                                                     boolean baritone;
@@ -754,6 +777,35 @@ public class modCommandRegistry {
                                                     ? "baritone" : "classic (bidirectional A*)";
                                             context.getSource().sendFeedback(
                                                     () -> Text.literal("Current pathfinder: " + current), false);
+                                            return 1;
+                                        })
+                                )
+                                .then(literal("pathcompare")
+                                        .then(CommandManager.argument("state", StringArgumentType.word())
+                                                .executes(context -> {
+                                                    String state = StringArgumentType.getString(context, "state").toLowerCase();
+                                                    boolean on;
+                                                    switch (state) {
+                                                        case "on": on = true; break;
+                                                        case "off": on = false; break;
+                                                        default:
+                                                            context.getSource().sendFeedback(
+                                                                    () -> Text.literal("Usage: /bot config pathcompare <on|off>"), false);
+                                                            return 0;
+                                                    }
+                                                    net.wcfcarolina13.PathFinding.PathCompareService.setEnabled(on);
+                                                    context.getSource().sendFeedback(
+                                                            () -> Text.literal("PathCompare shadow logging: " + (on ? "ON" : "OFF") + " (debug, not saved)"), true);
+                                                    return 1;
+                                                }))
+                                        .executes(context -> {
+                                            String status = "PathCompare: "
+                                                    + (net.wcfcarolina13.PathFinding.PathCompareService.isEnabled() ? "ON" : "OFF")
+                                                    + " submitted=" + net.wcfcarolina13.PathFinding.PathCompareService.submittedCount()
+                                                    + " logged=" + net.wcfcarolina13.PathFinding.PathCompareService.loggedCount()
+                                                    + " dropped=" + net.wcfcarolina13.PathFinding.PathCompareService.droppedCount()
+                                                    + " overrides=" + net.wcfcarolina13.PathFinding.PathFinderOverrides.size();
+                                            context.getSource().sendFeedback(() -> Text.literal(status), false);
                                             return 1;
                                         })
                                 )

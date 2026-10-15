@@ -86,22 +86,70 @@ public class PathFinder {
     private static final long PATHFIND_TIMEOUT_MS = 10_000L; // 10 second hard cap
 
     public static List<PathNode> calculatePath(BlockPos start, BlockPos target, ServerWorld world) {
+        return calculatePath(start, target, world, null, null);
+    }
+
+    /**
+     * Plans for a known bot. A per-bot {@link PathFinderOverrides} entry wins over the global
+     * {@link #USE_BARITONE_STYLE} flag (debug/A-B only, 1.1.240 slice D). When the shadow
+     * compare is on, the OTHER finder is queued on the same start/goal for one
+     * {@code [PathCompare]} line; its result is never used here.
+     */
+    public static List<PathNode> calculatePath(BlockPos start, BlockPos target, ServerWorld world,
+                                               UUID botUuid, String botName) {
+        PathFinderChoice choice = PathFinderOverrides.resolveFor(botUuid, USE_BARITONE_STYLE);
         long startTime = System.nanoTime();
-        String mode;
-        List<PathNode> result;
-
-        if (USE_BARITONE_STYLE) {
-            mode = "baritone";
-            result = BaritoneStylePathFinder.calculatePath(start, target, world);
-        } else {
-            mode = "bidir";
-            result = calculatePathBidirectional(start, target, world);
-        }
-
+        List<PathNode> result = runFinder(choice, start, target, world);
         long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
         LOGGER.info("[PathFinder] mode={} elapsed={}ms pathLen={} from={} to={}",
-                mode, elapsedMs, result.size(), start.toShortString(), target.toShortString());
+                choice.label(), elapsedMs, result.size(), start.toShortString(), target.toShortString());
+        if (botName != null && PathCompareService.isEnabled()) {
+            PathCompareService.submit(botName, start, target, world, choice, elapsedMs,
+                    PathCompareService.positions(result));
+        }
         return result;
+    }
+
+    /**
+     * Runs one finder with the timeout it normally gets (Baritone: its primary timeout; bidir:
+     * {@link #PATHFIND_TIMEOUT_MS}). No {@code [PathFinder] mode=} line, so the shadow compare
+     * can call it without skewing the mode counts.
+     */
+    static List<PathNode> runFinder(PathFinderChoice choice, BlockPos start, BlockPos target, ServerWorld world) {
+        if (choice == PathFinderChoice.BARITONE) {
+            return BaritoneStylePathFinder.calculatePath(start, target, world);
+        }
+        return calculatePathBidirectional(start, target, world);
+    }
+
+    /**
+     * Re-checks a finished path against {@link PathMovePolicy} with the world, the way the
+     * finders read it: every consecutive pair must be one horizontal step apart and an
+     * executable edge (standing landing, headroom for a rise, head lane for a drop). Diagonal
+     * corner clearance is not re-checked (the finder owns it). An empty or one-node path has no
+     * edges and passes; callers map an empty path to "none" first.
+     */
+    public static boolean isPathExecutable(List<BlockPos> path, ServerWorld world) {
+        if (path == null || world == null) {
+            return false;
+        }
+        for (int i = 0; i + 1 < path.size(); i++) {
+            BlockPos a = path.get(i);
+            BlockPos b = path.get(i + 1);
+            int dy = b.getY() - a.getY();
+            if (!PathCompareFormat.isAdjacentStep(b.getX() - a.getX(), b.getZ() - a.getZ())) {
+                return false;
+            }
+            if (!PathMovePolicy.isExecutable(dy,
+                    hasSupportedFloor(world, b),
+                    isPassable(world, b),
+                    isPassable(world, b.up()),
+                    dy > 0 && isPassable(world, a.up(2)),
+                    dy < 0 && isPassable(world, b.up(2)))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -114,7 +162,7 @@ public class PathFinder {
     }
 
     /** Original bidirectional A* implementation. */
-    private static List<PathNode> calculatePathBidirectional(BlockPos start, BlockPos target, ServerWorld world) {
+    static List<PathNode> calculatePathBidirectional(BlockPos start, BlockPos target, ServerWorld world) {
         if (start.equals(target)) {
             // Same shape as a merged search result (start..goal inclusive), just one node long.
             // Without this the two frontiers never overlap and the search burns its full timeout.

@@ -929,9 +929,11 @@ public final class MovementService {
                 return recordAttempt(player.getUuid(), destination,
                         new WalkResult(false, player.getBlockPos(), label + ": aborted"));
             }
-            List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world);
+            List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world,
+                    player.getUuid(), player.getName().getString());
             if (preclearPlannedStepUps(player, rawPath, "walkTo-preclear")) {
-                rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world);
+                rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world,
+                        player.getUuid(), player.getName().getString());
             }
             List<PathFinder.PathNode> simplified = PathFinder.simplifyPath(rawPath, world);
             boolean useRawSegments = shouldUseRawPathSegmentsForLocalEscape(rawPath, player.getBlockPos(), destination);
