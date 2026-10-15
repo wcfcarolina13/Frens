@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -588,37 +589,59 @@ public final class BaseNetworkManager {
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
                     if (player == null) return;
-                    ServerWorld world = player.getCommandSource().getWorld();
-                    if (world.getRegistryKey() != World.OVERWORLD) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bases are only managed in the Overworld.");
-                        return;
-                    }
-                    if (!BotAccessGate.isServerAdmin(player)) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Only operators or the host can reassign base ownership.");
-                        return;
-                    }
-                    String label = payload.label();
-                    if (label == null || label.isBlank()) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Select a base first.");
-                        return;
-                    }
-                    MinecraftServer srv = player.getCommandSource().getServer();
-                    String newUuid = payload.newOwnerUuid();
-                    String newName = payload.newOwnerName();
-                    // Normalize blank strings to null so canEditBase treats cleared owners as legacy.
-                    if (newUuid != null && newUuid.isBlank()) newUuid = null;
-                    if (newName != null && newName.isBlank()) newName = null;
-                    boolean ok = BotHomeService.setBaseOwner(srv, world, label, newUuid, newName);
-                    if (ok) {
-                        String display = newName != null ? newName
-                                : (BotHomeService.SERVER_OWNER_UUID.equals(newUuid) ? BotHomeService.SERVER_OWNER_NAME : "(unowned)");
-                        ChatUtils.sendSystemMessage(player.getCommandSource(),
-                                "Reassigned '" + label + "' owner to " + display + ".");
-                    } else {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "No base named '" + label + "' found.");
-                    }
-                    sendBasesList(player, currentBotAliasContext(player));
+                    BaseOwnerArg.Owner owner = BaseOwnerArg.normalize(payload.newOwnerUuid(), payload.newOwnerName());
+                    applyBaseOwner(player.getCommandSource(), payload.label(), owner.uuid(), owner.name());
                 }));
+    }
+
+    /**
+     * Reassigns a base's owner. Shared by the {@link BaseSetOwnerPayload} receiver and
+     * {@code /bot base owner}. Server thread only. Admin gate is {@link Frens#isServerAdmin}
+     * (operator or host, console passes). A null uuid/name pair clears the owner (legacy),
+     * {@link BotHomeService#SERVER_OWNER_UUID} makes the base server-owned.
+     *
+     * @return 1 when the owner changed, 0 otherwise (Brigadier result)
+     */
+    public static int applyBaseOwner(ServerCommandSource source, String label, String newUuid, String newName) {
+        if (source == null) return 0;
+        ServerWorld world = source.getWorld();
+        if (world.getRegistryKey() != World.OVERWORLD) {
+            reply(source, "Bases are only managed in the Overworld.");
+            return 0;
+        }
+        if (!Frens.isServerAdmin(source)) {
+            reply(source, "Only operators or the host can reassign base ownership.");
+            return 0;
+        }
+        if (label == null || label.isBlank()) {
+            reply(source, "Select a base first.");
+            return 0;
+        }
+        MinecraftServer srv = source.getServer();
+        BaseOwnerArg.Owner owner = BaseOwnerArg.normalize(newUuid, newName);
+        boolean ok = BotHomeService.setBaseOwner(srv, world, label, owner.uuid(), owner.name());
+        if (ok) {
+            String display = BaseOwnerArg.display(owner);
+            LOGGER.info("[base-owner] {} set owner of base '{}' to {} ({})",
+                    source.getName(), label, display, owner.uuid() == null ? "none" : owner.uuid());
+            reply(source, "Reassigned '" + label + "' owner to " + display + ".");
+        } else {
+            reply(source, "No base named '" + label + "' found.");
+        }
+        ServerPlayerEntity player = source.getPlayer();
+        if (player != null) {
+            sendBasesList(player, currentBotAliasContext(player));
+        }
+        return ok ? 1 : 0;
+    }
+
+    /** Players get the usual system message, the console (no player) gets command feedback. */
+    private static void reply(ServerCommandSource source, String message) {
+        if (source.getPlayer() != null) {
+            ChatUtils.sendSystemMessage(source, message);
+        } else {
+            source.sendFeedback(() -> net.minecraft.text.Text.literal(message), false);
+        }
     }
 
     public static void sendBasesList(ServerPlayerEntity player) {

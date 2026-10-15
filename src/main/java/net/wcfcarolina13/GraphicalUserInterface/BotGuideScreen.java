@@ -1259,7 +1259,8 @@ public final class BotGuideScreen extends Screen {
                                 "[Home] before a §fwhite§r name = this lodestone compass is the bot's §edesignated home compass§r. Used by the fast-travel mechanics.",
                                 "You can have a preferred home base AND a designated home compass at the same time — they are independent.",
                                 "Sunset-return picks the CLOSEST of: last-slept bed, preferred home, or nearest base. If your preferred home is far away and Spawn is closer, the bot may go to Spawn instead.",
-                                "To force a specific base on return, either delete the closer alternatives or keep the bot geographically near the preferred home."
+                                "To force a specific base on return, either delete the closer alternatives or keep the bot geographically near the preferred home.",
+                                "Admins can set who owns a base with /bot base owner <base> <player|server|none>. Put base names with spaces in quotes, for example /bot base owner \"My Base\" server. Operators and the host only."
                         ),
                         "UI-only",
                         "Inventory > Bases button",

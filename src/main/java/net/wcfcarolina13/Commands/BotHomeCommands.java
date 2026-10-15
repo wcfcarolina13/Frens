@@ -2,8 +2,13 @@ package net.wcfcarolina13.Commands;
 
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.context.CommandContext;
+import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.wcfcarolina13.network.BaseNetworkManager;
+import net.wcfcarolina13.network.BaseOwnerArg;
 
 /**
  * Home/base related commands.
@@ -294,7 +299,27 @@ final class BotHomeCommands {
                                 .executes(context -> modCommandRegistry.executeBaseRemove(context,
                                         StringArgumentType.getString(context, "label")))))
                 .then(CommandManager.literal("list")
-                        .executes(modCommandRegistry::executeBaseList));
+                        .executes(modCommandRegistry::executeBaseList))
+                // Admin only (gate inside applyBaseOwner). Literals win over the player argument,
+                // so "server" and "none" are never read as player names.
+                .then(CommandManager.literal("owner")
+                        .then(CommandManager.argument("label", StringArgumentType.string())
+                                .then(CommandManager.literal("server")
+                                        .executes(context -> executeBaseOwner(context, BaseOwnerArg.Kind.SERVER, null)))
+                                .then(CommandManager.literal("none")
+                                        .executes(context -> executeBaseOwner(context, BaseOwnerArg.Kind.NONE, null)))
+                                .then(CommandManager.argument("player", EntityArgumentType.player())
+                                        .executes(context -> executeBaseOwner(context, BaseOwnerArg.Kind.PLAYER,
+                                                EntityArgumentType.getPlayer(context, "player"))))));
+    }
+
+    private static int executeBaseOwner(CommandContext<ServerCommandSource> context, BaseOwnerArg.Kind kind,
+                                        ServerPlayerEntity player) {
+        BaseOwnerArg.Owner owner = BaseOwnerArg.resolve(kind,
+                player != null ? player.getUuid().toString() : null,
+                player != null ? player.getName().getString() : null);
+        return BaseNetworkManager.applyBaseOwner(context.getSource(),
+                StringArgumentType.getString(context, "label"), owner.uuid(), owner.name());
     }
 
     static ArgumentBuilder<ServerCommandSource, ?> buildUnleashTethered() {
