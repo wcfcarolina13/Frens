@@ -310,6 +310,13 @@ class WallOffPolicyTest {
     // 16-18. Abort, teardown
 
     @Test
+    void staleStopLatchIsClearedOnlyWhenNoTaskOwnsIt() {
+        assertTrue(WallOffPolicy.clearStaleLatchAtStart(true, false));   // /bot stop a minute ago, idle
+        assertFalse(WallOffPolicy.clearStaleLatchAtStart(true, true));   // a running task is being cancelled
+        assertFalse(WallOffPolicy.clearStaleLatchAtStart(false, false)); // nothing to clear
+    }
+
+    @Test
     void walkAbortsOnAFourPointDrop() {
         assertTrue(WallOffPolicy.abortWalk(20f, 16f));
         assertFalse(WallOffPolicy.abortWalk(20f, 17f));

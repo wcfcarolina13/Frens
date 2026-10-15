@@ -1173,6 +1173,18 @@ public final class BotFleeService {
             return false;
         }
         String name = bot.getName().getString();
+        // TaskService.forceAbort latches even with no ticket, and nothing clears it for this
+        // background thread: a /bot stop from minutes ago would abort the walk (shouldAbortSurvival)
+        // and the mover itself (nudge/execute read isAbortRequested). Clear a latch that no running
+        // task owns, as the sunset return and underground survival do. A /bot stop issued during
+        // the step re-latches and still aborts it.
+        boolean latched = TaskService.isAbortRequested(bot.getUuid()) && !TaskService.isServerStopping();
+        if (WallOffPolicy.clearStaleLatchAtStart(latched, TaskService.hasActiveTask(bot.getUuid()))) {
+            String latchReason = TaskService.getCancelReason(bot.getUuid()).orElse("");
+            TaskService.clearAbortLatch(bot.getUuid());
+            LOGGER.info("Bot {} wall-off: cleared a stale abort latch (reason={}) so the shelter walk can run",
+                    name, latchReason);
+        }
         long startMs = System.currentTimeMillis();
         float hpStart = bot.getHealth();
         try {

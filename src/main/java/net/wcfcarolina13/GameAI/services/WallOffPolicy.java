@@ -322,6 +322,15 @@ public final class WallOffPolicy {
         return Arrival.ARRIVED;
     }
 
+    /**
+     * A latched abort with no running task is stale (a {@code /bot stop} latches even without a
+     * ticket and nothing clears it for a background shelter thread): clear it before the walk, or
+     * it vetoes the night shelter. A latch that belongs to a running task is a real cancellation.
+     */
+    public static boolean clearStaleLatchAtStart(boolean latched, boolean hasActiveTask) {
+        return latched && !hasActiveTask;
+    }
+
     /** The bot is being hit on the way: cliff-dig or dig-down are faster. */
     public static boolean abortWalk(float hpAtStart, float hpNow) {
         return hpAtStart - hpNow >= ABORT_HP_DROP;
