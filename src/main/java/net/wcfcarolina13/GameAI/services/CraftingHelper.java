@@ -2073,7 +2073,10 @@ public final class CraftingHelper {
                     && !moveToPlacementStand(source, bot, stand, STATION_REACH_SQ, label + "-reposition")) {
                 return false;
             }
-            if (stand.equals(bot.getBlockPos())) {
+            // The move can report success without moving (the stand is already within reach), so
+            // re-check the footprint: whenever the bot still reaches into the place cell, walk it to
+            // the middle of the stand (it is on the stand or one cell beside it at this point).
+            if (stand.equals(bot.getBlockPos()) || botOverlapsCell(bot, placeAt)) {
                 recenterOnStand(bot, stand);
             }
         }
@@ -2102,7 +2105,8 @@ public final class CraftingHelper {
     }
 
     /**
-     * Walks the bot toward the middle of the stand it is on (a few short steps, worker thread only:
+     * Walks the bot toward the middle of the stand it is on or beside (a few short steps, stopping
+     * once centred, worker thread only:
      * callers are behind {@link CraftingStationPolicy#mayWalk}) so its hitbox stays inside the stand.
      */
     private static void recenterOnStand(ServerPlayerEntity bot, BlockPos stand) {
@@ -2110,7 +2114,7 @@ public final class CraftingHelper {
             return;
         }
         Vec3d center = Vec3d.ofBottomCenter(stand);
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 8; i++) {
             double dx = center.x - bot.getX();
             double dz = center.z - bot.getZ();
             if (dx * dx + dz * dz <= 0.01D) {

@@ -29,6 +29,14 @@ class WoodcutChatLinesTest {
     }
 
     @Test
+    void felledTreeAlwaysSaysSomething() {
+        assertEquals("Got 4 logs from that tree.", WoodcutChatLines.treeFelled(4));
+        assertEquals("Got 1 log from that tree.", WoodcutChatLines.treeFelled(1));
+        assertEquals("Done with that tree.", WoodcutChatLines.treeFelled(0));
+        assertEquals("Done with that tree.", WoodcutChatLines.treeFelled(-1));
+    }
+
+    @Test
     void noDevTextDashesOrSemicolons() {
         for (int logs = 0; logs <= 12; logs++) {
             for (boolean rest : new boolean[]{false, true}) {
@@ -39,6 +47,8 @@ class WoodcutChatLinesTest {
                 assertFalse(line.contains("—") || line.contains("–") || line.contains(";"), line);
                 assertFalse(line.contains(" min ") || line.contains("cleared ("), line);
             }
+            String felled = WoodcutChatLines.treeFelled(logs);
+            assertFalse(felled.contains("—") || felled.contains("–") || felled.contains(";"), felled);
         }
     }
 }

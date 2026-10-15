@@ -2477,7 +2477,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         int contentTopY = y + 2;
         // Development disclaimer banner (dialogue tab only, dismissable).
-        if (overlayCategory == TopicCategory.DIALOGUE && !dialogueDisclaimerDismissed) {
+        // With Questing off on this server the banner advertises a mode nobody can turn on.
+        if (overlayCategory == TopicCategory.DIALOGUE && !dialogueDisclaimerDismissed && isQuestingModeEnabledClient()) {
             int bannerH = drawDialogueDisclaimer(context, x, contentTopY, w);
             contentTopY += bannerH + 2;
         } else {
@@ -6036,6 +6037,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return allowed;
     }
 
+    /** The server's {@code questingModeEnabled} flag as this client last received it (SharedConfig sync). */
+    private static boolean isQuestingModeEnabledClient() {
+        return net.wcfcarolina13.Frens.CONFIG != null && net.wcfcarolina13.Frens.CONFIG.isQuestingModeEnabled();
+    }
+
     private List<TopicEntry> getVisibleAdminEntries() {
         boolean isAdmin = isAdminUser();
         boolean preview = isAdmin && adminPreviewAsNonAdmin;
@@ -6049,6 +6055,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
             if (isAdminHeaderEntry(entry)) {
                 pendingHeader = entry;
+                continue;
+            }
+
+            // "Recruitment Enable" sets the world to Questing, which the server refuses while
+            // Questing is off, so hide it (client copy of the flag, synced through SharedConfig).
+            if ("recruit_enable".equals(entry.dialogueKey) && !isQuestingModeEnabledClient()) {
                 continue;
             }
 

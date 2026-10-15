@@ -47,6 +47,30 @@ public final class WorldModeChooserPolicy {
     }
 
     /**
+     * The chat line after {@code /bot worldmode reset}, from the mode actually in effect once the
+     * recruitment state was re-sent (legacy migration can restore Questing on a recruited world,
+     * and with the flag off a joined op or host already set Admin). No em dashes or semicolons.
+     *
+     * @param questingModeEnabled the server flag
+     * @param selectionDone       the world's {@code modeSelectionDone} after the re-send
+     * @param savedMode           the world's {@code selectedWorldMode} after the re-send
+     */
+    public static String resetLine(boolean questingModeEnabled, boolean selectionDone, String savedMode) {
+        String mode = savedMode == null ? "" : savedMode.trim().toLowerCase(Locale.ROOT);
+        if (selectionDone && "questing".equals(mode)) {
+            return "World mode reset, but this world already has Questing progress, so it stays in Questing mode.";
+        }
+        if (selectionDone && "admin".equals(mode)) {
+            return questingModeEnabled
+                    ? "World mode reset. The world is in Admin mode."
+                    : "World mode reset. Questing mode is turned off on this server, so the world is in Admin mode.";
+        }
+        return questingModeEnabled
+                ? "World mode reset. Press [-] or rejoin to reopen the mode selection screen."
+                : "World mode reset. Questing mode is turned off on this server, so the world switches to Admin mode when an op or the host joins.";
+    }
+
+    /**
      * Whether a request to set the world to {@code requestedQuesting ? Questing : Admin} may go
      * ahead. Admin is always allowed. Questing needs the flag, unless the world already is
      * Questing (re-setting it changes nothing).

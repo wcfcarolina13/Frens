@@ -37,6 +37,24 @@ class WorldModeChooserPolicyTest {
     }
 
     @Test
+    void resetLineReportsTheModeInEffect() {
+        for (boolean flag : new boolean[] {true, false}) {
+            String questing = WorldModeChooserPolicy.resetLine(flag, true, "questing");
+            assertTrue(questing.contains("stays in Questing mode"), questing);
+            assertFalse(questing.contains("Admin"), questing);
+            String admin = WorldModeChooserPolicy.resetLine(flag, true, " Admin ");
+            assertTrue(admin.contains("is in Admin mode"), admin);
+            String unset = WorldModeChooserPolicy.resetLine(flag, false, null);
+            assertFalse(unset.contains("is in Admin mode"), unset);
+            for (String line : new String[] {questing, admin, unset}) {
+                assertFalse(line.contains("\u2014") || line.contains("\u2013") || line.contains(";"), line);
+            }
+        }
+        assertTrue(WorldModeChooserPolicy.resetLine(true, false, null).contains("mode selection screen"));
+        assertTrue(WorldModeChooserPolicy.resetLine(false, false, null).contains("when an op or the host joins"));
+    }
+
+    @Test
     void playerWhoCannotChooseGetsNothing() {
         for (boolean flag : new boolean[] {true, false}) {
             assertEquals(Decision.NONE, WorldModeChooserPolicy.decide(flag, false, null, false));

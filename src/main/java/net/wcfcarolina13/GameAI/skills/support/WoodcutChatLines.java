@@ -27,4 +27,13 @@ public final class WoodcutChatLines {
                 ? got + ", the rest of that tree needs an axe."
                 : got + " from that tree.";
     }
+
+    /**
+     * The line after a tree is felled. Never {@code null}: a felled tree always gets one line, even
+     * when none of its logs were counted (they were already gone when the bot got there).
+     */
+    public static String treeFelled(int logs) {
+        String line = treeHarvested(logs, false);
+        return line != null ? line : "Done with that tree.";
+    }
 }

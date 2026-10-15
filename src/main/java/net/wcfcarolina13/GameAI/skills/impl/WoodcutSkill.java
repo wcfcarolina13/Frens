@@ -1037,7 +1037,12 @@ public final class WoodcutSkill implements Skill {
                     continue;
                 }
                 regatherHandScaffoldAtTree(bot, target.base(), bootstrapRegatheredBases);
+                // Chat counts logs that actually left this tree (log blocks in its envelope before
+                // minus after), not mine attempts: retries and other break paths cannot skew it.
+                ServerWorld logCountWorld = bot.getEntityWorld() instanceof ServerWorld w ? w : null;
+                int envelopeLogsBefore = countEnvelopeLogs(logCountWorld, target);
                 TreeHarvestResult harvest = fellTree(source, bot, target, sharedState, replantSaplings, pendingFloaters, reachSession);
+                int logsCutFromTree = Math.max(0, envelopeLogsBefore - countEnvelopeLogs(logCountWorld, target));
                 trunkMineStarts += reachSession.trunkMineAttemptsStarted;
                 leafBlocksBroken += reachSession.leafBlocksBroken;
                 scaffoldPlaced += reachSession.scaffoldPlaced;
@@ -1070,7 +1075,7 @@ public final class WoodcutSkill implements Skill {
                     // Logs left because the bot has no axe yet (it does not pillar without one):
                     // say what it got, so the player knows the tree is not done.
                     if ("cluster-logs-remained".equals(harvest.detail()) && axeBootstrapBots.contains(bot.getUuid())) {
-                        String line = WoodcutChatLines.treeHarvested(reachSession.trunkMineAttemptsStarted, true);
+                        String line = WoodcutChatLines.treeHarvested(logsCutFromTree, true);
                         if (line != null) {
                             ChatUtils.sendSystemMessage(source, line);
                         }
@@ -1089,13 +1094,10 @@ public final class WoodcutSkill implements Skill {
                 felled++;
                 consecutiveFailures = 0;
                 sinceCleanup++;
-                LOGGER.info("Woodcut target cleared: base={} logs={} felled={} target={}",
-                        target.base().toShortString(), reachSession.trunkMineAttemptsStarted, felled,
+                LOGGER.info("Woodcut target cleared: base={} logs={} logsCut={} felled={} target={}",
+                        target.base().toShortString(), reachSession.trunkMineAttemptsStarted, logsCutFromTree, felled,
                         openEnded ? "open-ended" : String.valueOf(targetTrees));
-                String clearedLine = WoodcutChatLines.treeHarvested(reachSession.trunkMineAttemptsStarted, false);
-                if (clearedLine != null) {
-                    ChatUtils.sendSystemMessage(source, clearedLine);
-                }
+                ChatUtils.sendSystemMessage(source, WoodcutChatLines.treeFelled(logsCutFromTree));
                 runPerTreeMaintenance(context, source, bot, target, reachSession, pendingFloaters, replantSaplings);
                 if (shouldProactivelyDepositAfterMaintenance(bot, isHuntPrerequisite)) {
                     ensureWoodSpaceOrDeposit(source, bot, isHuntPrerequisite, workAreaState, pendingFloaters);
@@ -1943,6 +1945,22 @@ public final class WoodcutSkill implements Skill {
                 }
             }
         }
+    }
+
+    /** Log blocks inside the tree's scan box (the same box {@link #collectRemainingEnvelopeLogs} scans). */
+    private static int countEnvelopeLogs(ServerWorld world, TreeDetector.TreeTarget target) {
+        if (world == null || target == null) {
+            return 0;
+        }
+        BlockPos min = target.envelopeMin().add(-WOODCUT_LOG_SCAN_EXPANSION - 2, -3, -WOODCUT_LOG_SCAN_EXPANSION - 2);
+        BlockPos max = target.envelopeMax().add(WOODCUT_LOG_SCAN_EXPANSION + 2, WOODCUT_LOG_SCAN_EXPANSION + 4, WOODCUT_LOG_SCAN_EXPANSION + 2);
+        int count = 0;
+        for (BlockPos candidate : BlockPos.iterate(min, max)) {
+            if (world.getBlockState(candidate).isIn(BlockTags.LOGS)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private List<BlockPos> collectRemainingEnvelopeLogs(ServerPlayerEntity bot,

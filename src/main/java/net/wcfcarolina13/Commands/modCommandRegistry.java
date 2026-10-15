@@ -3026,6 +3026,21 @@ public class modCommandRegistry {
 
     }
 
+    /** "Crafted 1 Wooden Axe." with the item's display name, falling back to the raw id when it does not resolve. */
+    private static String craftedLine(int count, String itemId) {
+        String raw = itemId == null ? "item" : itemId.trim();
+        String name = raw;
+        Identifier id = Identifier.tryParse(raw.contains(":") ? raw.toLowerCase(Locale.ROOT) : "minecraft:" + raw.toLowerCase(Locale.ROOT));
+        if (id != null) {
+            Item resolved = Registries.ITEM.getOptionalValue(id).orElse(null);
+            if (resolved != null && resolved != net.minecraft.item.Items.AIR) {
+                name = resolved.getName().getString();
+            }
+        }
+        boolean plural = count != 1 && !name.toLowerCase(Locale.ROOT).endsWith("s");
+        return "Crafted " + count + " " + name + (plural ? "s" : "") + ".";
+    }
+
     private static int executeCraftGeneric(CommandContext<ServerCommandSource> context, String item, int amount, String material, ServerPlayerEntity bot) {
         ServerCommandSource source = context.getSource();
         ServerPlayerEntity commander = source.getPlayer();
@@ -3049,7 +3064,7 @@ public class modCommandRegistry {
                 if (crafted > 0) {
                     int finalCrafted = crafted;
                     source.getServer().execute(() ->
-                            ChatUtils.sendSystemMessage(source, "Crafted " + finalCrafted + " " + item + (finalCrafted == 1 ? "" : "s") + "."));
+                            ChatUtils.sendSystemMessage(source, craftedLine(finalCrafted, item)));
                 }
             } catch (Exception e) {
                 LOGGER.error("Unexpected error in /bot craft {}", item, e);
@@ -6238,10 +6253,16 @@ public class modCommandRegistry {
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
             net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.sendRecruitmentState(p);
         }
+        // Read the mode back: the re-send runs legacy migration (a recruited world returns to
+        // Questing) and, with Questing off, a joined op or host sets Admin. isEnabled runs the
+        // migration too, for a reset from the console with nobody online.
+        SurvivalRecruitmentService.isEnabled(server);
+        ManualConfig.SurvivalRecruitmentState after = SurvivalRecruitmentService.getState(server);
         ChatUtils.sendSystemMessage(context.getSource(),
-                SurvivalRecruitmentService.isQuestingModeEnabled()
-                        ? "World mode reset. Press [-] or rejoin to reopen the mode selection screen."
-                        : "World mode reset. Questing mode is turned off on this server, so the world is in Admin mode.");
+                net.wcfcarolina13.GameAI.services.WorldModeChooserPolicy.resetLine(
+                        SurvivalRecruitmentService.isQuestingModeEnabled(),
+                        after != null && after.isModeSelectionDone(),
+                        after != null ? after.getSelectedWorldMode() : null));
         return 1;
     }
 
