@@ -1738,8 +1738,7 @@ public class FunctionCallerV2 {
         boolean botRegistered = bot instanceof net.wcfcarolina13.Entity.createFakePlayer
                 && net.wcfcarolina13.GameAI.services.BotRegistry.isRegistered(bot.getUuid());
         boolean senderAuthorized = sender != null && Frens.isLegacyChatAuthorized(sender, bot);
-        if (!net.wcfcarolina13.GameAI.llm.LegacyChatAccessPolicy.mayConsumeConfirmation(
-                sender != null, botRegistered, senderAuthorized)) {
+        if (!(sender != null && botRegistered && senderAuthorized)) {
             ChatContextManager.clearPendingConfirmation(commanderId, state.botName);
             if (sender != null) {
                 sender.sendMessage(net.minecraft.text.Text.literal(

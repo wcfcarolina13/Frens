@@ -18,20 +18,15 @@ public final class AiChatOffHintPolicy {
      * @param singleExplicitAddress exactly one bot named, not a broadcast keyword
      * @param promptNonEmpty        the line had text after the bot's name
      * @param soulMasterEnabled     the soul chat master switch (absent runtime counts as off)
-     * @param legacyHandled         the legacy LLM route took the line
-     * @param inlineActionHandled   the legacy inline action parser recognised and ran a command
      * @param senderAuthorized      the sender may drive this bot (owner, operator or host)
      * @param alreadyHinted         this player already saw the notice this session
      */
     public static boolean shouldHint(boolean singleExplicitAddress, boolean promptNonEmpty,
-                                     boolean soulMasterEnabled, boolean legacyHandled,
-                                     boolean inlineActionHandled, boolean senderAuthorized,
+                                     boolean soulMasterEnabled, boolean senderAuthorized,
                                      boolean alreadyHinted) {
         return singleExplicitAddress
                 && promptNonEmpty
                 && !soulMasterEnabled
-                && !legacyHandled
-                && !inlineActionHandled
                 && senderAuthorized
                 && !alreadyHinted;
     }

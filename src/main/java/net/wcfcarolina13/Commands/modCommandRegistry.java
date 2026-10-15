@@ -48,7 +48,6 @@ import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.Entity.RespawnHandler;
 import net.wcfcarolina13.Entity.createFakePlayer;
-import net.wcfcarolina13.FilingSystem.LLMClientFactory;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -63,7 +62,6 @@ import net.wcfcarolina13.GameAI.services.BotIdleHobbiesService;
 import net.wcfcarolina13.GameAI.services.BotInventoryFullDialogueService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import java.nio.file.Path;
-import net.wcfcarolina13.OllamaClient.ollamaClient;
 import net.wcfcarolina13.PathFinding.ChartPathToBlock;
 import net.wcfcarolina13.PathFinding.PathFinder;
 import net.wcfcarolina13.PathFinding.PathTracer;
@@ -90,9 +88,6 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.DebugToggleService;
 import net.wcfcarolina13.ui.BotInventoryAccess;
-import net.wcfcarolina13.FunctionCaller.FunctionCallerV2;
-import net.wcfcarolina13.ServiceLLMClients.LLMClient;
-import net.wcfcarolina13.ServiceLLMClients.LLMServiceHandler;
 import net.wcfcarolina13.WorldUitls.isFoodItem;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -495,43 +490,6 @@ public class modCommandRegistry {
                                     return 1;
                                 })
                             )
-                        )
-	                        .then(literal("llm")
-	                                .then(literal("world")
-	                                        .then(CommandManager.argument("mode", StringArgumentType.string())
-	                                                .executes(context -> {
-                                                    boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
-                                                    if (Frens.CONFIG != null) {
-                                                        Frens.CONFIG.setDefaultLlmWorldEnabled(enabled);
-                                                        Frens.CONFIG.save();
-                                                    }
-                                                    ChatUtils.sendSystemMessage(context.getSource(),
-                                                            "LLM world toggle set to " + (enabled ? "on" : "off"));
-                                                    return 1;
-                                                })
-                                        )
-                                )
-                                .then(literal("bot")
-                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                                .then(CommandManager.argument("mode", StringArgumentType.string())
-                                                        .executes(context -> {
-                                                            boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
-                                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                            if (Frens.CONFIG != null) {
-                                                                String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(context.getSource().getServer());
-                                                                ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(bot.getName().getString(), wk);
-                                                                if (ctrl != null) {
-                                                                    ctrl.setLlmEnabled(enabled);
-                                                                    Frens.CONFIG.save();
-                                                                }
-                                                            }
-                                                            ChatUtils.sendSystemMessage(context.getSource(),
-                                                                    bot.getName().getString() + " LLM set to " + (enabled ? "on" : "off"));
-                                                            return 1;
-                                                        })
-                                                )
-                                        )
-                                )
                         )
 	                        .then(BotSoulCommands.build())
 
@@ -1053,19 +1011,6 @@ public class modCommandRegistry {
                                                 .then(CommandManager.argument("sprint", StringArgumentType.string())
                                                         .executes(context -> { botGo(context); return 1; })
                                                 )
-                                        )
-                                )
-                        )
-                        .then(literal("send_message_to")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .then(CommandManager.argument("message", StringArgumentType.greedyString())
-                                                .executes(context -> {
-
-                                                    ollamaClient.execute(context);
-
-                                                     return 1;
-
-                                                })
                                         )
                                 )
                         )
@@ -2224,130 +2169,8 @@ public class modCommandRegistry {
             }
         }
 
-        // ── LLM initialization (only when LLM is enabled AND runtime classes are available) ──
-        boolean llmActive = false;
-        if (Frens.CONFIG != null) {
-            String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
-            ManualConfig.BotControlSettings llmCtrl = Frens.CONFIG.getEffectiveBotControl(botName, worldKey);
-            llmActive = llmCtrl != null && llmCtrl.isLlmEnabled();
-        }
-
-        if (llmActive) {
-        String llmProvider = System.getProperty("frens.llmMode", System.getProperty("aiplayer.llmMode", "ollama"));
-
-        DebugToggleService.debug(LOGGER, "Using provider: {}", llmProvider);
-
-        try {
-        switch (llmProvider) {
-            case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok", "custom" -> {
-                LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
-                if (llmClient == null) {
-                    // Usually a missing API key. The bot already exists, so run it without the
-                    // language model (startAutoFace below) instead of leaving it half-initialised.
-                    LOGGER.error("spawnBot: LLMClientFactory returned null for provider {}. {} runs without LLM.", llmProvider, botName);
-                    ChatUtils.sendSystemMessage(serverSource,
-                            net.wcfcarolina13.GameAI.services.SpawnResultPolicy.aiOffMessage(botName, llmProvider));
-                    llmActive = false;
-                    break;
-                }
-
-                ChatUtils.sendSystemMessage(serverSource,
-                        "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
-                LLMServiceHandler.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), llmClient);
-
-                new Thread(() -> {
-                    try {
-                        while (!LLMServiceHandler.isInitialized) {
-                            try {
-                                Thread.sleep(500L); // Check every 500ms
-                            } catch (InterruptedException e) {
-                                LOGGER.error("LLM service initialization interrupted.", e);
-                                Thread.currentThread().interrupt();
-                                return;
-                            }
-                        }
-
-                        // initialization succeeded, continue:
-                        AutoFaceEntity.startAutoFace(bot);
-                    } catch (Exception e) {
-                        LOGGER.error("Error in LLM initialization thread for bot {}", botName, e);
-                    }
-                }, "LLM-Init-" + botName).start();
-            }
-
-            case "ollama" -> {
-                ollamaClient.botName = botName;
-                ChatUtils.sendSystemMessage(serverSource,
-                        "Please wait while " + botName + " connects to the language model.");
-                ollamaClient.initializeOllamaClient();
-
-                new Thread(() -> {
-                    try {
-                        while (!ollamaClient.isInitialized) {
-                            try {
-                                Thread.sleep(500L); // Check every 500ms
-                            } catch (InterruptedException e) {
-                                LOGGER.error("Ollama client initialization interrupted.", e);
-                                Thread.currentThread().interrupt();
-                                return;
-                            }
-                        }
-
-                        // initialization succeeded, continue:
-                        ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS));
-                        AutoFaceEntity.startAutoFace(bot);
-                    } catch (Exception e) {
-                        LOGGER.error("Error in Ollama initialization thread for bot {}", botName, e);
-                    }
-                }, "Ollama-Init-" + botName).start();
-            }
-
-            default -> {
-                LOGGER.warn("Unsupported provider detected: {}. Defaulting to Ollama client", llmProvider);
-                ollamaClient.botName = botName;
-                ChatUtils.sendSystemMessage(serverSource,
-                        "Warning! Unsupported provider detected. Defaulting to Ollama client");
-                ChatUtils.sendSystemMessage(serverSource,
-                        "Please wait while " + botName + " connects to the language model.");
-                ollamaClient.initializeOllamaClient();
-
-                new Thread(() -> {
-                    try {
-                        while (!ollamaClient.isInitialized) {
-                            try {
-                                Thread.sleep(500L); // Check every 500ms
-                            } catch (InterruptedException e) {
-                                LOGGER.error("Ollama client initialization interrupted.", e);
-                                Thread.currentThread().interrupt();
-                                return;
-                            }
-                        }
-
-                        // initialization succeeded, continue:
-                        ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS));
-                        AutoFaceEntity.startAutoFace(bot);
-                    } catch (Exception e) {
-                        LOGGER.error("Error in Ollama initialization thread (default case) for bot {}", botName, e);
-                    }
-                }, "Ollama-Init-" + botName).start();
-            }
-        }
-        } catch (NoClassDefFoundError | UnsatisfiedLinkError e) {
-            LOGGER.warn("[Frens] LLM runtime not available (build without -PaiEnabled?). Bot {} will run without LLM.", botName);
-            llmActive = false; // runtime missing → treat as non-LLM so fallback starts the behaviour loop
-        }
-        } // end if (llmActive)
-
-        // ── Always start the behaviour loop ──
-        // When LLM is active AND the provider init thread launched successfully,
-        // that thread calls startAutoFace after the provider connects.
-        // When LLM is disabled, classes are missing, or the catch fired,
-        // we must start it here so the bot can follow, fight, etc.
-        // startAutoFace() calls stopAutoFace() internally, so a double-start
-        // from the LLM thread is harmless.
-        if (!llmActive) {
-            AutoFaceEntity.startAutoFace(bot);
-        }
+        // Start the behaviour loop (follow, fight, hobbies) for every spawned bot.
+        AutoFaceEntity.startAutoFace(bot);
 
     }
 

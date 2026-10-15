@@ -29,7 +29,6 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.FilingSystem.PlayerPreferenceGate;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
-import net.wcfcarolina13.FunctionCaller.FunctionCallerV2;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
 import net.wcfcarolina13.GameAI.services.HuntSessionService;
 import net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService;
@@ -37,7 +36,6 @@ import net.wcfcarolina13.GameAI.services.BotAmbientSocialChatService;
 import net.wcfcarolina13.GameAI.services.BotCampfireAvoidanceService;
 import net.wcfcarolina13.GameAI.services.BotIdleHobbiesService;
 import net.wcfcarolina13.GameAI.services.BotInventoryFullDialogueService;
-import net.wcfcarolina13.GameAI.llm.LLMOrchestrator;
 import net.wcfcarolina13.GameAI.services.HuntCatalog;
 import net.wcfcarolina13.GameAI.services.HuntHistoryService;
 import net.wcfcarolina13.GameAI.services.BotQuestService;
@@ -364,8 +362,6 @@ public class Frens implements ModInitializer {
 
     // If the optional Ollama client library isn't present (aiEnabled=false builds), do not touch FunctionCallerV2.
     private static final boolean OLLAMA4J_AVAILABLE = isClassAvailable("io.github.amithkoujalgi.ollama4j.core.exceptions.OllamaBaseException");
-    private static final AtomicBoolean WARNED_MISSING_OLLAMA4J = new AtomicBoolean(false);
-    private static final AtomicBoolean WARNED_LEGACY_NLP_FAILURE = new AtomicBoolean(false);
     
     // Track bots that need spawn escape checks
     private static final ConcurrentHashMap<UUID, SpawnEscapeCheck> SPAWN_ESCAPE_CHECKS = new ConcurrentHashMap<>();
@@ -831,8 +827,7 @@ public class Frens implements ModInitializer {
             Frens.LOGGER.error("Failed to initialize Frens database; running without DB-backed memory.", e);
         }
 
-        // Legacy NLP models are NOT fetched here: requestLegacyNlpAssets() starts that on the
-        // first real legacy-LLM demand (ollama4j present + world and bot LLM toggles on).
+        // Legacy NLP models are NOT fetched here (the legacy chat path is retired).
         CompletableFuture.runAsync(AISearchConfig::setupIfMissing);
 
         djlAvailable = isClassAvailable("ai.djl.Model");
@@ -1438,21 +1433,6 @@ public class Frens implements ModInitializer {
             // This keeps the feature discoverable without requiring "<botname> quest".
             boolean nearbyQuestHandled = tryHandleNearbyQuestAsk(sender, raw);
 
-            boolean consumed = false;
-            if (OLLAMA4J_AVAILABLE) {
-                try {
-                    consumed = FunctionCallerV2.tryHandleConfirmation(sender.getUuid(), raw);
-                } catch (Throwable t) {
-                    // Don't let optional AI wiring break chat (or quests).
-                    if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
-                        LOGGER.warn("FunctionCallerV2 unavailable; skipping confirmation handling ({}: {})", t.getClass().getSimpleName(), t.getMessage());
-                    }
-                }
-            }
-            if (consumed) {
-                return;
-            }
-
             if (net.wcfcarolina13.GameAI.services.BotRespawnPromptService.handleChat(sender, raw)) {
                 return;
             }
@@ -1465,8 +1445,7 @@ public class Frens implements ModInitializer {
             ChatTarget target = resolveChatTargets(raw, sender);
             if (target.otherAddressee()) {
                 // Addressed to another online human: close the ambient reply window and the DM
-                // follow-up window, and do nothing bot-facing (no soul routing, no overhear, no
-                // legacy raw parser).
+                // follow-up window, and do nothing bot-facing (no soul routing, no overhear).
                 net.wcfcarolina13.GameAI.souls.SoulRuntime.noteOtherAddresseeChat(sender);
                 return;
             }
@@ -1491,7 +1470,7 @@ public class Frens implements ModInitializer {
 
                 // Group scenes: a broadcast keyword or a multi-name leading address routes to the
                 // soul PARTY channel when souls + the party toggle are on. NOT_SOUL falls through
-                // to the legacy per-bot loop exactly as before; a single-eligible-bot roster
+                // to the AI-chat-off hint below; a single-eligible-bot roster
                 // downgrades to the ordinary DM path below via SoulChatRouter.
                 if ((target.broadcast() || routedBots.size() >= 2) && !target.prompt().isEmpty()) {
                     try {
@@ -1512,13 +1491,12 @@ public class Frens implements ModInitializer {
                         }
                     } catch (Throwable t) {
                         // Don't let optional soul-communication wiring break chat.
-                        LOGGER.warn("SoulGroupRouter threw; falling back to legacy routing: {}", t.toString());
+                        LOGGER.warn("SoulGroupRouter threw; treating line as unanswered: {}", t.toString());
                     }
                     if (target.softBroadcast()) {
                         // A soft group address ("hey everyone") is honoured only on the soul party
                         // path (resolveChatTargets demotes it when that path cannot route); if the
-                        // party route still did not take it, it is plain chat -- never the legacy
-                        // "Processing your message" loop.
+                        // party route still did not take it, it is plain chat.
                         return;
                     }
                 }
@@ -1538,39 +1516,12 @@ public class Frens implements ModInitializer {
                             }
                         } catch (Throwable t) {
                             // Don't let optional soul-communication wiring break chat.
-                            LOGGER.warn("SoulChatRouter threw; falling back to legacy routing: {}", t.toString());
+                            LOGGER.warn("SoulChatRouter threw; treating line as unanswered: {}", t.toString());
                         }
                     }
                 }
 
-                boolean handled = false;
-                for (ServerPlayerEntity bot : routedBots) {
-                    if (target.prompt().isEmpty()) {
-                        continue;
-                    }
-                    // Only the owner, an operator or the host may drive a bot through the legacy
-                    // route -- checked before any status output or dispatch.
-                    if (!isLegacyChatAuthorized(sender, bot)) {
-                        continue;
-                    }
-                    ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-                    handled |= LLMOrchestrator.handleChat(
-                            bot,
-                            botSource,
-                            sender.getUuid(),
-                            target.prompt());
-                }
-                if (handled) {
-                    return;
-                }
-
-                // Compatibility fallback for targeted single-bot action prompts.
-                // Keep this inside explicit-target routing so the raw parser doesn't process the same line again.
-                boolean inlineActed = false;
-                if (routedBots.size() == 1 && !target.prompt().isEmpty()) {
-                    inlineActed = handleLegacyInlineActionPrompt(routedBots.get(0), sender, target.prompt());
-                }
-                maybeSendAiChatOffHint(routedBots, target, sender, inlineActed);
+                maybeSendAiChatOffHint(routedBots, target, sender);
                 return;
             }
 
@@ -1584,12 +1535,9 @@ public class Frens implements ModInitializer {
                 return;
             }
 
-            // Ambient/local chat: bots standing nearby may overhear this. Strictly observational
-            // — this never consumes the line, so the legacy inline-action parser below still runs
-            // exactly as it did before the feature existed (local-chat spec §3).
+            // Ambient/local chat: bots standing nearby may overhear this. Strictly observational:
+            // it never consumes the line (local-chat spec §3).
             net.wcfcarolina13.GameAI.souls.SoulRuntime.noteUnaddressedChat(sender, raw);
-
-            handleLegacyInlineActionFromRaw(raw, sender);
         });
     }
 
@@ -1659,10 +1607,9 @@ public class Frens implements ModInitializer {
     }
 
     /**
-     * Starts the legacy NLP model setup (download/extract, then the BERT load) on the model worker
-     * the first time a real legacy-LLM demand arrives; later calls only re-queue the BERT load
-     * after a world reload unloaded it. No-op without ollama4j. Callers must already have checked
-     * the world + bot LLM toggles ({@link #prepareLegacyNlp} does both).
+     * Starts the legacy NLP model setup (download/extract, then the BERT load) on the model worker.
+     * Unreachable now that the legacy chat path is retired: its only caller is the dead
+     * LLMOrchestrator, deleted together with this and the BERT wiring in the follow-up build.
      */
     public static void requestLegacyNlpAssets() {
         if (!OLLAMA4J_AVAILABLE) {
@@ -1679,25 +1626,6 @@ public class Frens implements ModInitializer {
             });
         }
         enqueueBertLoad();
-    }
-
-    /**
-     * Whether the legacy NLP/LLM path may run for {@code bot} (ollama4j present, world and bot
-     * LLM toggles on); when it may, makes sure the model setup has been requested.
-     */
-    private static boolean prepareLegacyNlp(ServerPlayerEntity bot) {
-        if (!net.wcfcarolina13.GameAI.llm.LegacyNlpBootstrapPolicy.isLegacyNlpUsable(
-                true, LLMOrchestrator.isWorldEnabled(), LLMOrchestrator.isBotEnabled(bot))) {
-            return false;
-        }
-        if (!OLLAMA4J_AVAILABLE) {
-            if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
-                LOGGER.debug("Legacy inline-action parser disabled: ollama4j is not on the classpath (non-AI build).");
-            }
-            return false;
-        }
-        requestLegacyNlpAssets();
-        return true;
     }
 
     private static void enqueueBertLoad() {
@@ -1849,73 +1777,6 @@ public class Frens implements ModInitializer {
         return new ArrayList<>(deduped.values());
     }
 
-    private static void handleLegacyInlineActionFromRaw(String raw, ServerPlayerEntity sender) {
-        if (raw == null || raw.isBlank() || sender == null || serverInstance == null) {
-            return;
-        }
-        String[] parts = raw.split(" ");
-        if (parts.length < 2) {
-            return;
-        }
-        String botName = parts[0];
-        ServerPlayerEntity bot = serverInstance.getPlayerManager().getPlayer(botName);
-        if (!BotEventHandler.isRegisteredBot(bot) || bot == null) {
-            return;
-        }
-        String userPrompt = String.join(" ", Arrays.copyOfRange(parts, 1, parts.length));
-        handleLegacyInlineActionPrompt(bot, sender, userPrompt);
-    }
-
-    /**
-     * Returns true only when the line was recognised as an action request and handed to
-     * FunctionCallerV2 (whatever came of it), false for every early exit.
-     */
-    private static boolean handleLegacyInlineActionPrompt(ServerPlayerEntity bot, ServerPlayerEntity sender, String userPrompt) {
-        if (bot == null || sender == null || userPrompt == null || userPrompt.isBlank()) {
-            return false;
-        }
-        // Authorisation first: both the explicit-target fallback and the raw leading-name lookup
-        // land here, so neither can drive a bot the sender doesn't own.
-        if (!isLegacyChatAuthorized(sender, bot)) {
-            return false;
-        }
-        // NLPProcessor's static init builds an OllamaAPI (and it imports DJL); both are compileOnly,
-        // so without -PaiEnabled=true the first touch throws NoClassDefFoundError — an Error, which
-        // would escape the CHAT_MESSAGE handler. Gate first (ollama4j + world/bot LLM toggles:
-        // this parser drives the LLM through FunctionCallerV2), then catch linkage failures anyway.
-        if (!prepareLegacyNlp(bot)) {
-            return false;
-        }
-        NLPProcessor.Intent intent;
-        try {
-            intent = NLPProcessor.getIntention(userPrompt);
-        } catch (LinkageError | RuntimeException e) {
-            if (WARNED_LEGACY_NLP_FAILURE.compareAndSet(false, true)) {
-                LOGGER.warn("Legacy inline-action parser unavailable ({}: {}); ignoring inline action prompts.",
-                        e.getClass().getSimpleName(), e.getMessage());
-            }
-            return false;
-        }
-        if (intent != NLPProcessor.Intent.REQUEST_ACTION) {
-            return false;
-        }
-        try {
-            // Constructor sets thread-local context used by the static run(..) entrypoint.
-            new FunctionCallerV2(bot.getCommandSource(), sender.getUuid());
-            FunctionCallerV2.run(userPrompt);
-        } catch (Throwable t) {
-            if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
-                LOGGER.warn("AI action handling failed ({}: {})", t.getClass().getSimpleName(), t.getMessage());
-            }
-        } finally {
-            try {
-                FunctionCallerV2.clearContext();
-            } catch (Throwable ignored) {
-            }
-        }
-        return true;
-    }
-
     /** Players who already saw the AI-chat-off notice this session; cleared on disconnect and stop. */
     private static final Set<UUID> AI_CHAT_OFF_HINTED = ConcurrentHashMap.newKeySet();
 
@@ -1925,7 +1786,7 @@ public class Frens implements ModInitializer {
      * system notice like SoulChatRouter's, so neither the scripted nor the soul lane gates it.
      */
     private static void maybeSendAiChatOffHint(List<ServerPlayerEntity> routedBots, ChatTarget target,
-                                               ServerPlayerEntity sender, boolean inlineActed) {
+                                               ServerPlayerEntity sender) {
         if (sender == null || routedBots == null || routedBots.size() != 1 || routedBots.get(0) == null) {
             return;
         }
@@ -1936,8 +1797,6 @@ public class Frens implements ModInitializer {
                 !target.broadcast(),
                 !target.prompt().isEmpty(),
                 soulMasterEnabled,
-                false, // the legacy LLM route returns before this point when it handled the line
-                inlineActed,
                 isLegacyChatAuthorized(sender, routedBots.get(0)),
                 AI_CHAT_OFF_HINTED.contains(sender.getUuid()));
         if (show && AI_CHAT_OFF_HINTED.add(sender.getUuid())) {

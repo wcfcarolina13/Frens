@@ -30,11 +30,7 @@ class SpawnResultPolicyTest {
         String pending = SpawnResultPolicy.pendingMessage("Jake");
         assertTrue(pending.startsWith("Spawning Jake"));
         assertFalse(pending.toLowerCase().contains("error"));
-        String aiOff = SpawnResultPolicy.aiOffMessage("Jake", "openai");
-        assertTrue(aiOff.startsWith("AI is off for Jake."));
-        for (String text : new String[]{pending, aiOff}) {
-            assertFalse(text.contains("—"), text);
-            assertFalse(text.contains(";"), text);
-        }
+        assertFalse(pending.contains("—"), pending);
+        assertFalse(pending.contains(";"), pending);
     }
 }

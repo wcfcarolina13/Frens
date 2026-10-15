@@ -95,7 +95,7 @@ class BotCommandTreeShapeTest {
         int bot = depthOf("bot");
         int child = bot + 1;
         assertEquals(child, depthOf("spawn"), "spawn must be a child of bot");
-        for (String name : new String[]{"debug", "emote", "wizard_tome", "llm", "config", "testgear", "test_chat_message", "recruit", "compass"}) {
+        for (String name : new String[]{"debug", "emote", "wizard_tome", "config", "testgear", "test_chat_message", "recruit", "compass"}) {
             assertEquals(child, depthOf(name), "/bot " + name + " must be a direct child of literal(\"bot\"), a sibling of spawn");
         }
     }

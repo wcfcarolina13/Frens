@@ -33,10 +33,4 @@ public final class SpawnResultPolicy {
     public static String pendingMessage(String botName) {
         return "Spawning " + botName + "…";
     }
-
-    /** One-line note when the bot spawned but its language model client could not start. */
-    public static String aiOffMessage(String botName, String provider) {
-        return "AI is off for " + botName + ". The " + provider
-                + " client could not start, so check its API key. " + botName + " still follows and works as usual.";
-    }
 }
