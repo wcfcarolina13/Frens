@@ -208,7 +208,7 @@ class ReportUnitTest(unittest.TestCase):
         self.assertEqual(pc["finders"], ["baritone", "bidir", "unified"])
         self.assertEqual(pc["unified_only_reachable"],
                          {"lines_with_unified": 2, "count": 1, "by_status": {"noexec": 1},
-                          "by_primary": {"unified": 1}})
+                          "by_primary": {"unified": 1}, "reasons": {}})
         self.assertEqual(pc["pairs"]["baritone_vs_unified"]["only_unified"], 1)
         modes = rep["pathfinding"]["modes"]
         self.assertEqual(modes["unified"]["count"], 3)
@@ -243,6 +243,21 @@ class ReportUnitTest(unittest.TestCase):
         # Each outcome took its own session's line: exec/reached for the first, noexec/not for the second.
         self.assertEqual(oc["per_primary_exec"], {"exec": {"n": 1, "reached": 1, "reached_pct": 100.0},
                                                   "noexec": {"n": 1, "reached": 0, "reached_pct": 0.0}})
+
+    def test_unified_reason_suffix_parses_and_is_counted(self):
+        rep = run_lines("""
+[10:00:00] [frens-pathcompare/INFO]: [PathCompare] bot=Eve from=29,78,142 to=17,73,166 primary=unified bidir=1ms/0/none baritone=32ms/11/exec unified=0ms/0/none:GOAL_NOT_STANDABLE plan=p12
+[10:00:01] [frens-pathcompare/INFO]: [PathCompare] bot=Eve from=18,71,151 to=17,73,166 primary=baritone bidir=1ms/0/none baritone=42ms/5/exec unified=30ms/7/exec:GOAL_NOT_STANDABLE plan=p15
+[10:00:02] [frens-pathcompare/INFO]: [PathCompare] bot=Eve from=0,64,0 to=5,64,5 primary=baritone bidir=9ms/4/exec baritone=3ms/4/exec unified=1ms/4/exec plan=p16
+""")
+        pc = rep["pathcompare"]
+        rec = rep["pathcompare"]["unified_only_reachable"]
+        self.assertEqual(rec["reasons"], {"none:GOAL_NOT_STANDABLE": 1, "partial:GOAL_NOT_STANDABLE": 1})
+        self.assertEqual(pc["per_finder"]["unified"]["n"], 3)
+        self.assertIn("unified reasons (none = no path, partial): none:GOAL_NOT_STANDABLE=1", flr.render_md(rep))
+        fv = flr.FINDER_VAL_RE.match("0ms/0/none:GOAL_NOT_STANDABLE")
+        self.assertEqual((fv.group(3), fv.group(4)), ("none", "GOAL_NOT_STANDABLE"))
+        self.assertIsNone(flr.FINDER_VAL_RE.match("3ms/4/exec").group(4))
 
     def test_old_two_finder_lines_still_parse(self):
         rep = run_lines("""

@@ -27,19 +27,19 @@ class PathFinderOverridesTest {
         for (PathFinderChoice active : PathFinderChoice.values()) {
             assertEquals(active, PathFinderOverrides.resolve(null, active));
         }
-        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolve(null, null));
+        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolve(null, null));
     }
 
     @Test
-    void legacyFlagMapsToUnifiedOrClassic() {
-        // Field window: the persisted boolean stays; true (the migrated default) is UNIFIED, false BIDIR.
-        assertEquals(PathFinderChoice.UNIFIED, PathFinderChoice.fromLegacyFlag(true));
+    void legacyFlagMapsToBaritoneOrClassic() {
+        // 1.1.242 A/B ruling: true (the migrated default) is BARITONE, false BIDIR; unified is opt-in.
+        assertEquals(PathFinderChoice.BARITONE, PathFinderChoice.fromLegacyFlag(true));
         assertEquals(PathFinderChoice.BIDIR, PathFinderChoice.fromLegacyFlag(false));
         // Through the dispatch precedence: a per-bot override still beats the mapped global.
         UUID bot = UUID.randomUUID();
-        PathFinderOverrides.set(bot, PathFinderChoice.BARITONE);
-        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolveFor(bot, PathFinderChoice.fromLegacyFlag(true)));
-        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(UUID.randomUUID(), PathFinderChoice.fromLegacyFlag(true)));
+        PathFinderOverrides.set(bot, PathFinderChoice.UNIFIED);
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(bot, PathFinderChoice.fromLegacyFlag(true)));
+        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolveFor(UUID.randomUUID(), PathFinderChoice.fromLegacyFlag(true)));
     }
 
     @Test

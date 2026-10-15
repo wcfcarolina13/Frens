@@ -7,6 +7,7 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PathCompareFormatTest {
@@ -137,6 +138,22 @@ class PathCompareFormatTest {
         assertEquals("p7", plain.get("plan"));
         assertEquals("unified", plain.get("primary"));
         assertEquals(5, plain.size()); // bot, from, to, primary, plan
+    }
+
+    @Test
+    void unifiedReasonSuffixRidesOnTheFinderValue() {
+        String line = PathCompareFormat.line("Eve", 29, 78, 142, 17, 73, 166, PathFinderChoice.UNIFIED,
+                1L, 0, "none", 32L, 11, "exec", 0L, 0, "none",
+                PathCompareFormat.unifiedReason("GOAL_NOT_STANDABLE"), 12L);
+        assertTrue(line.endsWith(" unified=0ms/0/none:GOAL_NOT_STANDABLE plan=p12"), line);
+        assertNull(PathCompareFormat.unifiedReason("NONE"));
+        assertEquals("3ms/4/exec", PathCompareFormat.finderValue(3L, 4, "exec", null));
+        assertEquals("3ms/4/exec", PathCompareFormat.finderValue(3L, 4, "exec", "two words"));
+        // The analyzer's finder regex: status and reason are separate groups; the k=v split still holds.
+        Matcher fv = Pattern.compile("^(-?\\d+)ms/(-?\\d+)/(\\w+)(?::(\\w+))?").matcher("0ms/0/none:GOAL_NOT_STANDABLE");
+        assertTrue(fv.find());
+        assertEquals("none", fv.group(3));
+        assertEquals("GOAL_NOT_STANDABLE", fv.group(4));
     }
 
     @Test

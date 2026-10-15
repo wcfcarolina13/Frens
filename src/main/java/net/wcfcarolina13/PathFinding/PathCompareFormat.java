@@ -5,7 +5,9 @@ import net.wcfcarolina13.PathFinding.unified.PathPlanIds;
 /**
  * The one {@code [PathCompare]} log line (1.1.240 slice D). The format is FIXED:
  * tools/logs/frens_log_report.py parses it with {@code (\w+)=(\S+)} pairs and
- * {@code ^(-?\d+)ms/(-?\d+)/(\w+)} finder values, so no value may contain a space.
+ * {@code ^(-?\d+)ms/(-?\d+)/(\w+)(?::(\w+))?} finder values, so no value may contain a space. The
+ * optional {@code :<REASON>} suffix (1.1.242) is a unified plan's {@code NoPathReason} on a NO_PATH or
+ * PARTIAL plan, e.g. {@code unified=0ms/0/none:GOAL_NOT_STANDABLE}; older parsers read past it.
  */
 public final class PathCompareFormat {
 
@@ -37,6 +39,17 @@ public final class PathCompareFormat {
         return ms + "ms/" + Math.max(0, len) + "/" + status;
     }
 
+    /** As above with {@code :<reason>} appended when {@code reason} is a non-blank single word. */
+    public static String finderValue(long ms, int len, String status, String reason) {
+        String base = finderValue(ms, len, status);
+        return reason == null || !reason.matches("\\w+") ? base : base + ":" + reason;
+    }
+
+    /** The reason suffix for a unified plan: its NoPathReason name unless the plan is FULL (NONE). */
+    public static String unifiedReason(String reasonName) {
+        return reasonName == null || reasonName.equals("NONE") ? null : reasonName;
+    }
+
     public static String line(String botName,
                               int fromX, int fromY, int fromZ,
                               int toX, int toY, int toZ,
@@ -64,8 +77,22 @@ public final class PathCompareFormat {
                               long unifiedMs, int unifiedLen, String unifiedStatus,
                               long planId) {
         return line(botName, fromX, fromY, fromZ, toX, toY, toZ, primary,
+                bidirMs, bidirLen, bidirStatus, baritoneMs, baritoneLen, baritoneStatus,
+                unifiedMs, unifiedLen, unifiedStatus, null, planId);
+    }
+
+    /** As above with the unified plan's reason suffix ({@link #unifiedReason}; null for none). */
+    public static String line(String botName,
+                              int fromX, int fromY, int fromZ,
+                              int toX, int toY, int toZ,
+                              PathFinderChoice primary,
+                              long bidirMs, int bidirLen, String bidirStatus,
+                              long baritoneMs, int baritoneLen, String baritoneStatus,
+                              long unifiedMs, int unifiedLen, String unifiedStatus, String unifiedReason,
+                              long planId) {
+        return line(botName, fromX, fromY, fromZ, toX, toY, toZ, primary,
                 bidirMs, bidirLen, bidirStatus, baritoneMs, baritoneLen, baritoneStatus)
-                + " unified=" + finderValue(unifiedMs, unifiedLen, unifiedStatus)
+                + " unified=" + finderValue(unifiedMs, unifiedLen, unifiedStatus, unifiedReason)
                 + (planId > 0 ? " plan=" + PathPlanIds.format(planId) : "");
     }
 

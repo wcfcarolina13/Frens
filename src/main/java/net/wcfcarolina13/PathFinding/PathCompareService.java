@@ -97,7 +97,11 @@ public final class PathCompareService {
     }
 
     /** One finder's {@code <ms>ms/<len>/<status>} value. */
-    private record Value(long ms, int len, String status) {
+    /** {@code reason}: a unified plan's NoPathReason when it is not FULL, else null. */
+    private record Value(long ms, int len, String status, String reason) {
+        Value(long ms, int len, String status) {
+            this(ms, len, status, null);
+        }
     }
 
     private static void runShadow(String botName, BlockPos start, BlockPos target, ServerWorld world,
@@ -129,7 +133,7 @@ public final class PathCompareService {
                     primaryChoice,
                     bidir.ms(), bidir.len(), bidir.status(),
                     baritone.ms(), baritone.len(), baritone.status(),
-                    unified.ms(), unified.len(), unified.status(),
+                    unified.ms(), unified.len(), unified.status(), unified.reason(),
                     primary.planId());
             LOGGER.info(line);
             LOGGED.incrementAndGet();
@@ -166,7 +170,8 @@ public final class PathCompareService {
         boolean noPath = plan.status() == PlanStatus.NO_PATH;
         boolean executable = !noPath && MoveSimulator.simulate(ctx, plan).executable();
         return new Value(ms, PathCompareFormat.unifiedLen(noPath, plan.moves().size()),
-                PathCompareFormat.unifiedStatus(noPath, executable));
+                PathCompareFormat.unifiedStatus(noPath, executable),
+                PathCompareFormat.unifiedReason(plan.reason().name()));
     }
 
     static List<BlockPos> positions(List<PathFinder.PathNode> nodes) {

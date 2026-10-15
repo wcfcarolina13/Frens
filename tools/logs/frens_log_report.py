@@ -165,7 +165,8 @@ FOOD_ALL_RE = re.compile(r"\bfood=(\d+)")
 NOT_NAMES = frozenset(["null", "none", "None", "self", "unknown"])
 CHAT_SPEAKER_RE = re.compile(r"^<?" + BOTNAME + r">?:? (.*)$")
 KV_RE = re.compile(r"(\w+)=(\S+)")
-FINDER_VAL_RE = re.compile(r"^(-?\d+)ms/(-?\d+)/(\w+)")
+# Optional ":<REASON>" suffix (1.1.242): a unified plan's NoPathReason on NO_PATH or PARTIAL.
+FINDER_VAL_RE = re.compile(r"^(-?\d+)ms/(-?\d+)/(\w+)(?::(\w+))?")
 
 TIMELINE_KINDS_MAX = 40
 STUCK_EPISODE_GAP_S = 120
@@ -536,7 +537,8 @@ class Analyzer(object):
         for k, v in KV_RE.findall(m.group(1)):
             fv = FINDER_VAL_RE.match(v)
             if fv:
-                rec["finders"][k] = {"ms": int(fv.group(1)), "len": int(fv.group(2)), "exec": fv.group(3)}
+                rec["finders"][k] = {"ms": int(fv.group(1)), "len": int(fv.group(2)), "exec": fv.group(3),
+                                     "reason": fv.group(4)}
             else:
                 rec[k] = v
         who = rec.get("bot") or bot
@@ -842,8 +844,12 @@ def unified_only_reachable(records):
             and all(v["len"] == 0 for f, v in r["finders"].items() if f != UNIFIED)]
     by_status = Counter(r["finders"][UNIFIED]["exec"] for r in hits)
     by_primary = Counter(r.get("primary", "?") for r in hits)
+    # NO_PATH / PARTIAL reasons the unified field carried (":<REASON>" suffix), "none" key = no path.
+    reasons = Counter("%s:%s" % ("none" if r["finders"][UNIFIED]["len"] == 0 else "partial",
+                                 r["finders"][UNIFIED]["reason"])
+                      for r in records if UNIFIED in r["finders"] and r["finders"][UNIFIED].get("reason"))
     return {"lines_with_unified": len(rows), "count": len(hits),
-            "by_status": dict(by_status), "by_primary": dict(by_primary)}
+            "by_status": dict(by_status), "by_primary": dict(by_primary), "reasons": dict(reasons)}
 
 
 # --------------------------------------------------------------------------- markdown
@@ -949,6 +955,9 @@ def render_md(rep, timeline_max=TIMELINE_KINDS_MAX):
         if uo.get("lines_with_unified"):
             o.append("- unified-only reachable: %d of %d lines with a unified field (status %s, primary %s)" % (
                 uo["count"], uo["lines_with_unified"], uo["by_status"] or "{}", uo["by_primary"] or "{}"))
+        if uo.get("reasons"):
+            o.append("- unified reasons (none = no path, partial): %s" % ", ".join(
+                "%s=%d" % (k, v) for k, v in sorted(uo["reasons"].items())))
     oc = pc.get("outcomes") or {"count": 0}
     if oc["count"]:
         ov = oc["overall"]
