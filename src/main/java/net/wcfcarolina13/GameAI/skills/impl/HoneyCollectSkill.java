@@ -189,9 +189,36 @@ public final class HoneyCollectSkill implements Skill {
         if (!BotBeehiveRegistryService.isBeehiveBlock(state)) return false;
         // Must be full (honey_level == 5)
         if (state.get(Properties.HONEY_LEVEL) != 5) return false;
-        // Must be smoked (campfire within 5 blocks below)
-        BlockEntity be = world.getBlockEntity(pos);
-        return be instanceof BeehiveBlockEntity hive && hive.isSmoked();
+        // Must be smoked (campfire within 5 blocks below). getBlockEntity is null off the
+        // server thread, so read the hive there (skill bodies run on a worker).
+        BlockPos hivePos = pos.toImmutable();
+        return callOnServer(world, () -> {
+            BlockEntity be = world.getBlockEntity(hivePos);
+            return be instanceof BeehiveBlockEntity hive && hive.isSmoked();
+        }, false);
+    }
+
+    private static <T> T callOnServer(ServerWorld world, java.util.function.Supplier<T> task, T fallback) {
+        var server = world.getServer();
+        if (server == null || server.isOnThread()) {
+            return task.get();
+        }
+        java.util.concurrent.CompletableFuture<T> future = new java.util.concurrent.CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(task.get());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            return future.get(500L, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     // ── Interaction ─────────────────────────────────────────────────

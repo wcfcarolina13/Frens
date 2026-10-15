@@ -1162,6 +1162,11 @@ public class modCommandRegistry {
                                                     String blockType = StringArgumentType.getString(context, "block_type");
 
                                                     BlockPos outPutPos = blockDetectionUnit.detectBlocks(bot, blockType);
+                                                    if (outPutPos == null) {
+                                                        blockDetectionUnit.setIsBlockDetectionActive(false);
+                                                        ChatUtils.sendSystemMessage(context.getSource(), "No matching block nearby.");
+                                                        return 1;
+                                                    }
 
                                                     LOGGER.info("Detected Block: {} at x={}, y={}, z={}", blockType, outPutPos.getX(), outPutPos.getY(), outPutPos.getZ());
                                                     blockDetectionUnit.setIsBlockDetectionActive(false);

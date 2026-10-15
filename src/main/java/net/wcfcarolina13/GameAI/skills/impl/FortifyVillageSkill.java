@@ -3880,7 +3880,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         if (state.getBlock() instanceof PaneBlock) return new NavBreakCandidateEval(false, NavBreakRejectReason.PANE);
         if (state.getBlock() instanceof TrapdoorBlock) return new NavBreakCandidateEval(false, NavBreakRejectReason.TRAPDOOR);
         if (state.getHardness(world, pos) < 0) return new NavBreakCandidateEval(false, NavBreakRejectReason.UNBREAKABLE);
-        if (world.getBlockEntity(pos) != null) return new NavBreakCandidateEval(false, NavBreakRejectReason.BLOCK_ENTITY);
+        if (state.hasBlockEntity()) return new NavBreakCandidateEval(false, NavBreakRejectReason.BLOCK_ENTITY);
         if (!state.getFluidState().isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.FLUID);
         if (VillageStructureProtectionService.isAdjacentToVillageStructure(world, pos, 2)) {
             return new NavBreakCandidateEval(false, NavBreakRejectReason.VILLAGE_ADJACENT);
@@ -3894,7 +3894,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.isReplaceable()) return new NavBreakCandidateEval(false, NavBreakRejectReason.AIR_OR_REPLACEABLE);
         if (state.getHardness(world, pos) < 0) return new NavBreakCandidateEval(false, NavBreakRejectReason.UNBREAKABLE);
-        if (world.getBlockEntity(pos) != null) return new NavBreakCandidateEval(false, NavBreakRejectReason.BLOCK_ENTITY);
+        if (state.hasBlockEntity()) return new NavBreakCandidateEval(false, NavBreakRejectReason.BLOCK_ENTITY);
         if (!state.getFluidState().isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.FLUID);
         if (state.getCollisionShape(world, pos).isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.NO_COLLISION);
         return new NavBreakCandidateEval(true, null);

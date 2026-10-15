@@ -1056,10 +1056,9 @@ public final class FishingSkill implements Skill {
             if (!(state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL))) {
                 continue;
             }
-            if (!(world.getBlockEntity(pos) instanceof Inventory chest)) {
-                continue;
-            }
-            if (!chestHasSpace(chest)) {
+            // Block entities read null off the server thread; this scan runs on the fishing worker.
+            BlockPos candidate = pos.toImmutable();
+            if (!callOnServer(world, () -> world.getBlockEntity(candidate) instanceof Inventory chest && chestHasSpace(chest), false, 500L)) {
                 continue;
             }
             double distSq = pos.getSquaredDistance(center);
@@ -1139,10 +1138,9 @@ public final class FishingSkill implements Skill {
             if (!(ringState.isOf(Blocks.CHEST) || ringState.isOf(Blocks.TRAPPED_CHEST) || ringState.isOf(Blocks.BARREL))) {
                 continue;
             }
-            if (!(world.getBlockEntity(pos) instanceof Inventory chest)) {
-                continue;
-            }
-            if (!chestHasSpace(chest)) {
+            // Block entities read null off the server thread; this scan runs on the fishing worker.
+            BlockPos candidate = pos.toImmutable();
+            if (!callOnServer(world, () -> world.getBlockEntity(candidate) instanceof Inventory chest && chestHasSpace(chest), false, 500L)) {
                 continue;
             }
             double distSq = pos.getSquaredDistance(origin);
@@ -2396,7 +2394,33 @@ bot.getName().getString());
         if (countRawFish(bot) <= 0) {
             return;
         }
-        SmeltingService.startBatchCook(bot, source, "fish", "auto");
+        // startBatchCook reads the furnace block entity, which is null off the server
+        // thread; the fishing body runs on a worker, so run the call there (as /bot cook does).
+        ServerWorld world = (ServerWorld) bot.getEntityWorld();
+        callOnServer(world, () -> SmeltingService.startBatchCook(bot, source, "fish", "auto"), false, 2000L);
+    }
+
+    private static <T> T callOnServer(ServerWorld world, java.util.function.Supplier<T> task, T fallback, long timeoutMs) {
+        var server = world.getServer();
+        if (server == null || server.isOnThread()) {
+            return task.get();
+        }
+        java.util.concurrent.CompletableFuture<T> future = new java.util.concurrent.CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(task.get());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            return future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     private static int countRawFish(ServerPlayerEntity bot) {

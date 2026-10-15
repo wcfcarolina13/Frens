@@ -599,12 +599,39 @@ public class WoolSkill implements Skill {
             ChatUtils.sendSystemMessage(source, "I found a chest, but I can't reach it from here.");
             return;
         }
-        ChestBlockEntity chest = world.getBlockEntity(chestPos) instanceof ChestBlockEntity c ? c : null;
-        if (chest == null) {
+        // The chest read and the item move both belong on the server thread (getBlockEntity
+        // is null off it, and this skill body runs on a worker).
+        Integer moved = callOnServer(world, () -> {
+            ChestBlockEntity chest = world.getBlockEntity(chestPos) instanceof ChestBlockEntity c ? c : null;
+            return chest == null ? null : depositPreferred(bot.getInventory(), chest);
+        });
+        if (moved == null) {
             return;
         }
-        int moved = depositPreferred(bot.getInventory(), chest);
         ChatUtils.sendSystemMessage(source, moved > 0 ? "Stored " + moved + " items to free space." : "Chest is full; continuing.");
+    }
+
+    private static <T> T callOnServer(ServerWorld world, java.util.function.Supplier<T> task) {
+        MinecraftServer server = world.getServer();
+        if (server == null || server.isOnThread()) {
+            return task.get();
+        }
+        java.util.concurrent.CompletableFuture<T> future = new java.util.concurrent.CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(task.get());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            return future.get(1000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private int depositPreferred(Inventory from, Inventory to) {

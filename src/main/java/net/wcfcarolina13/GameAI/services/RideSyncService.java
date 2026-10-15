@@ -1817,6 +1817,7 @@ public final class RideSyncService {
             logPreferredReject(bot, state, "prepare-vehicle-failed");
             return null;
         }
+        noteSuccessfulMountResolve(bot.getUuid());
         return preferred;
     }
 

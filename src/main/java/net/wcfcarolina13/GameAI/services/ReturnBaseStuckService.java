@@ -1824,7 +1824,7 @@ public final class ReturnBaseStuckService {
             return false;
         }
 
-        if (world.getBlockEntity(pos) != null) {
+        if (state.hasBlockEntity()) {
             return false;
         }
         if (!state.getFluidState().isEmpty()) {
