@@ -791,6 +791,7 @@ public final class WoodcutSkill implements Skill {
         int sinceCleanup = 0;
         int relocations = 0;
         int protectedOnlyScanStreak = 0;
+        WoodcutDetectionSnapshot lastDetection = null;
         int selectedTargets = 0;
         int miningProtectedFailures = 0;
         int pathFailures = 0;
@@ -844,6 +845,20 @@ public final class WoodcutSkill implements Skill {
                         break;
                     }
                     relocations++;
+                    // The protected-only streak branch says the nudge itself. When protection drove
+                    // the failures but soil-failed logs kept that streak from starting (1.1.238 field:
+                    // spawn-base rejects, then a silent relocation), say it here.
+                    if (lastDetection != null
+                            && WoodcutProtectionNudgePolicy.failureRelocationIsProtectionDriven(
+                                    lastDetection.totalLogs(), lastDetection.protectedLogs(), lastDetection.protectedReasonCounts())) {
+                        Map<String, Integer> nudgeReasons = lastDetection.protectedReasonCounts();
+                        WoodcutProtectionNudgePolicy.claimNudge(nudgeReasons, PROTECTION_NUDGES_SAID)
+                                .ifPresent(line -> {
+                                    LOGGER.info("Woodcut protection nudge (failure relocation): {} reasons={}",
+                                            bot.getName().getString(), nudgeReasons);
+                                    ChatUtils.sendSystemMessage(source, line);
+                                });
+                    }
                     if (relocateToUnprotectedTree(source, bot, effectiveSearchRadius(bot, searchRadius), failedBases, failedBaseReasons)) {
                         consecutiveFailures = 0;
                         visitedBases.clear();
@@ -881,6 +896,7 @@ public final class WoodcutSkill implements Skill {
                 WoodcutDetectionSnapshot detection = scanDetectionSnapshot(bot, effectiveSearchRadius, verticalRange, visitedBases, failedBases, failedBaseReasons, requestedBounds);
                 long detectionDurationMs = (System.nanoTime() - detectionStartedAt) / 1_000_000L;
                 logDetectionSnapshot(detection, detectionDurationMs);
+                lastDetection = detection;
                 strictTreeRejects += detection.rejectSamples().stream().filter(sample -> sample.contains("strictStandingReject=true")).count();
                 Optional<TreeDetector.TreeTarget> targetOpt = detection.nearestTree();
                 if (detection.nearestLooseTree().isPresent()) {

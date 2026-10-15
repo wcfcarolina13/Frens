@@ -146,4 +146,40 @@ class WoodcutProtectionNudgePolicyTest {
         assertFalse(line.contains("\u2013"));
         assertFalse(line.contains(";"));
     }
+
+    @Test
+    void failureRelocationFiresInSpawnFieldCase() {
+        // 1.1.238 sandbox: logs=5 soilFail=3 protectedFail=5 protectReasons=spawn-base=5
+        Map<String, Integer> counts = Map.of(WoodcutBaseAccessPolicy.SPAWN_BASE_REASON, 5);
+        assertTrue(WoodcutProtectionNudgePolicy.failureRelocationIsProtectionDriven(5, 5, counts));
+        Set<String> said = ConcurrentHashMap.newKeySet();
+        assertEquals(Optional.of(WoodcutProtectionNudgePolicy.SPAWN_BASE_LINE),
+                WoodcutProtectionNudgePolicy.claimNudge(counts, said));
+    }
+
+    @Test
+    void failureRelocationSilentWithoutProtectedRejects() {
+        assertFalse(WoodcutProtectionNudgePolicy.failureRelocationIsProtectionDriven(12, 0, Map.of()));
+        assertFalse(WoodcutProtectionNudgePolicy.failureRelocationIsProtectionDriven(12, 0, null));
+        assertFalse(WoodcutProtectionNudgePolicy.failureRelocationIsProtectionDriven(0, 0, Map.of()));
+    }
+
+    @Test
+    void failureRelocationSilentForStrayProtectedLogOrUnvoicedReason() {
+        // One beehive tree among many free logs: the failures were not a protection decision.
+        assertFalse(WoodcutProtectionNudgePolicy.failureRelocationIsProtectionDriven(20, 2, Map.of("beehive", 2)));
+        // Only proximity reasons: no line to say.
+        assertFalse(WoodcutProtectionNudgePolicy.failureRelocationIsProtectionDriven(4, 4, Map.of("human", 4)));
+        // Exactly half protected still counts.
+        assertTrue(WoodcutProtectionNudgePolicy.failureRelocationIsProtectionDriven(10, 5, Map.of("base-radius", 5)));
+    }
+
+    @Test
+    void failureRelocationNudgeAlreadySaidStaysSilent() {
+        Map<String, Integer> counts = Map.of(WoodcutBaseAccessPolicy.SPAWN_BASE_REASON, 5);
+        Set<String> said = ConcurrentHashMap.newKeySet();
+        said.add(WoodcutBaseAccessPolicy.SPAWN_BASE_REASON);
+        assertTrue(WoodcutProtectionNudgePolicy.failureRelocationIsProtectionDriven(5, 5, counts));
+        assertEquals(Optional.empty(), WoodcutProtectionNudgePolicy.claimNudge(counts, said));
+    }
 }

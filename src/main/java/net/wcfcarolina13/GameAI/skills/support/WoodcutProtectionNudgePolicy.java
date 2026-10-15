@@ -82,6 +82,22 @@ public final class WoodcutProtectionNudgePolicy {
     }
 
     /**
+     * Whether a relocation triggered by the consecutive-failures path is a protection decision
+     * worth explaining. True when the most recent scan rejected logs for protection, at least half
+     * of the logs it saw were protected, and one of those reasons has a line. Relocation after
+     * ordinary failures (no protected logs, or a stray protected log among many free ones) stays
+     * silent.
+     */
+    public static boolean failureRelocationIsProtectionDriven(int totalLogs,
+                                                              int protectedLogs,
+                                                              Map<String, Integer> reasonCounts) {
+        if (protectedLogs <= 0 || totalLogs <= 0 || protectedLogs * 2 < totalLogs) {
+            return false;
+        }
+        return dominantReason(reasonCounts).isPresent();
+    }
+
+    /**
      * Decides whether to say the nudge. Returns the line when the dominant reason's key
      * ({@link #saidKeyFor}) has not been said yet, and records that key in {@code alreadySaid}. {@code alreadySaid.add} is the claim, so a
      * concurrent set makes the once-only rule hold across bots on different worker threads.
