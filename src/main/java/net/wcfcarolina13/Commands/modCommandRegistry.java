@@ -4898,8 +4898,6 @@ public class modCommandRegistry {
             return 0;
         }
 
-        net.wcfcarolina13.network.SpellNavigationNetworkManager.sendNavTierToClient(commander, bot, alias);
-
         if (!canUseCompanionCome(server, commander, bot, st)) {
             if (recruitmentMode) {
                 ChatUtils.sendSystemMessage(source, "To call your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Goat Horn)." );
@@ -5034,8 +5032,6 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(source, "Can't summon a real player as a companion.");
             return 0;
         }
-
-        net.wcfcarolina13.network.SpellNavigationNetworkManager.sendNavTierToClient(commander, bot, alias);
 
         if (!(commander.getEntityWorld() instanceof ServerWorld commanderWorld)) {
             return 0;
@@ -5181,8 +5177,6 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(source, "Remote inventory requires an Enchanting Table or Wizard's Tome (either you or your companion).");
             return 0;
         }
-
-        net.wcfcarolina13.network.SpellNavigationNetworkManager.sendNavTierToClient(commander, bot, alias);
 
         boolean ok = BotInventoryAccess.openBotInventoryRemote(commander, bot);
         if (!ok) {
@@ -5335,8 +5329,6 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(source, "Can't control a real player as a companion.");
             return 0;
         }
-
-        net.wcfcarolina13.network.SpellNavigationNetworkManager.sendNavTierToClient(commander, bot, alias);
 
         String result;
         if (recruitmentMode) {

@@ -29,7 +29,6 @@ import java.util.Optional;
  * Handles navigation-related network communication:
  * - NavigationResponsePayload (C2S, player accepts/dismisses auto-return)
  * - SpellGuidancePayload (C2S, player casts Remote Guidance or Chorus Recall)
- * - BotNavTierPayload (S2C, sent on spells screen open via helper method)
  */
 public final class SpellNavigationNetworkManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(SpellNavigationNetworkManager.class);
@@ -276,13 +275,5 @@ public final class SpellNavigationNetworkManager {
     private static void sendFeedback(ServerPlayerEntity player, String message) {
         if (player == null || message == null) return;
         ChatUtils.sendSystemMessage(player.getCommandSource(), message);
-    }
-
-    /** Send nav tier to client when spells screen is opened. */
-    public static void sendNavTierToClient(ServerPlayerEntity player, ServerPlayerEntity bot, String botAlias) {
-        if (player == null || bot == null) return;
-        NavigationArtifactService.NavTier tier = NavigationArtifactService.getBotNavigationTier(bot, player);
-        ServerPlayNetworking.send(player, new BotNavTierPayload(
-                botAlias != null ? botAlias : "", tier.ordinal()));
     }
 }

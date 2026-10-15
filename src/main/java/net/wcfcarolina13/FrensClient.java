@@ -343,20 +343,6 @@ public class FrensClient implements ClientModInitializer {
         eyeSpellCooldownUntilMs = System.currentTimeMillis() + 60_000L;
     }
 
-    private static int cachedBotNavTier = 0;
-
-    /**
-     * Returns the cached navigation tier for the current companion bot.
-     * 0 = NONE, 1 = BASIC, 2 = ENHANCED.
-     */
-    public static int getCachedBotNavTier() {
-        return cachedBotNavTier;
-    }
-
-    public static void setCachedBotNavTier(int tier) {
-        cachedBotNavTier = tier;
-    }
-
     private static boolean isGameplayTipsEnabled() {
         return Frens.CONFIG == null || Frens.CONFIG.isGameplayTipsEnabled();
     }
@@ -1071,10 +1057,6 @@ public class FrensClient implements ClientModInitializer {
             if (mc != null && mc.player != null) {
                 mc.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.0f);
             }
-        });
-
-        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.BotNavTierPayload.ID, (payload, context) -> {
-            FrensClient.setCachedBotNavTier(payload.tier());
         });
 
         ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.GuideInventoryAccessPayload.ID, (payload, context) -> {
