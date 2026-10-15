@@ -123,6 +123,8 @@ public final class MovementService {
 
     private static final long OBSTRUCTION_MINE_COOLDOWN_MS = 4500L;
     private static final Map<UUID, Map<BlockPos, Long>> OBSTRUCTION_MINE_COOLDOWN = new ConcurrentHashMap<>();
+    /** A block refused by ObstructionMinePolicy is not re-evaluated (or re-logged) for this long. */
+    private static final long OBSTRUCTION_MINE_REFUSAL_HOLD_MS = 20_000L;
 
     private static final Map<UUID, LocalEscapeDirective> LOCAL_ESCAPE_DIRECTIVES = new ConcurrentHashMap<>();
     private static final Map<UUID, LocalEscapeCommitment> LOCAL_ESCAPE_COMMITMENTS = new ConcurrentHashMap<>();
@@ -3461,6 +3463,9 @@ public final class MovementService {
         } else if (state.isIn(BlockTags.AXE_MINEABLE)) {
             BotActions.selectHarvestToolOrHands(bot, "axe");
         }
+        if (obstructionMineRefused(bot, world, pos, state, label, "planned step trim")) {
+            return false;
+        }
 
         LOGGER.info("movement planned step trim [{}]: bot={} pos={} state={}",
                 label,
@@ -3468,9 +3473,11 @@ public final class MovementService {
                 pos.toShortString(),
                 state.getBlock().getTranslationKey());
 
+        CompletableFuture<String> future = null;
         try {
             boolean leafBlock = state.isIn(BlockTags.LEAVES);
-            MiningTool.mineBlock(bot, pos, leafBlock).get(6, TimeUnit.SECONDS);
+            future = MiningTool.mineBlock(bot, pos, leafBlock);
+            future.get(6, TimeUnit.SECONDS);
             sleep(120L);
             boolean mined = world.getBlockState(pos).isAir();
             if (mined && ConstructionRepairService.hasActiveSession(bot.getUuid())) {
@@ -3484,6 +3491,10 @@ public final class MovementService {
             }
             return mined;
         } catch (Exception ignored) {
+            // Stop the job so a retry never stacks a second one on the same block.
+            if (future != null) {
+                future.cancel(true);
+            }
             return false;
         }
     }
@@ -3710,6 +3721,9 @@ public final class MovementService {
             } else if (state.isIn(BlockTags.AXE_MINEABLE)) {
                 BotActions.selectHarvestToolOrHands(bot, "axe");
             }
+            if (obstructionMineRefused(bot, world, pos, state, label, "obstruction mine")) {
+                continue;
+            }
 
             LOGGER.info("movement obstruction mine [{}]: bot={} pos={} state={}",
                     label,
@@ -3717,8 +3731,10 @@ public final class MovementService {
                     pos.toShortString(),
                     state.getBlock().getTranslationKey());
 
+            CompletableFuture<String> future = null;
             try {
-                MiningTool.mineBlock(bot, pos, leafBlock).get(6, TimeUnit.SECONDS);
+                future = MiningTool.mineBlock(bot, pos, leafBlock);
+                future.get(6, TimeUnit.SECONDS);
                 // Small pause to let physics/collision settle.
                 sleep(120L);
                 boolean mined = world.getBlockState(pos).isAir();
@@ -3733,7 +3749,11 @@ public final class MovementService {
                 }
                 return mined;
             } catch (Exception ignored) {
-                // Cooldown is already marked; treat this as a failed attempt.
+                // Cooldown is already marked; treat this as a failed attempt. Stop the job so a
+                // retry after the cooldown never stacks a second one on the same block.
+                if (future != null) {
+                    future.cancel(true);
+                }
                 return false;
             }
         }
@@ -3753,6 +3773,43 @@ public final class MovementService {
             return false;
         }
         perBot.put(key, now);
+        return true;
+    }
+
+    /**
+     * Runs after tool selection. True (and one log line) when {@link ObstructionMinePolicy} refuses the
+     * block: it needs a tool the bot is not holding, or takes too long on the ground. The refusal holds
+     * the per-block cooldown for {@link #OBSTRUCTION_MINE_REFUSAL_HOLD_MS} so the line is not repeated
+     * every walk tick; the walk then falls through to its own unstick / give-up.
+     */
+    private static boolean obstructionMineRefused(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                                                  BlockState state, String label, String kind) {
+        ItemStack held = bot.getMainHandStack();
+        boolean requiresTool = state.isToolRequired();
+        boolean suitable = !held.isEmpty() && held.isSuitableFor(state);
+        float hardness = state.getHardness(world, pos);
+        int groundTicks = ObstructionMinePolicy.groundBreakTicks(
+                held.getMiningSpeedMultiplier(state), hardness, !requiresTool || suitable);
+        ObstructionMinePolicy.Verdict verdict = ObstructionMinePolicy.evaluate(
+                requiresTool, suitable, groundTicks, ObstructionMinePolicy.MAX_GROUND_BREAK_TICKS);
+        if (verdict == ObstructionMinePolicy.Verdict.ALLOW) {
+            return false;
+        }
+        Map<BlockPos, Long> perBot = OBSTRUCTION_MINE_COOLDOWN.computeIfAbsent(bot.getUuid(), __ -> new ConcurrentHashMap<>());
+        perBot.put(pos.toImmutable(),
+                System.currentTimeMillis() + OBSTRUCTION_MINE_REFUSAL_HOLD_MS - OBSTRUCTION_MINE_COOLDOWN_MS);
+        String heldName = held.isEmpty() ? "hand" : held.getItem().getTranslationKey();
+        if (verdict == ObstructionMinePolicy.Verdict.NEEDS_TOOL) {
+            LOGGER.info("movement {} refused [{}]: bot={} {} at {} needs a tool (held={})",
+                    kind, label, bot.getName().getString(),
+                    state.getBlock().getTranslationKey(), pos.toShortString(), heldName);
+        } else {
+            LOGGER.info("movement {} refused [{}]: bot={} {} at {} too slow ({} ground ticks > {}, held={})",
+                    kind, label, bot.getName().getString(),
+                    state.getBlock().getTranslationKey(), pos.toShortString(),
+                    groundTicks == Integer.MAX_VALUE ? "unbreakable" : groundTicks,
+                    ObstructionMinePolicy.MAX_GROUND_BREAK_TICKS, heldName);
+        }
         return true;
     }
 
