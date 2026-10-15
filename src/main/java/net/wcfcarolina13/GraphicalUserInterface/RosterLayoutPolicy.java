@@ -10,6 +10,8 @@ public final class RosterLayoutPolicy {
     public static final int ROW_H = 18;
     public static final int MAX_ROWS = 6;
     public static final int SUBTITLE_LINE_H = 10;
+    /** Height of the "Other worlds" toggle row above the bot rows, when there are other worlds. */
+    public static final int TOGGLE_ROW_H = 22;
 
     /**
      * The roster's vertical offsets, top to bottom. {@link BotRestoreScreen} places everything
@@ -64,7 +66,15 @@ public final class RosterLayoutPolicy {
      * @param subtitleLines lines the subtitle wraps to (at least 1)
      */
     public static Fit fit(int screenH, int margin, int subtitleLines) {
-        int extra = Math.max(0, subtitleLines - 1) * SUBTITLE_LINE_H;
+        return fit(screenH, margin, subtitleLines, 0);
+    }
+
+    /**
+     * @param extraH fixed height added above the bot rows (the Other worlds toggle row,
+     *               {@link #TOGGLE_ROW_H}, or 0)
+     */
+    public static Fit fit(int screenH, int margin, int subtitleLines, int extraH) {
+        int extra = Math.max(0, subtitleLines - 1) * SUBTITLE_LINE_H + Math.max(0, extraH);
         int available = screenH - 2 * Math.max(0, margin);
         int roomyH = ROOMY_FIXED_H + extra + MAX_ROWS * ROW_H;
         if (roomyH <= available) {

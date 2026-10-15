@@ -13,17 +13,29 @@ public final class RosterScreenCopy {
         /** No saved companions at all. */
         NONE_SAVED,
         /** Companions are saved, and every one of them is already in the world. */
-        ALL_PRESENT
+        ALL_PRESENT,
+        /** None saved in this world, but companions from other worlds can be brought in. */
+        NONE_HERE
     }
 
     private RosterScreenCopy() {
     }
 
     public static State state(int restorableCount, boolean allSavedPresent) {
+        return state(restorableCount, allSavedPresent, 0);
+    }
+
+    /**
+     * @param otherWorldsCount companions saved in other worlds that the roster can bring in
+     */
+    public static State state(int restorableCount, boolean allSavedPresent, int otherWorldsCount) {
         if (restorableCount > 0) {
             return State.HAS_RESTORABLE;
         }
-        return allSavedPresent ? State.ALL_PRESENT : State.NONE_SAVED;
+        if (allSavedPresent) {
+            return State.ALL_PRESENT;
+        }
+        return otherWorldsCount > 0 ? State.NONE_HERE : State.NONE_SAVED;
     }
 
     public static String title(State state) {
@@ -31,6 +43,7 @@ public final class RosterScreenCopy {
             case HAS_RESTORABLE -> "Choose Companions to Restore";
             case NONE_SAVED -> "Welcome. No saved companions yet.";
             case ALL_PRESENT -> "All your companions are already here";
+            case NONE_HERE -> "No companions in this world yet.";
         };
     }
 
@@ -39,6 +52,7 @@ public final class RosterScreenCopy {
             case HAS_RESTORABLE -> "Tick one or more saved bots, then click Spawn Selected.";
             case NONE_SAVED -> "Pick a name below to spawn your first bot.";
             case ALL_PRESENT -> "To add another, type a new name below and click Create.";
+            case NONE_HERE -> "Create one below, or open Other worlds to bring one in.";
         };
     }
 
@@ -48,6 +62,22 @@ public final class RosterScreenCopy {
             case HAS_RESTORABLE -> "";
             case NONE_SAVED -> "(No saved bots yet. Create one below.)";
             case ALL_PRESENT -> "(Everyone you saved is already in this world.)";
+            case NONE_HERE -> "(No companions in this world yet.)";
         };
+    }
+
+    /** Title while the Other worlds list is open. */
+    public static String otherWorldsTitle() {
+        return "Companions from other worlds";
+    }
+
+    /** Subtitle while the Other worlds list is open: what bringing one in does. */
+    public static String otherWorldsSubtitle() {
+        return "Spawning one here starts it fresh in this world. Its inventory stays in its old world.";
+    }
+
+    /** Label of the button that opens or closes the Other worlds list. */
+    public static String otherWorldsToggle(int otherWorldsCount, boolean open) {
+        return open ? "Back to this world" : "Other worlds (" + Math.max(0, otherWorldsCount) + ")";
     }
 }

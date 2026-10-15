@@ -40,4 +40,28 @@ class RosterScreenCopyTest {
             }
         }
     }
+
+    @Test
+    void noCompanionsHereButSomeElsewhereSaysSoPlainly() {
+        assertEquals(RosterScreenCopy.State.NONE_HERE, RosterScreenCopy.state(0, false, 2));
+        assertEquals(RosterScreenCopy.State.NONE_SAVED, RosterScreenCopy.state(0, false, 0));
+        assertEquals(RosterScreenCopy.State.ALL_PRESENT, RosterScreenCopy.state(0, true, 2));
+        assertEquals(RosterScreenCopy.State.HAS_RESTORABLE, RosterScreenCopy.state(1, false, 2));
+        assertEquals("No companions in this world yet.", RosterScreenCopy.title(RosterScreenCopy.State.NONE_HERE));
+        assertTrue(RosterScreenCopy.subtitle(RosterScreenCopy.State.NONE_HERE).contains("Other worlds"));
+    }
+
+    @Test
+    void otherWorldsCopyNamesTheCountAndWhatImportDoes() {
+        assertEquals("Other worlds (2)", RosterScreenCopy.otherWorldsToggle(2, false));
+        assertEquals("Back to this world", RosterScreenCopy.otherWorldsToggle(2, true));
+        String sub = RosterScreenCopy.otherWorldsSubtitle();
+        assertTrue(sub.contains("fresh"));
+        assertTrue(sub.contains("inventory stays in its old world"));
+        for (String text : new String[]{sub, RosterScreenCopy.otherWorldsTitle(),
+                RosterScreenCopy.otherWorldsToggle(3, false), RosterScreenCopy.otherWorldsToggle(3, true)}) {
+            assertFalse(text.contains("\u2014"), text);
+            assertFalse(text.contains(";"), text);
+        }
+    }
 }

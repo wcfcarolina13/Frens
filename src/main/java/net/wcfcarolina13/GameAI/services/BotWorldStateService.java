@@ -217,6 +217,21 @@ public final class BotWorldStateService {
         return Collections.unmodifiableMap(out);
     }
 
+    /**
+     * Read-only copy of alias (lower-cased) to the world keys it has a saved position under.
+     * Never migrates or flushes. Call on the server thread.
+     */
+    public static Map<String, java.util.Set<String>> worldKeysByAlias() {
+        ensureLoaded();
+        Map<String, java.util.Set<String>> out = new HashMap<>();
+        for (Map.Entry<String, Map<String, BotState>> entry : STATE.entrySet()) {
+            if (entry.getKey() != null && entry.getValue() != null) {
+                out.put(entry.getKey(), new java.util.HashSet<>(entry.getValue().keySet()));
+            }
+        }
+        return out;
+    }
+
     public static record BotState(double x, double y, double z, float yaw, float pitch) {
         static BotState from(ServerPlayerEntity bot) {
             float rawPitch = bot.getPitch();

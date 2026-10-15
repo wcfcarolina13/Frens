@@ -1494,11 +1494,80 @@ public class FrensClient implements ClientModInitializer {
         }
         rosterOpenedAwaitingBot = true;
         java.util.List<String> known = getKnownRestorableBotAliases();
+        net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.Scope scope =
+                net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.scope(known,
+                        java.util.Set.of(), java.util.Set.of(), false);
+        RosterWorldMembership membership = readRosterWorldMembership(client);
+        if (membership != null) {
+            scope = net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.scope(known,
+                    membership.inThisWorld(), membership.withAnyWorld(), true);
+        }
         java.util.Set<String> present = presentPlayerNamesLower(client);
+        java.util.Set<String> presentOrEmpty = present == null ? java.util.Set.of() : present;
         java.util.List<String> restorable = net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
-                known, present == null ? java.util.Set.of() : present);
-        boolean allSavedPresent = known != null && !known.isEmpty() && restorable.isEmpty();
-        client.setScreen(new BotRestoreScreen(parent, restorable, allSavedPresent));
+                scope.thisWorld(), presentOrEmpty);
+        java.util.List<String> otherWorlds = net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
+                scope.otherWorlds(), presentOrEmpty);
+        boolean allSavedPresent = !scope.thisWorld().isEmpty() && restorable.isEmpty();
+        client.setScreen(new BotRestoreScreen(parent, restorable, otherWorlds, allSavedPresent));
+    }
+
+    /** Lower-cased aliases with a per-world record here, and with one in any world. */
+    private record RosterWorldMembership(java.util.Set<String> inThisWorld, java.util.Set<String> withAnyWorld) {
+    }
+
+    /**
+     * Reads which companions have a spawn point or saved position in the open save. Singleplayer
+     * only (the integrated server): the stores are read on the server thread, read-only, so no
+     * legacy key is migrated by looking. Null when the world key cannot be known (multiplayer
+     * client, or the server did not answer in time), which keeps every companion in this world.
+     */
+    private static RosterWorldMembership readRosterWorldMembership(MinecraftClient client) {
+        net.minecraft.server.integrated.IntegratedServer server = client == null ? null : client.getServer();
+        if (server == null) {
+            return null;
+        }
+        try {
+            return server.submit(() -> {
+                String fingerprint = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+                String levelName = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentLevelName(server);
+                java.util.Set<String> here = new java.util.HashSet<>();
+                java.util.Set<String> any = new java.util.HashSet<>();
+                java.util.Map<String, java.util.Set<String>> keysByAlias = new java.util.HashMap<>();
+                if (Frens.CONFIG != null) {
+                    for (java.util.Map.Entry<String, java.util.Map<String, net.wcfcarolina13.FilingSystem.ManualConfig.BotSpawn>> e
+                            : Frens.CONFIG.getBotSpawnPointsByWorld().entrySet()) {
+                        if (e.getKey() != null && e.getValue() != null) {
+                            keysByAlias.computeIfAbsent(
+                                    net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.normalize(e.getKey()),
+                                    k -> new java.util.HashSet<>()).addAll(e.getValue().keySet());
+                        }
+                    }
+                }
+                for (java.util.Map.Entry<String, java.util.Set<String>> e
+                        : net.wcfcarolina13.GameAI.services.BotWorldStateService.worldKeysByAlias().entrySet()) {
+                    keysByAlias.computeIfAbsent(
+                            net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.normalize(e.getKey()),
+                            k -> new java.util.HashSet<>()).addAll(e.getValue());
+                }
+                for (java.util.Map.Entry<String, java.util.Set<String>> e : keysByAlias.entrySet()) {
+                    for (String key : e.getValue()) {
+                        if (net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.isUnscopedKey(key)) {
+                            continue;
+                        }
+                        any.add(e.getKey());
+                        if (net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.isCurrentWorldKey(
+                                key, fingerprint, levelName)) {
+                            here.add(e.getKey());
+                        }
+                    }
+                }
+                return new RosterWorldMembership(here, any);
+            }).get(500, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (Throwable t) {
+            Frens.LOGGER.debug("roster world scope unavailable: {}", String.valueOf(t));
+            return null;
+        }
     }
 
     private static void tickBotsPresentHintState(MinecraftClient client) {

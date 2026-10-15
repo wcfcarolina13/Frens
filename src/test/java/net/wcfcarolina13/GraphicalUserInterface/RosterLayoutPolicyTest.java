@@ -67,4 +67,21 @@ class RosterLayoutPolicyTest {
         assertEquals(RosterLayoutPolicy.COMPACT, RosterLayoutPolicy.spacing(true));
         assertEquals(RosterLayoutPolicy.ROOMY, RosterLayoutPolicy.spacing(false));
     }
+
+    @Test
+    void otherWorldsToggleRowStillFitsRoomyAtScaleFiveWindow() {
+        RosterLayoutPolicy.Fit fit = RosterLayoutPolicy.fit(328, 8, 1, RosterLayoutPolicy.TOGGLE_ROW_H);
+        assertFalse(fit.compact());
+        assertEquals(6, fit.rows());
+        assertEquals(290 + RosterLayoutPolicy.TOGGLE_ROW_H, fit.panelH());
+    }
+
+    @Test
+    void otherWorldsToggleRowWithTwoLineSubtitleGoesCompactAndKeepsRows() {
+        RosterLayoutPolicy.Fit fit = RosterLayoutPolicy.fit(328, 8, 2, RosterLayoutPolicy.TOGGLE_ROW_H);
+        assertTrue(fit.compact());
+        assertTrue(fit.rows() >= 1);
+        assertTrue(fit.panelH() <= 328 - 16);
+        assertEquals(RosterLayoutPolicy.fit(328, 8, 2), RosterLayoutPolicy.fit(328, 8, 2, 0));
+    }
 }

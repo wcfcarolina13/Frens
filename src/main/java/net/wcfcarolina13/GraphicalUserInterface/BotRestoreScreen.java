@@ -39,6 +39,10 @@ public class BotRestoreScreen extends Screen {
 
     private final Screen parent;
     private final List<String> aliases;
+    /** Companions saved in other worlds; shown in place of {@link #aliases} when opened. */
+    private final List<String> otherWorlds;
+    private boolean showingOtherWorlds = false;
+    private ButtonWidget otherWorldsButton;
     private final Set<String> selected = new LinkedHashSet<>();
     /** Index of the first bot row shown; the list scrolls by row. */
     private int firstRow = 0;
@@ -62,36 +66,62 @@ public class BotRestoreScreen extends Screen {
      *                        already in the world (the roster hides those)
      */
     public BotRestoreScreen(Screen parent, List<String> aliases, boolean allSavedPresent) {
+        this(parent, aliases, List.of(), allSavedPresent);
+    }
+
+    /**
+     * @param aliases         this world's companions that can be restored
+     * @param otherWorlds     companions saved in other worlds, offered behind the Other worlds button
+     * @param allSavedPresent true when the list is empty only because every saved companion of
+     *                        this world is already in it
+     */
+    public BotRestoreScreen(Screen parent, List<String> aliases, List<String> otherWorlds, boolean allSavedPresent) {
         super(Text.literal("Companions"));
         this.parent = parent;
         this.aliases = aliases == null ? List.of() : List.copyOf(aliases);
-        this.copyState = RosterScreenCopy.state(this.aliases.size(), allSavedPresent);
+        this.otherWorlds = otherWorlds == null ? List.of() : List.copyOf(otherWorlds);
+        this.copyState = RosterScreenCopy.state(this.aliases.size(), allSavedPresent, this.otherWorlds.size());
+    }
+
+    /** The bot rows currently listed: this world's, or other worlds' while that list is open. */
+    private List<String> listed() {
+        return showingOtherWorlds ? otherWorlds : aliases;
+    }
+
+    private String titleText() {
+        return showingOtherWorlds ? RosterScreenCopy.otherWorldsTitle() : RosterScreenCopy.title(copyState);
+    }
+
+    private String subtitleText() {
+        return showingOtherWorlds ? RosterScreenCopy.otherWorldsSubtitle() : RosterScreenCopy.subtitle(copyState);
     }
 
     /** One place for every y/x the roster uses, so init, render and clicks agree. */
     private record Layout(int panelX, int panelY, int panelW, int panelH, boolean compact,
-                          int titleY, int subtitleY, List<String> subtitle, int rowsTop, int rows,
+                          int titleY, int subtitleY, List<String> subtitle, int toggleY, int rowsTop, int rows,
                           int navY, int actionsY, int createY, int linkY) {
     }
 
     private Layout layout() {
         int panelW = Math.min(PANEL_W, this.width - 16);
-        List<String> subtitle = UiFitPolicy.wrap(RosterScreenCopy.subtitle(copyState), panelW - 16,
+        List<String> subtitle = UiFitPolicy.wrap(subtitleText(), panelW - 16,
                 this.textRenderer::getWidth, 2);
-        RosterLayoutPolicy.Fit fit = RosterLayoutPolicy.fit(this.height, 8, Math.max(1, subtitle.size()));
+        int toggleH = otherWorlds.isEmpty() ? 0 : RosterLayoutPolicy.TOGGLE_ROW_H;
+        RosterLayoutPolicy.Fit fit = RosterLayoutPolicy.fit(this.height, 8, Math.max(1, subtitle.size()), toggleH);
         int panelX = (this.width - panelW) / 2;
         int panelY = Math.max(4, (this.height - fit.panelH()) / 2);
         boolean compact = fit.compact();
         RosterLayoutPolicy.Spacing sp = RosterLayoutPolicy.spacing(compact);
         int titleY = panelY + sp.titleTop();
         int subtitleY = titleY + sp.subtitleGap();
-        int rowsTop = subtitleY + Math.max(1, subtitle.size()) * RosterLayoutPolicy.SUBTITLE_LINE_H + sp.rowsGap();
+        int toggleY = subtitleY + Math.max(1, subtitle.size()) * RosterLayoutPolicy.SUBTITLE_LINE_H + sp.rowsGap();
+        int rowsTop = toggleY + toggleH;
         int navY = rowsTop + fit.rows() * ROW_H + sp.navGap();
         int actionsY = navY + sp.actionsGap();
         int createY = actionsY + sp.createGap();
         int linkY = createY + sp.linkGap();
         return new Layout(panelX, panelY, panelW, fit.panelH(), compact, titleY, subtitleY, subtitle,
-                rowsTop, fit.rows(), navY, actionsY, createY, linkY);
+                toggleY, rowsTop, fit.rows(), navY, actionsY, createY, linkY);
     }
 
     @Override
@@ -101,11 +131,23 @@ public class BotRestoreScreen extends Screen {
         int panelX = l.panelX();
         int panelW = l.panelW();
         int visible = l.rows();
-        firstRow = RosterLayoutPolicy.clampFirstRow(firstRow, aliases.size(), visible);
+        firstRow = RosterLayoutPolicy.clampFirstRow(firstRow, listed().size(), visible);
+
+        // ── Other worlds toggle (only when other worlds have companions to bring in) ──
+        if (!otherWorlds.isEmpty()) {
+            int toggleW = Math.min(160, panelW - 24);
+            otherWorldsButton = ButtonWidget.builder(
+                            Text.literal(RosterScreenCopy.otherWorldsToggle(otherWorlds.size(), showingOtherWorlds)),
+                            btn -> toggleOtherWorlds())
+                    .dimensions(panelX + (panelW - toggleW) / 2, l.toggleY(), toggleW, 18).build();
+            this.addDrawableChild(otherWorldsButton);
+        } else {
+            otherWorldsButton = null;
+        }
 
         // ── Scroll buttons (skipped when every bot fits) ──
         int navY = l.navY();
-        if (aliases.size() > visible) {
+        if (listed().size() > visible) {
             prevButton = ButtonWidget.builder(Text.literal("◀ Prev"),
                     btn -> scrollRows(-visible))
                     .dimensions(panelX + 12, navY, 60, 18).build();
@@ -160,9 +202,15 @@ public class BotRestoreScreen extends Screen {
         botControlsLinkY = l.linkY();
     }
 
+    private void toggleOtherWorlds() {
+        showingOtherWorlds = !showingOtherWorlds;
+        firstRow = 0;
+        this.clearAndInit();
+    }
+
     private void scrollRows(int delta) {
         int visible = layout().rows();
-        int next = RosterLayoutPolicy.clampFirstRow(firstRow + delta, aliases.size(), visible);
+        int next = RosterLayoutPolicy.clampFirstRow(firstRow + delta, listed().size(), visible);
         if (next != firstRow) {
             firstRow = next;
             updateScrollButtons(visible);
@@ -174,13 +222,13 @@ public class BotRestoreScreen extends Screen {
             prevButton.active = firstRow > 0;
         }
         if (nextButton != null) {
-            nextButton.active = firstRow + visible < aliases.size();
+            nextButton.active = firstRow + visible < listed().size();
         }
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        if (aliases.size() > layout().rows() && verticalAmount != 0) {
+        if (listed().size() > layout().rows() && verticalAmount != 0) {
             scrollRows(verticalAmount > 0 ? -1 : 1);
             return true;
         }
@@ -200,9 +248,11 @@ public class BotRestoreScreen extends Screen {
     private boolean aliasExists(String candidate) {
         if (candidate == null) return false;
         String norm = candidate.trim().toLowerCase(Locale.ROOT);
-        for (String alias : aliases) {
-            if (alias.trim().toLowerCase(Locale.ROOT).equals(norm)) {
-                return true;
+        for (List<String> list : List.of(aliases, otherWorlds)) {
+            for (String alias : list) {
+                if (alias.trim().toLowerCase(Locale.ROOT).equals(norm)) {
+                    return true;
+                }
             }
         }
         return false;
@@ -235,7 +285,7 @@ public class BotRestoreScreen extends Screen {
         context.fill(panelX, panelY, panelX + panelW, panelY + panelH, 0xDD101010);
 
         // Title + subtitle
-        String title = UiFitPolicy.elide(RosterScreenCopy.title(copyState), panelW - 16, this.textRenderer::getWidth);
+        String title = UiFitPolicy.elide(titleText(), panelW - 16, this.textRenderer::getWidth);
         int titleW = this.textRenderer.getWidth(title);
         context.drawTextWithShadow(this.textRenderer, title,
                 panelX + (panelW - titleW) / 2, l.titleY(), 0xFFE6D7A3);
@@ -251,15 +301,16 @@ public class BotRestoreScreen extends Screen {
         // Roster rows (the list scrolls when it has more bots than rows)
         rowHits.clear();
         int visible = l.rows();
-        firstRow = RosterLayoutPolicy.clampFirstRow(firstRow, aliases.size(), visible);
+        List<String> rows = listed();
+        firstRow = RosterLayoutPolicy.clampFirstRow(firstRow, rows.size(), visible);
         int startIndex = firstRow;
-        int endIndex = Math.min(aliases.size(), startIndex + visible);
+        int endIndex = Math.min(rows.size(), startIndex + visible);
         int rowY = l.rowsTop();
         int rowX = panelX + 16;
         int rowW = panelW - 32;
         int chkX = rowX + 4;
 
-        if (aliases.isEmpty()) {
+        if (rows.isEmpty()) {
             String empty = UiFitPolicy.elide(RosterScreenCopy.emptyListLine(copyState), panelW - 16,
                     this.textRenderer::getWidth);
             int eW = this.textRenderer.getWidth(empty);
@@ -267,7 +318,7 @@ public class BotRestoreScreen extends Screen {
                     panelX + (panelW - eW) / 2, rowY + 18, 0xFF7C7C7C);
         } else {
             for (int i = startIndex; i < endIndex; i++) {
-                String alias = aliases.get(i);
+                String alias = rows.get(i);
                 boolean hover = mouseX >= rowX && mouseX <= rowX + rowW
                         && mouseY >= rowY && mouseY <= rowY + ROW_H;
                 boolean checked = selected.contains(alias);
@@ -290,8 +341,8 @@ public class BotRestoreScreen extends Screen {
         }
 
         // Scroll caption
-        if (aliases.size() > visible) {
-            String cap = (startIndex + 1) + "-" + endIndex + " of " + aliases.size();
+        if (rows.size() > visible) {
+            String cap = (startIndex + 1) + "-" + endIndex + " of " + rows.size();
             int cW = this.textRenderer.getWidth(cap);
             context.drawText(this.textRenderer, cap,
                     panelX + (panelW - cW) / 2, l.navY() + 5, 0xFF909090, false);
