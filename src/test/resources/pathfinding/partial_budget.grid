@@ -1,0 +1,11 @@
+# Open ground with the goal 200 blocks away and a tiny budget. nodecap makes the cut deterministic:
+# a 5 ms wall clock alone may finish FULL on a fast machine.
+name partial_budget
+origin 0 0 0
+size 212 3 9
+tool HAND
+start 3 1 4
+goal 203 1 4
+flags swim=1 break=0 place=0 scaffold=0 sprint=1
+budget primary=5 failure=5 nodecap=150
+fill 0 0 0 211 0 8 d

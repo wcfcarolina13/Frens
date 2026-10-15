@@ -1,0 +1,29 @@
+# Bob's gully (design section 10.1): a sand ledge at 22,63,126 boxed in by a pond and 2-high
+# Spawn-protected sand; in the sandbox it was only escapable by swimming.
+#
+# REAL cells: x 20..24, y 60..64, z 124..128, loaded verbatim from gully/bob_ledge_22_63_126.txt by
+# the `dump` line (last line, so it overrides the assumed fills). Every solid cell in it is marked
+# protected (the Spawn-base zone); sandstone maps to stone (#/P). The ledge air cell (@) is NOT
+# protected (assumption: the zone covers the blocks, so a 1-block dirt stair at the ledge is legal).
+#
+# ASSUMED cells (no dump yet), each fill below says what it stands for:
+name gully_ledge
+origin 14 56 116
+size 21 14 20
+tool HAND
+start 22 63 126
+goal 31 63 126
+flags swim=1 break=1 place=1 scaffold=0 sprint=1
+# assumed: stone under everything up to y59 (the pond floor; the real dump shows water down to y60,
+# so the pond is at least 3 deep there, not the 2 the design text says)
+fill 14 56 116 34 59 135 #
+# assumed: the pond continues north and east of the dump, water y60..62
+fill 20 60 116 28 62 127 ~
+# assumed: west Spawn-base plateau, protected sand topped at y64 (stand at y65)
+fill 14 60 116 19 64 135 p
+# assumed: the dump's z128 stone ridge continues south and east, protected, topped at y64
+fill 20 60 128 28 64 135 P
+# assumed: east terrace beyond the pond, unprotected stone topped at y62 (stand at y63); the goal
+fill 29 60 116 34 62 135 #
+# real: the dump (overrides the fills above inside x20..24, z124..128)
+dump gully/bob_ledge_22_63_126.txt 22 63 126 protect

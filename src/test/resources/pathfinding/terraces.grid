@@ -1,0 +1,18 @@
+# Five 1-block dirt steps up (x5..x9, standing y2..y6), a plateau, five steps down to y1.
+name terraces
+origin 0 0 0
+size 26 10 7
+tool HAND
+start 2 1 3
+goal 22 1 3
+flags swim=1 break=1 place=0 scaffold=0 sprint=1
+fill 0 0 0 25 0 6 d
+fill 5 1 0 5 1 6 d
+fill 6 1 0 6 2 6 d
+fill 7 1 0 7 3 6 d
+fill 8 1 0 8 4 6 d
+fill 9 1 0 12 5 6 d
+fill 13 1 0 13 4 6 d
+fill 14 1 0 14 3 6 d
+fill 15 1 0 15 2 6 d
+fill 16 1 0 16 1 6 d

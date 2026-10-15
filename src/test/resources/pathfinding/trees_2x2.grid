@@ -1,0 +1,14 @@
+# Four 2x2 log trunks with a leaf canopy down to head height (y2), goal behind them.
+name trees_2x2
+origin 0 0 0
+size 24 9 21
+tool HAND
+start 3 1 10
+goal 20 1 10
+flags swim=1 break=1 place=0 scaffold=0 sprint=1
+fill 0 0 0 23 0 20 d
+fill 6 2 4 15 6 16 l
+fill 8 1 7 9 6 8 w
+fill 8 1 12 9 6 13 w
+fill 12 1 7 13 6 8 w
+fill 12 1 12 13 6 13 w

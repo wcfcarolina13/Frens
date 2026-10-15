@@ -1,0 +1,10 @@
+# A 1-wide unprotected sand wall, 2 high, across the route (x10, z0..10); the way around is z11.
+name sand_wall_break
+origin 0 0 0
+size 21 5 15
+tool HAND
+start 5 1 2
+goal 15 1 2
+flags swim=1 break=1 place=0 scaffold=0 sprint=1
+fill 0 0 0 20 0 14 d
+fill 10 1 0 10 2 10 s

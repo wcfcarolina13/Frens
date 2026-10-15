@@ -1,0 +1,14 @@
+# A 4-high stone cliff in front (z>=10 stands at y5), a 1-step dirt slope 6 blocks to the side (x14..15).
+name cliff_side_slope
+origin 0 0 0
+size 20 8 20
+tool HAND
+start 8 1 5
+goal 8 5 14
+flags swim=1 break=1 place=0 scaffold=0 sprint=1
+fill 0 0 0 19 0 19 #
+fill 0 1 10 19 4 19 #
+fill 14 1 6 15 1 6 d
+fill 14 1 7 15 2 7 d
+fill 14 1 8 15 3 8 d
+fill 14 1 9 15 4 9 d

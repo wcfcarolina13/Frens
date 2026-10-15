@@ -1,0 +1,12 @@
+# A 2-high dirt wall (x10, z0..15) inside a protected zone (x8..12, all z); the way around at z16+
+# walks through protected flat ground, which is allowed. No break or place may touch the zone.
+name protected_zone
+origin 0 0 0
+size 21 5 22
+tool HAND
+start 5 1 3
+goal 15 1 3
+flags swim=1 break=1 place=1 scaffold=4 sprint=1
+fill 0 0 0 20 0 21 d
+fill 10 1 0 10 2 15 d
+protect 8 0 0 12 4 21

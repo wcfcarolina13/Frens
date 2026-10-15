@@ -1,0 +1,11 @@
+# Surface at y5 (stand y6). A pit on the straight line: air y3..5, so its floor stands at y3,
+# 3 below the start, under the depth floor min(start, goal) - 2 = 4.
+name cave_pit
+origin 0 0 0
+size 20 9 9
+tool HAND
+start 2 6 4
+goal 16 6 4
+flags swim=1 break=0 place=0 scaffold=0 sprint=1
+fill 0 0 0 19 5 8 d
+fill 8 3 3 10 5 5 .

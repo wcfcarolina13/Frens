@@ -1,0 +1,15 @@
+# Ground stands at y3. A lava pool x8..12 (lava at y0, air y1..2 above it), crossed by a 1-block
+# land bridge at z3 and a 1-deep wade crossing at z9 (water at y3 over dirt).
+name lava
+origin 0 0 0
+size 21 6 13
+tool HAND
+start 4 3 6
+goal 16 3 6
+flags swim=1 break=0 place=0 scaffold=0 sprint=1
+fill 0 0 0 20 2 12 d
+fill 8 0 0 12 2 12 .
+fill 8 0 0 12 0 12 !
+fill 8 0 3 12 2 3 d
+fill 8 0 9 12 2 9 d
+fill 8 3 9 12 3 9 ~

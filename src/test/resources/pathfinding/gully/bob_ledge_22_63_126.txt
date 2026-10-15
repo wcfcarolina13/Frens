@@ -1,0 +1,8 @@
+# MCP `blocks` dump around Bob's ledge, sandbox #21, centre 22,63,126 (@), r=2, levels top to bottom.
+# Rows z north to south (124..128), columns x west to east (20..24). Verbatim from the field session.
+# The sand/stone around the ledge in the 2-high wall direction were Spawn-protected in the sandbox.
+y=64: [". . . . .", ". . . . .", "sand sand . . .", "dirt sand sand sand .", "stone stone sandstone stone stone"]
+y=63: [". . . . .", ". . . . .", "sand sand @. . .", "sandstone sand sand sand .", "stone stone stone sandstone stone"]
+y=62: ["~ ~ ~ ~ ~", "sand ~ ~ ~ ~", "sandstone sandstone sand ~ ~", "sandstone sandstone sandstone sandstone ~", "stone stone stone stone stone"]
+y=61: ["~ ~ ~ ~ ~", "sand ~ ~ ~ ~", "sandstone sandstone sand ~ ~", "sandstone sandstone sandstone sandstone ~", "stone sandstone sandstone sandstone stone"]
+y=60: ["sand ~ ~ ~ ~", "sandstone sand ~ ~ ~", "sandstone sandstone sand ~ ~", "sandstone sandstone sandstone sandstone ~", "stone stone stone stone stone"]

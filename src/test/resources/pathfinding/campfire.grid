@@ -1,0 +1,10 @@
+# A lit campfire on the direct line; the route must keep its 2-block berth.
+name campfire
+origin 0 0 0
+size 21 4 11
+tool HAND
+start 2 1 5
+goal 18 1 5
+flags swim=1 break=0 place=0 scaffold=0 sprint=1
+fill 0 0 0 20 0 10 d
+set 10 1 5 c

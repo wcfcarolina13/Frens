@@ -1,0 +1,9 @@
+# 60 x 60 flat ground (dirt stands in for grass), goal 50 blocks east on the same row.
+name open_field
+origin 0 0 0
+size 60 4 60
+tool HAND
+start 5 1 30
+goal 55 1 30
+flags swim=1 break=1 place=0 scaffold=0 sprint=1
+fill 0 0 0 59 0 59 d
