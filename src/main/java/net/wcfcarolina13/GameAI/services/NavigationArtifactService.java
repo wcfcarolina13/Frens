@@ -668,11 +668,6 @@ public final class NavigationArtifactService {
         return botUuid != null && PENDING_TRAVELS.containsKey(botUuid);
     }
 
-    /** Get the pending travel record for a bot, or null if not traveling. */
-    public static PendingTravel getPendingTravel(UUID botUuid) {
-        return botUuid != null ? PENDING_TRAVELS.get(botUuid) : null;
-    }
-
     /** Find a pending travel by bot name (case-insensitive). Returns null if not traveling. */
     public static PendingTravel getPendingTravelByName(String botName) {
         if (botName == null) return null;

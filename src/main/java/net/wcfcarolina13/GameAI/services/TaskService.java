@@ -452,15 +452,6 @@ public final class TaskService {
     }
 
     /**
-     * Mark a task as open-ended (eligible to be interrupted by automation like sunset return).
-     */
-    public static void markOpenEnded(TaskTicket ticket, boolean openEnded) {
-        if (ticket != null) {
-            ticket.setOpenEnded(openEnded);
-        }
-    }
-
-    /**
      * Records which thread is executing the active skill for this ticket.
      * This enables /bot stop and server shutdown to interrupt long-running/hung skills.
      */

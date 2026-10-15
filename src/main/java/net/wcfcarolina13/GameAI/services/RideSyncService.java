@@ -67,7 +67,6 @@ public final class RideSyncService {
     private static final double SEARCH_RADIUS_SQ = SEARCH_RADIUS * SEARCH_RADIUS;
     private static final long RESYNC_COOLDOWN_TICKS = 40L;
     private static final long BOAT_RESYNC_COOLDOWN_TICKS = 10L;
-    private static final long MINECART_RESYNC_COOLDOWN_TICKS = 10L;
     private static final Map<UUID, UUID> SYNC_COMMANDER = new HashMap<>();
     private static final Map<UUID, UUID> SYNC_VEHICLE = new HashMap<>();
     private static final Map<UUID, Long> LAST_SYNC_TICK = new HashMap<>();
@@ -4175,21 +4174,6 @@ public final class RideSyncService {
                     fencePos.toShortString());
         }
     }
-
-    private static void maybeAnchorLeashedMount(ServerPlayerEntity bot, ServerPlayerEntity commander) {
-        if (bot == null || commander == null) {
-            return;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return;
-        }
-        MobEntity mount = findLeashedMount(bot, world, 8.0D);
-        if (mount == null) {
-            return;
-        }
-        anchorLeashedMount(bot, mount);
-    }
-
 
     private static List<Entity> findCandidateVehicles(ServerWorld world,
                                                       ServerPlayerEntity commander,

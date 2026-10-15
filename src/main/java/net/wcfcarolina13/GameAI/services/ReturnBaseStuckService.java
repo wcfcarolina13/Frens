@@ -1926,19 +1926,6 @@ public final class ReturnBaseStuckService {
 
 
     
-    /**
-     * Find the hotbar slot containing a matching tool.
-     */
-    private static int findToolSlot(ServerPlayerEntity bot, ItemStack targetTool) {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (ItemStack.areItemsEqual(stack, targetTool)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
     private static boolean isOverheadBlocked(ServerPlayerEntity bot) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;

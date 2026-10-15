@@ -254,10 +254,6 @@ public final class MovementService {
                                   int bypassFailures,
                                   BlockPos leafTarget,
                                   String detail) {
-        public boolean shouldShortCircuitFollowTick() {
-            return action == LeafClearAction.MINING_STARTED || action == LeafClearAction.MINING_IN_PROGRESS;
-        }
-
         public boolean countsAsCleared() {
             return action == LeafClearAction.MINING_STARTED
                     || action == LeafClearAction.MINING_IN_PROGRESS
@@ -1697,10 +1693,6 @@ public final class MovementService {
         FAILED_ROUTES.record(bot.getUuid(), failedRouteKey(origin, hop), System.currentTimeMillis());
         LOGGER.debug("movement failed route recorded [{}]: bot={} origin={} firstHop={} ttlMs={}",
                 label, bot.getName().getString(), origin.toShortString(), hop.toShortString(), FailedRoutePolicy.TTL_MS);
-    }
-
-    public static void clearFailedRoutes(UUID botId) {
-        FAILED_ROUTES.clear(botId);
     }
 
     private static LocalEscapeCandidate unlessRememberedFailed(UUID botId, BlockPos origin, FailedRouteSkips skips,
@@ -5276,19 +5268,6 @@ public final class MovementService {
         }
         return world.getBlockState(head).getCollisionShape(world, head).isEmpty()
                 && world.getBlockState(head.up()).getCollisionShape(world, head.up()).isEmpty();
-    }
-
-    private static boolean isGoToSuccess(String result) {
-        if (result == null) {
-            return false;
-        }
-        String lowered = result.toLowerCase();
-        for (String token : new String[]{"failed", "error", "not found"}) {
-            if (lowered.contains(token)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     static ServerWorld getWorld(ServerPlayerEntity player) {
