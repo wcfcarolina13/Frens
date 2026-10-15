@@ -5969,8 +5969,6 @@ public class modCommandRegistry {
         }
         st.setModeSelectionDone(false);
         st.setSelectedWorldMode(null);
-        st.setModeSelectedAtEpochMs(0L);
-        st.setModeSelectedByName(null);
         Frens.CONFIG.save();
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
             net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.sendRecruitmentState(p);

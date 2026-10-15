@@ -102,7 +102,6 @@ public class ManualConfig {
     private int fortBufferRadius = 8;
     private int undergroundLingerMinutes = 3;
     private int undergroundProximityBlocks = 32;
-    private Map<String, String> botSkins = new HashMap<>();
     // Per-bot generated voices (2026-08-29): soul profile id → voice assignment. Overrides the
     // profile JSON's own "voice" block; absent/blank = the global soul voice settings.
     private Map<String, SoulVoiceAssignment> soulProfileVoices = new HashMap<>();
@@ -694,17 +693,6 @@ public class ManualConfig {
         }
     }
 
-    public Map<String, String> getBotSkins() {
-        if (botSkins == null) {
-            botSkins = new HashMap<>();
-        }
-        return botSkins;
-    }
-
-    public void setBotSkins(Map<String, String> botSkins) {
-        this.botSkins = normalizeAliasMap(botSkins);
-    }
-
     public Map<String, BotSkinSelection> getBotSkinSelections() {
         if (botSkinSelections == null) {
             botSkinSelections = new HashMap<>();
@@ -726,27 +714,6 @@ public class ManualConfig {
             return;
         }
         putAliasValue(getBotSkinSelections(), alias, selection.sanitized());
-        // Keep legacy preset map synchronized for backward compatibility.
-        if (selection.hasPresetValue()) {
-            putAliasValue(getBotSkins(), alias, selection.getValue());
-        }
-    }
-
-    public String getBotSkin(String alias) {
-        BotSkinSelection structured = getBotSkinSelection(alias);
-        if (structured != null && structured.hasPresetValue()) {
-            return structured.getValue();
-        }
-        String key = resolveAliasKey(getBotSkins(), alias);
-        return key != null ? getBotSkins().get(key) : null;
-    }
-
-    public void setBotSkin(String alias, String presetId) {
-        if (alias == null || alias.isBlank() || presetId == null || presetId.isBlank()) {
-            return;
-        }
-        putAliasValue(getBotSkins(), alias, presetId.trim());
-        setBotSkinSelection(alias, BotSkinSelection.preset(presetId.trim()));
     }
 
     public Map<String, BotOwnership> getBotOwnership() {
@@ -1334,7 +1301,6 @@ public class ManualConfig {
         removeAliasVariants(botSpawnPoints, alias);
         removeAliasVariants(botControls, alias);
         removeAliasVariants(botQuestMemory, alias);
-        removeAliasVariants(botSkins, alias);
         removeAliasVariants(botSkinSelections, alias);
         removeNestedAliasVariants(botSpawnPointsByWorld, alias);
         removeNestedAliasVariants(botControlsByWorld, alias);
@@ -1346,30 +1312,7 @@ public class ManualConfig {
         botSpawnPoints = normalizeAliasMap(botSpawnPoints);
         botControls = normalizeAliasMap(botControls);
         botQuestMemory = normalizeAliasMap(botQuestMemory);
-        botSkins = normalizeAliasMap(botSkins);
         botSkinSelections = normalizeAliasMap(botSkinSelections);
-
-        // Legacy migration: seed structured skin selections from old preset-only map.
-        if (botSkinSelections.isEmpty() && !botSkins.isEmpty()) {
-            for (Map.Entry<String, String> entry : botSkins.entrySet()) {
-                String alias = entry.getKey();
-                String preset = entry.getValue();
-                if (alias == null || alias.isBlank() || preset == null || preset.isBlank()) {
-                    continue;
-                }
-                botSkinSelections.put(alias, BotSkinSelection.preset(preset));
-            }
-        }
-
-        // Keep legacy map populated for preset selections to avoid breaking old callers.
-        for (Map.Entry<String, BotSkinSelection> entry : botSkinSelections.entrySet()) {
-            String alias = entry.getKey();
-            BotSkinSelection selection = entry.getValue();
-            if (alias == null || alias.isBlank() || selection == null || !selection.hasPresetValue()) {
-                continue;
-            }
-            botSkins.putIfAbsent(alias, selection.getValue());
-        }
     }
 
     private static String normalizeAlias(String alias) {
@@ -1577,10 +1520,6 @@ public class ManualConfig {
             this.lastSetAtEpochMs = lastSetAtEpochMs;
         }
 
-        public static BotSkinSelection preset(String presetId) {
-            return new BotSkinSelection("preset", presetId, null, null, false, System.currentTimeMillis());
-        }
-
         public BotSkinSelection sanitized() {
             String normalizedSource = (source == null || source.isBlank())
                     ? "preset"
@@ -1645,12 +1584,6 @@ public class ManualConfig {
 
         public void setLastSetAtEpochMs(long lastSetAtEpochMs) {
             this.lastSetAtEpochMs = lastSetAtEpochMs;
-        }
-
-        public boolean hasPresetValue() {
-            return "preset".equalsIgnoreCase(source)
-                    && value != null
-                    && !value.isBlank();
         }
 
         public boolean isCustomUrl() {
@@ -1942,8 +1875,6 @@ public class ManualConfig {
         private boolean modeSelectionDone;
         // Last selected world mode ("questing" or "admin") for UI/status transparency.
         private String selectedWorldMode;
-        private long modeSelectedAtEpochMs;
-        private String modeSelectedByName;
         // Skin policy controls (server-authoritative).
         /** Retired in 1.1.233 (the owner check decides skin changes). Kept so saved configs still load. */
         @Deprecated
@@ -2041,24 +1972,6 @@ public class ManualConfig {
                 return;
             }
             this.selectedWorldMode = normalized;
-        }
-
-        public long getModeSelectedAtEpochMs() {
-            return modeSelectedAtEpochMs;
-        }
-
-        public void setModeSelectedAtEpochMs(long modeSelectedAtEpochMs) {
-            this.modeSelectedAtEpochMs = Math.max(0L, modeSelectedAtEpochMs);
-        }
-
-        public String getModeSelectedByName() {
-            return modeSelectedByName;
-        }
-
-        public void setModeSelectedByName(String modeSelectedByName) {
-            this.modeSelectedByName = (modeSelectedByName == null || modeSelectedByName.isBlank())
-                    ? null
-                    : modeSelectedByName.trim();
         }
 
         @Deprecated

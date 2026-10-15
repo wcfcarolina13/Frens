@@ -448,14 +448,7 @@ public final class BotSkinService {
             return null;
         }
         ManualConfig.BotSkinSelection structured = Frens.CONFIG.getBotSkinSelection(alias);
-        if (structured != null) {
-            return fromConfigSelection(structured);
-        }
-        String legacyPreset = Frens.CONFIG.getBotSkin(alias);
-        if (legacyPreset == null || legacyPreset.isBlank()) {
-            return null;
-        }
-        return SkinSelection.preset(legacyPreset).normalized();
+        return structured != null ? fromConfigSelection(structured) : null;
     }
 
     public static void persistSkinSelection(String alias, SkinSelection selection) {

@@ -495,7 +495,7 @@ public final class SurvivalRecruitmentService {
         return uuid == null ? "" : uuid.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
-    public static void noteModeSelectionConfigured(MinecraftServer server, boolean questingMode, String actorName) {
+    public static void noteModeSelectionConfigured(MinecraftServer server, boolean questingMode) {
         if (server == null || Frens.CONFIG == null) {
             return;
         }
@@ -505,8 +505,6 @@ public final class SurvivalRecruitmentService {
         }
         st.setModeSelectionDone(true);
         st.setSelectedWorldMode(questingMode ? "questing" : "admin");
-        st.setModeSelectedAtEpochMs(System.currentTimeMillis());
-        st.setModeSelectedByName(actorName);
     }
 
     public static void setWorldMode(MinecraftServer server, boolean questingMode, String actorName) {
@@ -518,7 +516,7 @@ public final class SurvivalRecruitmentService {
             Frens.LOGGER.warn("[recruit] Refused to set world mode to Questing for {}: questing mode is off", actorName);
             return;
         }
-        noteModeSelectionConfigured(server, questingMode, actorName);
+        noteModeSelectionConfigured(server, questingMode);
         Frens.CONFIG.save();
     }
 
@@ -668,8 +666,6 @@ public final class SurvivalRecruitmentService {
         }
         st.setModeSelectionDone(true);
         st.setSelectedWorldMode("questing");
-        st.setModeSelectedAtEpochMs(System.currentTimeMillis());
-        st.setModeSelectedByName("legacy-migration");
         Frens.CONFIG.save();
     }
 
@@ -1069,8 +1065,6 @@ public final class SurvivalRecruitmentService {
             // Completing recruitment implicitly means this world is using questing mode.
             updated.setModeSelectionDone(true);
             updated.setSelectedWorldMode("questing");
-            updated.setModeSelectedAtEpochMs(System.currentTimeMillis());
-            updated.setModeSelectedByName(player.getName().getString());
             Frens.CONFIG.save();
         }
 
