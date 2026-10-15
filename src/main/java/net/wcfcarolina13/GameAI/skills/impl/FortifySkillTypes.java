@@ -15,7 +15,7 @@ import java.util.*;
  *    ReplaceFailureKind, TowerPillarOutcome, TowerStepOutcome, TowerReturnOutcome, TowerScaffoldSideOutcome)
  *  - Result/data records (NavBreakCandidateEval, CavityCheckResult, DeferredRepair, ReplaceBlockResult,
  *    TowerStepAttemptResult, TowerReturnAttemptResult, TowerSummitStepCandidate, TowerSummitRoamResult,
- *    TowerHardResetResult, FortifyNavProgressWindow, TowerNavCandidate, ApproachCandidateEval,
+ *    TowerHardResetResult, FortifyNavProgressWindow, TowerNavCandidate,
  *    ScaffoldTeardownResult, SurfaceProfile, StartupRecoveryResult, MoatDigResult)
  *  - State/session classes (DeferredCleanupTask, FortifyCarveSession, FortifyNavRuntimeScope,
  *    TowerNavAttemptState, ScaffoldLedger)
@@ -145,10 +145,6 @@ record FortifyNavProgressWindow(BlockPos startPos, BlockPos endPos,
 
 record TowerNavCandidate(BlockPos pos, double score, int exits, boolean locallyReachable,
                          boolean previouslyFailed) {}
-
-record ApproachCandidateEval(boolean standable, boolean insideFootprint,
-                              boolean locallyReachable, boolean losZero,
-                              int exits) {}
 
 record ScaffoldTeardownResult(int trackedSession, int trackedMemory, int reconciledNearby,
                                int removed, int alreadyAir, int failedMine, int outOfReach,

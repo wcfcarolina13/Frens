@@ -12,14 +12,11 @@ import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Locale;
 
 public final class FeedAnimalsSkill implements Skill {
-    private static final Logger LOGGER = LoggerFactory.getLogger("skill-feed-animals");
     private static final int DEFAULT_RADIUS = 12;
     private static final int MAX_FEEDS = 2;
 

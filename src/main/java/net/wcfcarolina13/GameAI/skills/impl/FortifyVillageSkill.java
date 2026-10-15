@@ -79,7 +79,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fortify-village");
     private static final int MAX_SCAFFOLD_HEIGHT = 8;
-    private static final long MAX_BUILD_TIME_MS = 30 * 60_000L; // 30 minute cap
     private static final long PHASE_B_TIME_BUDGET_MS = 30 * 60_000L;
     private static final long MOAT_PASS2_TIME_BUDGET_MS = 12 * 60_000L;
     private static final long MOAT_CLEANUP_TIME_BUDGET_MS = 6 * 60_000L;
@@ -107,8 +106,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private static final int PASS1_ZERO_MOVEMENT_FAIL_THRESHOLD = 3;
     private static final int PASS1_MAX_ATTEMPTS = 2;
     private static final int PASS2_MAX_RECOVERY_ATTEMPTS = 12;
-    private static final int FORTIFY_SCAFFOLD_LEDGER_RADIUS_XZ = 2;
-    private static final int FORTIFY_SCAFFOLD_LEDGER_RADIUS_Y = 8;
     private static final int FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT = 10;
 
     private static final int FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT = 2;
@@ -4587,10 +4584,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
     static int safeSurfaceY(int referenceSurfaceY, Map<Long, Integer> plannedYByXZ, int terrainY, int x, int z) {
         return FortifyExecutionPolicyUtil.safeSurfaceY(referenceSurfaceY, plannedYByXZ, terrainY, x, z);
-    }
-
-    static int segmentBucketForTest(int startX, int startZ, int endX, int endZ, int x, int z, double segSize) {
-        return FortifyExecutionPolicyUtil.segmentBucketForLine(startX, startZ, endX, endZ, x, z, segSize);
     }
 
     static boolean shouldStopAfterNoProgressSegments(int noProgressSegments, int threshold) {

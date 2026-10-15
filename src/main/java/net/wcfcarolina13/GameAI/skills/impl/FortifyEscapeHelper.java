@@ -62,14 +62,6 @@ final class FortifyEscapeHelper {
         this.protectedPositionsSupplier = Objects.requireNonNull(protectedPositionsSupplier);
     }
 
-    /**
-     * Update the protected-positions reference.  Called by the skill when the
-     * layout changes (resume, merge, etc.).
-     */
-    void updateProtectedPositions(Set<BlockPos> newPositions) {
-        // No-op: supplier reads the skill's field dynamically.
-    }
-
     // ── Pure utilities ──────────────────────────────────────────
 
     static Direction dominantHorizontalDirection(BlockPos from, BlockPos to) {
@@ -266,10 +258,6 @@ final class FortifyEscapeHelper {
             }
         }
         return cleared;
-    }
-
-    int clearImmediateOverheadForEscape(ServerPlayerEntity bot, ServerWorld world) {
-        return clearEscapeShaftHeadroom(bot, world, 1, null);
     }
 
     // ── Pillar escape ───────────────────────────────────────────

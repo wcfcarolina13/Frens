@@ -8,8 +8,6 @@ import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayout
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService.FortificationLayout;
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService.WallPoint;
 import net.wcfcarolina13.GameAI.services.navigation.VoxelJunctionService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
@@ -20,8 +18,6 @@ import java.util.*;
  * {@link #updateScope}, {@link #updateLayout}, and {@link #updateMovementEpoch}.
  */
 final class FortifyEntombmentHelper {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger("skill-fortify-village");
 
     // ── constants ──────────────────────────────────────────────────────────────
     static final long FORTIFY_ENTOMBMENT_STATE_TTL_MS = 20_000L;
