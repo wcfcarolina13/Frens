@@ -853,6 +853,13 @@ public class BotEventHandler {
     public static void onBotRespawn(ServerPlayerEntity bot) {
         registerBot(bot);
         net.wcfcarolina13.GameAI.services.RideSyncService.clearBotState(bot.getUuid());
+        // Death drops every lead, so the saved leash target (kept by clearBotState for rejoin) is stale.
+        if (net.wcfcarolina13.GameAI.services.LeashTargetPolicy.shouldClear(
+                net.wcfcarolina13.GameAI.services.LeashTargetPolicy.Event.DIED, false)
+                && net.wcfcarolina13.GameAI.services.RideSyncService.getLeashTarget(bot.getUuid()) != null) {
+            net.wcfcarolina13.GameAI.services.RideSyncService.clearLeashTarget(bot.getUuid());
+            LOGGER.info("[leash-target] {} cleared leash target on respawn", bot.getName().getString());
+        }
         BotStuckService.resetBot(bot.getUuid());
         BotFleeService.reset(bot.getUuid());
         BotCombatCalloutService.resetCombatState(bot.getUuid());

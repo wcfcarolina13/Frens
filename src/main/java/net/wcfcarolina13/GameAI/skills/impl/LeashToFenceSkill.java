@@ -149,11 +149,41 @@ public final class LeashToFenceSkill implements Skill {
         if (tiedNow > 0) {
             ChatUtils.sendChatMessages(source, "Tied " + tiedNow + " animal(s) to fence at " + fencePos.toShortString() + ".");
             LOGGER.info("Leash skill: tiedNow={} stillHeld={} fence={} interacted={}", tiedNow, stillHeld, fencePos.toShortString(), interacted);
+            forgetLeashTargetIfLetGo(bot, world);
             return SkillExecutionResult.success("Tied " + tiedNow + " animal(s) to a fence.");
         }
 
         LOGGER.warn("Leash skill: fence interaction did not transfer any leads (stillHeld={} fence={} interacted={})", stillHeld, fencePos.toShortString(), interacted);
         return SkillExecutionResult.failure("Couldn't attach the leads to the fence. Make sure the animals are still leashed and the fence is reachable.");
+    }
+
+    /**
+     * After a fence tie, forget the bot's saved leash target unless that mount is still on the
+     * bot's lead (a partial tie). Hops to the server thread: this skill runs on a worker and
+     * RideSyncService's leash maps are server-thread state.
+     */
+    private static void forgetLeashTargetIfLetGo(ServerPlayerEntity bot, ServerWorld world) {
+        net.minecraft.server.MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null) {
+            return;
+        }
+        server.execute(() -> {
+            java.util.UUID targetId = net.wcfcarolina13.GameAI.services.RideSyncService.getLeashTarget(bot.getUuid());
+            if (targetId == null) {
+                return;
+            }
+            net.minecraft.entity.Entity target = world.getEntity(targetId);
+            boolean stillHeld = target instanceof MobEntity mob && mob.isLeashed() && mob.getLeashHolder() == bot;
+            if (net.wcfcarolina13.GameAI.services.LeashTargetPolicy.shouldClear(
+                    net.wcfcarolina13.GameAI.services.LeashTargetPolicy.Event.TIED_TO_FENCE, stillHeld)) {
+                net.wcfcarolina13.GameAI.services.RideSyncService.clearLeashTarget(bot.getUuid());
+                LOGGER.info("[leash-target] {} cleared leash target {} after tying to a fence",
+                        bot.getName().getString(), targetId);
+            } else {
+                LOGGER.info("[leash-target] {} kept leash target {}, still on its lead after the fence tie",
+                        bot.getName().getString(), targetId);
+            }
+        });
     }
 
     /**
