@@ -29,6 +29,8 @@ import net.wcfcarolina13.PathFinding.PathCompareFormat;
 import net.wcfcarolina13.PathFinding.PathCompareService;
 import net.wcfcarolina13.PathFinding.PathFinder;
 import net.wcfcarolina13.PathFinding.Segment;
+import net.wcfcarolina13.PathFinding.unified.CellPos;
+import net.wcfcarolina13.PathFinding.unified.PlannedMove;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionProtectionService;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionRepairService;
@@ -3275,6 +3277,338 @@ public final class MovementService {
         LOGGER.info("terrain move result: {} ok={} [{}] bot={} now={} {}",
                 decision.move(), ok, label, bot.getName().getString(), bot.getBlockPos().toShortString(), detail);
         return ok;
+    }
+
+    /** Outcome of one {@link PlannedMove}: {@code ok} means the bot stands on (or floats in) the move's {@code to}. */
+    public record PlannedMoveResult(boolean ok, String reason, int broke, int placed) {
+        static PlannedMoveResult fail(String reason, int broke, int placed) {
+            return new PlannedMoveResult(false, reason, broke, placed);
+        }
+    }
+
+    /**
+     * Execute one unified-finder move (1.1.242 slice C, design section 7). Worker thread only; every
+     * world mutation goes through the existing helpers ({@link #tryMinePlannedStepTrim},
+     * {@link ScaffoldService#pillarUp}), which hop to the server thread. Decisions live in
+     * {@link PlannedMoveExecPolicy}. Logs one {@code planned move} line per call.
+     */
+    public static PlannedMoveResult executePlannedMove(ServerPlayerEntity bot, PlannedMove move, String label) {
+        PlannedMoveResult result;
+        try {
+            result = executePlannedMoveInner(bot, move, label);
+        } catch (RuntimeException e) {
+            LOGGER.warn("planned move {} threw [{}]: {}", move == null ? "null" : move.kind(), label, e.toString());
+            result = PlannedMoveResult.fail("exception " + e.getClass().getSimpleName(), 0, 0);
+        }
+        if (move != null) {
+            if (bot != null) {
+                BotActions.stop(bot);
+            }
+            LOGGER.info("planned move {} {}->{} ok={} reason={} broke={} placed={} [{}] bot={}",
+                    move.kind(), CellPos.format(move.fromPacked()), CellPos.format(move.toPacked()),
+                    result.ok(), result.reason().replace(' ', '_'), result.broke(), result.placed(), label,
+                    bot == null ? "?" : bot.getName().getString());
+        }
+        return result;
+    }
+
+    private static PlannedMoveResult executePlannedMoveInner(ServerPlayerEntity bot, PlannedMove move, String label) {
+        if (bot == null || move == null || bot.getUuid() == null) {
+            return PlannedMoveResult.fail("no-bot-or-move", 0, 0);
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null || server.isOnThread()) {
+            return PlannedMoveResult.fail("server-thread", 0, 0);
+        }
+        ServerWorld world = getWorld(bot);
+        if (world == null) {
+            return PlannedMoveResult.fail("no-world", 0, 0);
+        }
+        if (abortRequested(bot)) {
+            return PlannedMoveResult.fail("aborted", 0, 0);
+        }
+        if (bot.hasVehicle() || bot.isClimbing()) {
+            return PlannedMoveResult.fail("vehicle-or-climbing", 0, 0);
+        }
+        BlockPos from = new BlockPos(move.fromX(), move.fromY(), move.fromZ());
+        BlockPos to = new BlockPos(move.toX(), move.toY(), move.toZ());
+        boolean inWater = bot.isTouchingWater();
+        BlockPos origin = groundedOrigin(bot);
+        BlockPos foot = BotPositionUtil.effectiveFootCell(world, origin);
+        boolean atOrigin = PlannedMoveExecPolicy.atOrigin(origin.getX() - from.getX(), origin.getY() - from.getY(),
+                origin.getZ() - from.getZ(), inWater)
+                || foot.equals(from);
+        if (!atOrigin) {
+            return PlannedMoveResult.fail("not-at-origin now=" + CellPos.format(origin.asLong()), 0, 0);
+        }
+        if (PlannedMoveExecPolicy.needsMutation(move)) {
+            boolean ok = PlannedMoveExecPolicy.mutationAllowed(
+                    Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get()),
+                    AutoFaceEntity.isBotExecutingTask(),
+                    ConstructionProtectionService.hasActiveProtection(bot.getUuid()));
+            if (!ok) {
+                return PlannedMoveResult.fail("mutation-gated", 0, 0);
+            }
+        }
+        // Switch expression with no default: a new MoveKind without an executor fails to compile.
+        return switch (move.kind()) {
+            case TRAVERSE, DIAGONAL -> executePlannedWalk(bot, world, move, from, to, label);
+            case ASCEND -> executePlannedAscend(bot, world, move, from, to, label);
+            case DESCEND -> executePlannedDescend(bot, world, move, from, to, label);
+            case FALL -> executePlannedFall(bot, world, from, to, label);
+            case ASCEND_PLACE -> executePlannedStairPlace(bot, world, move, from, to, label);
+            case SWIM -> executePlannedSwim(bot, world, from, to, label);
+            // No companion skill opts into DOWNWARD in 1.1.242 (SearchContext.allowDownward defaults false).
+            case DOWNWARD -> PlannedMoveResult.fail("downward-no-executor", 0, 0);
+        };
+    }
+
+    /**
+     * Mine {@code toBreak} in plan order (top cell first, so nothing falls into a mined cell). A cell that
+     * is already clear is skipped; one still solid after the directed mine records a failed route keyed
+     * on that cell. Returns the count mined, or -(count+1) on failure.
+     */
+    private static int minePlannedCells(ServerPlayerEntity bot, ServerWorld world, PlannedMove move, BlockPos from,
+                                        String label) {
+        int broke = 0;
+        for (long packed : move.toBreak()) {
+            if (abortRequested(bot)) {
+                return -(broke + 1);
+            }
+            BlockPos cell = BlockPos.fromLong(packed);
+            if (!hasCollision(world, cell)) {
+                continue;
+            }
+            if (tryMinePlannedStepTrim(bot, world, cell, label + "-planned-break")) {
+                broke++;
+            } else if (hasCollision(world, cell)) {
+                recordFailedRoute(bot, from, cell, label + "-planned-break");
+                return -(broke + 1);
+            }
+        }
+        // Gravel or sand from above can refill a mined cell before the step.
+        for (long packed : move.toBreak()) {
+            BlockPos cell = BlockPos.fromLong(packed);
+            if (hasCollision(world, cell)) {
+                recordFailedRoute(bot, from, cell, label + "-planned-refill");
+                return -(broke + 1);
+            }
+        }
+        return broke;
+    }
+
+    private static PlannedMoveResult executePlannedWalk(ServerPlayerEntity bot, ServerWorld world, PlannedMove move,
+                                                        BlockPos from, BlockPos to, String label) {
+        int broke = 0;
+        if (move.toBreak().length > 0) {
+            int mined = minePlannedCells(bot, world, move, from, label);
+            if (mined < 0) {
+                return PlannedMoveResult.fail(abortRequested(bot) ? "aborted" : "break-failed", -mined - 1, 0);
+            }
+            broke = mined;
+        }
+        boolean arrived = nudgeTowardExactBlock(bot, to, false, label + "-planned-walk");
+        return new PlannedMoveResult(arrived, arrived ? PlannedMoveExecPolicy.REASON_OK : "walk-not-arrived", broke, 0);
+    }
+
+    private static PlannedMoveResult executePlannedAscend(ServerPlayerEntity bot, ServerWorld world, PlannedMove move,
+                                                          BlockPos from, BlockPos to, String label) {
+        int mined = minePlannedCells(bot, world, move, from, label);
+        boolean minedAll = mined >= 0;
+        int broke = minedAll ? mined : -mined - 1;
+        if (!minedAll && abortRequested(bot)) {
+            return PlannedMoveResult.fail("aborted", broke, 0);
+        }
+        boolean stepped = minedAll && stepUpOnto(bot, to, label + "-planned-ascend");
+        String reason = PlannedMoveExecPolicy.stepOutcome(minedAll, stepped);
+        return new PlannedMoveResult(PlannedMoveExecPolicy.REASON_OK.equals(reason), reason, broke, 0);
+    }
+
+    /** tryTerrainMoveToward's step-up: a close nudge onto {@code to} and a grounded y at or above it. */
+    private static boolean stepUpOnto(ServerPlayerEntity bot, BlockPos to, String label) {
+        return nudgeTowardUntilClose(bot, to, PlannedMoveExecPolicy.STEP_UP_REACH_SQ,
+                PlannedMoveExecPolicy.STEP_UP_TIMEOUT_MS, PlannedMoveExecPolicy.STEP_UP_IMPULSE, label)
+                && groundedOrigin(bot).getY() >= to.getY();
+    }
+
+    /** Live landing check: body and head passable, nothing deadly in the body, head or floor, and a floor to stand on. */
+    private static String landingHazard(ServerWorld world, BlockPos to) {
+        BlockPos floor = to.down();
+        if (hasCollision(world, to) || hasCollision(world, to.up())) {
+            return "landing-blocked";
+        }
+        for (BlockPos cell : new BlockPos[] {to, to.up(), floor}) {
+            BlockState state = world.getBlockState(cell);
+            if (BotHazardService.isDeadlyBlock(state) || world.getFluidState(cell).isIn(FluidTags.LAVA)) {
+                return "landing-hazard " + state.getBlock().getTranslationKey();
+            }
+        }
+        if (!hasCollision(world, floor) && world.getFluidState(to).isEmpty()) {
+            return "landing-no-floor";
+        }
+        return null;
+    }
+
+    private static PlannedMoveResult executePlannedDescend(ServerPlayerEntity bot, ServerWorld world, PlannedMove move,
+                                                           BlockPos from, BlockPos to, String label) {
+        String hazard = landingHazard(world, to);
+        if (hazard != null) {
+            return PlannedMoveResult.fail(hazard, 0, 0);
+        }
+        // A one-block step down: the walk nudge drops off the edge and groundedOrigin waits for the landing.
+        return executePlannedWalk(bot, world, move, from, to, label);
+    }
+
+    private static PlannedMoveResult executePlannedFall(ServerPlayerEntity bot, ServerWorld world, BlockPos from,
+                                                        BlockPos to, String label) {
+        String hazard = landingHazard(world, to);
+        if (hazard != null) {
+            return PlannedMoveResult.fail(hazard, 0, 0);
+        }
+        // The drop column above the landing (the cells the bot falls through) must hold no lava or fire.
+        for (int y = to.getY() + 1; y <= from.getY() + 1; y++) {
+            BlockPos cell = new BlockPos(to.getX(), y, to.getZ());
+            if (hasCollision(world, cell)) {
+                return PlannedMoveResult.fail("fall-column-blocked " + CellPos.format(cell.asLong()), 0, 0);
+            }
+            if (BotHazardService.isDeadlyBlock(world.getBlockState(cell))) {
+                return PlannedMoveResult.fail("fall-column-hazard " + CellPos.format(cell.asLong()), 0, 0);
+            }
+        }
+        Vec3d target = centerOf(to);
+        boolean airborne = false;
+        for (int tick = 0; tick < PlannedMoveExecPolicy.WALK_OFF_TICKS; tick++) {
+            if (abortRequested(bot)) {
+                return PlannedMoveResult.fail("aborted", 0, 0);
+            }
+            if (!bot.isOnGround() && !bot.isTouchingWater()) {
+                airborne = true;
+                break;
+            }
+            inputStepToward(bot, to, target, false, false);
+            sleep(PlannedMoveExecPolicy.TICK_MS);
+        }
+        if (!airborne) {
+            return PlannedMoveResult.fail("walk-off-timeout", 0, 0);
+        }
+        BotActions.stop(bot);
+        boolean landed = false;
+        for (int tick = 0; tick < PlannedMoveExecPolicy.FALL_LAND_TICKS; tick++) {
+            if (abortRequested(bot)) {
+                return PlannedMoveResult.fail("aborted", 0, 0);
+            }
+            if (bot.isOnGround() || bot.isTouchingWater()) {
+                landed = true;
+                break;
+            }
+            sleep(PlannedMoveExecPolicy.TICK_MS);
+        }
+        if (!landed) {
+            return PlannedMoveResult.fail("fall-land-timeout", 0, 0);
+        }
+        BlockPos now = groundedOrigin(bot);
+        BlockPos foot = BotPositionUtil.effectiveFootCell(world, now);
+        boolean ok = PlannedMoveExecPolicy.landedOk(now.getX() - to.getX(), now.getY() - to.getY(), now.getZ() - to.getZ())
+                || foot.equals(to);
+        if (ok && !now.equals(to) && !foot.equals(to)) {
+            // Momentum carried the bot one cell past; centre it on the planned landing.
+            ok = nudgeTowardExactBlock(bot, to, false, label + "-planned-fall-center");
+        }
+        return new PlannedMoveResult(ok, ok ? PlannedMoveExecPolicy.REASON_OK : "landed-off-plan now="
+                + CellPos.format(now.asLong()), 0, 0);
+    }
+
+    private static PlannedMoveResult executePlannedStairPlace(ServerPlayerEntity bot, ServerWorld world, PlannedMove move,
+                                                              BlockPos from, BlockPos to, String label) {
+        long[] toPlace = move.toPlace();
+        if (toPlace.length != 1 || BlockPos.fromLong(toPlace[0]).getX() != from.getX()
+                || BlockPos.fromLong(toPlace[0]).getY() != from.getY() || BlockPos.fromLong(toPlace[0]).getZ() != from.getZ()) {
+            // The executor places only under the bot (pillarUp); any other planned cell is not ours to place.
+            return PlannedMoveResult.fail("place-cell-not-origin", 0, 0);
+        }
+        BlockPos placeCell = BlockPos.fromLong(toPlace[0]);
+        // pillarUp takes SCAFFOLD_BLOCKS in order (DIRT first); with no plain dirt it would place cobble.
+        if (countTerrainStairBlocks(bot) <= 0) {
+            return PlannedMoveResult.fail("no-dirt", 0, 0);
+        }
+        if (!BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, placeCell).allowed()
+                || ProtectedZoneService.isProtected(placeCell, world, BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot))
+                || ConstructionProtectionService.protectionReason(bot.getUuid(), placeCell) != null) {
+            recordFailedRoute(bot, from, from.up(), label + "-planned-place");
+            return PlannedMoveResult.fail("place-territory", 0, 0);
+        }
+        if (hasCollision(world, from.up(2)) || hasCollision(world, from.up(3)) || hasCollision(world, to.up())) {
+            return PlannedMoveResult.fail("place-no-headroom", 0, 0);
+        }
+        boolean pillared = ScaffoldService.pillarUp(bot, 1, false);
+        boolean dirt = world.getBlockState(placeCell).isOf(Blocks.DIRT);
+        if (!pillared || !dirt) {
+            recordFailedRoute(bot, from, from.up(), label + "-planned-place");
+            if (pillared) {
+                LOGGER.warn("planned stair [{}]: pillarUp placed {} at {}, not dirt", label,
+                        world.getBlockState(placeCell).getBlock().getTranslationKey(), CellPos.format(placeCell.asLong()));
+            }
+            return PlannedMoveResult.fail(pillared ? "placed-not-dirt" : "place-failed", 0, pillared ? 1 : 0);
+        }
+        if (abortRequested(bot)) {
+            return PlannedMoveResult.fail("aborted", 0, 1);
+        }
+        boolean stepped = stepUpOnto(bot, to, label + "-planned-stair");
+        return new PlannedMoveResult(stepped, stepped ? PlannedMoveExecPolicy.REASON_OK : "placed-not-stepped", 0, 1);
+    }
+
+    /**
+     * SWIM: one tick of held input per loop (face, forward impulse, jump when the eyes are under or on an
+     * exit), vanilla water physics doing the rest like {@link #encourageSurfaceDrift}. Gives up on the
+     * per-cell budget or when the bot's block has not changed for the stall window (a wall).
+     */
+    private static PlannedMoveResult executePlannedSwim(ServerPlayerEntity bot, ServerWorld world, BlockPos from,
+                                                        BlockPos to, String label) {
+        boolean exitMove = to.getY() > from.getY() || world.getFluidState(to).isEmpty();
+        if (!world.getFluidState(to.up()).isEmpty() || hasCollision(world, to.up())) {
+            // The plan swims with a dry, open head; a flooded or blocked head is off plan.
+            return PlannedMoveResult.fail("swim-head-not-dry", 0, 0);
+        }
+        if (hasCollision(world, to)) {
+            return PlannedMoveResult.fail("swim-cell-blocked", 0, 0);
+        }
+        Vec3d target = centerOf(to);
+        BlockPos lastBlock = bot.getBlockPos();
+        int sinceChange = 0;
+        for (int tick = 0; ; tick++) {
+            if (abortRequested(bot)) {
+                return PlannedMoveResult.fail("aborted", 0, 0);
+            }
+            BlockPos now = bot.getBlockPos();
+            if (PlannedMoveExecPolicy.swimArrived(now.getX() - to.getX(), now.getY() - to.getY(), now.getZ() - to.getZ(),
+                    exitMove, bot.isOnGround())) {
+                return new PlannedMoveResult(true, PlannedMoveExecPolicy.REASON_OK, 0, 0);
+            }
+            if (now.equals(lastBlock)) {
+                sinceChange++;
+            } else {
+                lastBlock = now;
+                sinceChange = 0;
+            }
+            if (PlannedMoveExecPolicy.swimGiveUp(tick, sinceChange)) {
+                return PlannedMoveResult.fail(tick >= PlannedMoveExecPolicy.SWIM_CELL_TICKS ? "swim-timeout" : "swim-stalled",
+                        0, 0);
+            }
+            boolean sent = runOnServerThread(bot, () -> {
+                if (bot.isSneaking() && !SneakLockService.isLocked(bot.getUuid())) {
+                    bot.setSneaking(false);
+                }
+                LookController.faceBlock(bot, to);
+                BotActions.applyMovementInput(bot, target, 0.12D);
+                if (PlannedMoveExecPolicy.swimJump(exitMove, bot.getAir(), bot.getMaxAir(), bot.isSubmergedInWater())) {
+                    BotActions.jump(bot);
+                }
+            });
+            if (!sent) {
+                return PlannedMoveResult.fail("server-hop-failed", 0, 0);
+            }
+            sleep(PlannedMoveExecPolicy.TICK_MS);
+        }
     }
 
     /**
