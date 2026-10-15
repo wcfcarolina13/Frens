@@ -1938,7 +1938,9 @@ public final class WoodcutSkill implements Skill {
                         int pillarSteps = 0;
                         for (int step = 0; step <= maxSteps; step++) {
                             if (TaskService.isServerStopping() || isTreeWorkStopped(bot)) {
-                                terminalReason = "abort-requested";
+                                terminalReason = !TaskService.isServerStopping() && !isAbortRequested(bot)
+                                        ? LOST_TREE_CLAIM_DETAIL
+                                        : "abort-requested";
                                 break;
                             }
 
@@ -2381,10 +2383,11 @@ public final class WoodcutSkill implements Skill {
                 bot.setSneaking(true); // re-assert sneak after mining
             }
 
-            // Step 3: Bridge sweep — try bridging in each cardinal direction for logs
-            if (!isAbortRequested(bot)) {
+            // Step 3: Bridge sweep — try bridging in each cardinal direction for logs.
+            // Skipped once the tree claim is lost: the logs around us now belong to another bot.
+            if (!isTreeWorkStopped(bot)) {
                 for (Direction bridgeDir : Direction.Type.HORIZONTAL) {
-                    if (isAbortRequested(bot)) break;
+                    if (isTreeWorkStopped(bot)) break;
                     boolean hasTargetsInDir = false;
                     for (int d = 2; d <= 6 && !hasTargetsInDir; d++) {
                         BlockPos probe = bot.getBlockPos().offset(bridgeDir, d);
@@ -2693,6 +2696,9 @@ public final class WoodcutSkill implements Skill {
                     new BlockPos(next.getX(), determineColumnAnchorY(next, remaining, target), next.getZ()),
                     next.getY() - 1);
             if (stand == null || bot.getBlockPos().getSquaredDistance(stand) > 16.0D) {
+                break;
+            }
+            if (isTreeClaimLost(bot)) {
                 break;
             }
 
