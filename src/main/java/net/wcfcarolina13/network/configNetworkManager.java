@@ -68,38 +68,6 @@ public final class configNetworkManager {
         }
     }
 
-    /** Client-side: push an API key for {@code provider} to the server (operator-only server-side). */
-    public static void sendSaveAPIPacket(String provider, String apiKey) {
-        if (provider == null || apiKey == null) {
-            return;
-        }
-        try {
-            if (net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(SaveAPIKeyPayload.ID)) {
-                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(new SaveAPIKeyPayload(provider, apiKey));
-            } else {
-                Frens.LOGGER.debug("sendSaveAPIPacket: server cannot receive frens:save_api_key, skipping");
-            }
-        } catch (Throwable t) {
-            Frens.LOGGER.debug("sendSaveAPIPacket failed: {}", String.valueOf(t));
-        }
-    }
-
-    /** Client-side: push the custom provider key + URL to the server (operator-only server-side). */
-    public static void sendSaveCustomProviderPacket(String apiKey, String url) {
-        if (apiKey == null || url == null) {
-            return;
-        }
-        try {
-            if (net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(SaveCustomProviderPayload.ID)) {
-                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(new SaveCustomProviderPayload(apiKey, url));
-            } else {
-                Frens.LOGGER.debug("sendSaveCustomProviderPacket: server cannot receive frens:save_custom_provider, skipping");
-            }
-        } catch (Throwable t) {
-            Frens.LOGGER.debug("sendSaveCustomProviderPacket failed: {}", String.valueOf(t));
-        }
-    }
-
     // ------------------------------------------------------------------ server -> client
 
     /** Server-side: ask {@code player}'s client to open the config UI with a fresh snapshot. */
@@ -172,7 +140,7 @@ public final class configNetworkManager {
     // ------------------------------------------------------------------ server receivers
 
     /**
-     * Registers the three C2S config receivers. Called once from {@code Frens.onInitialize};
+     * Registers the C2S config receivers (config save, voice mute mask). Called once from {@code Frens.onInitialize};
      * global receivers persist for the JVM, so this must not run per server start.
      */
     public static void registerServerReceivers() {
@@ -247,58 +215,6 @@ public final class configNetworkManager {
                     : java.util.List.copyOf(payload.mutedCategoryIds());
             context.server().execute(() ->
                     net.wcfcarolina13.ChatUtils.VoiceLineMuteService.setPlayerMask(senderId, ids));
-        });
-
-        ServerPlayNetworking.registerGlobalReceiver(SaveAPIKeyPayload.ID, (payload, context) -> {
-            ServerPlayerEntity sender = context.player();
-            if (sender == null) {
-                return;
-            }
-            String provider = payload.provider();
-            String apiKey = payload.apiKey();
-            context.server().execute(() -> {
-                if (!canEditConfig(context.server(), sender)) {
-                    Frens.LOGGER.warn("Rejected API key save from non-operator {}", sender.getName().getString());
-                    return;
-                }
-                ManualConfig config = Frens.CONFIG;
-                if (config == null || provider == null || apiKey == null) {
-                    return;
-                }
-                switch (provider.toLowerCase(java.util.Locale.ROOT)) {
-                    case "openai" -> config.setOpenAIKey(apiKey);
-                    case "gemini" -> config.setGeminiKey(apiKey);
-                    case "claude" -> config.setClaudeKey(apiKey);
-                    case "grok" -> config.setGrokKey(apiKey);
-                    default -> {
-                        Frens.LOGGER.warn("Unknown API key provider '{}', ignoring", provider);
-                        return;
-                    }
-                }
-                config.save();
-            });
-        });
-
-        ServerPlayNetworking.registerGlobalReceiver(SaveCustomProviderPayload.ID, (payload, context) -> {
-            ServerPlayerEntity sender = context.player();
-            if (sender == null) {
-                return;
-            }
-            String apiKey = payload.apiKey();
-            String url = payload.url();
-            context.server().execute(() -> {
-                if (!canEditConfig(context.server(), sender)) {
-                    Frens.LOGGER.warn("Rejected custom provider save from non-operator {}", sender.getName().getString());
-                    return;
-                }
-                ManualConfig config = Frens.CONFIG;
-                if (config == null || apiKey == null || url == null) {
-                    return;
-                }
-                config.setCustomApiKey(apiKey);
-                config.setCustomApiUrl(url);
-                config.save();
-            });
         });
     }
 }

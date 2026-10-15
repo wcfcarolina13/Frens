@@ -34,7 +34,7 @@ import net.wcfcarolina13.GraphicalUserInterface.BotGuideScreen;
 import net.wcfcarolina13.GraphicalUserInterface.BotPlayerInventoryScreen;
 import net.wcfcarolina13.GraphicalUserInterface.CookablesScreen;
 import net.wcfcarolina13.GraphicalUserInterface.CraftingHistoryScreen;
-import net.wcfcarolina13.GraphicalUserInterface.ConfigManager;
+import net.wcfcarolina13.GraphicalUserInterface.BotControlScreen;
 import net.wcfcarolina13.GraphicalUserInterface.CompanionHotkeyOverlayHud;
 import net.wcfcarolina13.GraphicalUserInterface.HuntablesScreen;
 import net.wcfcarolina13.GraphicalUserInterface.RecruitmentDialogueScreen;
@@ -822,7 +822,8 @@ public class FrensClient implements ClientModInitializer {
                 ConfigJsonUtil.applyConfigJson(configJson);
                 MinecraftClient client = MinecraftClient.getInstance();
                 Screen parent = client.currentScreen;
-                client.setScreen(new ConfigManager(Text.literal("Frens Configuration"), parent));
+                // /configMan opens Bot Controls (the old config hub's only live screen).
+                client.setScreen(new BotControlScreen(parent));
             });
         });
 

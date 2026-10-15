@@ -42,9 +42,7 @@ import net.wcfcarolina13.GameAI.services.BotQuestService;
 
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.network.OpenConfigPayload;
-import net.wcfcarolina13.network.SaveAPIKeyPayload;
 import net.wcfcarolina13.network.SaveConfigPayload;
-import net.wcfcarolina13.network.SaveCustomProviderPayload;
 import net.wcfcarolina13.network.UpdatePlayerPreservePayload;
 import net.wcfcarolina13.network.RequestPlayerPreservePayload;
 import net.wcfcarolina13.network.PlayerPreserveStatePayload;
@@ -571,8 +569,6 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(SaveConfigPayload.ID, SaveConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(OpenConfigPayload.ID, OpenConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.ConfigSyncPayload.ID, net.wcfcarolina13.network.ConfigSyncPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(SaveAPIKeyPayload.ID, SaveAPIKeyPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(SaveCustomProviderPayload.ID, SaveCustomProviderPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.VoiceMuteMaskPayload.ID, net.wcfcarolina13.network.VoiceMuteMaskPayload.CODEC);
 
         // Bases manager UI payloads
