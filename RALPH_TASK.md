@@ -3,7 +3,15 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.247) — next session starts here
+## Session Handoff 2026-10-15 (1.1.248) — next session starts here
+
+**State:** main = origin/main @ 1.1.248. Suite 2501 green. 1.1.248 = Q8 combat callouts wired, Q9 `/bot base owner`, Q14 leash
+target forgotten after a fence tie or death. Field items: Phase 6ap.
+**Next:** the Q5 wall-off night shelter (built and under review on branch `wall-off-rebuild`, 2 commits on b4b89bcb, 28 pure
+tests; needs a cherry-pick, the dusk sandbox test, release as 1.1.249), then the Q2/Q3 legacy LLM retirement.
+**Needs Bradley:** Q14 force-dismount (see changelog ruling), `/bot base remove|rename` ungated, CLAUDE.md count edits.
+
+## Session Handoff 2026-10-15 (1.1.247) — superseded
 
 **State:** main = origin/main @ 1.1.247. Suite 2472 green. Audit section 3 (all 16 SAFE-DELETE phases) is done. 1.1.247 =
 Phases 13-16, Q17 entry-terrain restore, Q5 flee pillar deletions. No new field items.

@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Combat callouts wired, /bot base owner, leash target forgotten after a fence tie or death (audit Q8, Q9, Q14); 1.1.248 (2026-10-15)
+
+Three small features from Bradley's dead-code audit answers (`docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 5a, answers 8, 9, 14). Code that was written and never called is now called.
+
+- **Combat callouts hear the whole fight** (`7d3dcc2a`, Q8, audit B14). The hostile scan reports the bot's own hostiles to `BotCombatCalloutService.noteCombatSituation` every behaviour tick (server thread), so the mid-fight "lots of them" lines (25 s cooldown) and the post-combat multi-mob lines can finally play (`maxDangerousMobCount` was stuck at 1). A new `AFTER_DAMAGE` listener calls `onBotHitPlayer` when a registered bot really hurts a human player (arrows count via the shooter, shield blocks, 0-damage snowballs and other bots do not), so the recorded friendly-fire apologies play (6 s cooldown). Pure `FriendlyFireCalloutPolicy`, the post-combat pool choice now runs through its `postCombatBucket` (same result as before). A kill shot does not apologise (Fabric skips dead victims), and the logged damage is before armour.
+- **`/bot base owner <base> <player|server|none>`** (`f185502c`, Q9, audit B13). Operators and the host can claim a legacy ownerless base, hand it to the server or clear it. The payload handler that no client ever sent is now `BaseNetworkManager.applyBaseOwner`, shared by the command and the payload (same checks and replies). Quote names with spaces. Online players only (a player named "server" or "none" needs a selector). Guide: one line under "Bases, Home".
+- **Leash target forgotten when the lead is really let go** (`a15ac670`, `78a1c0a7`, Q14). When a bot ties its animals to a fence, or dies, its saved leash target and the saved "bot holds this mount on a lead" record are cleared (server thread), so a later tick or a rejoin no longer pulls the animal back onto the bot's lead. A partial tie keeps the target if the animal is still on the lead. Pure `LeashTargetPolicy`. Review C1 caught that the first version cleared memory only and a rejoin restored the lead from disk.
+- **Ruling against Bradley's literal answer 14 (cost if wrong):** his answer named the force-dismount hotkey and `/bot unmount`. Force-dismount deliberately keeps the leash target when the bot holds the lead (that is how the horse comes back on rejoin), and `/bot unmount` does not exist, so neither clears it. Cost: none if the intent was "forget a released lead". If he wanted the `'` key to also release the lead, that is a new behaviour to add.
+- **Ruling, death forgets the held lead record (cost if wrong):** after a death and a restart the bot no longer goes back for a horse it was leading.
+- **Follow-ups noted, not fixed:** `/bot base remove` and `rename` have no admin or owner gate. `forceDismountAndSecure` mutates entity state on the skill worker thread. Two other leash-target removals in `RideSyncService` leave the saved record (same gap as C1).
+- **Tests:** 2472 → 2501 (+12 `FriendlyFireCalloutPolicyTest`, +6 `BaseOwnerArgTest`, +11 `LeashTargetPolicyTest`). Sandbox smoke: `/bot base owner Spawn server`, `none`, and a missing base answer correctly, no ERROR lines.
+- **Field checks:** Phase 6ap.
+
 ## Dead-code removal 5: woodcut, tree detection, farm, shelter, small skills, Fortify helpers, flee pillar (audit Phases 13 to 16, Q17, Q5 deletions); 1.1.247 (2026-10-15)
 
 Fifth removal build of the dead-code audit (`docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 3 Phases 13 to 16), with Bradley's answers 17 and 5 (deletions only, the wall-off night shelter is rebuilt in its own build). About 920 lines removed net, no functional change.
