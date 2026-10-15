@@ -25,8 +25,6 @@ public final class WoodcutAxeBootstrapPolicy {
     /** Planks from one log. */
     public static final int PLANKS_PER_LOG = 4;
 
-    /** {@link #mayAttemptCraft} sentinel: no craft attempt has failed this run. */
-    public static final int NO_FAILED_Y = Integer.MIN_VALUE;
     /**
      * Failed axe crafts a run allows before it ends. Each attempt can craft a table and arm
      * CraftingHelper's 60 s table cooldown, so a bot on a slope must not retry at every new Y.
@@ -64,38 +62,97 @@ public final class WoodcutAxeBootstrapPolicy {
                 : Step.PUNCH_LOG;
     }
 
+    /** Why a first-axe craft with enough wood failed. */
+    public enum CraftFailureCause {
+        /** A crafting table was crafted (or held) but could not be put down where the bot stood. */
+        TABLE_PLACEMENT,
+        /** The wood ran short (something else ate it, or the count was wrong). */
+        MISSING_WOOD,
+        /** Anything else (sticks, the axe recipe itself). */
+        OTHER
+    }
+
+    /** Where a first-axe craft failed (the bot's block position) and why. */
+    public record CraftFailure(int x, int y, int z, CraftFailureCause cause) {
+    }
+
+    /**
+     * The cause of a failed craft, read from the inventory afterwards. A crafting table still held
+     * means the craft got as far as the table and only its placement failed (1.1.234 playthrough:
+     * "bot-intersects-target" on flat ground). Otherwise, wood below the threshold means the wood
+     * was missing; anything else is OTHER.
+     */
+    public static CraftFailureCause classifyCraftFailure(boolean holdsCraftingTable, boolean enoughWoodNow) {
+        if (holdsCraftingTable) {
+            return CraftFailureCause.TABLE_PLACEMENT;
+        }
+        return enoughWoodNow ? CraftFailureCause.OTHER : CraftFailureCause.MISSING_WOOD;
+    }
+
     /**
      * Whether the bot may try the first-axe craft where it stands. Only on the ground: up a pillar
      * the crafting table has nowhere to go (1.1.233 playthrough: y127, "couldn't place it here"),
      * and the failure used to end the whole run. {@code grounded} is the entity's on-ground flag
      * (false mid-jump); {@code onOwnScaffold} is true when the block underfoot is one this run
-     * placed. After a failure, a retry is allowed only at a different Y ({@code failedAtY} is
-     * {@link #NO_FAILED_Y} when nothing failed yet).
+     * placed. After a failure ({@code lastFailure} is {@code null} when nothing failed yet) a retry
+     * is allowed at a different Y, and after a table-placement failure also from a different stand
+     * cell at the same Y (x or z moved by at least one block): on flat ground the Y never changes,
+     * and a new cell gives the table new neighbours.
      */
-    public static boolean mayAttemptCraft(boolean grounded, boolean onOwnScaffold, int failedAtY, int currentY) {
+    public static boolean mayAttemptCraft(boolean grounded,
+                                          boolean onOwnScaffold,
+                                          CraftFailure lastFailure,
+                                          int x,
+                                          int y,
+                                          int z) {
         if (!grounded || onOwnScaffold) {
             return false;
         }
-        return failedAtY == NO_FAILED_Y || currentY != failedAtY;
+        if (lastFailure == null || y != lastFailure.y()) {
+            return true;
+        }
+        return lastFailure.cause() == CraftFailureCause.TABLE_PLACEMENT
+                && (x != lastFailure.x() || z != lastFailure.z());
     }
 
     /**
      * Whether a recorded craft failure ends the run. Nothing failed: never. The attempt budget is
-     * spent: always. Otherwise only when the bot stands on real ground and still may not retry
-     * (same Y as the failure), so a failure that happened off the ground waits for a grounded retry.
+     * spent: always. A table-placement failure never ends it early: the bot only has to step to
+     * another cell, which the next tree's approach does, and the loop's own failure and relocation
+     * limits still bound the run. Otherwise only when the bot stands on real ground and still may
+     * not retry (same Y as the failure), so a failure that happened off the ground waits for a
+     * grounded retry.
      */
     public static boolean craftFailureEndsRun(int failedAttempts,
                                               boolean grounded,
                                               boolean onOwnScaffold,
-                                              int failedAtY,
-                                              int currentY) {
-        if (failedAttempts <= 0 || failedAtY == NO_FAILED_Y) {
+                                              CraftFailure lastFailure,
+                                              int x,
+                                              int y,
+                                              int z) {
+        if (failedAttempts <= 0 || lastFailure == null) {
             return false;
         }
         if (failedAttempts >= MAX_CRAFT_ATTEMPTS) {
             return true;
         }
-        return grounded && !onOwnScaffold && !mayAttemptCraft(grounded, onOwnScaffold, failedAtY, currentY);
+        if (lastFailure.cause() == CraftFailureCause.TABLE_PLACEMENT) {
+            return false;
+        }
+        return grounded && !onOwnScaffold && !mayAttemptCraft(grounded, onOwnScaffold, lastFailure, x, y, z);
+    }
+
+    /**
+     * Whether a bootstrap bot that just reached a tree's stand gathers hand scaffold again. The
+     * gather at the run's start can come up short (1.1.234 playthrough: a new world's Spawn base
+     * protects the cells around spawn), so the bot tries once more at each tree, which usually
+     * stands outside any base. At most once per tree ({@code alreadyGatheredAtThisTree}).
+     */
+    public static boolean mayRegatherAtTree(boolean bootstrapActive,
+                                            int handScaffoldHeld,
+                                            int handScaffoldTarget,
+                                            boolean alreadyGatheredAtThisTree) {
+        return bootstrapActive && !alreadyGatheredAtThisTree && handScaffoldHeld < handScaffoldTarget;
     }
 
     /**

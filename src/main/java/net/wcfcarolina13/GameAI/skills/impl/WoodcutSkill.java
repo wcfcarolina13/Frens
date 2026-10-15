@@ -40,6 +40,7 @@ import net.wcfcarolina13.GameAI.services.WoodcutCleanupMemoryService;
 import net.wcfcarolina13.GameAI.services.WoodcutKnowledgeService;
 import net.wcfcarolina13.GameAI.services.BotBeehiveRegistryService;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.construction.BridgeScaffoldService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.skills.Skill;
@@ -50,6 +51,7 @@ import net.wcfcarolina13.GameAI.skills.support.FallingBlockStabilizer;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutAxeBootstrapPolicy;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutChatLines;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutHazardScanner;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutProtectionNudgePolicy;
 import net.wcfcarolina13.PathFinding.GoTo;
@@ -128,8 +130,8 @@ public final class WoodcutSkill implements Skill {
     private RequestedWorkBounds activeRequestedBounds;
     /** Bots running this woodcut bare-handed until they hold wood for a first axe. Keyed per bot: the registered skill instance is shared. */
     private final Set<UUID> axeBootstrapBots = ConcurrentHashMap.newKeySet();
-    /** Bootstrap bots' Y at their last failed axe craft (WoodcutAxeBootstrapPolicy.mayAttemptCraft). */
-    private final Map<UUID, Integer> axeBootstrapFailedAtY = new ConcurrentHashMap<>();
+    /** Bootstrap bots' last failed axe craft: cell and cause (WoodcutAxeBootstrapPolicy.mayAttemptCraft). */
+    private final Map<UUID, WoodcutAxeBootstrapPolicy.CraftFailure> axeBootstrapLastFailure = new ConcurrentHashMap<>();
     /** Failed axe-craft attempts this run per bootstrap bot (WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS). */
     private final Map<UUID, Integer> axeBootstrapFailedAttempts = new ConcurrentHashMap<>();
     /**
@@ -767,6 +769,7 @@ public final class WoodcutSkill implements Skill {
         Set<BlockPos> failedBases = new HashSet<>();
         Map<BlockPos, String> failedBaseReasons = new HashMap<>();
         Set<BlockPos> pendingFloaters = new HashSet<>();
+        Set<BlockPos> bootstrapRegatheredBases = new HashSet<>();
         int felled = 0;
         int consecutiveFailures = 0;
         int totalFailures = 0;
@@ -805,6 +808,10 @@ public final class WoodcutSkill implements Skill {
                     axeBootstrapCraftFailed = true;
                     break;
                 }
+                // A failed first-axe craft retries only where the policy allows (a new cell after a
+                // table-placement failure, or a new Y). The craft is otherwise reached only before a
+                // log is mined, so after the last reachable log the retry never came (1.1.234).
+                tryPendingAxeBootstrapRetry(bot);
                 // Hunger-aware interruption: don't fell trees until starvation kills the bot.
                 if (net.wcfcarolina13.GameAI.services.HealingService.shouldPauseForStarvation(bot)) {
                     net.wcfcarolina13.GameAI.services.SkillResumeService.flagManualResume(bot);
@@ -1029,6 +1036,7 @@ public final class WoodcutSkill implements Skill {
                     logWoodcutMaintenanceSummary(target.base(), reachSession, "approach-failed");
                     continue;
                 }
+                regatherHandScaffoldAtTree(bot, target.base(), bootstrapRegatheredBases);
                 TreeHarvestResult harvest = fellTree(source, bot, target, sharedState, replantSaplings, pendingFloaters, reachSession);
                 trunkMineStarts += reachSession.trunkMineAttemptsStarted;
                 leafBlocksBroken += reachSession.leafBlocksBroken;
@@ -1059,6 +1067,14 @@ public final class WoodcutSkill implements Skill {
                     lastFailureReason = harvest.failureReason();
                     workAreaState.markFailure(target.base());
                     logTargetTrace(target, reachSession, harvest.failureReason().name());
+                    // Logs left because the bot has no axe yet (it does not pillar without one):
+                    // say what it got, so the player knows the tree is not done.
+                    if ("cluster-logs-remained".equals(harvest.detail()) && axeBootstrapBots.contains(bot.getUuid())) {
+                        String line = WoodcutChatLines.treeHarvested(reachSession.trunkMineAttemptsStarted, true);
+                        if (line != null) {
+                            ChatUtils.sendSystemMessage(source, line);
+                        }
+                    }
                     // Replant even on failed trees if trunk was actually cut
                     if (replantSaplings && reachSession.trunkMineAttemptsStarted > 0 && !isAbortRequested(bot)) {
                         plantSaplings(bot, source, target.base(), reachSession);
@@ -1073,10 +1089,12 @@ public final class WoodcutSkill implements Skill {
                 felled++;
                 consecutiveFailures = 0;
                 sinceCleanup++;
-                if (openEnded) {
-                    ChatUtils.sendSystemMessage(source, "Woodcut target cleared (" + felled + ")");
-                } else {
-                    ChatUtils.sendSystemMessage(source, "Woodcut target cleared (" + felled + " min " + targetTrees + ")");
+                LOGGER.info("Woodcut target cleared: base={} logs={} felled={} target={}",
+                        target.base().toShortString(), reachSession.trunkMineAttemptsStarted, felled,
+                        openEnded ? "open-ended" : String.valueOf(targetTrees));
+                String clearedLine = WoodcutChatLines.treeHarvested(reachSession.trunkMineAttemptsStarted, false);
+                if (clearedLine != null) {
+                    ChatUtils.sendSystemMessage(source, clearedLine);
                 }
                 runPerTreeMaintenance(context, source, bot, target, reachSession, pendingFloaters, replantSaplings);
                 if (shouldProactivelyDepositAfterMaintenance(bot, isHuntPrerequisite)) {
@@ -1216,7 +1234,7 @@ public final class WoodcutSkill implements Skill {
         return finalResult;
         } finally {
             axeBootstrapBots.remove(bot.getUuid());
-            axeBootstrapFailedAtY.remove(bot.getUuid());
+            axeBootstrapLastFailure.remove(bot.getUuid());
             axeBootstrapFailedAttempts.remove(bot.getUuid());
             axeBootstrapSharedState.remove(bot.getUuid());
             activeRequestedBounds = null;
@@ -5245,14 +5263,20 @@ public final class WoodcutSkill implements Skill {
         }
         candidates.sort(Comparator.<BlockPos>comparingInt(p -> p.getY() - origin.getY())
                 .thenComparingDouble(p -> p.getSquaredDistance(origin)));
+        int protectedSkipped = 0;
         for (BlockPos pos : candidates) {
             if (gathered >= toGather || TaskService.isServerStopping() || isAbortRequested(bot)) {
                 break;
             }
             BlockState state = world.getBlockState(pos);
-            // By block state, not asItem: grass block, podzol and mycelium drop dirt. Protected
-            // zones and bases are refused by mineBlock's territory check.
+            // By block state, not asItem: grass block, podzol and mycelium drop dirt.
             if (!isHandScaffoldSource(world, pos, state)) {
+                continue;
+            }
+            // The miner's own territory check, asked first: a new world's Spawn base covers the
+            // spawn area, and mining there only returns "protected claim" (1.1.234 playthrough).
+            if (!BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos).allowed()) {
+                protectedSkipped++;
                 continue;
             }
             LookController.faceBlock(bot, pos);
@@ -5261,6 +5285,10 @@ public final class WoodcutSkill implements Skill {
                 gathered++;
                 LOGGER.debug("Woodcut scaffold collected at {}", pos.toShortString());
             }
+        }
+        if (protectedSkipped > 0) {
+            LOGGER.info("Woodcut scaffold gather: skipped {} protected cell(s) near {}",
+                    protectedSkipped, origin.toShortString());
         }
         return gathered;
     }
@@ -5584,15 +5612,17 @@ public final class WoodcutSkill implements Skill {
             selectHandsOrHarmlessItem(bot);
             return false;
         }
-        int failedAtY = axeBootstrapFailedAtY.getOrDefault(botId, WoodcutAxeBootstrapPolicy.NO_FAILED_Y);
+        WoodcutAxeBootstrapPolicy.CraftFailure lastFailure = axeBootstrapLastFailure.get(botId);
         int failedAttempts = axeBootstrapFailedAttempts.getOrDefault(botId, 0);
         boolean grounded = bot.isOnGround();
         boolean onOwnScaffold = isOnOwnScaffold(bot);
+        BlockPos here = bot.getBlockPos();
         if (failedAttempts >= WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS
-                || !WoodcutAxeBootstrapPolicy.mayAttemptCraft(grounded, onOwnScaffold, failedAtY, bot.getBlockY())) {
-            LOGGER.debug("Woodcut axe bootstrap: {} holds enough wood but may not craft here (grounded={} onOwnScaffold={} y={} failedAtY={} attempts={})",
-                    bot.getName().getString(), grounded, onOwnScaffold, bot.getBlockY(),
-                    failedAtY == WoodcutAxeBootstrapPolicy.NO_FAILED_Y ? "none" : failedAtY, failedAttempts);
+                || !WoodcutAxeBootstrapPolicy.mayAttemptCraft(grounded, onOwnScaffold, lastFailure,
+                        here.getX(), here.getY(), here.getZ())) {
+            LOGGER.debug("Woodcut axe bootstrap: {} holds enough wood but may not craft here (grounded={} onOwnScaffold={} at={} lastFailure={} attempts={})",
+                    bot.getName().getString(), grounded, onOwnScaffold, here.toShortString(),
+                    lastFailure == null ? "none" : lastFailure, failedAttempts);
             selectHandsOrHarmlessItem(bot);
             return false;
         }
@@ -5608,9 +5638,15 @@ public final class WoodcutSkill implements Skill {
         // Record where it failed. The tree loop ends the run honestly once nothing can change
         // (WoodcutAxeBootstrapPolicy.craftFailureEndsRun); until then logs are punched by hand.
         int attempts = axeBootstrapFailedAttempts.merge(botId, 1, Integer::sum);
-        axeBootstrapFailedAtY.put(botId, bot.getBlockY());
-        LOGGER.warn("Woodcut axe bootstrap: {} had enough wood but the axe craft failed at y={} (attempt {}/{})",
-                bot.getName().getString(), bot.getBlockY(), attempts, WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS);
+        WoodcutAxeBootstrapPolicy.CraftFailureCause cause = WoodcutAxeBootstrapPolicy.classifyCraftFailure(
+                countInventoryItem(bot, Items.CRAFTING_TABLE) > 0,
+                axeBootstrapStep(bot) == WoodcutAxeBootstrapPolicy.Step.HAVE_ENOUGH_CRAFT);
+        BlockPos failedAt = bot.getBlockPos();
+        axeBootstrapLastFailure.put(botId, new WoodcutAxeBootstrapPolicy.CraftFailure(
+                failedAt.getX(), failedAt.getY(), failedAt.getZ(), cause));
+        LOGGER.warn("Woodcut axe bootstrap: {} had enough wood but the axe craft failed at {} cause={} (attempt {}/{})",
+                bot.getName().getString(), failedAt.toShortString(), cause, attempts,
+                WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS);
         selectHandsOrHarmlessItem(bot);
         return false;
     }
@@ -5622,12 +5658,58 @@ public final class WoodcutSkill implements Skill {
         if (failedAttempts <= 0 || !axeBootstrapBots.contains(botId)) {
             return false;
         }
+        BlockPos here = bot.getBlockPos();
         return WoodcutAxeBootstrapPolicy.craftFailureEndsRun(
                 failedAttempts,
                 bot.isOnGround(),
                 isOnOwnScaffold(bot),
-                axeBootstrapFailedAtY.getOrDefault(botId, WoodcutAxeBootstrapPolicy.NO_FAILED_Y),
-                bot.getBlockY());
+                axeBootstrapLastFailure.get(botId),
+                here.getX(), here.getY(), here.getZ());
+    }
+
+    /**
+     * Tree-loop probe: after one failed first-axe craft, try again as soon as the bot stands where
+     * the policy allows it (bootstrapAxeOrPunch re-checks ground, cell and Y), instead of waiting for
+     * a log to mine. Bounded by MAX_CRAFT_ATTEMPTS.
+     */
+    private void tryPendingAxeBootstrapRetry(ServerPlayerEntity bot) {
+        UUID botId = bot.getUuid();
+        int failedAttempts = axeBootstrapFailedAttempts.getOrDefault(botId, 0);
+        if (!axeBootstrapBots.contains(botId)
+                || failedAttempts <= 0
+                || failedAttempts >= WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS
+                || axeBootstrapStep(bot) != WoodcutAxeBootstrapPolicy.Step.HAVE_ENOUGH_CRAFT) {
+            return;
+        }
+        BlockPos here = bot.getBlockPos();
+        if (!WoodcutAxeBootstrapPolicy.mayAttemptCraft(bot.isOnGround(), isOnOwnScaffold(bot),
+                axeBootstrapLastFailure.get(botId), here.getX(), here.getY(), here.getZ())) {
+            return;
+        }
+        LOGGER.info("Woodcut axe bootstrap: {} retrying the axe craft at {} (attempt {}/{})",
+                bot.getName().getString(), here.toShortString(), failedAttempts + 1,
+                WoodcutAxeBootstrapPolicy.MAX_CRAFT_ATTEMPTS);
+        ensureAxeOrRetrieve(bot);
+    }
+
+    /**
+     * Bootstrap: once the bot stands at a tree, gather hand scaffold again if the run's opening
+     * gather came up short (it may have started inside a protected base). Once per tree.
+     */
+    private void regatherHandScaffoldAtTree(ServerPlayerEntity bot, BlockPos treeBase, Set<BlockPos> regatheredBases) {
+        UUID botId = bot.getUuid();
+        int held = countHandScaffoldItems(bot);
+        if (!WoodcutAxeBootstrapPolicy.mayRegatherAtTree(axeBootstrapBots.contains(botId), held,
+                BOOTSTRAP_HAND_SCAFFOLD_TARGET, regatheredBases.contains(treeBase))
+                || isAbortRequested(bot)
+                || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        regatheredBases.add(treeBase.toImmutable());
+        int gathered = gatherNearbyPillarBlocks(bot, world, BOOTSTRAP_HAND_SCAFFOLD_TARGET - held);
+        LOGGER.info("Woodcut axe bootstrap: {} gathered {} more hand scaffold block(s) at tree {} (held {} before)",
+                bot.getName().getString(), gathered, treeBase.toShortString(), held);
+        selectHandsOrHarmlessItem(bot);
     }
 
     /**
