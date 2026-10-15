@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Legacy LLM chat retired, part 2: dead stack and its libraries deleted, jar 52.6 MB to 33.3 MB (audit Q2, Q3); 1.1.251 (2026-10-15)
+
+Second half of Bradley's answers 2 and 3 (`docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 5a). 1.1.250 made the pre-souls LLM chat unreachable, this build deletes it. About 10,050 lines and 107 files removed.
+
+- **Legacy stack deleted** (`080160e4`, `72b470b3`). 58 source files: the cloud and Ollama clients and model fetchers, `ollamaClient`, `FunctionCallerV2` and its tool registry and state updaters, the NLP intent stack (BERT, CART, LIDSNet, OpenNLP preprocessing), `RAG2`, the web search tool, the SQLite memory store, the legacy orchestrator classes, the thinking overlay (and a compiled `.class` that was sitting in the source tree). Then `State`, `StateActions` and seven helpers whose only user was `FunctionCallerV2`. In `Frens`: the BERT, DJL and ollama4j startup and shutdown blocks, the SQLite database creation and the web search config file written at every start. In `ManualConfig`: the provider, model, API key and URL fields and the model-list probe of localhost:11434 that ran on every load. Old keys in a settings file are ignored and drop on the next save.
+- **Libraries dropped** (`4bb9df49`). ollama4j, DJL (with its PyTorch natives), OpenNLP, sqlite-jdbc, jsoup, commons-compress, commons-math3, the `-PaiEnabled` build flag and the two stub source trees. A dependency check before deleting showed no live user of any of them (souls talk to Ollama over plain HTTP, the Piper installer unpacks with the JDK). Jackson stays (souls use it). The jar is 33.3 MB, down from 52.6 MB (sqlite-jdbc alone was 14.3 MB), and contains none of the dropped libraries.
+- **Kept, live:** everything under `GameAI/souls/` and `voice/`, `ManualConfig.ollamaBaseUrl`, `SharedStateUtils` (skills), `AiChatOffHintPolicy` and `LegacyChatAccessPolicy` (the "AI chat is off" notice), `test_chat_message`.
+- **Docs** (`982e0674`, `37f08172`). Live comments, README ("legacy AI runtime retired") and the release notes' `-PaiEnabled` note. CLAUDE.md (main checkout, gitignored) needs its build line, the LLM integration block, the `Database/` and `RLAgent` lines and four dependency rows updated (listed in the handoff).
+- **Build note:** builds need JDK 21 (`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home`); with the shell's default JDK 25, Gradle 8.14.2 fails once `build.gradle` changes.
+- **Tests:** 2527 → 2502 (−25: the tests of five deleted classes, `LegacyChatStatusPolicy`, `LegacyNlpBootstrapPolicy`, `ModelAvailabilityPolicy`, `ModelFetchCoalescer`, `MemorySql`). Sandbox smoke: souls runtime starts, `test_chat_message` works with debug on, woodcut starts, no ERROR or class-loading errors.
+- **Field checks:** Phase 6as.
+
 ## Legacy LLM chat retired, part 1: routes, commands, toggles and screens gone (audit Q2, Q3); 1.1.250 (2026-10-15)
 
 Bradley's answers 2 and 3 to the dead-code audit (`docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 5a): retire the pre-souls LLM chat path and its two toggles. Souls, Soul Chat, voices, the Ollama installer and the AI setup checklist are untouched. Part 1 makes the old path unreachable and removes everything players see; part 2 (next build) deletes the dead classes and the libraries only they used (ollama4j, DJL, OpenNLP, sqlite-jdbc and three unused ones, each verified to have no live user).

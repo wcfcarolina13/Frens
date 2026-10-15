@@ -3,7 +3,23 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.250) — next session starts here
+## Session Handoff 2026-10-15 (1.1.251) — next session starts here
+
+**State:** main = origin/main @ 1.1.251. Suite 2502 green. Dead-code audit phase 2 COMPLETE: every item Bradley approved on
+2026-10-15 shipped in 1.1.243-1.1.251 (removals ~19,000 lines, wall-off shelter, combat callouts, /bot base owner, leash
+target). 1.1.251 = legacy LLM stack and its libraries deleted, jar 33.3 MB (was 52.6). Builds need JDK 21
+(`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home`). Field items: Phases 6an-6as pending.
+**Backlog from the audit answers:** (1) death-location retrieval mission (Q11, `companionDied*` keys kept for it), (2) per-world
+migration of global bot controls, then delete the 1-arg lookups (Q12), (3) mount `_legacy` promotion removal once Nirn has run
+1.1.246 or later (Q13), (4) wall-off: prefer dirt without a pickaxe, persistence across reload, (5) dig-down leaves an uncapped
+bunker when the cap fails, (6) `/bot base remove|rename` have no admin or owner gate, (7) `forceDismountAndSecure` mutates
+entity state on a worker thread, two leash-target removals leave the saved record, (8) TorchPlacer thread per torch.
+**Needs Bradley:** Q14 force-dismount (1.1.248 ruling), CLAUDE.md edits in the main checkout (gitignored): build line (drop
+`-PaiEnabled`, note JDK 21), replace the "LLM Integration" block with a short Souls block, delete the `Database/` and
+`GameAI/RLAgent.java` lines, `FilingSystem/` = config handling, delete the SQLite, OpenNLP, DJL and ollama4j dependency rows,
+FortifySkillTypes 15 records, FortifyEscapeHelper 13 methods without `clearImmediateOverheadForEscape`.
+
+## Session Handoff 2026-10-15 (1.1.250) — superseded
 
 **State:** main = origin/main @ 1.1.250. Suite 2527 green. 1.1.250 = legacy LLM chat retired, part 1 (routes, `/bot llm`,
 `/bot send_message_to`, both toggles, the /configMan hub and its screens and payloads). Field items: Phase 6ar.
