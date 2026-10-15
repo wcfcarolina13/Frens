@@ -5,6 +5,7 @@ import net.wcfcarolina13.GameAI.services.TerrainMovePolicy.Move;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -104,6 +105,68 @@ class TerrainMovePolicyTest {
     void lowRiseIsNotATerrainMove() {
         assertEquals(Move.NONE, TerrainMovePolicy.choose(new Inputs(1, 0, 0, 0, true, 64, true, false, 0)).move());
         assertEquals(Move.WALK_AROUND, TerrainMovePolicy.choose(new Inputs(1, 0, 0, 0, true, 64, true, true, 4)).move());
+    }
+
+    @Test
+    void onlyRouteCandidatesThatLeaveTheTrapOrDirectivesAreDetours() {
+        assertTrue(TerrainMovePolicy.detourCounts(true, true, false), "BFS route leaving the trap");
+        assertTrue(TerrainMovePolicy.detourCounts(false, false, true), "directive");
+        assertFalse(TerrainMovePolicy.detourCounts(false, true, false), "1-hop fallback, even when it leaves the trap");
+        assertFalse(TerrainMovePolicy.detourCounts(false, false, false), "1-hop fallback");
+        assertFalse(TerrainMovePolicy.detourCounts(true, false, false), "BFS route that stays in the trap");
+    }
+
+    @Test
+    void jakesWallWithoutACountedDetourBreaksInsteadOfLoopingOnWalk() {
+        // Field 1.1.240: a 1-hop flat fallback (cost 1) beat BREAK every second without moving him.
+        // With the fallback dropped, a trap-like cell facing soft terrain breaks.
+        Inputs trapNoDetour = new Inputs(2, 1, sandByHand(), sandByHand(), true, 0, false, false, 0, true, false);
+        assertEquals(Move.BREAK, TerrainMovePolicy.choose(trapNoDetour).move());
+    }
+
+    @Test
+    void openCellSidestepBeatsSoftBreak() {
+        int sand = sandByHand();
+        Inputs open = new Inputs(2, 1, sand, sand, true, 0, false, false, 0, false, true);
+        TerrainMovePolicy.Decision d = TerrainMovePolicy.choose(open);
+        assertEquals(Move.WALK_AROUND, d.move());
+        assertEquals(TerrainMovePolicy.SIDESTEP_COST, d.cost(), 1e-9);
+        // 3+ rise, two sand cells: still walks.
+        Inputs tall = new Inputs(3, 2, 2L * sand, sand, true, 0, false, false, 0, false, true);
+        assertEquals(Move.WALK_AROUND, TerrainMovePolicy.choose(tall).move());
+        // Beats place too.
+        Inputs withDirt = new Inputs(2, 1, sand, sand, true, 64, true, false, 0, false, true);
+        assertEquals(Move.WALK_AROUND, TerrainMovePolicy.choose(withDirt).move());
+    }
+
+    @Test
+    void instantBreakTiesTheSidestepAndWalkingWins() {
+        Inputs zeroTick = new Inputs(2, 1, 0, 0, true, 0, false, false, 0, false, true);
+        TerrainMovePolicy.Decision d = TerrainMovePolicy.choose(zeroTick);
+        assertEquals(TerrainMovePolicy.SIDESTEP_COST, d.breakCost(), 1e-9);
+        assertEquals(Move.WALK_AROUND, d.move());
+    }
+
+    @Test
+    void openCellWithoutSidestepBreaks() {
+        Inputs open = new Inputs(2, 1, sandByHand(), sandByHand(), true, 0, false, false, 0, false, false);
+        assertEquals(Move.BREAK, TerrainMovePolicy.choose(open).move());
+    }
+
+    @Test
+    void trapCellIgnoresTheSidestep() {
+        Inputs trap = new Inputs(2, 1, sandByHand(), sandByHand(), true, 0, false, false, 0, true, true);
+        assertEquals(Move.BREAK, TerrainMovePolicy.choose(trap).move());
+        Inputs trapStone = new Inputs(2, 1, stoneByHand(), stoneByHand(), true, 0, false, false, 0, true, true);
+        assertEquals(Move.NONE, TerrainMovePolicy.choose(trapStone).move());
+    }
+
+    @Test
+    void aCountedDetourStillUsesItsOwnCostInAnOpenCell() {
+        Inputs openWithRoute = new Inputs(2, 1, sandByHand(), sandByHand(), true, 0, false, true, 1, false, true);
+        TerrainMovePolicy.Decision d = TerrainMovePolicy.choose(openWithRoute);
+        assertEquals(Move.WALK_AROUND, d.move());
+        assertEquals(1.0, d.cost(), 1e-9);
     }
 
     @Test

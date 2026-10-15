@@ -303,7 +303,8 @@ public final class MovementService {
                                         boolean overrideTarget,
                                         String reason,
                                         List<BlockPos> route,
-                                        BlockPos origin) {}
+                                        BlockPos origin,
+                                        boolean searchRoute) {}
 
     private record LocalEscapeMove(BlockPos target, boolean stepUp) {}
 
@@ -923,20 +924,24 @@ public final class MovementService {
         long deadline = System.currentTimeMillis() + (fastReplan ? TimeUnit.SECONDS.toMillis(5) : TimeUnit.SECONDS.toMillis(20));
         BlockPos lastReached = player.getBlockPos();
         boolean replanned = false;
+        boolean boxedInTried = false;
         for (int attempt = 0; attempt < 2; attempt++) {
             if (abortRequested(player)) {
                 BotActions.stop(player);
                 return recordAttempt(player.getUuid(), destination,
                         new WalkResult(false, player.getBlockPos(), label + ": aborted"));
             }
-            List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world,
+            BlockPos planStart = walkPlanStart(player);
+            List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(planStart, destination, world,
                     player.getUuid(), player.getName().getString());
             if (preclearPlannedStepUps(player, rawPath, "walkTo-preclear")) {
-                rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world,
+                planStart = walkPlanStart(player);
+                rawPath = PathFinder.calculatePath(planStart, destination, world,
                         player.getUuid(), player.getName().getString());
             }
+            boolean boxedIn = rawPath.isEmpty() && PathFinder.lastSearchBoxedIn();
             List<PathFinder.PathNode> simplified = PathFinder.simplifyPath(rawPath, world);
-            boolean useRawSegments = shouldUseRawPathSegmentsForLocalEscape(rawPath, player.getBlockPos(), destination);
+            boolean useRawSegments = shouldUseRawPathSegmentsForLocalEscape(rawPath, planStart, destination);
             if (player.getBlockPos().getSquaredDistance(destination) <= 256.0D) {
                 LOGGER.info("walkTo lead-in [{}]: strategy={} rawFirst={}",
                         label,
@@ -953,6 +958,20 @@ public final class MovementService {
                     segments.size(),
                     segments.peek());
             if (segments.isEmpty()) {
+                // 1.1.240: the start cell had no executable neighbour (Bob on a sand ledge between a
+                // pond and 2-high sand walls). One costed terrain move toward the goal, same gates as
+                // any terrain BREAK/PLACE; a failure is remembered by FailedRoutePolicy inside it.
+                if (boxedIn && !boxedInTried) {
+                    boxedInTried = true;
+                    LOGGER.info("walkTo boxed-in start: trying terrain move toward {} [{}] bot={} from={}",
+                            destination.toShortString(), label, player.getName().getString(), planStart.toShortString());
+                    tryTerrainMoveToward(player, destination, label + "-boxed-in", true);
+                    if (!walkPlanStart(player).equals(planStart)) {
+                        // Replan once without spending one of the two attempts (bounded by boxedInTried).
+                        attempt--;
+                        continue;
+                    }
+                }
                 if (tryImmediateLocalEscape(player, destination, label + "-nop-path")) {
                     continue;
                 }
@@ -1005,6 +1024,18 @@ public final class MovementService {
         }
         return recordAttempt(player.getUuid(), destination,
                 new WalkResult(false, player.getBlockPos(), label + ": walk blocked after replans"));
+    }
+
+    /**
+     * Where walkTo plans from (1.1.240 M2): the grounded cell on a worker thread, so a mid-jump start
+     * does not plan from one cell up; on the server thread (no waiting) the raw block position.
+     */
+    private static BlockPos walkPlanStart(ServerPlayerEntity player) {
+        MinecraftServer server = player.getCommandSource() != null ? player.getCommandSource().getServer() : null;
+        if (server == null || server.isOnThread()) {
+            return player.getBlockPos();
+        }
+        return groundedOrigin(player);
     }
 
     static boolean shouldUseRawPathSegmentsForLocalEscape(List<PathFinder.PathNode> rawPath, BlockPos start, BlockPos destination) {
@@ -1210,15 +1241,18 @@ public final class MovementService {
             return false;
         }
         long timeoutMs = stepUp ? 1600L : 1100L;
-        boolean reached = nudgeTowardUntilClose(bot, target, 0.64D, timeoutMs, 0.18D, label);
-        // Partial-block-aware equality: bot standing on carpet/plate/soul sand has
-        // getBlockPos() = floor cell, not floor+1, so raw .equals(target) misses
-        // arrival when the path waypoint lives at floor+1. See BotPositionUtil.
-        if (BotPositionUtil.isAt(bot, target)) {
-            return true;
-        }
-        return reached && bot.squaredDistanceTo(Vec3d.ofCenter(target)) <= 0.64D;
+        // 1.1.240 C1: reach 0.45. Vec3d.ofCenter sits half a block above the feet, so 0.25 of any
+        // reach is vertical; 0.64 left ~0.62 horizontal and was met from the origin cell. 0.45
+        // leaves ~0.45 horizontal, inside the target cell. The nudge result is only a hint.
+        nudgeTowardUntilClose(bot, target, EXACT_BLOCK_REACH_SQ, timeoutMs, 0.18D, label);
+        // Success = landed in the target cell. groundedOrigin waits for the landing (worker
+        // thread); effectiveFootCell lifts a carpet/slab/soul-sand floor cell to the feet cell.
+        BlockPos landed = groundedOrigin(bot);
+        World world = bot.getEntityWorld();
+        return landed.equals(target) || BotPositionUtil.effectiveFootCell(world, landed).equals(target);
     }
+
+    private static final double EXACT_BLOCK_REACH_SQ = 0.45D;
 
     private static void commitLocalEscape(ServerPlayerEntity player,
                                           LocalEscapeCandidate candidate,
@@ -1522,7 +1556,8 @@ public final class MovementService {
                 true,
                 directive.reason(),
                 List.of(directive.target().toImmutable()),
-                start.toImmutable()
+                start.toImmutable(),
+                false
         );
     }
 
@@ -1609,7 +1644,8 @@ public final class MovementService {
                                 false,
                                 describeLocalEscapeReason(route, candidateOpenNeighbors, candidateReachableArea, elevationGain),
                                 List.copyOf(route.subList(1, route.size())),
-                                start.toImmutable()
+                                start.toImmutable(),
+                                true
                         ));
                     }
                 }
@@ -1773,7 +1809,8 @@ public final class MovementService {
                 false,
                 stepUp ? "step-up" : "flat",
                 List.of(candidate.toImmutable()),
-                start.toImmutable()
+                start.toImmutable(),
+                false
         );
     }
 
@@ -2954,12 +2991,15 @@ public final class MovementService {
     }
 
     /**
-     * Cheap stair blocks for PLACE: the non-plank part of {@link ScaffoldService#SCAFFOLD_BLOCKS}, which it
-     * places first. A holder so MovementService's static init never touches {@code Items} (unit tests).
+     * Stair blocks for PLACE: plain dirt only (1.1.240 I2, Bradley: "a 1-block dirt step may stay"; the
+     * step is untracked, so nothing else may be left behind). Coarse and rooted dirt are not counted:
+     * {@link ScaffoldService#pillarUp} picks from {@link ScaffoldService#SCAFFOLD_BLOCKS} in order, which
+     * has DIRT first but no other dirt, so a bot holding only coarse dirt and cobble would place cobble.
+     * Counting DIRT alone guarantees pillarUp places dirt. A holder so MovementService's static init never
+     * touches {@code Items} (unit tests).
      */
     private static final class TerrainStairBlocks {
-        static final Set<Item> ITEMS = Set.of(
-                Items.DIRT, Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.NETHERRACK);
+        static final Set<Item> ITEMS = Set.of(Items.DIRT);
     }
 
     /**
@@ -2971,8 +3011,20 @@ public final class MovementService {
      * protection and no obstruction-mine opt-out (the same gates as {@link #tryMineObstructionToward}).
      * Every mined cell goes through {@link #tryMinePlannedStepTrim} (territory authorization incl. the
      * Spawn base, protected zones, near-human-blocks, hazards, {@link ObstructionMinePolicy}). PLACE is
-     * {@link ScaffoldService#pillarUp} for one block, untracked (Bradley: the dirt step may stay), whose
-     * placement re-checks territory on the server thread.</p>
+     * {@link ScaffoldService#pillarUp} for one block of plain dirt, untracked (Bradley: the dirt step may
+     * stay), whose placement re-checks territory on the server thread.</p>
+     *
+     * <p>WALK_AROUND counts only a BFS escape route that leaves the trap, or a local-escape directive
+     * ({@link TerrainMovePolicy#detourCounts}); the 1-hop flat/step fallback never counts, since it can
+     * leave the bot facing the same wall. In an open cell (the open/area numbers
+     * {@link #findBestLocalEscapeCandidate} uses to skip its search) an adjacent sidestep counts at
+     * {@link TerrainMovePolicy#SIDESTEP_COST}, so walking beats soft BREAK there. A walk is ok only if
+     * the bot's grounded cell changed; otherwise its first hop is remembered as a failed route.</p>
+     *
+     * <p>Natural terrain (dirt, sand, gravel, clay) may be broken here, while
+     * {@link #tryMineObstructionToward} refuses it. Deliberate (1.1.240 M3): obstruction mining is a
+     * generic unstick that must never tunnel through terrain; this BREAK is costed against walking,
+     * goal-directed, at most two cells, and fully gated.</p>
      */
     private static boolean tryTerrainMoveToward(ServerPlayerEntity bot, BlockPos goal, String label, boolean allowMutation) {
         if (bot == null || goal == null || bot.getUuid() == null) {
@@ -3069,8 +3121,13 @@ public final class MovementService {
         int scaffoldCount = countTerrainStairBlocks(bot);
 
         LocalEscapeCandidate detour = findBestLocalEscapeCandidate(bot, goal);
+        if (detour != null && !TerrainMovePolicy.detourCounts(detour.searchRoute(), detour.leavesTrap(), detour.overrideTarget())) {
+            detour = null;
+        }
         int detourBlocks = detour == null ? 0
                 : Math.max(1, detour.route() == null ? 1 : detour.route().size());
+        boolean openCell = isOpenTerrainCell(world, origin);
+        BlockPos sidestep = detour == null && openCell ? findTerrainSidestep(world, botId, origin, goal, front) : null;
 
         TerrainMovePolicy.Decision decision = TerrainMovePolicy.choose(new TerrainMovePolicy.Inputs(
                 rise,
@@ -3081,14 +3138,16 @@ public final class MovementService {
                 scaffoldCount,
                 placeOk,
                 detour != null,
-                detourBlocks));
+                detourBlocks,
+                !openCell,
+                sidestep != null));
         if (decision.move() == TerrainMovePolicy.Move.NONE) {
-            LOGGER.debug("terrain move: NONE [{}] bot={} from={} dir={} rise={} breakOk={} breakTicks={} scaffold={} placeOk={} detour=false",
+            LOGGER.debug("terrain move: NONE [{}] bot={} from={} dir={} rise={} breakOk={} breakTicks={} scaffold={} placeOk={} detour=false open={}",
                     label, bot.getName().getString(), origin.toShortString(), dir, rise, breakOk, breakTicksSum,
-                    scaffoldCount, placeOk);
+                    scaffoldCount, placeOk, openCell);
             return false;
         }
-        LOGGER.info("terrain move: {} cost={} [{}] bot={} from={} dir={} rise={} walk={} break={} place={} cells={} breakTicks={} scaffold={} goal={}",
+        LOGGER.info("terrain move: {} cost={} [{}] bot={} from={} dir={} rise={} walk={} break={} place={} cells={} breakTicks={} scaffold={} open={} walkVia={} goal={}",
                 decision.move(),
                 TerrainMovePolicy.Decision.fmt(decision.cost()),
                 label,
@@ -3102,14 +3161,41 @@ public final class MovementService {
                 breakCells.size(),
                 breakTicksSum,
                 scaffoldCount,
+                openCell,
+                detour != null ? (detour.overrideTarget() ? "directive" : "route") : (sidestep != null ? "sidestep" : "-"),
                 goal.toShortString());
 
         boolean ok;
         String detail;
         switch (decision.move()) {
             case WALK_AROUND -> {
-                ok = executeLocalEscapeCandidate(bot, detour, goal, label + "-terrain-walk");
-                detail = "route=" + describeBlockRoute(detour.route(), 4);
+                BlockPos firstHop;
+                boolean walked;
+                if (detour != null) {
+                    List<BlockPos> route = detour.route() == null || detour.route().isEmpty()
+                            ? List.of(detour.target()) : detour.route();
+                    firstHop = route.get(0);
+                    walked = executeLocalEscapeCandidate(bot, detour, goal, label + "-terrain-walk");
+                    detail = "route=" + describeBlockRoute(route, 4);
+                } else {
+                    firstHop = sidestep;
+                    BotActions.stop(bot);
+                    walked = nudgeTowardExactBlock(bot, sidestep, sidestep.getY() > origin.getY(), label + "-terrain-sidestep");
+                    if (!walked) {
+                        recordFailedRoute(bot, origin, sidestep, label + "-terrain-sidestep");
+                    }
+                    detail = "sidestep=" + sidestep.toShortString();
+                }
+                // 1.1.240 C1(b): a walk that leaves the bot in its origin cell is not a success,
+                // whatever the nudge said; remember it so the next stuck event picks something else.
+                BlockPos now = groundedOrigin(bot);
+                boolean displaced = !now.equals(origin) && !BotPositionUtil.effectiveFootCell(world, now).equals(origin);
+                if (walked && !displaced) {
+                    clearLocalEscapeCommitment(botId);
+                    recordFailedRoute(bot, origin, firstHop, label + "-terrain-walk");
+                }
+                ok = walked && displaced;
+                detail += " displaced=" + displaced;
             }
             case BREAK -> {
                 boolean mined = true;
@@ -3155,6 +3241,41 @@ public final class MovementService {
         LOGGER.info("terrain move result: {} ok={} [{}] bot={} now={} {}",
                 decision.move(), ok, label, bot.getName().getString(), bot.getBlockPos().toShortString(), detail);
         return ok;
+    }
+
+    /**
+     * Open cell for terrain moves: the same numbers {@link #findBestLocalEscapeCandidate} uses to skip
+     * its escape search (3+ open cardinal sides and a reachable area of 7+ within 2). Anything else is
+     * trap-like, where BREAK may beat a sidestep.
+     */
+    private static boolean isOpenTerrainCell(ServerWorld world, BlockPos origin) {
+        return countOpenCardinalNeighbors(world, origin) >= 3
+                && estimateLocalEscapeReachableArea(world, origin, 2) >= 7;
+    }
+
+    /**
+     * {@link #tryLocalUnstick}-style sidestep for an open cell: the adjacent cell (flat, step up or
+     * step down, a valid local-escape move) nearest the goal, level preferred, skipping the blocked
+     * front cell and remembered failed routes. Null when there is none.
+     */
+    private static BlockPos findTerrainSidestep(ServerWorld world, UUID botId, BlockPos origin, BlockPos goal, BlockPos front) {
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (LocalEscapeMove move : enumerateLocalEscapeMoves(world, origin)) {
+            BlockPos cand = move.target();
+            if (cand.getX() == front.getX() && cand.getZ() == front.getZ()) {
+                continue;
+            }
+            if (isRememberedFailedRoute(botId, origin, cand)) {
+                continue;
+            }
+            double score = cand.getSquaredDistance(goal) + Math.abs(cand.getY() - origin.getY()) * 4.0D;
+            if (score < bestScore) {
+                bestScore = score;
+                best = cand;
+            }
+        }
+        return best;
     }
 
     /**
@@ -3943,7 +4064,8 @@ public final class MovementService {
         if (ConstructionProtectionService.protectionReason(bot.getUuid(), pos) != null) {
             return false;
         }
-        if (world.getBlockEntity(pos) != null) {
+        // hasBlockEntity, not world.getBlockEntity: the latter is always null off the server thread.
+        if (state.hasBlockEntity()) {
             return false;
         }
         if (!state.getFluidState().isEmpty()) {
@@ -3980,6 +4102,13 @@ public final class MovementService {
         return hardness >= 0.0F && hardness < 12.0F;
     }
 
+    /**
+     * Generic stuck assist: mine one obstruction within reach toward {@code goal} (skill/build tasks
+     * only). Refuses natural terrain (dirt, sand, gravel, clay) and build materials so a stuck bot never
+     * tunnels. {@link #tryTerrainMoveToward}'s BREAK does allow soft natural blocks: that is deliberate
+     * (1.1.240 M3), because it is costed against walking around, goal-directed, at most two cells and
+     * fully gated, whereas this assist is not.
+     */
     private static boolean tryMineObstructionToward(ServerPlayerEntity bot, BlockPos goal, String label) {
         if (bot == null || goal == null) {
             return false;
@@ -4093,7 +4222,8 @@ public final class MovementService {
             if (!state.getFluidState().isEmpty()) {
                 continue;
             }
-            if (world.getBlockEntity(pos) != null) {
+            // hasBlockEntity, not world.getBlockEntity: the latter is always null off the server thread.
+            if (state.hasBlockEntity()) {
                 continue;
             }
             // Never grief obvious player storage/beds or unstick-protected blocks.

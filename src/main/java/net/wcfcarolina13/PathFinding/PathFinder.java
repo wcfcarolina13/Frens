@@ -85,6 +85,23 @@ public class PathFinder {
 
     private static final long PATHFIND_TIMEOUT_MS = 10_000L; // 10 second hard cap
 
+    /**
+     * Set by either finder on this thread: the last search found no path because the start cell had
+     * no executable neighbour (Baritone: open set exhausted after 1 node; bidir: forward open set
+     * exhausted after expanding only the start). Thread-local because the shadow compare runs the
+     * other finder on its own thread. Reset at the start of every search.
+     */
+    private static final ThreadLocal<Boolean> LAST_SEARCH_BOXED_IN = ThreadLocal.withInitial(() -> false);
+
+    static void noteSearchBoxedIn(boolean boxedIn) {
+        LAST_SEARCH_BOXED_IN.set(boxedIn);
+    }
+
+    /** Whether the last search on this thread failed with a boxed-in start (see {@link #noteSearchBoxedIn}). */
+    public static boolean lastSearchBoxedIn() {
+        return Boolean.TRUE.equals(LAST_SEARCH_BOXED_IN.get());
+    }
+
     public static List<PathNode> calculatePath(BlockPos start, BlockPos target, ServerWorld world) {
         return calculatePath(start, target, world, null, null);
     }
@@ -98,6 +115,7 @@ public class PathFinder {
     public static List<PathNode> calculatePath(BlockPos start, BlockPos target, ServerWorld world,
                                                UUID botUuid, String botName) {
         PathFinderChoice choice = PathFinderOverrides.resolveFor(botUuid, USE_BARITONE_STYLE);
+        noteSearchBoxedIn(false);
         long startTime = System.nanoTime();
         List<PathNode> result = runFinder(choice, start, target, world);
         long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
@@ -166,6 +184,7 @@ public class PathFinder {
 
     /** Original bidirectional A* implementation. */
     static List<PathNode> calculatePathBidirectional(BlockPos start, BlockPos target, ServerWorld world) {
+        noteSearchBoxedIn(false);
         if (start.equals(target)) {
             // Same shape as a merged search result (start..goal inclusive), just one node long.
             // Without this the two frontiers never overlap and the search burns its full timeout.
@@ -274,6 +293,9 @@ public class PathFinder {
         }
 
         LOGGER.warn("No path found between {} and {}", start, target);
+        // Boxed-in start: the forward side ran dry after expanding only the start (a boxed-in goal
+        // exhausts the backward side instead and is not flagged).
+        noteSearchBoxedIn(openForward.isEmpty() && closedForward.size() <= 1);
         return new ArrayList<>();
     }
 

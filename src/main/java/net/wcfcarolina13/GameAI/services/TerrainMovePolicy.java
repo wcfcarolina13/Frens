@@ -9,7 +9,11 @@ import java.util.Locale;
  *
  * <p>Moves and costs (in rough "blocks of effort"):</p>
  * <ul>
- *   <li>{@link Move#WALK_AROUND}: a local detour exists; cost = its extra blocks (at least 1).</li>
+ *   <li>{@link Move#WALK_AROUND}: a local detour exists; cost = its extra blocks (at least 1). Only a
+ *       BFS escape route that leaves the trap, or a directive, is a detour ({@link #detourCounts}); the
+ *       1-hop flat fallback never is (1.1.240 C1: it left Jake facing the same wall). Without a detour,
+ *       an open (non-trap) cell with an adjacent sidestep walks at {@link #SIDESTEP_COST}, which no
+ *       BREAK beats (1.1.240 I3: walk around soft terrain in open country, do not dig).</li>
  *   <li>{@link Move#BREAK}: mine the blocking cells. A 2-rise needs only its head-height cell (the
  *       rise becomes a 1-block stair), a 3+ rise needs the foot and head cells. Cost =
  *       sum(ground break ticks) / 20 + 2 per cell. Every cell must pass territory/protection and
@@ -28,6 +32,8 @@ public final class TerrainMovePolicy {
     public static final double PLACE_COST = 3.0D;
     public static final double BREAK_COST_PER_CELL = 2.0D;
     public static final double TICKS_PER_COST_UNIT = 20.0D;
+    /** Fixed walk cost of a sidestep from an open cell; BREAK costs at least this, and ties go to walking. */
+    public static final double SIDESTEP_COST = 2.0D;
 
     public enum Move { WALK_AROUND, BREAK, PLACE, NONE }
 
@@ -41,6 +47,8 @@ public final class TerrainMovePolicy {
      * @param placeAllowed         territory/protection allow a block under the bot and the stair top is clear
      * @param hasDetourCandidate   a local walking detour exists and is not a remembered failure
      * @param detourExtraBlocks    blocks that detour walks
+     * @param trapLikeCell         the bot's cell is not open (sidesteps do not count there)
+     * @param sidestepAvailable    an adjacent sidestep exists that is not a remembered failure
      */
     public record Inputs(int rise,
                          int blockingCells,
@@ -50,7 +58,18 @@ public final class TerrainMovePolicy {
                          int scaffoldCount,
                          boolean placeAllowed,
                          boolean hasDetourCandidate,
-                         int detourExtraBlocks) {}
+                         int detourExtraBlocks,
+                         boolean trapLikeCell,
+                         boolean sidestepAvailable) {
+
+        /** A trap-like cell with no sidestep: only the detour counts for walking. */
+        public Inputs(int rise, int blockingCells, long breakTicksSum, int maxCellBreakTicks,
+                      boolean allBlockingCellsBreakAllowed, int scaffoldCount, boolean placeAllowed,
+                      boolean hasDetourCandidate, int detourExtraBlocks) {
+            this(rise, blockingCells, breakTicksSum, maxCellBreakTicks, allBlockingCellsBreakAllowed,
+                    scaffoldCount, placeAllowed, hasDetourCandidate, detourExtraBlocks, true, false);
+        }
+    }
 
     public record Decision(Move move, double cost, double walkCost, double breakCost, double placeCost) {
         /** Cost formatted for logs: "-" when a move does not apply. */
@@ -69,11 +88,23 @@ public final class TerrainMovePolicy {
         return rise == 2 ? 1 : 2;
     }
 
+    /**
+     * Whether a local-escape candidate counts as a WALK_AROUND detour: a directive, or a BFS route
+     * candidate that leaves the trap. The 1-hop flat/step fallback never counts, even when it reports
+     * leavesTrap (it does whenever the neighbour has more open sides).
+     */
+    public static boolean detourCounts(boolean searchRoute, boolean leavesTrap, boolean directive) {
+        return directive || (searchRoute && leavesTrap);
+    }
+
     public static double walkCost(Inputs in) {
-        if (!in.hasDetourCandidate()) {
-            return Double.POSITIVE_INFINITY;
+        if (in.hasDetourCandidate()) {
+            return Math.max(1, in.detourExtraBlocks());
         }
-        return Math.max(1, in.detourExtraBlocks());
+        if (!in.trapLikeCell() && in.sidestepAvailable()) {
+            return SIDESTEP_COST;
+        }
+        return Double.POSITIVE_INFINITY;
     }
 
     public static double breakCost(Inputs in) {

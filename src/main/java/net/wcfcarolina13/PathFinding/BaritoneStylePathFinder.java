@@ -130,6 +130,7 @@ public class BaritoneStylePathFinder {
 
         LOGGER.info("[BaritonePathFinder] Start=({},{},{}) Target=({},{},{}) timeout={}ms",
                 sx, sy, sz, tx, ty, tz, timeoutMs);
+        PathFinder.noteSearchBoxedIn(false);
 
         ChunkCache cache = new ChunkCache(world);
         cache.startY = sy;
@@ -185,6 +186,8 @@ public class BaritoneStylePathFinder {
         if (!partial.isEmpty()) {
             return partial;
         }
+        // Only the start was expanded: it had no executable neighbour (walkTo's boxed-in start).
+        PathFinder.noteSearchBoxedIn(nodesExpanded <= 1);
         return new ArrayList<>();
     }
 
