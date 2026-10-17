@@ -1354,9 +1354,10 @@ public class BotEventHandler {
                 if (!augmentedHostiles.isEmpty()) {
                     return engageHostiles(bot, server, augmentedHostiles);
                 }
-                // If we were recently damaged by a hostile (within 2s), do a wider scan.
-                // Prevents premature combat exit when a skeleton shoots from beyond 10-block range.
-                if (BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, server.getTicks(), 40)) {
+                // If we were recently damaged by a hostile (within 5s), do a wider scan.
+                // Prevents premature combat exit when a skeleton or bogged shoots from beyond 10-block range.
+                if (BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, server.getTicks(),
+                        net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.RECENT_DAMAGE_WINDOW_TICKS)) {
                     List<Entity> widerScan = AutoFaceEntity.detectNearbyEntities(bot, 16.0D)
                             .stream()
                             .filter(EntityUtil::isHostile)

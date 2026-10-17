@@ -1101,6 +1101,7 @@ public class Frens implements ModInitializer {
                                 serverPlayer, serverPlayer.getCommandSource().getServer().getTicks());
                         // Hostile damage clears shelter — bot needs to fight back
                         net.wcfcarolina13.GameAI.services.BotFleeService.clearShelter(serverPlayer.getUuid());
+                        pauseTaskForRangedHit(serverPlayer, attacker, source);
                     }
 
                     // Snowball-fight reactions: snowball-from-player escalates a probe to ACTIVE,
@@ -1709,6 +1710,45 @@ public class Frens implements ModInitializer {
      */
     private static void scheduleSpawnEscapeCheck(MinecraftServer server, ServerPlayerEntity bot) {
         SPAWN_ESCAPE_CHECKS.put(bot.getUuid(), new SpawnEscapeCheck());
+    }
+
+    /**
+     * A hostile's projectile hit a bot that is running a task: pause the task (debounced) so the
+     * IDLE branch can fight or flee. Same sequence as the AutoFace phantom pause. Server thread.
+     */
+    private static void pauseTaskForRangedHit(ServerPlayerEntity bot,
+                                              Entity attacker,
+                                              net.minecraft.entity.damage.DamageSource source) {
+        net.minecraft.server.MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null) {
+            return;
+        }
+        long now = server.getTicks();
+        boolean projectile = source.isIn(net.minecraft.registry.tag.DamageTypeTags.IS_PROJECTILE);
+        double distance = Math.sqrt(attacker.squaredDistanceTo(bot));
+        boolean shouldPause = net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.shouldPause(
+                net.wcfcarolina13.GameAI.services.TaskService.hasActiveTask(bot.getUuid()),
+                true,
+                projectile,
+                distance,
+                net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.pausedRecently(bot.getUuid(), now));
+        if (!shouldPause) {
+            return;
+        }
+        String typeId = net.minecraft.entity.EntityType.getId(attacker.getType()).toString();
+        net.wcfcarolina13.Entity.AutoFaceEntity.isBotMoving = false;
+        net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
+        net.wcfcarolina13.GameAI.services.BotFleeService.captureInterruptedSurvival(bot);
+        if (net.wcfcarolina13.GameAI.skills.SkillManager.requestSkillPause(
+                bot, net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.PAUSE_MESSAGE)) {
+            net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.notePause(bot.getUuid(), now);
+            net.wcfcarolina13.GameAI.services.SkillResumeService.requestAutoResume(bot);
+            LOGGER.info("Bot {} paused task for ranged hit: shooter={} ranged={} distance={}",
+                    bot.getName().getString(),
+                    typeId,
+                    net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.isRangedShooter(typeId),
+                    String.format(java.util.Locale.ROOT, "%.1f", distance));
+        }
     }
     
     /**

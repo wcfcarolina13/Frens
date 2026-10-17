@@ -726,7 +726,8 @@ public final class BotFleeService {
         if (mode != BotEventHandler.Mode.IDLE && !damageOverride) return false;
         // Bot is in a tactical shelter — don't flee unless shelter is compromised
         if (isInShelter(bot.getUuid())) {
-            if (BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, server.getTicks(), 40)) {
+            if (BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, server.getTicks(),
+                    RangedThreatPausePolicy.RECENT_DAMAGE_WINDOW_TICKS)) {
                 clearShelter(bot.getUuid());
                 LOGGER.info("Bot {} shelter compromised (taking damage) — clearing for flee",
                         bot.getName().getString());

@@ -752,7 +752,8 @@ public final class BotCombatCalloutService {
                 return new KillCallout("Target down!", BotDialogueSounds.LINE_COMBAT_KILL_TARGET_DOWN);
             }
 
-            if (type == EntityType.SKELETON || type == EntityType.STRAY || type == EntityType.WITHER_SKELETON) {
+            if (type == EntityType.SKELETON || type == EntityType.STRAY || type == EntityType.WITHER_SKELETON
+                    || type == EntityType.BOGGED || type == EntityType.PARCHED) {
                 if (preferSpecific) {
                     return RNG.nextBoolean()
                             ? new KillCallout("Skeleton down.", BotDialogueSounds.LINE_COMBAT_KILL_SKELETON_1)
@@ -872,6 +873,8 @@ public final class BotCombatCalloutService {
         if (type == EntityType.SKELETON
                 || type == EntityType.STRAY
                 || type == EntityType.WITHER_SKELETON
+                || type == EntityType.BOGGED
+                || type == EntityType.PARCHED
                 || type == EntityType.ZOMBIE
                 || type == EntityType.DROWNED
                 || type == EntityType.HUSK
@@ -947,6 +950,8 @@ public final class BotCombatCalloutService {
                 || type == EntityType.SKELETON
                 || type == EntityType.STRAY
                 || type == EntityType.WITHER_SKELETON
+                || type == EntityType.BOGGED
+                || type == EntityType.PARCHED
                 || type == EntityType.SPIDER
                 || type == EntityType.CAVE_SPIDER;
     }
