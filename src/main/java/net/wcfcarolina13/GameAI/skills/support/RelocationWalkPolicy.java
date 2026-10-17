@@ -13,7 +13,27 @@ public final class RelocationWalkPolicy {
     /** Extra walk calls toward one relocation target after the first. Not MAX_RELOCATIONS (targets). */
     public static final int MAX_EXTRA_HOPS = 3;
 
+    /**
+     * Wall-clock bound on one relocation attempt (every candidate and hop of one
+     * relocateToUnprotectedTree call). Without it 1 + {@link #MAX_EXTRA_HOPS} hops of up to 40 s per
+     * candidate, over up to 8 blind-walk candidates, could keep the bot walking for many minutes.
+     */
+    public static final long RELOCATION_BUDGET_MS = 90_000L;
+
     private RelocationWalkPolicy() {
+    }
+
+    /** Whether a relocation that started at {@code startedAtMs} has used its {@link #RELOCATION_BUDGET_MS}. */
+    public static boolean budgetExhausted(long startedAtMs, long nowMs) {
+        return nowMs - startedAtMs >= RELOCATION_BUDGET_MS;
+    }
+
+    /**
+     * Whether a sunset-gated relocation should stop walking: the same test as woodcut's own gate
+     * (time of day at or past {@code sunsetTimeOfDay}), so a long relocation does not run past dusk.
+     */
+    public static boolean pastSunset(boolean sunsetGated, long worldTimeOfDay, int sunsetTimeOfDay) {
+        return sunsetGated && (int) Math.floorMod(worldTimeOfDay, 24000L) >= sunsetTimeOfDay;
     }
 
     /**

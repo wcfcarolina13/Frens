@@ -885,7 +885,7 @@ public final class WoodcutSkill implements Skill {
                                     ChatUtils.sendSystemMessage(source, line);
                                 });
                     }
-                    if (relocateToUnprotectedTree(source, bot, effectiveSearchRadius(bot, searchRadius), failedBases, failedBaseReasons)) {
+                    if (relocateToUnprotectedTree(source, bot, effectiveSearchRadius(bot, searchRadius), failedBases, failedBaseReasons, !internal)) {
                         consecutiveFailures = 0;
                         visitedBases.clear();
                         LOGGER.info("Woodcut: relocated ({}/{}), resuming search from {}",
@@ -4650,13 +4650,15 @@ public final class WoodcutSkill implements Skill {
                                                ServerPlayerEntity bot,
                                                int currentSearchRadius,
                                                Set<BlockPos> failedBases,
-                                               Map<BlockPos, String> failedBaseReasons) {
+                                               Map<BlockPos, String> failedBaseReasons,
+                                               boolean sunsetGated) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
         if (isAbortRequested(bot)) {
             return false;
         }
+        RelocationBudget budget = new RelocationBudget(System.currentTimeMillis(), sunsetGated);
 
         long relocationStartedAt = System.nanoTime();
         long immediateStageMs = 0L;
@@ -4673,14 +4675,14 @@ public final class WoodcutSkill implements Skill {
             double immediateDist = Math.sqrt(origin.getSquaredDistance(immediateTarget));
             LOGGER.info("Woodcut relocation: immediate local tree candidate at {} (dist={}) from {}",
                     immediateTarget.toShortString(), (int) immediateDist, origin.toShortString());
-            if (origin.getSquaredDistance(immediateTarget) <= 9.0D || walkToTarget(source, bot, immediateTarget)) {
+            if (origin.getSquaredDistance(immediateTarget) <= 9.0D || walkToTarget(source, bot, immediateTarget, budget)) {
                 logRelocationStageTimings(relocationStartedAt, immediateStageMs, nearbyStageMs, broadStageMs, "immediate-local");
                 return true;
             }
         }
 
         if (MappedVillageService.isInsideMappedVillage(world, origin)
-                && tryExitMappedVillage(source, bot, world, origin)) {
+                && tryExitMappedVillage(source, bot, world, origin, budget)) {
             logRelocationStageTimings(relocationStartedAt, immediateStageMs, nearbyStageMs, broadStageMs, "mapped-village-exit");
             return true;
         }
@@ -4702,7 +4704,7 @@ public final class WoodcutSkill implements Skill {
             double dist = Math.sqrt(origin.getSquaredDistance(nearbyTarget));
             LOGGER.info("Woodcut relocation: nearby sampled tree at {} (dist={}) from {} after {}ms",
                     nearbyTarget.toShortString(), (int) dist, origin.toShortString(), nearbyStageMs);
-            if (walkToTarget(source, bot, nearbyTarget)) {
+            if (walkToTarget(source, bot, nearbyTarget, budget)) {
                 logRelocationStageTimings(relocationStartedAt, immediateStageMs, nearbyStageMs, broadStageMs, "nearby-sampled");
                 return true;
             }
@@ -4725,7 +4727,7 @@ public final class WoodcutSkill implements Skill {
         if (target == null) {
             LOGGER.info("Woodcut relocation: no unprotected tree within {} blocks of {} after {}ms sampled search, trying blind walk",
                     RELOCATION_SEARCH_RADIUS, origin.toShortString(), broadStageMs);
-            boolean blindWalkResult = blindWalkAwayFromProtection(source, bot, world, origin);
+            boolean blindWalkResult = blindWalkAwayFromProtection(source, bot, world, origin, budget);
             logRelocationStageTimings(relocationStartedAt, immediateStageMs, nearbyStageMs, broadStageMs,
                     blindWalkResult ? "blind-walk-success" : "blind-walk-failed");
             return blindWalkResult;
@@ -4734,7 +4736,7 @@ public final class WoodcutSkill implements Skill {
         double dist = Math.sqrt(origin.getSquaredDistance(target));
         LOGGER.info("Woodcut relocation: broad sampled tree at {} (dist={}) from {} after {}ms",
                 target.toShortString(), (int) dist, origin.toShortString(), broadStageMs);
-        boolean walked = walkToTarget(source, bot, target);
+        boolean walked = walkToTarget(source, bot, target, budget);
         logRelocationStageTimings(relocationStartedAt, immediateStageMs, nearbyStageMs, broadStageMs,
                 walked ? "broad-sampled" : "broad-sampled-walk-failed");
         return walked;
@@ -4768,7 +4770,8 @@ public final class WoodcutSkill implements Skill {
     private boolean tryExitMappedVillage(ServerCommandSource source,
                                          ServerPlayerEntity bot,
                                          ServerWorld world,
-                                         BlockPos origin) {
+                                         BlockPos origin,
+                                         RelocationBudget budget) {
         Optional<MappedVillageNavigationService.EscapePlan> planOpt =
                 MappedVillageNavigationService.planExit(world, origin, MAPPED_VILLAGE_EXIT_CLEARANCE);
         if (planOpt.isEmpty()) {
@@ -4793,7 +4796,7 @@ public final class WoodcutSkill implements Skill {
         }
 
         for (BlockPos candidate : plan.candidateTargets()) {
-            if (isAbortRequested(bot)) {
+            if (isAbortRequested(bot) || relocationOutOfTime(bot, budget, "mapped-village-exit")) {
                 return false;
             }
             if (!isDryStableWoodcutStand(world, candidate)) {
@@ -4803,7 +4806,7 @@ public final class WoodcutSkill implements Skill {
             }
             LOGGER.info("Woodcut relocation: trying mapped-village exit candidate {} for '{}'",
                     candidate.toShortString(), plan.villageName());
-            if (!walkToTarget(source, bot, candidate)) {
+            if (!walkToTarget(source, bot, candidate, budget)) {
                 LOGGER.info("Woodcut relocation: mapped-village exit candidate {} failed (reason=path-unreachable)",
                         candidate.toShortString());
                 continue;
@@ -4835,7 +4838,8 @@ public final class WoodcutSkill implements Skill {
     private boolean blindWalkAwayFromProtection(ServerCommandSource source,
                                                  ServerPlayerEntity bot,
                                                  ServerWorld world,
-                                                 BlockPos origin) {
+                                                 BlockPos origin,
+                                                 RelocationBudget budget) {
         // 8 compass directions: N, NE, E, SE, S, SW, W, NW
         int[][] dirs = {
             {0, -1}, {1, -1}, {1, 0}, {1, 1},
@@ -4844,7 +4848,7 @@ public final class WoodcutSkill implements Skill {
 
         int triedCount = 0;
         for (int[] dir : dirs) {
-            if (isAbortRequested(bot)) return false;
+            if (isAbortRequested(bot) || relocationOutOfTime(bot, budget, "blind-walk")) return false;
             int tx = origin.getX() + dir[0] * BLIND_WALK_DISTANCE;
             int tz = origin.getZ() + dir[1] * BLIND_WALK_DISTANCE;
             BlockPos probe = new BlockPos(tx, origin.getY(), tz);
@@ -4863,7 +4867,7 @@ public final class WoodcutSkill implements Skill {
             triedCount++;
             LOGGER.info("Woodcut blind walk: trying direction ({},{}) toward {} (attempt {})",
                     dir[0], dir[1], dryProbe.toShortString(), triedCount);
-            if (walkToTarget(source, bot, dryProbe)) {
+            if (walkToTarget(source, bot, dryProbe, budget)) {
                 return true;
             }
             // Walk failed — try the next direction from current position
@@ -4883,7 +4887,33 @@ public final class WoodcutSkill implements Skill {
         return SafePositionService.getWalkableGroundY(world, column.getX(), column.getZ());
     }
 
-    private boolean walkToTarget(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
+    /** When one relocation attempt started, and whether woodcut's sunset gate applies to it. */
+    private record RelocationBudget(long startedAtMs, boolean sunsetGated) {
+    }
+
+    /**
+     * Whether a relocation must stop walking: its {@link RelocationWalkPolicy#RELOCATION_BUDGET_MS}
+     * is used up, or (when sunset-gated) dusk came while it walked. Checked before every hop and
+     * candidate; the relocation then fails and the main loop's own sunset gate ends the run.
+     */
+    private boolean relocationOutOfTime(ServerPlayerEntity bot, RelocationBudget budget, String where) {
+        if (budget == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (RelocationWalkPolicy.budgetExhausted(budget.startedAtMs(), now)) {
+            LOGGER.info("Woodcut relocation: stopping at {} (reason=budget-exhausted after {}ms, budget {}ms)",
+                    where, now - budget.startedAtMs(), RelocationWalkPolicy.RELOCATION_BUDGET_MS);
+            return true;
+        }
+        if (RelocationWalkPolicy.pastSunset(budget.sunsetGated(), bot.getEntityWorld().getTimeOfDay(), SUNSET_TIME_OF_DAY)) {
+            LOGGER.info("Woodcut relocation: stopping at {} (reason=sunset after {}ms)", where, now - budget.startedAtMs());
+            return true;
+        }
+        return false;
+    }
+
+    private boolean walkToTarget(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target, RelocationBudget budget) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
@@ -4898,6 +4928,9 @@ public final class WoodcutSkill implements Skill {
             if (hop > 0 && isAbortRequested(bot)) {
                 LOGGER.info("Woodcut relocation: walk to {} stopped (abort requested after {} hop(s))",
                         target.toShortString(), hop);
+                return false;
+            }
+            if (relocationOutOfTime(bot, budget, "walk to " + target.toShortString() + " hop " + hop)) {
                 return false;
             }
             MovementService.MovementPlan plan = MovementService.planLootApproach(
