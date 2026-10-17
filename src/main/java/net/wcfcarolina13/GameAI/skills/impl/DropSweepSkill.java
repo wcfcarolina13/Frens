@@ -113,7 +113,7 @@ public SkillExecutionResult execute(SkillContext context) {
                 List<ItemEntity> residual = world.getEntitiesByClass(
                         ItemEntity.class,
                         bot.getBoundingBox().expand(effectiveRadius, effectiveVertical, effectiveRadius),
-                        item -> !item.isRemoved()
+                        item -> !item.isRemoved() && DropSweeper.isAllowedDrop(bot.getUuid(), item)
                 );
                 residual.sort(Comparator.comparingDouble(bot::squaredDistanceTo));
 
@@ -175,7 +175,7 @@ private static int countItemsInRange(ServerWorld world, ServerPlayerEntity bot, 
     for (ItemEntity item : world.getEntitiesByClass(
             ItemEntity.class,
             bot.getBoundingBox().expand(radius, vertical, radius),
-            item -> !item.isRemoved())) {
+            item -> !item.isRemoved() && DropSweeper.isAllowedDrop(bot.getUuid(), item))) {
         total += item.getStack().getCount();
     }
     return total;

@@ -16,6 +16,7 @@ import net.minecraft.world.World;
 import net.minecraft.world.rule.GameRules;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
+import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -28,6 +29,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -141,8 +143,13 @@ public final class DeathRetrievalService {
             LOGGER.info("[Retrieve] {}: travel did not start (gate refused)", alias);
             return fail(source, DeathRetrievalPolicy.cannotSetOff(alias));
         }
+        // Whose death rides in the action, so the arrival (also after a reload) finds its tagged drops.
+        // "me" only when the mod's record is this same vanilla death.
+        String whoForAction = DeathRetrievalPolicy.isMe(who)
+                ? (target.epochMs() != null ? DeathRetrievalPolicy.ME : null)
+                : who.trim();
         NavigationArtifactService.schedulePostArrival(alias, new NavigationArtifactService.PostArrivalAction(
-                DeathRetrievalPolicy.actionType(mode), stand, recipient, null));
+                DeathRetrievalPolicy.actionType(mode, whoForAction), stand, recipient, null));
         LOGGER.info("[Retrieve] {} departing to stand point {} in {} (death {}) return={}",
                 alias, stand.toShortString(), dimKey.getValue(), target.pos().toShortString(), mode);
 
@@ -191,24 +198,33 @@ public final class DeathRetrievalService {
             params.put("passes", DeathRetrievalPolicy.SWEEP_PASSES);
             // Never store into, or place, chests at the death spot: a full bot stops and says so.
             params.put("noOffload", true);
-            LOGGER.info("[Retrieve] {} sweeping drops around {} (r={} passes={})",
-                    botAlias, arrivedDest.toShortString(), DeathRetrievalPolicy.SWEEP_RADIUS, DeathRetrievalPolicy.SWEEP_PASSES);
+            Set<UUID> filter = deathDropFilter(server, bot, arrivedDest, action);
+            LOGGER.info("[Retrieve] {} sweeping drops around {} (r={} passes={} tagged={})",
+                    botAlias, arrivedDest.toShortString(), DeathRetrievalPolicy.SWEEP_RADIUS, DeathRetrievalPolicy.SWEEP_PASSES,
+                    filter == null ? "none, sweeping everything" : filter.size());
+            UUID botUuid = bot.getUuid();
             EXECUTOR.submit(() -> {
-                SkillExecutionResult result = runSweep(botAlias, botSource, params);
-                if ((result == null || !result.success()) && !bot.isDead() && !bot.isRemoved()) {
-                    LOGGER.info("[Retrieve] {} sweep failed ('{}'), retrying once in {} ms", botAlias,
-                            result == null ? "null" : result.message(), DeathRetrievalPolicy.SWEEP_RETRY_DELAY_MS);
-                    try {
-                        Thread.sleep(DeathRetrievalPolicy.SWEEP_RETRY_DELAY_MS);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
+                SkillExecutionResult result;
+                DropSweeper.setAllowedDrops(botUuid, filter);
+                try {
+                    result = runSweep(botAlias, botSource, params);
+                    if ((result == null || !result.success()) && !bot.isDead() && !bot.isRemoved()) {
+                        LOGGER.info("[Retrieve] {} sweep failed ('{}'), retrying once in {} ms", botAlias,
+                                result == null ? "null" : result.message(), DeathRetrievalPolicy.SWEEP_RETRY_DELAY_MS);
+                        try {
+                            Thread.sleep(DeathRetrievalPolicy.SWEEP_RETRY_DELAY_MS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        if (!bot.isDead() && !bot.isRemoved()) {
+                            result = runSweep(botAlias, botSource, params);
+                        }
                     }
-                    if (!bot.isDead() && !bot.isRemoved()) {
-                        result = runSweep(botAlias, botSource, params);
-                    }
+                } finally {
+                    DropSweeper.setAllowedDrops(botUuid, null);
                 }
                 final SkillExecutionResult finalResult = result;
-                server.execute(() -> finish(server, botAlias, bot, before, sweepStartMs, finalResult, action));
+                server.execute(() -> finish(server, botAlias, bot, before, sweepStartMs, finalResult, action, filter));
             });
         });
     }
@@ -232,7 +248,7 @@ public final class DeathRetrievalService {
      */
     private static void finish(MinecraftServer server, String botAlias, ServerPlayerEntity sweptBot, int before,
                                long sweepStartMs, SkillExecutionResult result,
-                               NavigationArtifactService.PostArrivalAction action) {
+                               NavigationArtifactService.PostArrivalAction action, Set<UUID> filter) {
         UUID recipient = action.ownerUuid();
         BotDeathRecordService.DeathRecord lastDeath = BotDeathRecordService.getBotRecord(server, botAlias);
         boolean died = sweptBot.isDead() || (lastDeath != null && lastDeath.epochMs() >= sweepStartMs);
@@ -250,15 +266,16 @@ public final class DeathRetrievalService {
         // Offload is off for this sweep, so the inventory gain is the real count.
         int picked = Math.max(0, countItems(bot) - before);
         boolean ok = result != null && result.success();
-        LOGGER.info("[Retrieve] {} sweep done: picked={} success={} msg='{}'",
-                botAlias, picked, ok, result == null ? "null" : result.message());
+        LOGGER.info("[Retrieve] {} sweep done: picked={} tagged={} taggedGone={} success={} msg='{}'",
+                botAlias, picked, filter == null ? 0 : filter.size(), taggedGone(bot, filter), ok,
+                result == null ? "null" : result.message());
         if (!ok) {
             LOGGER.info("[Retrieve] {} stays: sweep failed twice", botAlias);
             NavigationArtifactService.notifyPlayer(server, recipient, "§e"
                     + DeathRetrievalPolicy.sweepFailedStaying(botAlias, result == null ? null : result.message()) + "§r");
             return;
         }
-        boolean leftBehind = bot.getInventory().getEmptySlot() == -1 && dropsRemain(bot);
+        boolean leftBehind = bot.getInventory().getEmptySlot() == -1 && dropsRemain(bot, filter);
         if (leftBehind) {
             NavigationArtifactService.notifyPlayer(server, recipient,
                     "§a" + DeathRetrievalPolicy.result(botAlias, picked) + "§r");
@@ -384,11 +401,46 @@ public final class DeathRetrievalService {
         return off == null ? null : death.add(off.dx(), off.dy(), off.dz());
     }
 
-    /** Item entities still within the sweep radius of the bot. Server thread. */
-    private static boolean dropsRemain(ServerPlayerEntity bot) {
+    /** This trip's drops (tagged ones, or any when untagged) still within the sweep radius. Server thread. */
+    private static boolean dropsRemain(ServerPlayerEntity bot, Set<UUID> filter) {
         double r = DeathRetrievalPolicy.SWEEP_RADIUS;
         return !bot.getEntityWorld().getEntitiesByClass(net.minecraft.entity.ItemEntity.class,
-                bot.getBoundingBox().expand(r, r, r), e -> !e.isRemoved()).isEmpty();
+                bot.getBoundingBox().expand(r, r, r),
+                e -> !e.isRemoved() && DeathDropFilterPolicy.allowed(filter, e.getUuid())).isEmpty();
+    }
+
+    /** Tagged drops no longer in the world (picked up, merged or despawned). Server thread. */
+    private static int taggedGone(ServerPlayerEntity bot, Set<UUID> filter) {
+        if (filter == null || !(bot.getEntityWorld() instanceof ServerWorld world)) return 0;
+        int gone = 0;
+        for (UUID id : filter) {
+            net.minecraft.entity.Entity e = world.getEntity(id);
+            if (e == null || e.isRemoved()) gone++;
+        }
+        return gone;
+    }
+
+    /**
+     * The item entities that dropped at the death this trip is for, or null (sweep everything) when
+     * the action names no death, the record is gone, has no tags, or is a later death elsewhere.
+     * Server thread.
+     */
+    private static Set<UUID> deathDropFilter(MinecraftServer server, ServerPlayerEntity bot, BlockPos stand,
+                                             NavigationArtifactService.PostArrivalAction action) {
+        Optional<String> who = DeathRetrievalPolicy.parseWho(action.type());
+        if (who.isEmpty()) return null;
+        BotDeathRecordService.DeathRecord rec = DeathRetrievalPolicy.ME.equals(who.get())
+                ? BotDeathRecordService.getPlayerRecord(server, action.ownerUuid())
+                : BotDeathRecordService.getBotRecord(server, who.get());
+        if (rec == null) return null;
+        String dim = bot.getEntityWorld().getRegistryKey().getValue().toString();
+        if (!dim.equals(rec.dimension())
+                || !DeathDropFilterPolicy.deathNearStand(rec.x() - stand.getX(), rec.y() - stand.getY(), rec.z() - stand.getZ())) {
+            LOGGER.info("[Retrieve] {}: {}'s last death at {} is not this trip's, sweeping everything",
+                    bot.getName().getString(), who.get(), rec.pos().toShortString());
+            return null;
+        }
+        return DeathDropFilterPolicy.toFilter(rec.dropUuids());
     }
 
     /** Total item count in the bot's inventory (all slots). Server thread. */
