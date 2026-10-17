@@ -3,6 +3,8 @@ package net.wcfcarolina13.GameAI.services;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.DoorBlock;
+import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -15,6 +17,7 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.shape.VoxelShape;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -32,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Tracks stagnation during RETURNING_BASE mode and triggers flare signals when stuck.
@@ -1062,15 +1066,25 @@ public final class ReturnBaseStuckService {
         // NextBot-inspired: Get recent failed directions to avoid
         java.util.Deque<int[]> failedDirs = FAILED_NUDGE_DIRS.computeIfAbsent(botId, k -> new java.util.LinkedList<>());
 
+        boolean bestIsDrop = false;
         for (int[] off : offsets) {
-            BlockPos candidate = origin.add(off[0], 0, off[1]);
-            if (!isPassable(world, candidate)) {
-                continue;
+            BlockPos sameY = origin.add(off[0], 0, off[1]);
+            BlockPos candidate = sameY;
+            boolean drop = false;
+            if (!isPassable(world, sameY)) {
+                // Second pass (1.1.262): on a 1-high ledge every same-Y cell lacks footing,
+                // so try the cell one block down, gated by StuckCellPolicy.dropOneAllowed.
+                BlockPos lower = sameY.down();
+                if (!isDropOneLanding(world, lower)) {
+                    continue;
+                }
+                candidate = lower;
+                drop = true;
             }
-            
+
             // CRITICAL: Check if there's actually a clear path to this tile (not just the tile itself)
-            // This prevents nudging into walls/cliffs
-            if (!isPathClearForNudge(world, origin, candidate)) {
+            // This prevents nudging into walls/cliffs. A drop crosses the same-Y cell first.
+            if (!isPathClearForNudge(world, origin, sameY)) {
                 LOGGER.debug("Quick-nudge: {} blocked by obstacle", candidate.toShortString());
                 continue;
             }
@@ -1131,12 +1145,15 @@ public final class ReturnBaseStuckService {
             }
 
             // Lower is better. Combine all penalties.
+            // A drop is a little worse than a level step: prefer level ground on ties.
+            double dropPenalty = drop ? 0.5 : 0.0;
             double score = distToBase + (moveCost * 0.25) - (openNeighbors * 0.45) 
-                         + stuckPenalty + failedPenalty + explorePenalty;
+                         + stuckPenalty + failedPenalty + explorePenalty + dropPenalty;
             if (score < bestScore) {
                 bestScore = score;
                 best = candidate;
                 bestOffset = off;
+                bestIsDrop = drop;
             }
         }
 
@@ -1190,9 +1207,35 @@ public final class ReturnBaseStuckService {
             return false;
         }
 
+        if (bestIsDrop) {
+            LOGGER.info("ReturnBaseStuck: quick-nudge drop-1 toward {} to {}",
+                    bestOffset[0] + "," + bestOffset[1], best.toShortString());
+        }
         LOGGER.info("ReturnBaseStuck: quick-nudge to {} (stagnant={}, score={}, failedMem={})",
                 best.toShortString(), stagnant, String.format("%.2f", bestScore), failedDirs.size());
         return true;
+    }
+
+    /**
+     * Landing cell for a quick-nudge drop of exactly one block ({@code landing} = feet cell
+     * after the drop). The head cell is the same-Y cell the bot crosses, and the row above
+     * it is the bot's upper body during the crossing. See {@link StuckCellPolicy#dropOneAllowed}.
+     */
+    private static boolean isDropOneLanding(ServerWorld world, BlockPos landing) {
+        BlockPos head = landing.up();
+        BlockPos transit = head.up();
+        BlockPos floor = landing.down();
+        BlockState landingState = world.getBlockState(landing);
+        BlockState headState = world.getBlockState(head);
+        BlockState floorState = world.getBlockState(floor);
+        return StuckCellPolicy.dropOneAllowed(
+                WalkablePartialBlocks.isPathable(landingState, world, landing),
+                WalkablePartialBlocks.isPathable(headState, world, head),
+                WalkablePartialBlocks.isPathable(world.getBlockState(transit), world, transit),
+                !floorState.getCollisionShape(world, floor).isEmpty(),
+                BotHazardService.isDeadlyBlock(floorState),
+                BotHazardService.isDeadlyBlock(landingState) || BotHazardService.isDeadlyBlock(headState),
+                !world.getFluidState(landing).isEmpty() || !world.getFluidState(head).isEmpty());
     }
 
     private static boolean isWaterLikeContext(ServerPlayerEntity bot, ServerWorld world) {
@@ -1594,10 +1637,10 @@ public final class ReturnBaseStuckService {
             current = current.add(dx, 0, dz);
             BlockState at = world.getBlockState(current);
             BlockState above = world.getBlockState(current.up());
-            if (!at.isAir() && !at.isReplaceable() && at.isSolidBlock(world, current)) {
+            if (isBlockBlocking(world, current, at, false)) {
                 return false;
             }
-            if (!above.isAir() && !above.isReplaceable() && above.isSolidBlock(world, current.up())) {
+            if (isBlockBlocking(world, current.up(), above, true)) {
                 return false;
             }
         }
@@ -1605,15 +1648,56 @@ public final class ReturnBaseStuckService {
     }
     
     /**
-     * Helper to check if a block is truly blocking (solid and not passable).
-     * Matches the logic in isPathClear().
+     * Does this cell stop the bot crossing it horizontally? Collision-shape based
+     * ({@link StuckCellPolicy#blocksHorizontalCell}): at feet anything taller than the step
+     * height blocks (fences, walls, glass, panes, leaves, stairs), at head anything
+     * thicker than a thin partial blocks (a slab at head height). Doors and trapdoors the
+     * bot can pass follow the pathfinder rule. Before 1.1.262 this was
+     * {@code isSolidBlock}, which let fences, walls, slabs, stairs, glass and panes through.
      */
-    private static boolean isBlockBlocking(ServerWorld world, BlockPos pos, BlockState state) {
-        // Air and replaceable blocks (grass, flowers, etc.) are passable
-        if (state.isAir() || state.isReplaceable()) {
+    private static boolean isBlockBlocking(ServerWorld world, BlockPos pos, BlockState state, boolean isHead) {
+        if (state.isAir()) {
             return false;
         }
-        return state.isSolidBlock(world, pos);
+        VoxelShape shape = state.getCollisionShape(world, pos);
+        boolean empty = shape.isEmpty();
+        double maxY = empty ? 0.0D : shape.getMax(Direction.Axis.Y);
+        boolean blocks = StuckCellPolicy.blocksHorizontalCell(isPassableDoorOrTrapdoor(world, pos, state), empty, maxY, isHead);
+        // isSolidBlock is only evaluated on the blocked branch, to keep the common path cheap.
+        if (blocks && (state.isReplaceable() || !state.isSolidBlock(world, pos))) {
+            noteCollisionShapeReject(isHead ? "head" : "feet", state, pos);
+        }
+        return blocks;
+    }
+
+    /** Mirrors the unified pathfinder: wooden doors and trapdoors pass, iron ones only when open, locked ones never. */
+    private static boolean isPassableDoorOrTrapdoor(ServerWorld world, BlockPos pos, BlockState state) {
+        if (state.getBlock() instanceof DoorBlock) {
+            if (LockableBlockService.isLocked(world, pos)) {
+                return false;
+            }
+            return !state.isOf(Blocks.IRON_DOOR) || state.get(DoorBlock.OPEN);
+        }
+        if (state.getBlock() instanceof TrapdoorBlock) {
+            if (LockableBlockService.isLocked(world, pos)) {
+                return false;
+            }
+            return !state.isOf(Blocks.IRON_TRAPDOOR) || state.getCollisionShape(world, pos).isEmpty();
+        }
+        return false;
+    }
+
+    private static final AtomicLong LAST_COLLISION_REJECT_LOG_MS = new AtomicLong(0L);
+
+    /** Throttled to one INFO line a second: a cell the old isSolidBlock test would have passed. */
+    private static void noteCollisionShapeReject(String row, BlockState state, BlockPos pos) {
+        long now = System.currentTimeMillis();
+        long last = LAST_COLLISION_REJECT_LOG_MS.get();
+        if (now - last < 1000L || !LAST_COLLISION_REJECT_LOG_MS.compareAndSet(last, now)) {
+            return;
+        }
+        LOGGER.info("Stuck escape: {} blocked by {} at {} (collision shape)",
+                row, state.getBlock().getName().getString(), pos.toShortString());
     }
     
     /**
@@ -1630,7 +1714,7 @@ public final class ReturnBaseStuckService {
         // Check the candidate position itself (lower body and head height)
         BlockState candAt = world.getBlockState(candidate);
         BlockState candAbove = world.getBlockState(candidate.up());
-        if (isBlockBlocking(world, candidate, candAt) || isBlockBlocking(world, candidate.up(), candAbove)) {
+        if (isBlockBlocking(world, candidate, candAt, false) || isBlockBlocking(world, candidate.up(), candAbove, true)) {
             LOGGER.debug("[ReturnStuck] Dir ({},{}) blocked at candidate: {} at={} above={}", 
                 dx, dz, candidate, candAt.getBlock().getName().getString(), candAbove.getBlock().getName().getString());
             return false;
@@ -1643,13 +1727,13 @@ public final class ReturnBaseStuckService {
             BlockPos xAdj = origin.add(dx, 0, 0);
             BlockState xAt = world.getBlockState(xAdj);
             BlockState xAbove = world.getBlockState(xAdj.up());
-            boolean xBlocked = isBlockBlocking(world, xAdj, xAt) || isBlockBlocking(world, xAdj.up(), xAbove);
+            boolean xBlocked = isBlockBlocking(world, xAdj, xAt, false) || isBlockBlocking(world, xAdj.up(), xAbove, true);
             
             // Check Z-adjacent position
             BlockPos zAdj = origin.add(0, 0, dz);
             BlockState zAt = world.getBlockState(zAdj);
             BlockState zAbove = world.getBlockState(zAdj.up());
-            boolean zBlocked = isBlockBlocking(world, zAdj, zAt) || isBlockBlocking(world, zAdj.up(), zAbove);
+            boolean zBlocked = isBlockBlocking(world, zAdj, zAt, false) || isBlockBlocking(world, zAdj.up(), zAbove, true);
             
             // For diagonal movement, need at least one clear cardinal path
             // (can't cut through a corner if BOTH cardinals are blocked)
@@ -1968,12 +2052,16 @@ public final class ReturnBaseStuckService {
         //   - air, tall grass, water, flowers, saplings → empty collision → pass
         //   - OPEN doors, OPEN fence gates → empty collision → pass
         //   - carpets, pressure plates, rails, tripwire, lily pads → whitelisted → pass
-        //   - bottom slabs, stairs, layered snow → whitelisted → pass
+        //   - bottom slabs, stairs, layered snow → whitelisted → pass (FEET cell only,
+        //     the head cell must be pathable)
         //   - closed doors, closed fence gates, walls, full cubes → non-empty, non-whitelisted → reject
         //
         // See logs 16:27:45 (pressure plate bug) and 18:46:31 (open fence gate rejection).
         if (!BotRescueService.isThinWalkablePartialBlock(at, world, pos)) return false;
-        if (!BotRescueService.isThinWalkablePartialBlock(above, world, abovePos)) return false;
+        // Head cell: pathable only (empty collision or a thin partial). A slab or stair at
+        // head height is standable as a FEET cell but hits the head, so isStandable is
+        // wrong here (1.1.262).
+        if (!WalkablePartialBlocks.isPathable(above, world, abovePos)) return false;
         // Footing: any block with a non-empty collision shape supports standing.
         // The previous check used isSolidBlock(), which returns FALSE for stairs,
         // slabs, fences, fence gates and other partial-cube blocks — even though
@@ -2089,8 +2177,12 @@ public final class ReturnBaseStuckService {
                 BlockPos standPos = placePos.up();
                 BlockState standState = world.getBlockState(standPos);
                 BlockState standHead = world.getBlockState(standPos.up());
-                if (!(standState.isAir() || !standState.blocksMovement())
-                        || !(standHead.isAir() || !standHead.blocksMovement())) continue;
+                // Collision shape, not blocksMovement(): an open gate is clear, and the
+                // hazard check keeps cobweb (empty collision) from counting as clear.
+                if (isBlockBlocking(world, standPos, standState, false)
+                        || isBlockBlocking(world, standPos.up(), standHead, true)
+                        || BotHazardService.isDeadlyBlock(standState)
+                        || BotHazardService.isDeadlyBlock(standHead)) continue;
                 // Must make progress toward base
                 double newDist = horizontalDistSq(standPos, baseTarget);
                 if (newDist >= originDist) continue;
@@ -2178,8 +2270,8 @@ public final class ReturnBaseStuckService {
         int open = 0;
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos candidate = center.offset(dir);
-            if (!isBlockBlocking(world, candidate, world.getBlockState(candidate))
-                    && !isBlockBlocking(world, candidate.up(), world.getBlockState(candidate.up()))) {
+            if (!isBlockBlocking(world, candidate, world.getBlockState(candidate), false)
+                    && !isBlockBlocking(world, candidate.up(), world.getBlockState(candidate.up()), true)) {
                 open++;
             }
         }

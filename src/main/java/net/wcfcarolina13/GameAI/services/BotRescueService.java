@@ -7,6 +7,7 @@ import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -344,9 +345,12 @@ public final class BotRescueService {
             double botX = bot.getX(), botZ = bot.getZ();
             for (Direction dir : Direction.Type.HORIZONTAL) {
                 BlockPos adjacent = feet.offset(dir);
-                if (!world.getBlockState(adjacent).blocksMovement()) {
+                // Feet OR head row: vanilla isInsideWall tests the eye-level box, so a
+                // head-level block beside the bot clips it too (1.1.262).
+                if (!isWallBeside(world, adjacent)) {
                     continue;
                 }
+                boolean headLevelOnly = isWallBesideHeadOnly(world, adjacent);
                 double nudgeX = -dir.getOffsetX() * 0.4;
                 double nudgeZ = -dir.getOffsetZ() * 0.4;
                 if (!isNudgeDestinationSafe(world, botX + nudgeX, bot.getY(), botZ + nudgeZ)) {
@@ -356,8 +360,8 @@ public final class BotRescueService {
                 }
                 bot.setPosition(botX + nudgeX, bot.getY(), botZ + nudgeZ);
                 bot.velocityDirty = true;
-                LOGGER.info("Bot {} nudged away from wall {} to escape collision clip",
-                        bot.getName().getString(), dir.asString());
+                LOGGER.info("Bot {} nudged away from wall {} to escape collision clip{}",
+                        bot.getName().getString(), dir.asString(), headLevelOnly ? " (head-level)" : "");
                 return true;
             }
             // No adjacent solid block found OR every nudge destination was a wall —
@@ -464,6 +468,12 @@ public final class BotRescueService {
             // Found an escape direction - mine blocks that way
             BlockPos targetPos = feet.offset(escapeDirection);
             BlockState targetState = world.getBlockState(targetPos);
+
+            // The 1-out cell is already enterable (short grass, snow layer, carpet):
+            // push toward it instead of mining it (1.1.262).
+            if (isSideCellEnterable(world, targetPos)) {
+                return attemptEscapeMovement(bot, world, feet, head);
+            }
 
             if (!targetState.isAir() && !targetState.isOf(Blocks.BEDROCK) && targetState.blocksMovement()) {
                 if (targetState.getBlock() instanceof DoorBlock) {
@@ -778,7 +788,7 @@ public final class BotRescueService {
             // corridor would have us drill the bot into the opposing wall.
             for (Direction dir : Direction.Type.HORIZONTAL) {
                 BlockPos adjacent = feet.offset(dir);
-                if (!world.getBlockState(adjacent).blocksMovement()) {
+                if (!isWallBeside(world, adjacent)) {
                     continue;
                 }
                 double nudgeX = -dir.getOffsetX() * 0.4;
@@ -854,16 +864,21 @@ public final class BotRescueService {
                 BlockPos checkFeet = feet.offset(dir, distance);
                 BlockPos checkHead = checkFeet.up();
 
-                BlockState feetState = world.getBlockState(checkFeet);
-                BlockState headState = world.getBlockState(checkHead);
+                // A hazard (lava, fire, cobweb, powder snow) ends this direction: the
+                // escape would have to cross it.
+                if (BotHazardService.isDeadlyBlock(world.getBlockState(checkFeet))
+                        || BotHazardService.isDeadlyBlock(world.getBlockState(checkHead))) {
+                    break;
+                }
 
-                // Found air space the bot can stand in
-                if (feetState.isAir() && headState.isAir()) {
+                // Found space the bot can stand in: air, or a side-enterable partial or
+                // plant (short grass, leaf litter, thin snow, carpet) since 1.1.262.
+                if (isSideCellEnterable(world, checkFeet)) {
                     if (distance < shortestDistance) {
                         shortestDistance = distance;
                         bestDir = dir;
                     }
-                    break; // Found air in this direction, check next direction
+                    break; // Found space in this direction, check next direction
                 }
             }
         }
@@ -894,7 +909,56 @@ public final class BotRescueService {
         boolean headClear = headState.isAir()
                 || isClimbableNonBlocking(headState)
                 || headState.getCollisionShape(world, head).isEmpty();
-        return feetClear && headClear;
+        // Cobweb, fire and powder snow have empty collision: only the hazard check stops
+        // a nudge into them.
+        boolean hazard = BotHazardService.isDeadlyBlock(feetState) || BotHazardService.isDeadlyBlock(headState);
+        return feetClear && headClear && !hazard;
+    }
+
+    /** Cell the bot can occupy from the side: pathable partial or climbable. */
+    private static boolean isCellPathableOrClimbable(ServerWorld world, BlockPos pos, BlockState state) {
+        return isClimbableNonBlocking(state) || WalkablePartialBlocks.isPathable(state, world, pos);
+    }
+
+    private static boolean isNonWaterFluid(BlockState state) {
+        var fluid = state.getFluidState();
+        return !fluid.isEmpty() && !fluid.isIn(FluidTags.WATER);
+    }
+
+    /** Side cell (feet at {@code sideFeet}) the rescue may push the bot into. See {@link StuckCellPolicy#sideEnterable}. */
+    private static boolean isSideCellEnterable(ServerWorld world, BlockPos sideFeet) {
+        BlockPos sideHead = sideFeet.up();
+        BlockState feetState = world.getBlockState(sideFeet);
+        BlockState headState = world.getBlockState(sideHead);
+        return StuckCellPolicy.sideEnterable(
+                isCellPathableOrClimbable(world, sideFeet, feetState),
+                isCellPathableOrClimbable(world, sideHead, headState),
+                BotHazardService.isDeadlyBlock(feetState),
+                BotHazardService.isDeadlyBlock(headState),
+                isNonWaterFluid(feetState) || isNonWaterFluid(headState));
+    }
+
+    /** Feet-or-head wall in the column beside the bot. See {@link StuckCellPolicy#wallAt}. */
+    private static boolean isWallBeside(ServerWorld world, BlockPos sideFeet) {
+        BlockPos sideHead = sideFeet.up();
+        BlockState feetState = world.getBlockState(sideFeet);
+        BlockState headState = world.getBlockState(sideHead);
+        return StuckCellPolicy.wallAt(
+                feetState.getCollisionShape(world, sideFeet).isEmpty(),
+                headState.getCollisionShape(world, sideHead).isEmpty(),
+                isCellPathableOrClimbable(world, sideFeet, feetState),
+                isCellPathableOrClimbable(world, sideHead, headState));
+    }
+
+    private static boolean isWallBesideHeadOnly(ServerWorld world, BlockPos sideFeet) {
+        BlockPos sideHead = sideFeet.up();
+        BlockState feetState = world.getBlockState(sideFeet);
+        BlockState headState = world.getBlockState(sideHead);
+        return StuckCellPolicy.wallHeadOnly(
+                feetState.getCollisionShape(world, sideFeet).isEmpty(),
+                headState.getCollisionShape(world, sideHead).isEmpty(),
+                isCellPathableOrClimbable(world, sideFeet, feetState),
+                isCellPathableOrClimbable(world, sideHead, headState));
     }
 
     private static boolean attemptEscapeMovement(ServerPlayerEntity bot, ServerWorld world, BlockPos feet, BlockPos head) {
@@ -913,9 +977,16 @@ public final class BotRescueService {
             BlockState feetState = world.getBlockState(checkFeet);
             BlockState headState = world.getBlockState(checkHead);
 
-            // Found adjacent clear space
-            if ((feetState.isAir() || isClimbableNonBlocking(feetState))
-                    && (headState.isAir() || isClimbableNonBlocking(headState))) {
+            // Found adjacent clear space. Sideways: any side-enterable cell (air, short
+            // grass, leaf litter, thin snow, carpet, climbable) with no hazard, so a plant
+            // beside the bot no longer loses to the UP hop. UP/DOWN keep the air-or-
+            // climbable test for the encased case.
+            boolean horizontal = dir.getAxis().isHorizontal();
+            boolean clear = horizontal
+                    ? isSideCellEnterable(world, checkFeet)
+                    : (feetState.isAir() || isClimbableNonBlocking(feetState))
+                            && (headState.isAir() || isClimbableNonBlocking(headState));
+            if (clear) {
                 Vec3d targetPos = Vec3d.ofCenter(checkFeet);
                 Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
                 Vec3d direction = targetPos.subtract(currentPos).normalize();
@@ -925,7 +996,12 @@ public final class BotRescueService {
                 bot.velocityDirty = true;
                 LAST_ESCAPE_NUDGE_MS.put(bot.getUuid(), nowMs);
 
-                LOGGER.info("Bot {} attempting escape movement toward {}", bot.getName().getString(), dir);
+                if (horizontal && (!feetState.isAir() || !headState.isAir())) {
+                    LOGGER.info("Bot {} escape side cell {} enterable (partial or plant), moving there instead of up",
+                            bot.getName().getString(), checkFeet.toShortString());
+                } else {
+                    LOGGER.info("Bot {} attempting escape movement toward {}", bot.getName().getString(), dir);
+                }
                 return true;
             }
         }
