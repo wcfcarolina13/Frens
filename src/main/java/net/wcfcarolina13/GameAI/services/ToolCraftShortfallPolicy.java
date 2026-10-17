@@ -112,6 +112,21 @@ public final class ToolCraftShortfallPolicy {
         return materialsLine.trim() + " I'd also need a crafting table nearby.";
     }
 
+    /** The answer when the bot holds a table it could not place and nothing else is short. */
+    public static final String STATION_UNPLACEABLE_LINE = "I have a crafting table but can't place it here.";
+
+    /**
+     * The one line an explicit tool craft sends when the bot holds a crafting table but could not
+     * place it: the materials line with that added, or that alone when the materials line is
+     * empty. Never says the bot needs a table it already holds.
+     */
+    public static String withStationUnplaceable(String materialsLine) {
+        if (materialsLine == null || materialsLine.isBlank()) {
+            return STATION_UNPLACEABLE_LINE;
+        }
+        return materialsLine.trim() + " " + STATION_UNPLACEABLE_LINE;
+    }
+
     private static String noun(String item, int count) {
         String name = pretty(item);
         if (count <= 1 || MASS_NOUNS.contains(name) || name.endsWith("s")) {

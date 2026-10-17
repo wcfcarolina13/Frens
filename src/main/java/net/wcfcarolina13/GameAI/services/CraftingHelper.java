@@ -117,6 +117,10 @@ public final class CraftingHelper {
     // Cooldown after crafting a new table — prevents spam-crafting when placement/reach keeps failing.
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CRAFT_TABLE_CRAFT_COOLDOWN_MS = 60_000L;
+    // Deadline after a table craft that failed for want of planks (CraftingStationPolicy.mayTryTableCraft,
+    // TABLE_NO_PLANKS_RETRY_MS): until then a call without the planks skips the craft and its chest
+    // pulls, which a pull that found nothing does not pause (CraftChestPullPolicy.shouldPause).
+    private static final Map<UUID, Long> TABLE_CRAFT_NO_PLANKS_UNTIL = new java.util.concurrent.ConcurrentHashMap<>();
 
     // Chest pulls (withdrawFromNearbyChests). A pull the owner's decision ended, or that found the
     // owner away, and that got nothing and holds nothing pauses that material for the bot
@@ -724,6 +728,13 @@ public final class CraftingHelper {
     }
 
     /** Bundle-aware plank count. Pair every consume with {@link #reachForItem} first. */
+    /** Planks held plus what held logs would make (4 each), as a table craft would convert them. */
+    private static int plankEquivalentHeld(ServerPlayerEntity bot) {
+        int logs = InventoryIterator.count(bot,
+                s -> s != null && !s.isEmpty() && s.isIn(net.minecraft.registry.tag.ItemTags.LOGS));
+        return CraftingStationPolicy.plankEquivalent(countPlanks(bot), logs);
+    }
+
     private static int countPlanks(ServerPlayerEntity bot) {
         return InventoryIterator.count(bot, CraftingHelper::isPlank);
     }
@@ -1390,9 +1401,7 @@ public final class CraftingHelper {
     /** Head material in the bot's own inventory; for wood, planks plus what its logs would make. */
     private static int headMaterialOnHand(ServerPlayerEntity bot, ToolMaterial mat) {
         if (mat.headItem().equals(Items.OAK_PLANKS)) {
-            int logs = InventoryIterator.count(bot,
-                    s -> s != null && !s.isEmpty() && s.isIn(net.minecraft.registry.tag.ItemTags.LOGS));
-            return CraftingStationPolicy.plankEquivalent(countPlanks(bot), logs);
+            return plankEquivalentHeld(bot);
         }
         return countItem(bot, mat.headItem());
     }
@@ -1421,9 +1430,12 @@ public final class CraftingHelper {
             if (shortfall == null) {
                 sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
             } else if (shortfall.message == null) {
-                // No chest pull without a table, so this is the inventory alone.
-                shortfall.message = ToolCraftShortfallPolicy.withStationNeeded(
-                        toolShortfallLine(bot, kind, mat, amount, headCount, stickCount));
+                // No chest pull without a table, so this is the inventory alone. A held table the
+                // station could not place is named as such, never as a table the bot needs.
+                String line = toolShortfallLine(bot, kind, mat, amount, headCount, stickCount);
+                shortfall.message = findItemInInventory(bot, Items.CRAFTING_TABLE) != -1
+                        ? ToolCraftShortfallPolicy.withStationUnplaceable(line)
+                        : ToolCraftShortfallPolicy.withStationNeeded(line);
             }
             return STATION_UNAVAILABLE;
         }
@@ -1793,7 +1805,7 @@ public final class CraftingHelper {
             PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);
             if (prepared == null) {
                 warnStationStep(onServerThread, "Failed to place crafting table from inventory near {}", botPos.toShortString());
-                tellStationFailure(bot, source, "I couldn't place a crafting table here.");
+                if (!quiet) tellStationFailure(bot, source, "I couldn't place a crafting table here.");
                 declineIfTickSide(bot, onServerThread, "no-placement-cell");
                 return false;
             }
@@ -1806,7 +1818,7 @@ public final class CraftingHelper {
             if (!placed) {
                 warnStationStep(onServerThread, "Failed to place crafting table from inventory near {} detail={}",
                         bot.getBlockPos().toShortString(), placeResult.reason());
-                tellStationFailure(bot, source, "I couldn't place a crafting table here.");
+                if (!quiet) tellStationFailure(bot, source, "I couldn't place a crafting table here.");
                 declineIfTickSide(bot, onServerThread, placeFailureReason(placeResult));
                 return false;
             }
@@ -1859,6 +1871,15 @@ public final class CraftingHelper {
             declineIfTickSide(bot, onServerThread, skippedTableOutOfReach ? "far-table" : "no-table");
             return false;
         }
+        // A craft that just failed for want of planks is not retried (nor its chest pulls) until
+        // TABLE_NO_PLANKS_RETRY_MS passes, unless the bot now holds the planks.
+        Long noPlanksUntil = TABLE_CRAFT_NO_PLANKS_UNTIL.get(bot.getUuid());
+        if (!CraftingStationPolicy.mayTryTableCraft(noPlanksUntil, System.currentTimeMillis(), plankEquivalentHeld(bot))) {
+            logStationStep(onServerThread, "Skipping crafting table craft (no planks, retry in {}ms)",
+                    noPlanksUntil - System.currentTimeMillis());
+            declineIfTickSide(bot, onServerThread, skippedTableOutOfReach ? "far-table" : "no-table");
+            return false;
+        }
         LOGGER.info("No crafting table found; attempting to craft one.");
         ensurePlanksAvailable(bot, source, 4);
         boolean crafted = craftCraftingTable(source, bot, source.getPlayer(), 1, quiet);
@@ -1866,6 +1887,10 @@ public final class CraftingHelper {
             // Only a table actually made arms the no-spam cooldown: a craft that failed for want
             // of planks must not stop a retry once the planks are there.
             CRAFT_TABLE_CRAFT_COOLDOWN.put(bot.getUuid(), System.currentTimeMillis());
+            TABLE_CRAFT_NO_PLANKS_UNTIL.remove(bot.getUuid());
+        } else if (plankEquivalentHeld(bot) < CraftingStationPolicy.TABLE_PLANKS) {
+            TABLE_CRAFT_NO_PLANKS_UNTIL.put(bot.getUuid(),
+                    System.currentTimeMillis() + CraftingStationPolicy.TABLE_NO_PLANKS_RETRY_MS);
         }
         if (crafted && findItemInInventory(bot, Items.CRAFTING_TABLE) != -1) {
             PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);

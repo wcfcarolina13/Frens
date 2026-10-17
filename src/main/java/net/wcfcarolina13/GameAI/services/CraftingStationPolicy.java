@@ -34,6 +34,10 @@ public final class CraftingStationPolicy {
     public static final int TICK_SCAN_VERTICAL = 5;
     /** At most one "no table in reach, not walking" line per bot this often. */
     public static final long DECLINE_LOG_INTERVAL_MS = 30_000L;
+    /** How long a table craft that failed for want of planks holds back the next try (and its chest pulls). */
+    public static final long TABLE_NO_PLANKS_RETRY_MS = 15_000L;
+    /** Planks one crafting table takes. */
+    public static final int TABLE_PLANKS = 4;
 
     private CraftingStationPolicy() {
     }
@@ -124,6 +128,16 @@ public final class CraftingStationPolicy {
      */
     public static boolean shouldLogDecline(long nowMs, Long lastLogMs) {
         return lastLogMs == null || nowMs - lastLogMs >= DECLINE_LOG_INTERVAL_MS;
+    }
+
+    /**
+     * Whether ensureCraftingStation may try to craft a table now. A bot holding the planks for one
+     * ({@code planksHeld} at least {@link #TABLE_PLANKS}) always may. Otherwise it waits out the
+     * window a craft that failed for want of planks armed ({@code noPlanksUntilMs}, null when none),
+     * because each try pulls from nearby chests and an every-second caller would pull every second.
+     */
+    public static boolean mayTryTableCraft(Long noPlanksUntilMs, long nowMs, int planksHeld) {
+        return planksHeld >= TABLE_PLANKS || noPlanksUntilMs == null || nowMs >= noPlanksUntilMs;
     }
 
     /**

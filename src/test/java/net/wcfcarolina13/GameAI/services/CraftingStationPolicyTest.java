@@ -171,6 +171,21 @@ class CraftingStationPolicyTest {
         assertTrue(CraftingStationPolicy.shouldLogDecline(last + 90_000L, last));
     }
 
+    @Test
+    void tableCraftWaitsOutTheNoPlanksWindowUnlessThePlanksAreHeld() {
+        assertEquals(15_000L, CraftingStationPolicy.TABLE_NO_PLANKS_RETRY_MS);
+        long now = 1_000_000L;
+        long until = now + CraftingStationPolicy.TABLE_NO_PLANKS_RETRY_MS;
+        assertTrue(CraftingStationPolicy.mayTryTableCraft(null, now, 0), "never failed: try");
+        assertFalse(CraftingStationPolicy.mayTryTableCraft(until, now, 0), "just failed, still no planks");
+        assertFalse(CraftingStationPolicy.mayTryTableCraft(until, now + 14_999L, 3), "three planks are not a table");
+        assertTrue(CraftingStationPolicy.mayTryTableCraft(until, until, 0), "the window has passed");
+        assertTrue(CraftingStationPolicy.mayTryTableCraft(until, until + 60_000L, 0));
+        // 1.1.266 C2 field check: given 7 planks, /bot craft crafting_table crafts at once.
+        assertTrue(CraftingStationPolicy.mayTryTableCraft(until, now, 7), "held planks bypass the window");
+        assertTrue(CraftingStationPolicy.mayTryTableCraft(until, now, 4), "exactly one table's worth");
+    }
+
     // ── source pins ──────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -206,10 +221,28 @@ class CraftingStationPolicyTest {
     }
 
     @Test
+    void aCraftThatFoundNoPlanksHoldsBackTheNextTryAndItsChestPulls() throws IOException {
+        // M1 (1.1.267): a no-planks call pulled from chests on every station call.
+        String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
+        int check = body.indexOf("CraftingStationPolicy.mayTryTableCraft(");
+        int pull = body.indexOf("ensurePlanksAvailable(");
+        int craft = body.indexOf("craftCraftingTable(");
+        int arm = body.indexOf("TABLE_CRAFT_NO_PLANKS_UNTIL.put(");
+        assertTrue(check >= 0 && check < pull && pull < craft, "the window is checked before the chest pull");
+        assertTrue(arm > craft, "the window is armed after the failed craft");
+        assertEquals(1, count(body, "TABLE_CRAFT_NO_PLANKS_UNTIL.put("));
+        assertGuarded(body, "TABLE_CRAFT_NO_PLANKS_UNTIL.put(", "< CraftingStationPolicy.TABLE_PLANKS");
+        String skip = blockAfter(body, check);
+        assertTrue(skip.contains("logStationStep(") && skip.contains("declineIfTickSide("),
+                "the skip logs and declines like the cooldown skip");
+    }
+
+    @Test
     void aQuietStationLeavesTheTableLinesToItsCaller() throws IOException {
         // Field bug C: the tool craft's shortfall line names the table, so the station stays quiet.
         String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
-        assertGuarded(body, "tellStationFailure(bot, source, \"I crafted a crafting table", "if (!quiet)");
+        assertGuarded(body, "tellStationFailure(", "if (!quiet)");
+        assertEquals(4, count(body, "tellStationFailure("), "both place-from-inventory and both crafted-table lines");
         assertGuarded(body, "sendCraftTableNeededOnce(", "if (!quiet)");
         String helper = craftingHelperSource();
         assertTrue(helper.contains("public static boolean ensureCraftingStation(ServerPlayerEntity bot, ServerCommandSource source) {\n"

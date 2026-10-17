@@ -98,4 +98,25 @@ class ToolCraftShortfallPolicyTest {
         assertEquals("I need a crafting table placed nearby to craft that.",
                 ToolCraftShortfallPolicy.withStationNeeded("   "));
     }
+
+    @Test
+    void heldButUnplaceableTableIsNamedAsHeldNotNeeded() {
+        List<Missing> reqs = ToolCraftShortfallPolicy.requirements("cobblestone", 3, 2, 1, 0, 2, 0, false);
+        String line = ToolCraftShortfallPolicy.message("stone axe", 1, reqs);
+        String out = ToolCraftShortfallPolicy.withStationUnplaceable(line);
+        assertEquals("I need 3 cobblestone and 2 sticks for a stone axe. I have 2 sticks."
+                + " I have a crafting table but can't place it here.", out);
+        assertFalse(out.contains("need a crafting table"), "never says it needs a table it holds");
+        assertFalse(out.contains("\u2014") || out.contains(";"), "public text: no em dashes or semicolons");
+    }
+
+    @Test
+    void heldButUnplaceableAloneWhenNothingElseIsShort() {
+        for (String empty : new String[] {"", null, "   "}) {
+            assertEquals("I have a crafting table but can't place it here.",
+                    ToolCraftShortfallPolicy.withStationUnplaceable(empty));
+        }
+        assertEquals("I need 2 sticks for a wooden axe. I have a crafting table but can't place it here.",
+                ToolCraftShortfallPolicy.withStationUnplaceable("  I need 2 sticks for a wooden axe. "));
+    }
 }
