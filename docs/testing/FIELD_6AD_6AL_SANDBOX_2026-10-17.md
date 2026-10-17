@@ -53,7 +53,7 @@ so zone-wand corners and tooltips were not testable.
 | 6ag-4 Questing hidden | PARTIAL | S2: no chooser, one line "Frens is in Admin mode: open the roster with [-] to bring in a companion." (11:18:55), roster opens, `/bot recruit enable` answered "Questing mode is turned off on this server." (11:20:45). Not tested: an existing Questing world still recruits (no Questing save). |
 | 6ag-5 Craft names | PASS | S2 11:23:28 "Crafted 1 Wooden Axe." |
 | 6ah-1 Climb out of a shallow open-sky hole by day | PASS | S1 Jake, sheltered overnight in his dig-down. At dawn 11:12:00: `broke cap of dig-down shelter`, `linger: allow — shallow open-sky hole by day, climbing out (depth=4 scaffold=10)`, ascent mode, `Reached surface with open sky after 3 steps` (11:12:01). He climbed out by ascent, not `pillar recovery`. |
-| 6ah-2 Night bunker registers and holds | PASS | S2 dusk: Dirk, Tabby, Sprout `dig-down cap placed … covers=true` (12:04:30-31). No `no_overhead_cover`. They held all night, then `breaking free from tactical shelter (daylight, tod=1003)` and `dig-down dawn exit` (12:07:43). Note: Crafty's cap was `place-rejected` twice inside the host base (12:04:30), so it climbed out and retried. |
+| 6ah-2 Night bunker registers and holds | PASS | S2 dusk: Dirk, Tabby, Sprout `dig-down cap placed … covers=true` (12:04:30-31). No `no_overhead_cover`. They held all night, then `breaking free from tactical shelter (daylight, tod=1003)` and `dig-down dawn exit` (12:07:43). Note: Crafty's cap was `place-rejected` twice inside the host base (12:04:30), so it climbed out and retried. That reason comes from vanilla `blockItem.place` not accepting the placement (`BotActions.java:1086`), not from the territory check. |
 | 6ah-3 Roster shows this world only | PASS | S1: "All your companions are already here", "Other worlds (6)", Create inactive for "Abby" and active for "Zelda". Abby came in with `inventory: []`. S2 (new world): "No companions in this world yet." No `roster world scope not ready`. Tooltip not checkable (no hover). |
 | 6ai-1 Fresh world: bot walks out of the Spawn base | **FAIL** | S2 Sprout, two trees planted inside the base: `protectedFail=10 protectReasons=spawn-base=10`, chat "The trees around spawn are protected, so I'm heading out to find others." once (11:51:59), no `Cannot mine`. But all 3 relocation walks to trees 68-114 blocks away ended `direct: deadline`, then "No valid trees nearby. Try moving closer or adjust radius." (11:52:26). It repeated on a rerun (11:53:40). Zero logs from outside the base. Bug D. |
 | 6ai-2 Admin toggle lets bots cut Spawn trees | **FAIL** | S2: World Settings set "Cut trees in the Spawn base: On" ("Bots may now cut trees in the Spawn base." 11:55:41). Sprout did break the Spawn logs (7 oak_log in inventory), but every log logged `miner refused … ('⚠️ Cannot mine: protected claim.')` after a full 60-tick break (11:56:05-08 …). Woodcut counted 4/4 refused per tree (`failedBaseCount=3`) and ended "I punched enough wood for an axe but couldn't craft one…". Table placement in the base was refused (expected, like dirt). Bug E. Non-admin half not testable. |
@@ -102,7 +102,8 @@ placed nearby to craft that." (11:21:20). The drop sweep counts stacks, not item
 on `/bot craft <item> <bot>` is parsed as the material argument (`material 'wood' in the item name overrides preference 'Nowood'`).
 
 **D. Relocation gives up before reaching distant trees (6ai-1).** Each relocation walk has a short deadline, so a 68-114 block trip
-ends after about 30 blocks, and three hops leave the bot short of trees with nothing in detect range.
+ends after about 30 blocks, and three hops leave the bot short of trees with nothing in detect range. Same map and symptom as
+finding #2 of `PLAYTHROUGH_1.1.234_SANDBOX.md` (2026-10-14), still open.
 ```
 [11:52:00] Woodcut relocation: broad sampled tree at -69, 74, -68 (dist=96) from 0, 73, 0
 [11:52:06] Woodcut relocation: walk to -69, 74, -68 failed: direct: deadline plan=p69
@@ -131,7 +132,8 @@ verification forbids, and the replan returns the same plan.
 ```
 
 **G. Tree claims are keyed on the base block (6al-1).** After the bottom log is cut, the same tree is detected with a higher base and
-can be claimed by a second bot.
+can be claimed by a second bot. This is what is left of finding #19 of `PLAYTHROUGH_1.1.234_SANDBOX.md` (bots queue on one tree), which
+1.1.241 fixed for the untouched base.
 ```
 [12:20:06] (Ash)   Woodcut: selected tree target base=153, 80, 200 top=153, 85, 200 height=6
 [12:20:08] (Birch) Woodcut: tree 153, 80, 200 is claimed by Ash, picking another
@@ -140,6 +142,9 @@ can be claimed by a second bot.
 [12:20:50] (Ash)   Woodcut: selected tree target base=142, 84, 200 top=142, 84, 200 height=1
 [12:20:57] (Birch) Woodcut target cleared: base=142, 80, 200 logs=5 logsCut=10 felled=1 target=4
 ```
+
+Earlier findings that now pass: #14 (bare-hand stone on approach) is 6aj-1, #17 (no-block escape loop) is 6aj-3,
+#18 (`creeper-fuse` in chat) is 6al-2, #11 (roster says it twice) is 6aj-5, #10 (missing sounds) is 6aj-5.
 
 ## Test-method notes
 
