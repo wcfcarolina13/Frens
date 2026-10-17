@@ -75,11 +75,11 @@ public final class GuideInventoryNetworkManager {
         String reason = "";
         if (fullAccess && !nearby) {
             if (hasSpellbook && nearTable) {
-                reason = "Remote Inventory active \u2014 Wizard's Tome + near enchanting table";
+                reason = "Remote Inventory active: Wizard's Tome + near enchanting table";
             } else if (hasSpellbook) {
-                reason = "Remote Inventory active \u2014 " + botAlias + " holds a Wizard's Tome";
+                reason = "Remote Inventory active: " + botAlias + " holds a Wizard's Tome";
             } else if (nearTable) {
-                reason = "Remote Inventory active \u2014 near enchanting table";
+                reason = "Remote Inventory active: near enchanting table";
             }
         }
 

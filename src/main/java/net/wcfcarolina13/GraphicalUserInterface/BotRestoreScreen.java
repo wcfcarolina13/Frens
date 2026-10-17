@@ -487,7 +487,7 @@ public class BotRestoreScreen extends Screen {
                 "bot spawn " + quoteAlias(name) + " admin");
         if (client.player != null) {
             client.player.sendMessage(
-                    Text.literal("Creating " + name + " (random skin — change later via inventory)."),
+                    Text.literal("Creating " + name + " (random skin, change later via inventory)."),
                     true);
         }
         client.setScreen(null);

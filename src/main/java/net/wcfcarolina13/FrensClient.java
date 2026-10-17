@@ -1061,7 +1061,7 @@ public class FrensClient implements ClientModInitializer {
                     pendingZonePreviewActive = false;
                     player.sendMessage(net.minecraft.text.Text.literal(
                             "\u00A7aCorner 1 set at " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()
-                            + " \u2014 right-click to set Corner 2"), true);
+                            + ". Right-click to set Corner 2"), true);
                 } else if (payload.cornerIndex() == 2 && pendingZonePos1 != null) {
                     pendingZonePos2 = pos;
                     pendingZonePreviewActive = true;
@@ -1069,7 +1069,7 @@ public class FrensClient implements ClientModInitializer {
                     player.sendMessage(net.minecraft.text.Text.literal(
                             "\u00A7aZone selected (" + p1.getX() + "," + p1.getY() + "," + p1.getZ()
                             + " \u2192 " + pos.getX() + "," + pos.getY() + "," + pos.getZ()
-                            + ") \u2014 [=] confirm | right-click to re-select"), true);
+                            + "). [=] confirm | right-click to re-select"), true);
                 }
             });
         });
@@ -1269,7 +1269,7 @@ public class FrensClient implements ClientModInitializer {
         if (overlay != null && overlaySlot != null) {
             return "Hold [" + overlay + "], then [" + overlaySlot + "]";
         }
-        return "Unbound — configure in Controls";
+        return "Unbound. Configure in Controls";
     }
 
     static Integer overlaySlotFor(CompanionShortcut shortcut) {
@@ -1512,8 +1512,8 @@ public class FrensClient implements ClientModInitializer {
 
     /**
      * Reads which companions have a spawn point or saved position in the open save. Singleplayer
-     * only (the integrated server): the stores are read on the server thread, read-only, so no
-     * legacy key is migrated by looking. Null when there is no integrated server (multiplayer
+     * only (the integrated server): the stores are read on the server thread and read-only, so
+     * looking changes nothing. Null when there is no integrated server (multiplayer
      * client), which keeps every companion in this world.
      */
     private static java.util.concurrent.CompletableFuture<RosterWorldMembership> submitRosterWorldMembership(

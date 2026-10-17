@@ -143,8 +143,8 @@ public final class LockableBlockService {
 
         boolean locked = isLocked(world, targetPos);
         String msg = locked
-                ? "\u00A7c\u00A7lLocked \u00A77\u2014 Right-click to unlock"
-                : "\u00A7a\u00A7lUnlocked \u00A77\u2014 Right-click to lock";
+                ? "\u00A7c\u00A7lLocked\u00A77: Right-click to unlock"
+                : "\u00A7a\u00A7lUnlocked\u00A77: Right-click to lock";
         player.networkHandler.sendPacket(new OverlayMessageS2CPacket(Text.literal(msg)));
     }
 

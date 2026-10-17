@@ -12,7 +12,7 @@ class FrensClientShortcutHintTest {
         assertEquals("[R]", FrensClient.formatCompanionShortcutInstruction("R", "\\", 2));
         assertEquals("Hold [\\], then [4]", FrensClient.formatCompanionShortcutInstruction(null, "\\", 4));
         assertEquals(
-                "Unbound — configure in Controls",
+                "Unbound. Configure in Controls",
                 FrensClient.formatCompanionShortcutInstruction(null, null, null)
         );
     }
