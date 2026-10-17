@@ -16,24 +16,46 @@ class RangedThreatPausePolicyTest {
         RangedThreatPausePolicy.resetForTests();
     }
 
+    private static final String WOODCUT = "skill:woodcut";
+
     @Test
     void projectileHitFromHostileDuringTaskPauses() {
-        assertTrue(RangedThreatPausePolicy.shouldPause(true, true, true, 14.0D, false));
-        assertTrue(RangedThreatPausePolicy.shouldPause(true, true, true, RangedThreatPausePolicy.MAX_SHOOTER_DISTANCE, false));
+        assertTrue(RangedThreatPausePolicy.shouldPause(WOODCUT, true, true, 14.0D, false));
+        assertTrue(RangedThreatPausePolicy.shouldPause(WOODCUT, true, true, RangedThreatPausePolicy.MAX_SHOOTER_DISTANCE, false));
     }
 
     @Test
     void eachMissingConditionKeepsWorking() {
-        assertFalse(RangedThreatPausePolicy.shouldPause(false, true, true, 14.0D, false));
-        assertFalse(RangedThreatPausePolicy.shouldPause(true, false, true, 14.0D, false));
-        assertFalse(RangedThreatPausePolicy.shouldPause(true, true, false, 4.0D, false));
-        assertFalse(RangedThreatPausePolicy.shouldPause(true, true, true, 14.0D, true));
-        assertFalse(RangedThreatPausePolicy.shouldPause(true, true, true, 16.5D, false));
-        assertFalse(RangedThreatPausePolicy.shouldPause(true, true, true, Double.NaN, false));
+        assertFalse(RangedThreatPausePolicy.shouldPause(null, true, true, 14.0D, false));
+        assertFalse(RangedThreatPausePolicy.shouldPause(WOODCUT, false, true, 14.0D, false));
+        assertFalse(RangedThreatPausePolicy.shouldPause(WOODCUT, true, false, 4.0D, false));
+        assertFalse(RangedThreatPausePolicy.shouldPause(WOODCUT, true, true, 14.0D, true));
+        assertFalse(RangedThreatPausePolicy.shouldPause(WOODCUT, true, true, 16.5D, false));
+        assertFalse(RangedThreatPausePolicy.shouldPause(WOODCUT, true, true, Double.NaN, false));
     }
 
     @Test
-    void rangedShootersAreTheBowAndCrossbowMobs() {
+    void retrievalSweepAndSurfaceRecoveryAreNeverPaused() {
+        assertFalse(RangedThreatPausePolicy.shouldPause("skill:drop_sweep", true, true, 8.0D, false));
+        assertFalse(RangedThreatPausePolicy.shouldPause("Skill:Drop_Sweep", true, true, 8.0D, false));
+        assertFalse(RangedThreatPausePolicy.shouldPause("surface_recovery", true, true, 8.0D, false));
+        assertTrue(RangedThreatPausePolicy.isNeverPauseTask("skill:drop_sweep"));
+        assertTrue(RangedThreatPausePolicy.isNeverPauseTask("surface_recovery"));
+        assertFalse(RangedThreatPausePolicy.isNeverPauseTask(WOODCUT));
+        assertFalse(RangedThreatPausePolicy.isNeverPauseTask("skill:mining"));
+        assertFalse(RangedThreatPausePolicy.isNeverPauseTask(null));
+        // Other tasks, hobbies included, still pause.
+        assertTrue(RangedThreatPausePolicy.shouldPause("skill:mining", true, true, 8.0D, false));
+    }
+
+    @Test
+    void anyHostileProjectilePausesWhateverTheShooterType() {
+        // The shooter type is a log field, not a rule: shouldPause takes no type at all.
+        assertTrue(RangedThreatPausePolicy.shouldPause(WOODCUT, true, true, 8.0D, false));
+    }
+
+    @Test
+    void shooterLogFieldNamesTheBowAndCrossbowMobs() {
         assertTrue(RangedThreatPausePolicy.isRangedShooter("minecraft:skeleton"));
         assertTrue(RangedThreatPausePolicy.isRangedShooter("minecraft:stray"));
         assertTrue(RangedThreatPausePolicy.isRangedShooter("minecraft:bogged"));

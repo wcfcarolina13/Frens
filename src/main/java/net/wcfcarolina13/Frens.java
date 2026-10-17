@@ -1727,7 +1727,7 @@ public class Frens implements ModInitializer {
         boolean projectile = source.isIn(net.minecraft.registry.tag.DamageTypeTags.IS_PROJECTILE);
         double distance = Math.sqrt(attacker.squaredDistanceTo(bot));
         boolean shouldPause = net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.shouldPause(
-                net.wcfcarolina13.GameAI.services.TaskService.hasActiveTask(bot.getUuid()),
+                net.wcfcarolina13.GameAI.services.TaskService.getActiveTaskName(bot.getUuid()).orElse(null),
                 true,
                 projectile,
                 distance,

@@ -10,6 +10,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * IDLE branch (combat or flee) can deal with the shooter. Without this a bogged or skeleton
  * shooting from past the 10-block AutoFace pause radius never interrupts woodcutting: the bot
  * keeps chopping while it is shot. Pure: entity types are registry id strings, ticks are longs.
+ *
+ * <p>Any hostile projectile hit counts, not only bows and crossbows: a blaze fireball or a
+ * drowned's trident pauses the task too. The shooter type ({@link #isRangedShooter}) is only a
+ * log field. A hobby (ambient task) is paused without a resume record: it simply ends and the
+ * hobby scheduler picks another later. Tasks whose interruption is worse than the arrows are
+ * never paused: the death-retrieval sweep (a pause fails it for good) and surface recovery.
  */
 public final class RangedThreatPausePolicy {
 
@@ -41,17 +47,37 @@ public final class RangedThreatPausePolicy {
     private RangedThreatPausePolicy() {
     }
 
-    /** Bow and crossbow mobs. Wither skeletons and skeleton horses do not shoot. */
+    /**
+     * Active ticket names a ranged hit never pauses. Skill tickets carry the "skill:" prefix
+     * (DeathRetrievalService runs drop_sweep via SkillManager.runSkill with no resume record);
+     * surface recovery is a system task named without it.
+     */
+    private static final Set<String> NEVER_PAUSE_TASKS = Set.of(
+            "skill:drop_sweep",
+            "surface_recovery");
+
+    /** Bow and crossbow mobs, for the log line only. Wither skeletons and skeleton horses do not shoot. */
     public static boolean isRangedShooter(String typeId) {
         return typeId != null && RANGED_SHOOTERS.contains(typeId);
     }
 
-    public static boolean shouldPause(boolean hasActiveTask,
+    /** True for an active ticket name a ranged hit must not pause. */
+    public static boolean isNeverPauseTask(String activeTaskName) {
+        return activeTaskName != null
+                && NEVER_PAUSE_TASKS.contains(activeTaskName.trim().toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /**
+     * @param activeTaskName the bot's active ticket name ({@code TaskService.getActiveTaskName}),
+     *                       null when the bot has no task
+     */
+    public static boolean shouldPause(String activeTaskName,
                                       boolean attackerHostile,
                                       boolean projectileDamage,
                                       double distance,
                                       boolean alreadyPausedRecently) {
-        return hasActiveTask
+        return activeTaskName != null
+                && !isNeverPauseTask(activeTaskName)
                 && attackerHostile
                 && projectileDamage
                 && !Double.isNaN(distance)
