@@ -16,9 +16,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.item.ShearsItem;
+import net.wcfcarolina13.PlayerUtils.ToolSelector;
 
 public final class MountedLeafClearingService {
     private static final Logger LOGGER = LoggerFactory.getLogger("mount-leaf");
@@ -57,14 +58,11 @@ public final class MountedLeafClearingService {
         float yaw = (float) Math.toDegrees(Math.atan2(-delta.x, delta.z));
         Direction toward = Direction.fromHorizontalDegrees(yaw);
 
-        ItemStack tool = selectLeafTool(bot);
-        if (!tool.isEmpty()) {
-            equipTool(bot, tool);
-        }
-
         int broken = 0;
+        boolean toolChosen = false;
         for (BlockPos leaf : mountedLeafCandidates(bot.getBlockPos(), toward)) {
-            if (!world.getBlockState(leaf).isIn(BlockTags.LEAVES)) {
+            BlockState leafState = world.getBlockState(leaf);
+            if (!leafState.isIn(BlockTags.LEAVES)) {
                 continue;
             }
             if (ProtectedZoneService.isProtected(leaf, world, BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot))) {
@@ -79,6 +77,12 @@ public final class MountedLeafClearingService {
             }
             if (bot.squaredDistanceTo(Vec3d.ofCenter(leaf)) > LEAF_REACH_SQ) {
                 continue;
+            }
+            if (!toolChosen) {
+                toolChosen = true;
+                if (!holdLeafTool(bot, leafState)) {
+                    return;
+                }
             }
             try {
                 bot.swingHand(Hand.MAIN_HAND);
@@ -112,53 +116,23 @@ public final class MountedLeafClearingService {
         );
     }
 
-    private static ItemStack selectLeafTool(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return ItemStack.EMPTY;
-        }
-        if (!bot.getInventory().contains(new ItemStack(Items.SHEARS))) {
-            return ItemStack.EMPTY;
-        }
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isOf(Items.SHEARS)) {
-                return stack;
-            }
-        }
-        for (int slot = 9; slot < 36; slot++) {
-            ItemStack stack = bot.getInventory().getStack(slot);
-            if (stack.isOf(Items.SHEARS)) {
-                int hotbarSlot = swapToHotbar(bot, slot);
-                if (hotbarSlot >= 0) {
-                    return bot.getInventory().getStack(hotbarSlot);
+    /**
+     * Holds the item {@link ToolSelector#selectBestToolForBlock} picks for leaves (never shears:
+     * they drop the leaf block instead of saplings and sticks). Selects that hotbar slot only when
+     * it is not already held. Server tick only: the leaf branch of the selector reads the hotbar and
+     * never swaps, reaches into bundles or hops threads. Returns false when the main hand still holds
+     * shears, so the caller skips this pass.
+     */
+    private static boolean holdLeafTool(ServerPlayerEntity bot, BlockState leafState) {
+        ItemStack tool = ToolSelector.selectBestToolForBlock(bot, leafState);
+        if (!tool.isEmpty() && tool != bot.getMainHandStack()) {
+            for (int i = 0; i < 9; i++) {
+                if (bot.getInventory().getStack(i) == tool) {
+                    bot.getInventory().setSelectedSlot(i);
+                    break;
                 }
             }
         }
-        return ItemStack.EMPTY;
-    }
-
-    private static void equipTool(ServerPlayerEntity bot, ItemStack tool) {
-        if (bot == null || tool == null || tool.isEmpty()) {
-            return;
-        }
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (ItemStack.areItemsEqual(stack, tool)) {
-                bot.getInventory().setSelectedSlot(i);
-                return;
-            }
-        }
-    }
-
-    private static int swapToHotbar(ServerPlayerEntity bot, int fromSlot) {
-        int targetHotbarSlot = bot.getInventory().getSelectedSlot();
-        for (int i = 0; i < 9; i++) {
-            if (bot.getInventory().getStack(i).isEmpty()) {
-                targetHotbarSlot = i;
-                break;
-            }
-        }
-        bot.currentScreenHandler.onSlotClick(fromSlot, targetHotbarSlot, SlotActionType.SWAP, bot);
-        return targetHotbarSlot;
+        return !(bot.getMainHandStack().getItem() instanceof ShearsItem);
     }
 }
