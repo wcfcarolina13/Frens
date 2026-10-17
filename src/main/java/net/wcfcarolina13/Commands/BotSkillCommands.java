@@ -10,6 +10,8 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.services.BotTargetingService;
+import net.wcfcarolina13.GameAI.services.DeathRetrievalPolicy;
+import net.wcfcarolina13.GameAI.services.DeathRetrievalService;
 import net.wcfcarolina13.GameAI.services.LeashReleasePolicy;
 import net.wcfcarolina13.GameAI.services.RideSyncService;
 import net.wcfcarolina13.GameAI.schematic.SchematicWriter;
@@ -214,6 +216,27 @@ final class BotSkillCommands {
                             result.forgotOtherTarget()));
         }
         return Math.max(released, targets.isEmpty() ? 0 : 1);
+    }
+
+    /**
+     * {@code /bot retrieve <bot> [me|<deadBot>]}: the bot fast-travels to the death spot, sweeps
+     * the drops and comes back to the sender. The bot sits in a {@code string()} slot named
+     * {@code target}; the second slot is {@code who} (not a bot-slot name, it names a dead bot or
+     * "me"). Brigadier runs executors on the server thread, which the world reads need.
+     */
+    static ArgumentBuilder<ServerCommandSource, ?> buildRetrieve() {
+        return CommandManager.literal("retrieve")
+                .executes(context -> {
+                    ChatUtils.sendSystemMessage(context.getSource(), DeathRetrievalPolicy.usage());
+                    return 0;
+                })
+                .then(CommandManager.argument("target", StringArgumentType.string())
+                        .executes(context -> DeathRetrievalService.execute(context.getSource(),
+                                StringArgumentType.getString(context, "target"), null))
+                        .then(CommandManager.argument("who", StringArgumentType.string())
+                                .executes(context -> DeathRetrievalService.execute(context.getSource(),
+                                        StringArgumentType.getString(context, "target"),
+                                        StringArgumentType.getString(context, "who")))));
     }
 
     static ArgumentBuilder<ServerCommandSource, ?> buildHitch() {

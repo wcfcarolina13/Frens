@@ -719,6 +719,41 @@ public final class NavigationArtifactService {
     }
 
     /**
+     * Death-retrieval outbound trip ({@code /bot retrieve}). The travel cooldown is cleared first
+     * so the mission is never told to rest, and the artifact gate is skipped (the death spot is a
+     * known position, like a base). Combat and food gates and the arrival hunger cost stay.
+     */
+    public static boolean beginRetrievalTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                               String botAlias, BlockPos destination,
+                                               RegistryKey<World> dimension, UUID ownerUuid) {
+        if (server == null || bot == null || destination == null || dimension == null) return false;
+        clearTravelCooldown(bot.getUuid());
+        double distance = bot.getBlockPos().getManhattanDistance(destination);
+        boolean crossDim = !bot.getEntityWorld().getRegistryKey().equals(dimension);
+        int delayTicks = calculateDelayTicks(distance, crossDim);
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid,
+                false, false, true, false);
+    }
+
+    /**
+     * Return leg of a finished errand (death retrieval): no gates, normal hunger cost on arrival,
+     * cross-dimension aware.
+     *
+     * @return the delay in ticks, or -1 when the travel did not start
+     */
+    public static int beginErrandReturnTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                              String botAlias, BlockPos destination,
+                                              RegistryKey<World> dimension, UUID ownerUuid) {
+        if (server == null || bot == null || destination == null || dimension == null) return -1;
+        double distance = bot.getBlockPos().getManhattanDistance(destination);
+        boolean crossDim = !bot.getEntityWorld().getRegistryKey().equals(dimension);
+        int delayTicks = calculateDelayTicks(distance, crossDim);
+        boolean started = beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid,
+                true, false, false, false);
+        return started ? delayTicks : -1;
+    }
+
+    /**
      * Magic travel path: spells that consume reagents (ender pearls, chorus fruit)
      * bypass food requirements entirely. The reagent cost IS the price.
      * Hunger drain on arrival is also skipped.
@@ -1559,6 +1594,8 @@ public final class NavigationArtifactService {
                     notifyOwner(server, action.ownerUuid(), "\u00A7e" + ownerMsg + "\u00A7r");
                 }
             });
+        } else if (action != null && DeathRetrievalPolicy.parseAction(action.type()).isPresent()) {
+            DeathRetrievalService.onArrival(server, ps.botAlias(), ps.dest(), ps.dimensionFallback(), action);
         }
     }
 
@@ -1717,6 +1754,11 @@ public final class NavigationArtifactService {
     }
 
     // ── Internals ─────────────────────────────────────────────────────────
+
+    /** {@link #notifyOwner} for other services: sends now, or queues for the player's next login. */
+    public static void notifyPlayer(MinecraftServer server, UUID playerUuid, String message) {
+        notifyOwner(server, playerUuid, message);
+    }
 
     /** Send a message to a player if online, otherwise queue it for delivery on next login. */
     private static void notifyOwner(MinecraftServer server, UUID ownerUuid, String message) {

@@ -501,6 +501,7 @@ public class modCommandRegistry {
 	                        .then(BotSkillCommands.buildShelter())
 	                        .then(BotSkillCommands.buildBuild())
 	                        .then(BotSkillCommands.buildLeash())
+	                        .then(BotSkillCommands.buildRetrieve())
 	                        .then(BotSkillCommands.buildHitch())
 	                        .then(BotSkillCommands.buildFortify())
 	                        .then(BotLifecycleCommands.buildList())
