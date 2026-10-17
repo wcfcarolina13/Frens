@@ -4,7 +4,9 @@
 Stages:
   seal     overhang next to Wally, 4 dirt + 4 cobblestone, no pickaxe, dusk: expect dirt in the seal cells
   dawn     daylight: expect the wall-off teardown
+  valuables  same overhang, only diamond blocks and chests: expect blocks=0, no wall, dig-down refused
   dig      flat platform with no overhang, 4 dirt only, dusk: expect a capped dig-down bunker
+  noblocks flat stone under open sky, empty inventory: expect dig-down skipped reason=no-seal-block, no hole
   scan X Y Z   print the block grid around a position
 Reload check: after 'seal', save_and_quit (tools/sandbox/smoke.sh tail or the MCP), relaunch the same save,
 then grep latest.log for 'shelter restored on join'.
@@ -58,7 +60,8 @@ def finish(x, y, z):
 stage = sys.argv[1] if len(sys.argv) > 1 else "seal"
 SHELTER = r"wall-off|shelter|dig-down|bunker|Wally.*(cliff|seeking)"
 
-if stage == "seal":
+def overhang_with(items):
+    """Stone overhang next to Wally (open to the north only), Wally given `items`, then dusk."""
     prepare()
     x, y, z = 80, 65, 83
     cx, cz = x + 3, z
@@ -71,13 +74,20 @@ if stage == "seal":
     chat(f"/fill {cx+1} {y} {cz-1} {cx+1} {y+1} {cz} stone")
     chat(f"/tp {BOT} {x}.5 {y} {z}.5")
     chat(f"/clear {BOT}")
-    chat(f"/give {BOT} cobblestone 4")
-    chat(f"/give {BOT} dirt 4")
+    for item in items:
+        chat(f"/give {BOT} {item}")
     finish(x, y, z)
     m = mark()
     chat("/time set 13000", 60)
     show(m, SHELTER)
     print(cmd(cmd="blocks", x=cx, y=y, z=cz, r=2, dy=1)[:900])
+
+
+if stage == "seal":
+    overhang_with(["cobblestone 4", "dirt 4"])
+elif stage == "valuables":
+    # Only blocks a shelter must never use: expect blocks=0, no wall, and dig-down refused on the stone floor.
+    overhang_with(["diamond_block 8", "chest 2"])
 elif stage == "dawn":
     m = mark()
     cmd(cmd="press_key", key="escape")
@@ -98,5 +108,19 @@ elif stage == "dig":
     show(m, SHELTER)
     print(cmd(cmd="bot_state", name=BOT)[:250])
     print(cmd(cmd="blocks", x=x, y=y - 2, z=z, r=1, dy=3)[:1200])
+elif stage == "noblocks":
+    # Flat stone, empty inventory, no overhang: expect `dig-down skipped reason=no-seal-block` and no hole.
+    prepare()
+    x, y, z = 80, 65, 150
+    chat(f"/fill {x-8} {y} {z-8} {x+8} {y+15} {z+8} air")
+    chat(f"/fill {x-8} {y+16} {z-8} {x+8} {y+30} {z+8} air")
+    chat(f"/fill {x-8} {y-4} {z-8} {x+8} {y-1} {z+8} stone")
+    chat(f"/tp {BOT} {x}.5 {y} {z}.5")
+    chat(f"/clear {BOT}")
+    finish(x, y, z)
+    m = mark()
+    chat("/time set 13000", 45)
+    show(m, SHELTER)
+    print(cmd(cmd="blocks", x=x, y=y - 2, z=z, r=1, dy=2)[:900])
 elif stage == "scan":
     print(cmd(cmd="blocks", x=sys.argv[2], y=sys.argv[3], z=sys.argv[4], r=2, dy=3)[:1500])
