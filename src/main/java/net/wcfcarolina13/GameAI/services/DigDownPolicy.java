@@ -107,6 +107,28 @@ public final class DigDownPolicy {
         return capped ? Outcome.SHELTER : Outcome.CLIMB_OUT;
     }
 
+    /** What a capped (dig-down) or sealed (cliff) shelter does after its accept-time assessment. */
+    public enum Accept { REGISTER, REGISTER_SEALED, CLIMB_OUT }
+
+    /**
+     * A capped pit that fails validation must not keep the bot capped and unregistered (no dawn
+     * exit). Valid registers. A hostile next to a sealed shelter registers anyway, as wall-off does:
+     * climbing out beside the mob is worse than the bunker. Every other reason (structural, or a
+     * timed-out assessment) leaves.
+     *
+     * @param reason the assessment's invalid reason in lower case ({@code hostile_exposed}, ...)
+     * @param sealed the shelter's entrance rule holds (dig-down: the cap blocks movement)
+     */
+    public static Accept accept(boolean valid, String reason, boolean sealed) {
+        if (valid) {
+            return Accept.REGISTER;
+        }
+        if ("hostile_exposed".equals(reason) && sealed) {
+            return Accept.REGISTER_SEALED;
+        }
+        return Accept.CLIMB_OUT;
+    }
+
     /** Pillar steps for the climb-out: refill the whole dug depth if the scaffold allows. */
     public static int climbSteps(int realRemovals, int scaffoldBlocks) {
         return Math.max(0, Math.min(realRemovals, scaffoldBlocks));
@@ -138,15 +160,25 @@ public final class DigDownPolicy {
     }
 
     public static boolean isMarked(List<Mark> marks, String dimension, int x, int z, long nowDay) {
+        return coveringMark(marks, dimension, x, z, nowDay) != null;
+    }
+
+    /** The first live mark covering the column, or null. */
+    public static Mark coveringMark(List<Mark> marks, String dimension, int x, int z, long nowDay) {
         if (marks == null) {
-            return false;
+            return null;
         }
         for (Mark mark : marks) {
             if (!expired(mark, nowDay) && covers(mark, dimension, x, z)) {
-                return true;
+                return mark;
             }
         }
-        return false;
+        return null;
+    }
+
+    /** {@code skipped reason=column-marked} is logged once per mark (one column, one night). */
+    public static boolean firstSkipLog(List<Mark> alreadyLogged, Mark mark) {
+        return mark != null && (alreadyLogged == null || !alreadyLogged.contains(mark));
     }
 
     /** The marks to keep after adding {@code added}: expired ones are dropped. */

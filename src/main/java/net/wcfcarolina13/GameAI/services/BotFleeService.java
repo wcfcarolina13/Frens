@@ -1156,13 +1156,27 @@ public final class BotFleeService {
         emergencyDigDown(bot, gen);
     }
 
+    /** Marks whose {@code column-marked} skip was already logged (once per column per night). */
+    private static final ConcurrentHashMap<UUID, List<DigDownPolicy.Mark>> LOGGED_MARK_SKIPS = new ConcurrentHashMap<>();
+
+    /** True the first time a skip under {@code mark} is seen for this bot; expired marks are pruned. */
+    private static boolean firstMarkedSkip(ServerPlayerEntity bot, DigDownPolicy.Mark mark) {
+        boolean[] first = {false};
+        LOGGED_MARK_SKIPS.compute(bot.getUuid(), (id, logged) -> {
+            first[0] = DigDownPolicy.firstSkipLog(logged, mark);
+            return first[0] ? DigDownPolicy.withMark(logged, mark, mark.day()) : logged;
+        });
+        return first[0];
+    }
+
     /** Per-bot no-dig-down marks left by an uncapped dig, kept until the next dawn. */
     private static final ConcurrentHashMap<UUID, List<DigDownPolicy.Mark>> NO_DIG_DOWN_MARKS = new ConcurrentHashMap<>();
     /** Timeout for each bounded server-thread hop of the dig-down step. */
     private static final long DIG_DOWN_HOP_TIMEOUT_MS = 500L;
 
     /** The preflight hop's answer: where the column starts and why it may not be dug (null = dig). */
-    private record DigDownPreflight(BlockPos origin, String dimension, long day, String skipReason) {}
+    private record DigDownPreflight(BlockPos origin, String dimension, long day, String skipReason,
+                                    DigDownPolicy.Mark coveringMark) {}
 
     /** One cap attempt: where the cap went (null when none) and every candidate's refusal. */
     private record DigDownCap(BlockPos capPos, BlockPos feet, String reasons) {}
@@ -1199,7 +1213,9 @@ public final class BotFleeService {
                 return;
             }
             if (pre.skipReason() != null) {
-                LOGGER.info("Bot {} dig-down skipped reason={} at {}", name, pre.skipReason(), pre.origin().toShortString());
+                if (pre.coveringMark() == null || firstMarkedSkip(bot, pre.coveringMark())) {
+                    LOGGER.info("Bot {} dig-down skipped reason={} at {}", name, pre.skipReason(), pre.origin().toShortString());
+                }
                 return;
             }
             BlockPos digPos = pre.origin();
@@ -1264,9 +1280,8 @@ public final class BotFleeService {
             }
             Thread.sleep(300);
             if (isStaleShelter(bot, gen)) {
-                if (capPos == null) {
-                    abandonStaleDigDown(bot, server, world, pre, realRemovals);
-                }
+                // Capped or not, an unregistered bot must not stay in the pit.
+                abandonStaleDigDown(bot, server, world, pre, realRemovals);
                 return;
             }
 
@@ -1285,10 +1300,20 @@ public final class BotFleeService {
             ShelterAssessment assessment = callOnServer(server,
                     () -> assessShelterAt(bot, world, bot.getBlockPos(), ShelterType.DIG_DOWN, capPos, null),
                     DIG_DOWN_HOP_TIMEOUT_MS, null);
-            if (assessment == null || !assessment.valid()) {
-                LOGGER.info("Bot {} dig-down bunker rejected reason={}", name,
-                        assessment != null ? assessment.reason().name().toLowerCase() : "assess-timeout");
+            String rejectReason = assessment == null ? "assess-timeout"
+                    : assessment.valid() ? "valid" : assessment.reason().name().toLowerCase();
+            boolean sealed = assessment != null && Boolean.TRUE.equals(callOnServer(server,
+                    () -> isShelterEntranceSecured(world, assessment.standPos(), ShelterType.DIG_DOWN, capPos, null),
+                    DIG_DOWN_HOP_TIMEOUT_MS, Boolean.FALSE));
+            DigDownPolicy.Accept accept = DigDownPolicy.accept(assessment != null && assessment.valid(), rejectReason, sealed);
+            if (accept == DigDownPolicy.Accept.CLIMB_OUT) {
+                LOGGER.info("Bot {} dig-down bunker rejected reason={} — climbing out", name, rejectReason);
+                climbOutOfDigDownPit(bot, server, world, digPos, realRemovals);
+                markNoDigDown(bot, pre.dimension(), digPos, pre.day());
                 return;
+            }
+            if (accept == DigDownPolicy.Accept.REGISTER_SEALED) {
+                LOGGER.info("Bot {} dig-down: hostile adjacent but sealed, registering", name);
             }
             registerShelter(bot, new ShelterInfo(
                     server.getTicks(),
@@ -1347,8 +1372,9 @@ public final class BotFleeService {
         BlockPos origin = bot.getBlockPos().toImmutable();
         String dimension = world.getRegistryKey().getValue().toString();
         long day = DigDownPolicy.gameDay(world.getTimeOfDay());
-        boolean marked = DigDownPolicy.isMarked(NO_DIG_DOWN_MARKS.get(bot.getUuid()),
+        DigDownPolicy.Mark covering = DigDownPolicy.coveringMark(NO_DIG_DOWN_MARKS.get(bot.getUuid()),
                 dimension, origin.getX(), origin.getZ(), day);
+        boolean marked = covering != null;
         List<DigDownPolicy.Cell> cells = new ArrayList<>(DigDownPolicy.DEPTH);
         for (int depth = 1; depth <= DigDownPolicy.DEPTH; depth++) {
             cells.add(classifyDigDownCell(bot, world, origin.down(depth)));
@@ -1365,7 +1391,7 @@ public final class BotFleeService {
         }
         String topId = Registries.BLOCK.getId(world.getBlockState(origin.down()).getBlock()).toString();
         String reason = DigDownPolicy.preflight(marked, cells, floorSolid, seals, topId);
-        return new DigDownPreflight(origin, dimension, day, reason);
+        return new DigDownPreflight(origin, dimension, day, reason, marked ? covering : null);
     }
 
     private static DigDownPolicy.Cell classifyDigDownCell(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
@@ -2589,21 +2615,27 @@ public final class BotFleeService {
                     ShelterType.CLIFF,
                     wallFeet.toImmutable(),
                     digDir);
-            if (assessment.valid()) {
-                registerShelter(bot, new ShelterInfo(
-                        server.getTicks(),
-                        ShelterType.CLIFF,
-                        wallFeet.toImmutable(),
-                        digDir,
-                        assessment.standPos(),
-                        server.getTicks(),
-                        ShelterInvalidReason.VALID));
-            } else {
-                LOGGER.info("Bot {} cliff shelter rejected reason={}",
-                        bot.getName().getString(),
-                        assessment.reason().name().toLowerCase());
+            String cliffReason = assessment.reason().name().toLowerCase();
+            DigDownPolicy.Accept cliffAccept = DigDownPolicy.accept(assessment.valid(), cliffReason, sealed[0]);
+            ShelterInfo cliffInfo = new ShelterInfo(
+                    server.getTicks(),
+                    ShelterType.CLIFF,
+                    wallFeet.toImmutable(),
+                    digDir,
+                    assessment.standPos(),
+                    server.getTicks(),
+                    ShelterInvalidReason.VALID);
+            if (cliffAccept == DigDownPolicy.Accept.CLIMB_OUT) {
+                // Sealed in but unregistered would mean no dawn exit: open the seal and walk out.
+                LOGGER.info("Bot {} cliff shelter rejected reason={} — leaving the tunnel",
+                        bot.getName().getString(), cliffReason);
+                breakFreeCliff(bot, (ServerWorld) bot.getEntityWorld(), cliffInfo);
                 return;
             }
+            if (cliffAccept == DigDownPolicy.Accept.REGISTER_SEALED) {
+                LOGGER.info("Bot {} cliff: hostile adjacent but sealed, registering", bot.getName().getString());
+            }
+            registerShelter(bot, cliffInfo);
 
             LOGGER.info("Bot {} dug emergency cliff shelter {} (sealed={})",
                     bot.getName().getString(), digDir.asString(), sealed[0]);

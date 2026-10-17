@@ -90,6 +90,36 @@ class DigDownPolicyTest {
     }
 
     @Test
+    void acceptRegistersValidAndSealedWithAHostileOutside() {
+        assertEquals(DigDownPolicy.Accept.REGISTER, DigDownPolicy.accept(true, "valid", true));
+        assertEquals(DigDownPolicy.Accept.REGISTER, DigDownPolicy.accept(true, "valid", false));
+        assertEquals(DigDownPolicy.Accept.REGISTER_SEALED, DigDownPolicy.accept(false, "hostile_exposed", true));
+    }
+
+    @Test
+    void acceptClimbsOutOnStructuralRejectsAndUnsealedHostile() {
+        assertEquals(DigDownPolicy.Accept.CLIMB_OUT, DigDownPolicy.accept(false, "hostile_exposed", false));
+        assertEquals(DigDownPolicy.Accept.CLIMB_OUT, DigDownPolicy.accept(false, "no_overhead_cover", true));
+        assertEquals(DigDownPolicy.Accept.CLIMB_OUT, DigDownPolicy.accept(false, "water_intrusion", true));
+        assertEquals(DigDownPolicy.Accept.CLIMB_OUT, DigDownPolicy.accept(false, "entrance_unsealed", false));
+        assertEquals(DigDownPolicy.Accept.CLIMB_OUT, DigDownPolicy.accept(false, "assess-timeout", true));
+        assertEquals(DigDownPolicy.Accept.CLIMB_OUT, DigDownPolicy.accept(false, null, true));
+    }
+
+    @Test
+    void coveringMarkAndOneSkipLogPerMark() {
+        Mark mark = new Mark(OW, 0, 0, 3);
+        assertEquals(mark, DigDownPolicy.coveringMark(List.of(mark), OW, 2, -2, 3));
+        assertNull(DigDownPolicy.coveringMark(List.of(mark), OW, 3, 0, 3));
+        assertNull(DigDownPolicy.coveringMark(List.of(mark), OW, 0, 0, 4));
+        assertTrue(DigDownPolicy.firstSkipLog(null, mark));
+        assertTrue(DigDownPolicy.firstSkipLog(List.of(new Mark(OW, 9, 9, 3)), mark));
+        assertFalse(DigDownPolicy.firstSkipLog(List.of(new Mark(OW, 0, 0, 3)), mark));
+        assertTrue(DigDownPolicy.firstSkipLog(List.of(new Mark(OW, 0, 0, 2)), mark)); // next night logs again
+        assertFalse(DigDownPolicy.firstSkipLog(List.of(), null));
+    }
+
+    @Test
     void climbStepsRefillTheDepthWhenScaffoldAllows() {
         assertEquals(3, DigDownPolicy.climbSteps(3, 10));
         assertEquals(2, DigDownPolicy.climbSteps(3, 2));
