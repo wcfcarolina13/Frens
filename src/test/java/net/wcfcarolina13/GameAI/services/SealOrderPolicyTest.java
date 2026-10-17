@@ -70,6 +70,20 @@ class SealOrderPolicyTest {
     }
 
     @Test
+    void capOrderDropsFallingBlocksAndKeepsTheRest() {
+        java.util.Set<String> falling = java.util.Set.of("minecraft:sand", "minecraft:gravel");
+        List<String> noPick = SealOrderPolicy.withoutFalling(SealOrderPolicy.order(TODAY, false, false), falling);
+        assertEquals(TODAY.size() - 2, noPick.size());
+        assertEquals("minecraft:dirt", noPick.get(0));
+        assertEquals("minecraft:oak_planks", noPick.get(1));
+        assertTrue(!noPick.contains("minecraft:sand") && !noPick.contains("minecraft:gravel"));
+        assertEquals(List.of("minecraft:cobblestone"),
+                SealOrderPolicy.withoutFalling(List.of("minecraft:gravel", "minecraft:cobblestone"), falling));
+        assertEquals(List.of(), SealOrderPolicy.withoutFalling(List.of("minecraft:sand"), falling));
+        assertEquals(List.of("minecraft:sand"), SealOrderPolicy.withoutFalling(List.of("minecraft:sand"), null));
+    }
+
+    @Test
     void emptyOrNullGivesEmpty() {
         assertEquals(List.of(), SealOrderPolicy.order(List.of(), false, false));
         assertEquals(List.of(), SealOrderPolicy.order(null, true, false));

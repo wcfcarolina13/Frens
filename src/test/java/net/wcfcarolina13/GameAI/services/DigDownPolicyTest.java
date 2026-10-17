@@ -27,8 +27,44 @@ class DigDownPolicyTest {
     void preflightPassesWithNoSealBlockWhenTheTopCellDropsOneByHand() {
         assertNull(DigDownPolicy.preflight(false, SOLID3, true, 0, "minecraft:grass_block"));
         assertNull(DigDownPolicy.preflight(false, SOLID3, true, 0, "minecraft:dirt"));
-        assertNull(DigDownPolicy.preflight(false, SOLID3, true, 0, "minecraft:sand"));
-        assertNull(DigDownPolicy.preflight(false, SOLID3, true, 0, "minecraft:gravel"));
+    }
+
+    @Test
+    void fallingTopCellsDoNotCountAsACapSource() {
+        assertEquals("no-seal-block", DigDownPolicy.preflight(false, SOLID3, true, 0, "minecraft:sand"));
+        assertEquals("no-seal-block", DigDownPolicy.preflight(false, SOLID3, true, 0, "minecraft:gravel"));
+    }
+
+    @Test
+    void centredWithinTheShaftTolerance() {
+        assertTrue(DigDownPolicy.centred(10.5, -3.5, 10, -4));
+        assertTrue(DigDownPolicy.centred(10.67, -3.33, 10, -4));
+        assertFalse(DigDownPolicy.centred(10.70, -3.5, 10, -4));
+        assertFalse(DigDownPolicy.centred(10.5, -3.29, 10, -4));
+        assertFalse(DigDownPolicy.centred(11.5, -3.5, 10, -4));
+    }
+
+    @Test
+    void pitDepthIsZeroWhenTheBotNeverFellIn() {
+        assertEquals(3, DigDownPolicy.pitDepth(61, 64));
+        assertEquals(1, DigDownPolicy.pitDepth(63, 64));
+        assertEquals(0, DigDownPolicy.pitDepth(64, 64));
+        assertEquals(0, DigDownPolicy.pitDepth(65, 64));
+    }
+
+    @Test
+    void climbAfterFailureOnlyForAnUnsettledRealDig() {
+        assertTrue(DigDownPolicy.climbAfterFailure(1, false));
+        assertFalse(DigDownPolicy.climbAfterFailure(0, false));
+        assertFalse(DigDownPolicy.climbAfterFailure(3, true));
+    }
+
+    @Test
+    void climbLatchClearsOnlyAnUnownedLatch() {
+        assertEquals(DigDownPolicy.Latch.NONE, DigDownPolicy.climbLatch(false, false));
+        assertEquals(DigDownPolicy.Latch.NONE, DigDownPolicy.climbLatch(false, true));
+        assertEquals(DigDownPolicy.Latch.CLEAR, DigDownPolicy.climbLatch(true, false));
+        assertEquals(DigDownPolicy.Latch.BLOCKED, DigDownPolicy.climbLatch(true, true));
     }
 
     @Test

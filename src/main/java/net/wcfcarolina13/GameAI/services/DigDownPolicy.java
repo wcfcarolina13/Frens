@@ -26,11 +26,43 @@ public final class DigDownPolicy {
     public static final long DAY_TICKS = 24_000L;
 
     /**
-     * Top-cell blocks that drop a seal block when mined by hand, so a bot with no seal block can
-     * still cap: dirt and grass drop dirt, sand drops sand, gravel drops gravel nine times in ten.
+     * Top-cell blocks that drop a cap block when mined by hand, so a bot with no seal block can
+     * still cap: dirt and grass drop dirt. Sand and gravel are not here: they are falling blocks,
+     * and the cap sits over the bot's air head cell.
      */
-    public static final Set<String> HAND_SEAL_DROPS = Set.of(
-            "minecraft:dirt", "minecraft:grass_block", "minecraft:sand", "minecraft:gravel");
+    public static final Set<String> HAND_SEAL_DROPS = Set.of("minecraft:dirt", "minecraft:grass_block");
+
+    /**
+     * Horizontal offset from the cell centre at which the 0.6-wide box fits the 1x1 shaft
+     * (0.5 - 0.3 = 0.2, with a margin).
+     */
+    public static final double CENTRE_TOLERANCE = 0.18D;
+
+    /** The bot's x/z are within {@link #CENTRE_TOLERANCE} of the cell's centre. */
+    public static boolean centred(double x, double z, int cellX, int cellZ) {
+        return Math.abs(x - (cellX + 0.5D)) <= CENTRE_TOLERANCE && Math.abs(z - (cellZ + 0.5D)) <= CENTRE_TOLERANCE;
+    }
+
+    /** How deep the feet are below the original feet level; 0 when the bot never fell in. */
+    public static int pitDepth(int feetY, int groundFeetY) {
+        return Math.max(0, groundFeetY - feetY);
+    }
+
+    /** After a failure or interrupt mid-dig: climb out when a cell really opened and nothing settled it. */
+    public static boolean climbAfterFailure(int realRemovals, boolean settled) {
+        return realRemovals > 0 && !settled;
+    }
+
+    /** What the climb-out does about a latched abort (the pillar aborts at step 0 on one). */
+    public enum Latch { NONE, CLEAR, BLOCKED }
+
+    /** Clear a latch no running task owns; a task-owned latch leaves the bot in the pit (logged). */
+    public static Latch climbLatch(boolean latched, boolean taskOwnsIt) {
+        if (!latched) {
+            return Latch.NONE;
+        }
+        return taskOwnsIt ? Latch.BLOCKED : Latch.CLEAR;
+    }
 
     /** Server-thread classification of one column cell. */
     public enum Cell {

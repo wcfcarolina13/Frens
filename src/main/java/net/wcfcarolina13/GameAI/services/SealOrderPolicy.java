@@ -78,4 +78,21 @@ public final class SealOrderPolicy {
         out.sort(Comparator.comparingInt(id -> NO_PICKAXE_RANK.getOrDefault(id, UNRANKED)));
         return List.copyOf(out);
     }
+
+    /**
+     * {@code ordered} without the falling blocks (sand, gravel), order kept. For a block placed with
+     * air under it, such as the dig-down cap over the bot's head.
+     */
+    public static List<String> withoutFalling(List<String> ordered, java.util.Set<String> fallingIds) {
+        if (ordered == null || ordered.isEmpty()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>(ordered.size());
+        for (String id : ordered) {
+            if (fallingIds == null || !fallingIds.contains(id)) {
+                out.add(id);
+            }
+        }
+        return List.copyOf(out);
+    }
 }

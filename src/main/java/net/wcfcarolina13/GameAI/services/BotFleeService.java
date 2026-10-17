@@ -204,6 +204,42 @@ public final class BotFleeService {
         return ordered.isEmpty() ? SEAL_BLOCKS : List.copyOf(ordered);
     }
 
+    /** Seal ids that are falling blocks (sand, gravel): never placed with air under them. */
+    private static final Set<String> FALLING_SEAL_IDS = SEAL_BLOCKS.stream()
+            .filter(item -> item instanceof net.minecraft.item.BlockItem bi
+                    && bi.getBlock() instanceof net.minecraft.block.FallingBlock)
+            .map(item -> Registries.ITEM.getId(item).toString())
+            .collect(Collectors.toUnmodifiableSet());
+    /** Seal ids the dig-down cap may use. */
+    private static final Set<String> CAP_IDS = SEAL_IDS.stream()
+            .filter(id -> !FALLING_SEAL_IDS.contains(id))
+            .collect(Collectors.toUnmodifiableSet());
+
+    /**
+     * {@link #sealBlocksFor} without falling blocks, for the dig-down cap: it sits over the bot's
+     * air head cell, so sand or gravel there would fall onto the bot. Never empty (falls back to
+     * today's gravity-free order).
+     */
+    private static List<Item> capBlocksFor(ServerPlayerEntity bot) {
+        List<String> ids = new ArrayList<>();
+        for (Item item : sealBlocksFor(bot)) {
+            ids.add(Registries.ITEM.getId(item).toString());
+        }
+        List<Item> out = new ArrayList<>();
+        for (String id : SealOrderPolicy.withoutFalling(ids, FALLING_SEAL_IDS)) {
+            Item item = SEAL_ITEM_BY_ID.get(id);
+            if (item != null) {
+                out.add(item);
+            }
+        }
+        if (out.isEmpty()) {
+            for (String id : SealOrderPolicy.withoutFalling(SEAL_ID_ORDER, FALLING_SEAL_IDS)) {
+                out.add(SEAL_ITEM_BY_ID.get(id));
+            }
+        }
+        return List.copyOf(out);
+    }
+
     /** Returns true if the bot is currently inside a tactical shelter. */
     public static boolean isInShelter(UUID botId) {
         return SHELTER_ACTIVE.containsKey(botId);
@@ -1189,10 +1225,14 @@ public final class BotFleeService {
      */
     private static void emergencyDigDown(ServerPlayerEntity bot, long gen) {
         String name = bot.getName().getString();
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null || !(bot.getEntityWorld() instanceof ServerWorld world)) return;
+        DigDownPreflight pre = null;
+        int realRemovals = 0;
+        // True once the pit is registered as a shelter or the climb-out has run: nothing left to undo.
+        boolean settled = false;
         try {
             if (isStaleShelter(bot, gen)) return;
-            MinecraftServer server = bot.getCommandSource().getServer();
-            if (server == null || !(bot.getEntityWorld() instanceof ServerWorld world)) return;
             // Same stale-latch rule as wall-off: a latched /bot stop from before turns every
             // mineBlock into a no-op, and the cap then ran with the bot still on the surface.
             boolean latched = TaskService.isAbortRequested(bot.getUuid()) && !TaskService.isServerStopping();
@@ -1202,7 +1242,7 @@ public final class BotFleeService {
                 LOGGER.info("Bot {} dig-down: cleared a stale abort latch (reason={})", name, latchReason);
             }
 
-            DigDownPreflight pre = callOnServer(server, () -> {
+            pre = callOnServer(server, () -> {
                 bot.setSprinting(false);
                 bot.setVelocity(0, bot.getVelocity().y, 0);
                 bot.velocityDirty = true;
@@ -1219,12 +1259,17 @@ public final class BotFleeService {
                 return;
             }
             BlockPos digPos = pre.origin();
+            // The bot's box is 0.6 wide: off centre it straddles a neighbour cell and never drops
+            // into the 1x1 shaft it digs.
+            boolean centred = centreOnDigCell(bot, server, digPos);
+            LOGGER.info("Bot {} dig-down: centred={} at {} over {}", name, centred,
+                    String.format(java.util.Locale.ROOT, "%.2f,%.2f", bot.getX(), bot.getZ()), digPos.toShortString());
             Thread.sleep(300);
 
             // Mine the column, counting cells that really opened.
-            int realRemovals = 0;
             for (int depth = 0; depth < DigDownPolicy.DEPTH; depth++) {
                 if (isStaleShelter(bot, gen)) {
+                    settled = true;
                     abandonStaleDigDown(bot, server, world, pre, realRemovals);
                     return;
                 }
@@ -1252,21 +1297,24 @@ public final class BotFleeService {
             // Fall into the hole and pick up the drops (the cap may need them).
             Thread.sleep(1500);
             if (isStaleShelter(bot, gen)) {
+                settled = true;
                 abandonStaleDigDown(bot, server, world, pre, realRemovals);
                 return;
             }
 
-            List<Item> seals = sealBlocksFor(bot);
-            DigDownCap cap = tryCapDigDown(bot, server, world, digPos, seals);
+            // The cap goes over the bot's head with air below it: never a falling block.
+            List<Item> capBlocks = capBlocksFor(bot);
+            DigDownCap cap = tryCapDigDown(bot, server, world, digPos, capBlocks);
             if (cap.capPos() == null) {
                 LOGGER.info("Bot {} dig-down cap failed (feet {}): {} — retrying once",
                         name, cap.feet() != null ? cap.feet().toShortString() : "?", cap.reasons());
                 Thread.sleep(300);
                 if (isStaleShelter(bot, gen)) {
+                    settled = true;
                     abandonStaleDigDown(bot, server, world, pre, realRemovals);
                     return;
                 }
-                cap = tryCapDigDown(bot, server, world, digPos, seals);
+                cap = tryCapDigDown(bot, server, world, digPos, capBlocks);
                 if (cap.capPos() == null) {
                     LOGGER.info("Bot {} dig-down cap failed again (feet {}): {}",
                             name, cap.feet() != null ? cap.feet().toShortString() : "?", cap.reasons());
@@ -1281,6 +1329,7 @@ public final class BotFleeService {
             Thread.sleep(300);
             if (isStaleShelter(bot, gen)) {
                 // Capped or not, an unregistered bot must not stay in the pit.
+                settled = true;
                 abandonStaleDigDown(bot, server, world, pre, realRemovals);
                 return;
             }
@@ -1288,8 +1337,8 @@ public final class BotFleeService {
             DigDownPolicy.Outcome outcome = DigDownPolicy.afterCap(realRemovals, capPos != null);
             if (outcome == DigDownPolicy.Outcome.CLIMB_OUT) {
                 LOGGER.info("Bot {} dig-down bunker uncapped after digging {} — climbing out", name, realRemovals);
-                climbOutOfDigDownPit(bot, server, world, digPos, realRemovals);
-                markNoDigDown(bot, pre.dimension(), digPos, pre.day());
+                settled = true;
+                markAndClimbOut(bot, server, world, pre);
                 return;
             }
             if (outcome != DigDownPolicy.Outcome.SHELTER) {
@@ -1308,8 +1357,8 @@ public final class BotFleeService {
             DigDownPolicy.Accept accept = DigDownPolicy.accept(assessment != null && assessment.valid(), rejectReason, sealed);
             if (accept == DigDownPolicy.Accept.CLIMB_OUT) {
                 LOGGER.info("Bot {} dig-down bunker rejected reason={} — climbing out", name, rejectReason);
-                climbOutOfDigDownPit(bot, server, world, digPos, realRemovals);
-                markNoDigDown(bot, pre.dimension(), digPos, pre.day());
+                settled = true;
+                markAndClimbOut(bot, server, world, pre);
                 return;
             }
             if (accept == DigDownPolicy.Accept.REGISTER_SEALED) {
@@ -1323,6 +1372,7 @@ public final class BotFleeService {
                     assessment.standPos(),
                     server.getTicks(),
                     ShelterInvalidReason.VALID));
+            settled = true;
 
             // Wait for bot to settle inside the bunker before placing torch
             Thread.sleep(500);
@@ -1361,10 +1411,66 @@ public final class BotFleeService {
                 Thread.sleep(3000);
             }
         } catch (InterruptedException e) {
+            if (DigDownPolicy.climbAfterFailure(realRemovals, settled) && pre != null) {
+                // Climb with the flag cleared (every wait would throw again), then restore it.
+                Thread.interrupted();
+                LOGGER.info("Bot {} dig-down interrupted after digging {} — climbing out", name, realRemovals);
+                try {
+                    markAndClimbOut(bot, server, world, pre);
+                } catch (InterruptedException ignored) {
+                    // fall through to restoring the flag
+                } catch (Exception climbError) {
+                    LOGGER.warn("Bot {} dig-down climb-out after interrupt failed: {}", name, climbError.getMessage());
+                }
+            }
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             LOGGER.warn("Emergency dig-down failed for {}: {}", name, e.getMessage());
+            if (DigDownPolicy.climbAfterFailure(realRemovals, settled) && pre != null) {
+                LOGGER.info("Bot {} dig-down failed after digging {} — climbing out", name, realRemovals);
+                try {
+                    markAndClimbOut(bot, server, world, pre);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                } catch (Exception climbError) {
+                    LOGGER.warn("Bot {} dig-down climb-out after failure failed: {}", name, climbError.getMessage());
+                }
+            }
         }
+    }
+
+    /**
+     * Bounded centring over the dig cell before mining, like the wall-off centring but to
+     * {@link DigDownPolicy#CENTRE_TOLERANCE} so the 0.6-wide box fits the 1x1 shaft. The verdict is
+     * read on the server thread.
+     */
+    private static boolean centreOnDigCell(ServerPlayerEntity bot, MinecraftServer server, BlockPos cell)
+            throws InterruptedException {
+        Vec3d target = Vec3d.ofBottomCenter(cell);
+        long deadline = System.currentTimeMillis() + 2_000L;
+        boolean moved = false;
+        while (System.currentTimeMillis() < deadline) {
+            if (DigDownPolicy.centred(bot.getX(), bot.getZ(), cell.getX(), cell.getZ())) {
+                break;
+            }
+            double dx = target.x - bot.getX();
+            double dz = target.z - bot.getZ();
+            double horizSq = dx * dx + dz * dz;
+            if (horizSq > 1.0D) {
+                break;
+            }
+            double impulse = Math.max(0.03D, Math.min(0.08D, Math.sqrt(horizSq) * 0.25D));
+            BotActions.applyMovementInput(bot, target, impulse);
+            moved = true;
+            Thread.sleep(90L);
+        }
+        if (moved) {
+            BotActions.stop(bot);
+            Thread.sleep(150L);
+        }
+        return Boolean.TRUE.equals(callOnServer(server,
+                () -> DigDownPolicy.centred(bot.getX(), bot.getZ(), cell.getX(), cell.getZ()),
+                DIG_DOWN_HOP_TIMEOUT_MS, Boolean.FALSE));
     }
 
     /** Server thread only: one read of the column under the bot, its seal blocks and its marks. */
@@ -1381,11 +1487,12 @@ public final class BotFleeService {
         }
         BlockState floor = world.getBlockState(origin.down(DigDownPolicy.DEPTH + 1));
         boolean floorSolid = floor.blocksMovement() && floor.getFluidState().isEmpty();
+        // Only blocks the cap may use count: no falling blocks over the bot's head.
         int seals = 0;
         var inventory = bot.getInventory();
         for (int i = 0; i < inventory.size(); i++) {
             ItemStack stack = inventory.getStack(i);
-            if (!stack.isEmpty() && SEAL_IDS.contains(Registries.ITEM.getId(stack.getItem()).toString())) {
+            if (!stack.isEmpty() && CAP_IDS.contains(Registries.ITEM.getId(stack.getItem()).toString())) {
                 seals += stack.getCount();
             }
         }
@@ -1441,17 +1548,43 @@ public final class BotFleeService {
     }
 
     /**
-     * Leaves an uncapped pit. The linger tree suppresses every surface recovery entry point at night
+     * Leaves a dig-down pit. The linger tree suppresses every surface recovery entry point at night
      * (SUPPRESS_NIGHT), and the pillar recovery tears its pillar down again, so this pillars up
-     * inside the 1x1 shaft with the mined blocks and leaves the pillar in place: the pit ends up
-     * filled. Falls back to the dedicated surface recovery (no linger gate) when the pillar falls short.
+     * inside the 1x1 shaft and leaves the pillar in place: the pit ends up filled. The pillar places
+     * {@link ScaffoldService#SCAFFOLD_BLOCKS} only, so "pillar with the mined blocks" works for a dirt
+     * or grass column, or a stone column mined with a pickaxe (cobblestone drops). Sand, gravel or
+     * stone mined by hand gives no scaffold: then the dedicated surface recovery (no linger gate) runs.
      */
     private static void climbOutOfDigDownPit(ServerPlayerEntity bot,
                                              MinecraftServer server,
                                              ServerWorld world,
-                                             BlockPos digPos,
-                                             int depth) throws InterruptedException {
+                                             BlockPos digPos) throws InterruptedException {
         String name = bot.getName().getString();
+        Integer startY = callOnServer(server, () -> bot.getBlockY(), DIG_DOWN_HOP_TIMEOUT_MS, null);
+        if (startY == null) {
+            LOGGER.info("Bot {} dig-down climb-out: position read timed out — not climbing", name);
+            return;
+        }
+        int depth = DigDownPolicy.pitDepth(startY, digPos.getY());
+        if (depth <= 0) {
+            LOGGER.info("Bot {} dig-down climb-out: not in the pit (feetY={} ground={}) — nothing to climb",
+                    name, startY, digPos.getY());
+            return;
+        }
+        // A /bot stop or forceAbort that came with the stale generation latches TaskService, and the
+        // pillar aborts at step 0 on a latch. Clear it unless a running task owns it.
+        boolean latched = TaskService.isAbortRequested(bot.getUuid()) && !TaskService.isServerStopping();
+        DigDownPolicy.Latch latch = DigDownPolicy.climbLatch(latched, TaskService.hasActiveTask(bot.getUuid()));
+        if (latch == DigDownPolicy.Latch.CLEAR) {
+            String latchReason = TaskService.getCancelReason(bot.getUuid()).orElse("");
+            TaskService.clearAbortLatch(bot.getUuid());
+            LOGGER.info("Bot {} dig-down climb-out: cleared an abort latch (reason={}) so the pillar can run",
+                    name, latchReason);
+        } else if (latch == DigDownPolicy.Latch.BLOCKED) {
+            LOGGER.info("Bot {} dig-down climb-out: abort latch owned by a running task (reason={}) — left in the pit at {}",
+                    name, TaskService.getCancelReason(bot.getUuid()).orElse(""), bot.getBlockPos().toShortString());
+            return;
+        }
         ensureScaffoldReachable(bot, depth);
         Integer scaffold = callOnServer(server, () -> countScaffoldBlocks(bot), DIG_DOWN_HOP_TIMEOUT_MS, 0);
         int scaffoldCount = scaffold != null ? scaffold : 0;
@@ -1499,6 +1632,13 @@ public final class BotFleeService {
                 bot.getBlockPos().toShortString(), rim != null ? rim.toShortString() : "none");
     }
 
+    /** Marks the column first (so a failed or aborted climb still blocks a second dig), then climbs out. */
+    private static void markAndClimbOut(ServerPlayerEntity bot, MinecraftServer server, ServerWorld world,
+                                        DigDownPreflight pre) throws InterruptedException {
+        markNoDigDown(bot, pre.dimension(), pre.origin(), pre.day());
+        climbOutOfDigDownPit(bot, server, world, pre.origin());
+    }
+
     /**
      * A generation bump (respawn, mode change, combat reset) mid-dig must not leave a live bot in an
      * uncapped pit: climb out and mark the column, as the uncapped path does. Wall-off precedent:
@@ -1510,8 +1650,7 @@ public final class BotFleeService {
             return;
         }
         LOGGER.info("Bot {} dig-down: stale mid-dig after digging {} — climbing out", bot.getName().getString(), realRemovals);
-        climbOutOfDigDownPit(bot, server, world, pre.origin(), realRemovals);
-        markNoDigDown(bot, pre.dimension(), pre.origin(), pre.day());
+        markAndClimbOut(bot, server, world, pre);
     }
 
     /** No dig-down in this column (and {@link DigDownPolicy#MARK_RADIUS} around it) until the next dawn. */
