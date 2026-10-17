@@ -3,7 +3,21 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-17 (1.1.261) — next session starts here
+## Session Handoff 2026-10-17 (1.1.263) — next session starts here
+
+**State:** main = origin/main @ 1.1.263. Suite 2671 green. 1.1.263 = the sunset auto-return segment pick and the
+`canReach` probe honour the bot's pathfinder (per-bot override, then global) through `PathFinder.probePlan`, held to
+the caller's budget on the server thread. Classic probes with Baritone (no budgeted classic entry). Guard test
+`FinderChoiceBypassGuardTest` stops direct finder calls outside `PathFinding/`. Sandbox check passed
+(`tools/sandbox/sunsettest.py`). Field items: Phase 6bc. 1.1.262 is the parallel escape-code build.
+**Next:**
+- Does `FollowPlannerService` (which walks each sunset segment) honour the finder choice? Not checked in this build.
+- `modCommandRegistry` goto calls `PathFinder.calculatePath` without a bot, so it follows only the global choice.
+- Slice D, then the 6ad-6al bugs A-G, as in the 1.1.261 block below.
+
+Everything in the 1.1.261 block below still applies.
+
+## Session Handoff 2026-10-17 (1.1.261) — superseded
 
 **State:** main = origin/main @ 1.1.261. Suite 2663 green. 1.1.261 = the unified pathfinder is the default and Baritone is
 the opt-in fallback. A one-time config migration moves saved Baritone to unified and keeps classic. The command saves all

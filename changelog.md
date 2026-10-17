@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Sunset auto-return and reachability probes honour the bot's pathfinder; 1.1.263 (2026-10-17)
+
+Finishes the 1.1.261 switch: two paths still ignored the finder choice.
+
+- **Sunset segment pick** (`07d224d4`): `BotAutoReturnSunsetService.refreshTravelSegment` called the Baritone-style finder directly (200 ms, server thread) to pick the next waypoint on a return of more than 60 blocks. It now calls the new `PathFinder.probePlan(start, goal, world, botUuid, timeoutMs)`, which resolves the per-bot override, then the global choice. New INFO line `Sunset segment for <bot> finder=<word> pathLen=<n> next=<pos>`, logged on the session's first segment, when the finder changes, or every 10 s at most (DEBUG otherwise).
+- **canReach** (`07d224d4`): the reachability probe behind the follow-reach check and the come recovery (`BotEventHandler`) read only the global choice. A new overload takes the bot's UUID, so a per-bot override counts too. The old overload keeps the global choice.
+- **Budget kept on the server thread:** every branch of the probe stays within the caller's budget. Unified runs as a probe request (the budget is the whole budget, 3000 nodes). If unified throws, Baritone gets only what is left of the budget (`2ad3359e`, review Minor). canReach reads only the plan status and skips the node conversion (`2ad3359e`).
+- **Guards:** the pure `PathFinderProbePolicy` (unified stays unified, Baritone and classic probe with Baritone) has tests composed with the saved-word and override resolution. `FinderChoiceBypassGuardTest` scans production sources and fails if anything outside `PathFinding/` references `BaritoneStylePathFinder` or `UnifiedPathFinder` directly. Comment stripping knows about string, char and text-block literals.
+- **Ruling (cost if wrong):** classic probes with Baritone, because the classic finder has no budgeted entry and its 10 s cap would freeze the server thread. Slice D removes classic. Cost: a classic bot picks its sunset segment with Baritone, the same as canReach did before.
+- **Sandbox check (mcp-sandbox, `tools/sandbox/sunsettest.py`):** two dusks with Wally and Smokey about 90 blocks from a base. Global baritone: both segments `finder=baritone`. Global unified with Wally overridden to baritone: Wally `finder=baritone` (its `[BaritonePathFinder] ... timeout=200ms` lines continue), Smokey `finder=unified` with no Baritone lines. Both finders stalled at the same rise near the base (Baritone in round 1, unified in round 2), so that is terrain, not the finder. Smokey's first unified probe was `pathLen=0` because the spread dropped it into a hole.
+- **Not covered:** the segment walk itself is planned by `FollowPlannerService`, which this build does not touch. Whether it honours the choice is a follow-up, as is `modCommandRegistry`'s goto path (`calculatePath` with no bot, so global only).
+- **Review (Opus):** merge-ready, no Critical or Important. Four Minors fixed in `2ad3359e`: the fallback budget, no node conversion after the budget, the log throttle, and literal-aware comment stripping in the guard test.
+- Release number: 1.1.262 is held by the parallel escape-code build, so this one is 1.1.263.
+- Tests 2663 → 2671.
+- **Field checks:** Phase 6bc.
+
 ## Older field phases 6ad-6al run in the sandbox: 25 pass, 6 fail (2026-10-17, no build)
 
 Claude played the 41 checks of Phases 6ad-6al (builds 1.1.232-1.1.241) in `mcp-sandbox` on 1.1.261 over the MCP API, in three saves (commands off, then two commands-on copies). Nirn was read only (logs and config). Results and bug notes: `docs/testing/FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
