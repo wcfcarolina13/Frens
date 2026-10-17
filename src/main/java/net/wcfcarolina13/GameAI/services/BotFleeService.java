@@ -1264,6 +1264,12 @@ public final class BotFleeService {
             boolean centred = centreOnDigCell(bot, server, digPos);
             LOGGER.info("Bot {} dig-down: centred={} at {} over {}", name, centred,
                     String.format(java.util.Locale.ROOT, "%.2f,%.2f", bot.getX(), bot.getZ()), digPos.toShortString());
+            // Straddling the rim, the bot would not drop in and the open shaft would stay behind.
+            String centreSkip = DigDownPolicy.centreSkipReason(centred);
+            if (centreSkip != null) {
+                LOGGER.info("Bot {} dig-down skipped reason={} at {}", name, centreSkip, digPos.toShortString());
+                return;
+            }
             Thread.sleep(300);
 
             // Mine the column, counting cells that really opened.

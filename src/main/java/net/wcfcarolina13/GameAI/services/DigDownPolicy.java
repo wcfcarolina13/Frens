@@ -43,6 +43,11 @@ public final class DigDownPolicy {
         return Math.abs(x - (cellX + 0.5D)) <= CENTRE_TOLERANCE && Math.abs(z - (cellZ + 0.5D)) <= CENTRE_TOLERANCE;
     }
 
+    /** Null when the dig may start, else {@code not-centred}: nothing is mined off centre. */
+    public static String centreSkipReason(boolean centred) {
+        return centred ? null : "not-centred";
+    }
+
     /** How deep the feet are below the original feet level; 0 when the bot never fell in. */
     public static int pitDepth(int feetY, int groundFeetY) {
         return Math.max(0, groundFeetY - feetY);

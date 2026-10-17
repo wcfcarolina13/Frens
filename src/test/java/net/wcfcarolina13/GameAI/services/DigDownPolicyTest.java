@@ -45,6 +45,12 @@ class DigDownPolicyTest {
     }
 
     @Test
+    void offCentreSkipsTheDig() {
+        assertNull(DigDownPolicy.centreSkipReason(true));
+        assertEquals("not-centred", DigDownPolicy.centreSkipReason(false));
+    }
+
+    @Test
     void pitDepthIsZeroWhenTheBotNeverFellIn() {
         assertEquals(3, DigDownPolicy.pitDepth(61, 64));
         assertEquals(1, DigDownPolicy.pitDepth(63, 64));
