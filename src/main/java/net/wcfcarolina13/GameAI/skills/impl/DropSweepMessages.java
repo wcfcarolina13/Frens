@@ -28,6 +28,19 @@ public final class DropSweepMessages {
         return "Picked up " + items(picked) + ", " + left + " out of reach.";
     }
 
+    /**
+     * Items picked up over a sweep: the larger of what the sweep counted itself and how far the
+     * pile in range shrank. The sweep does not see drops taken by plain pickup (already in reach,
+     * walked over, nearby-drop collection), so its own count alone undercounts.
+     *
+     * @param initialInRange items lying in range when the sweep started
+     * @param remaining      items still lying in range at the end
+     * @param counted        items the sweep counted as picked up
+     */
+    public static int pickedUpCount(int initialInRange, int remaining, int counted) {
+        return Math.max(Math.max(0, counted), Math.max(0, initialInRange) - Math.max(0, remaining));
+    }
+
     /** The bot stopped because its inventory is full and nothing could be stored or dropped. */
     public static String inventoryFull(int pickedUp) {
         int picked = Math.max(0, pickedUp);

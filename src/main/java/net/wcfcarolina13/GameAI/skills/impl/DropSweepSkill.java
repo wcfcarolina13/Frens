@@ -73,6 +73,10 @@ public SkillExecutionResult execute(SkillContext context) {
         int pass = 0;
         int collectedCount = 0;
         int remaining = countItemsInRange(world, bot, effectiveRadius, effectiveVertical);
+        // Items lying in range at the start: drops already in pickup reach, collectNearbyDrops
+        // and vanilla pickups while walking are never counted by the sweep, so the summary
+        // uses whichever of the two counts is larger.
+        int initialInRange = remaining;
 
         if (noOffload) {
             DropSweeper.setNoOffload(bot.getUuid(), true);
@@ -166,7 +170,8 @@ public SkillExecutionResult execute(SkillContext context) {
                 "Swept drops within radius %.1f (%.1f vertical) across %d pass(es). Remaining items: %d, collected: %d",
                 effectiveRadius, effectiveVertical, pass + 1, Math.max(remaining, 0), collectedCount);
         LOGGER.info("drop_sweep completed: {}", detail);
-        return SkillExecutionResult.success(DropSweepMessages.summary(collectedCount, remaining));
+        return SkillExecutionResult.success(DropSweepMessages.summary(
+                DropSweepMessages.pickedUpCount(initialInRange, remaining, collectedCount), remaining));
 }
 
 /** Items (stack counts) still lying within the sweep range. */

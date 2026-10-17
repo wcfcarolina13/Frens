@@ -23,6 +23,21 @@ class DropSweepMessagesTest {
     }
 
     @Test
+    void pickedUpCountUsesThePileShrinkWhenTheSweepUndercounted() {
+        // Field: 3 drops in reach were taken by plain pickup, the sweep counted none of them.
+        assertEquals(3, DropSweepMessages.pickedUpCount(3, 0, 0));
+        assertEquals(5, DropSweepMessages.pickedUpCount(7, 2, 1));
+    }
+
+    @Test
+    void pickedUpCountKeepsTheSweepCountWhenTheRangeGrew() {
+        // The range widens each pass, so the end count can exceed the start count.
+        assertEquals(4, DropSweepMessages.pickedUpCount(2, 6, 4));
+        assertEquals(0, DropSweepMessages.pickedUpCount(0, 0, 0));
+        assertEquals(0, DropSweepMessages.pickedUpCount(-1, -1, -1));
+    }
+
+    @Test
     void pickedUpSomeWithLeftovers() {
         assertEquals("Picked up 3 items, 2 out of reach.", DropSweepMessages.summary(3, 2));
     }
