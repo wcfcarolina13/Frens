@@ -349,6 +349,59 @@ public final class UnifiedPathFinder {
         return PathPlan.noPath(ctx.planId(), NoPathReason.NO_SCAFFOLD, expanded, elapsedMs);
     }
 
+    /**
+     * What {@link #truncateToExecutable} did: the plan to run, and the move it was cut before with the
+     * verifier's reason ({@code cutAt} -1 and {@code reason} null when the plan was left alone).
+     */
+    public record Truncation(PathPlan plan, int cutAt, String reason) {
+        public boolean truncated() {
+            return cutAt >= 0;
+        }
+    }
+
+    /**
+     * Cuts a plan before the first move an earlier move of the same plan undoes (6ad-6al field bug F).
+     * The search prices every move on the unmutated terrain, so it can mine a cell with one move and
+     * step onto it as solid with a later one (TRAVERSE mines C, TRAVERSE on, ASCEND back onto C);
+     * {@link CostVerifier} applies the earlier moves' breaks and places to an overlay and cancels that
+     * move as forbidden, and the replan from the same cell returns the same plan.
+     *
+     * <p>This is the verifier's own verdict at plan time: {@link CostVerifier#check} from move 0 over the
+     * whole plan on an overlay of the planning terrain, with no cost-rise limit, so only a move that is
+     * now refused or lands elsewhere cuts. Not {@link MoveSimulator#simulate}: its exact re-evaluation
+     * also fails a move whose planned break an earlier move already made, which the executor skips
+     * ({@code minePlannedCells}), and cutting those executable plans short would stop walks that work.</p>
+     *
+     * <p>A cut at move k &gt; 0 keeps moves [0, k) through {@link #trimPartial} as a PARTIAL with reason
+     * {@link NoPathReason#SELF_CONFLICT}, so the bot walks up to the conflict and the next leg plans on
+     * the real terrain. No minimum distance: any real progress beats a leg the verifier cancels. A cut
+     * at move 0, or a prefix that trims to nothing, is NO_PATH(SELF_CONFLICT). NO_PATH and empty plans
+     * come back unchanged. Pure: reads only {@code ctx.terrain()} through the overlay.</p>
+     */
+    public static Truncation truncateToExecutable(SearchContext ctx, PathPlan plan) {
+        if (plan.status() == PlanStatus.NO_PATH || plan.isEmpty()) {
+            return new Truncation(plan, -1, null);
+        }
+        List<PlannedMove> moves = plan.moves();
+        CostVerifier.Verdict v = CostVerifier.check(ctx, plan, 0, ctx.terrain(), moves.size(),
+                Double.POSITIVE_INFINITY);
+        if (!v.cancel()) {
+            return new Truncation(plan, -1, null);
+        }
+        int k = v.moveIndex();
+        List<PlannedMove> cut = k > 0 ? trimPartial(moves.subList(0, k)) : List.of();
+        if (cut.isEmpty()) {
+            return new Truncation(PathPlan.noPath(plan.planId(), NoPathReason.SELF_CONFLICT, plan.nodesExpanded(),
+                    plan.elapsedMs()), k, v.reason());
+        }
+        double ticks = 0;
+        for (PlannedMove m : cut) {
+            ticks += m.ticks();
+        }
+        return new Truncation(new PathPlan(plan.planId(), PlanStatus.PARTIAL, NoPathReason.SELF_CONFLICT, 0, cut,
+                ticks, plan.nodesExpanded(), plan.elapsedMs()), k, v.reason());
+    }
+
     /** 10% tail cut beyond 30 moves; never end on a swim cell or right after a break/place action. */
     static List<PlannedMove> trimPartial(List<PlannedMove> moves) {
         List<PlannedMove> out = new ArrayList<>(moves);

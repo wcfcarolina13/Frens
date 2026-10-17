@@ -21,6 +21,7 @@ import net.wcfcarolina13.PathFinding.unified.PathPlanIds;
 import net.wcfcarolina13.PathFinding.unified.PlanAdapter;
 import net.wcfcarolina13.PathFinding.unified.PlanRequest;
 import net.wcfcarolina13.PathFinding.unified.PlanStatus;
+import net.wcfcarolina13.PathFinding.unified.PlannedMove;
 import net.wcfcarolina13.PathFinding.unified.SearchContext;
 import net.wcfcarolina13.PathFinding.unified.UnifiedPathFinder;
 import net.wcfcarolina13.PathFinding.unified.WorldTerrainView;
@@ -316,7 +317,12 @@ public class PathFinder {
     static PlanResult runUnified(BlockPos start, BlockPos target, ServerWorld world, PlanRequest req,
                                  WorldTerrainView.BotSnapshot snapshot, long planId) {
         SearchContext ctx = unifiedContext(start, target, world, req, snapshot, planId);
-        PathPlan plan = UnifiedPathFinder.search(ctx);
+        PathPlan searched = UnifiedPathFinder.search(ctx);
+        UnifiedPathFinder.Truncation cut = UnifiedPathFinder.truncateToExecutable(ctx, searched);
+        PathPlan plan = cut.plan();
+        if (cut.truncated()) {
+            logTruncation(planId, searched, cut);
+        }
         List<PathNode> nodes = plan.status() == PlanStatus.NO_PATH
                 ? new ArrayList<>() : new ArrayList<>(PlanAdapter.toPathNodes(plan, ctx));
         if (plan.status() == PlanStatus.NO_PATH) {
@@ -326,6 +332,23 @@ public class PathFinder {
                     || (plan.reason() == NoPathReason.BLOCKED_PROTECTED && plan.nodesExpanded() <= 1));
         }
         return new PlanResult(PathFinderChoice.UNIFIED, planId, nodes, plan, ctx, plan.elapsedMs(), false);
+    }
+
+    /**
+     * One INFO line per truncated plan (6ad-6al field bug F), grep "unified plan truncated at move": the
+     * cut move and the verifier's reason, then every earlier move with its planned breaks, so a field
+     * check can see which earlier break the cut move needed as footing.
+     */
+    private static void logTruncation(long planId, PathPlan searched, UnifiedPathFinder.Truncation cut) {
+        List<PlannedMove> moves = searched.moves();
+        StringBuilder before = new StringBuilder();
+        for (int i = 0; i < cut.cutAt(); i++) {
+            before.append(i == 0 ? "" : " | ").append(i).append(':').append(moves.get(i));
+        }
+        LOGGER.info("[PathFinder] unified plan truncated at move {} {} plan={} was={} now={} moves={} kept={} reason={} earlier=[{}]",
+                cut.cutAt(), moves.get(cut.cutAt()).kind(),
+                PathPlanIds.format(planId), searched.status(), cut.plan().status(), moves.size(),
+                cut.plan().moves().size(), cut.reason(), before);
     }
 
     /** The search context for one unified search: a fresh {@link WorldTerrainView} owned by this thread. */
