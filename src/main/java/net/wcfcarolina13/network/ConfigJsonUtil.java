@@ -42,6 +42,19 @@ public final class ConfigJsonUtil {
         return GSON.toJson(SharedConfig.capture(config));
     }
 
+    /**
+     * Server to client snapshot: {@link #configToJson(ManualConfig)} plus the server's current
+     * world key, so a remote client's per-bot edits land under that world.
+     */
+    public static String configToJson(ManualConfig config, String serverWorldKey) {
+        if (config == null) {
+            return "{}";
+        }
+        SharedConfig snapshot = SharedConfig.capture(config);
+        snapshot.serverWorldKey = serverWorldKey;
+        return GSON.toJson(snapshot);
+    }
+
     /** Merges {@code json} onto {@code Frens.CONFIG}. Returns false when nothing was applied. */
     public static boolean applyConfigJson(String json) {
         ManualConfig config = null;

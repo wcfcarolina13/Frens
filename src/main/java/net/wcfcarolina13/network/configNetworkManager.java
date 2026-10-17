@@ -79,7 +79,7 @@ public final class configNetworkManager {
             if (!ServerPlayNetworking.canSend(player, OpenConfigPayload.ID)) {
                 return;
             }
-            ServerPlayNetworking.send(player, new OpenConfigPayload(ConfigJsonUtil.configToJson()));
+            ServerPlayNetworking.send(player, new OpenConfigPayload(serverConfigJson(player.getEntityWorld().getServer())));
         } catch (Throwable t) {
             Frens.LOGGER.warn("sendOpenConfigPacket failed: {}", String.valueOf(t));
         }
@@ -92,7 +92,7 @@ public final class configNetworkManager {
         }
         try {
             if (ServerPlayNetworking.canSend(player, ConfigSyncPayload.ID)) {
-                ServerPlayNetworking.send(player, new ConfigSyncPayload(ConfigJsonUtil.configToJson()));
+                ServerPlayNetworking.send(player, new ConfigSyncPayload(serverConfigJson(player.getEntityWorld().getServer())));
             }
         } catch (Throwable t) {
             Frens.LOGGER.warn("sendConfigSync failed: {}", String.valueOf(t));
@@ -104,7 +104,7 @@ public final class configNetworkManager {
         if (server == null) {
             return;
         }
-        String json = ConfigJsonUtil.configToJson();
+        String json = serverConfigJson(server);
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             if (!isRealPlayer(player)) {
                 continue;
@@ -117,6 +117,19 @@ public final class configNetworkManager {
                 Frens.LOGGER.warn("broadcastConfigSync failed for {}: {}", player.getName().getString(), String.valueOf(t));
             }
         }
+    }
+
+    /** The shared config plus this server's world key (see {@link SharedConfig#serverWorldKey}). */
+    private static String serverConfigJson(MinecraftServer server) {
+        String worldKey = null;
+        try {
+            worldKey = server != null
+                    ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server)
+                    : null;
+        } catch (Throwable t) {
+            Frens.LOGGER.debug("serverConfigJson: no world key: {}", String.valueOf(t));
+        }
+        return ConfigJsonUtil.configToJson(Frens.CONFIG, worldKey);
     }
 
     private static boolean isRealPlayer(ServerPlayerEntity player) {

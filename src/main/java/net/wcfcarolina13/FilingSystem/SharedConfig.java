@@ -46,6 +46,12 @@ public class SharedConfig {
     public Integer soulLocalRate;
     public Boolean soulVoiceEnabled;
     public Map<String, Map<String, ManualConfig.BotControlSettings>> botControlsByWorld;
+    /**
+     * The sending server's current world key, so a client on a remote server edits
+     * {@code botControlsByWorld[alias][serverWorldKey]}. Set only on server to client sends,
+     * never by {@link #capture}, so a client save never carries one.
+     */
+    public String serverWorldKey;
 
     public SharedConfig() {
     }
@@ -137,6 +143,11 @@ public class SharedConfig {
             Map<String, Map<String, ManualConfig.BotControlSettings>> live = config.getBotControlsByWorld();
             live.clear();
             live.putAll(staged);
+        }
+        // Only a client holding a remote server's config keeps the key (single player and the
+        // server itself read their own world key directly).
+        if (serverWorldKey != null && !serverWorldKey.isBlank() && config.isRemoteAuthoritative()) {
+            config.setRemoteWorldKey(serverWorldKey);
         }
     }
 

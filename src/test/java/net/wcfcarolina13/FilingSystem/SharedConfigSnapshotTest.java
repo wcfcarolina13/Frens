@@ -9,6 +9,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -92,5 +93,48 @@ class SharedConfigSnapshotTest {
 
         cfg.setRemoteAuthoritative(false);
         assertFalse(cfg.isRemoteAuthoritative());
+    }
+
+    @Test
+    void captureNeverCarriesAServerWorldKey() throws Exception {
+        ManualConfig cfg = newRealConfig();
+        cfg.setRemoteAuthoritative(true);
+        cfg.setRemoteWorldKey("Nirn#4a9f00d9");
+
+        assertNull(SharedConfig.capture(cfg).serverWorldKey);
+        assertFalse(net.wcfcarolina13.network.ConfigJsonUtil.configToJson(cfg).contains("serverWorldKey"));
+        assertTrue(net.wcfcarolina13.network.ConfigJsonUtil.configToJson(cfg, "Nirn#4a9f00d9")
+                .contains("\"serverWorldKey\":\"Nirn#4a9f00d9\""));
+    }
+
+    @Test
+    void remoteClientKeepsTheServerWorldKeyUntilDisconnect() throws Exception {
+        ManualConfig cfg = newRealConfig();
+        cfg.setRemoteAuthoritative(true);
+        String json = net.wcfcarolina13.network.ConfigJsonUtil.configToJson(newRealConfig(), "Nirn#4a9f00d9");
+
+        assertTrue(net.wcfcarolina13.network.ConfigJsonUtil.applyConfigJson(json, cfg));
+        assertEquals("Nirn#4a9f00d9", cfg.getRemoteWorldKey());
+        assertEquals("Nirn#4a9f00d9", cfg.botControlEditWorldKey(null));
+        assertFalse(new Gson().toJson(cfg).contains("Nirn#4a9f00d9"), "transient key leaked into the config JSON");
+
+        // A sync without a key (a client save echoed back) leaves it alone.
+        new SharedConfig().applyTo(cfg);
+        assertEquals("Nirn#4a9f00d9", cfg.getRemoteWorldKey());
+
+        cfg.setRemoteAuthoritative(false);
+        assertNull(cfg.getRemoteWorldKey());
+        assertNull(cfg.botControlEditWorldKey(null));
+    }
+
+    @Test
+    void singlePlayerIgnoresTheSyncedKeyAndUsesItsOwnWorld() throws Exception {
+        ManualConfig cfg = newRealConfig();
+        SharedConfig sync = new SharedConfig();
+        sync.serverWorldKey = "Nirn#4a9f00d9";
+        sync.applyTo(cfg);
+
+        assertNull(cfg.getRemoteWorldKey());
+        assertEquals("Local#1", cfg.botControlEditWorldKey("Local#1"));
     }
 }

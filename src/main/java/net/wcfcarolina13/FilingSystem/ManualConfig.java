@@ -195,6 +195,35 @@ public class ManualConfig {
     /** Marks (or unmarks) this config as holding a remote server's globals. */
     public void setRemoteAuthoritative(boolean remoteAuthoritative) {
         this.remoteAuthoritative = remoteAuthoritative;
+        if (!remoteAuthoritative) {
+            this.remoteWorldKey = null;
+        }
+    }
+
+    /**
+     * World key of the remote server this client is connected to, sent with every config sync
+     * ({@link SharedConfig#serverWorldKey}). Null in single player and before the first sync.
+     * Transient so Gson never serializes it.
+     */
+    private transient volatile String remoteWorldKey;
+
+    public void setRemoteWorldKey(String remoteWorldKey) {
+        this.remoteWorldKey = remoteWorldKey == null || remoteWorldKey.isBlank() ? null : remoteWorldKey.trim();
+    }
+
+    public String getRemoteWorldKey() {
+        return remoteWorldKey;
+    }
+
+    /**
+     * The world key the Bot Controls screen edits under: the integrated server's key when there is
+     * one, else the key the remote server sent, else null (per-bot edits cannot be kept).
+     */
+    public String botControlEditWorldKey(String integratedServerWorldKey) {
+        if (integratedServerWorldKey != null && !integratedServerWorldKey.isBlank()) {
+            return integratedServerWorldKey;
+        }
+        return remoteWorldKey;
     }
 
     /** @return true when these values came from a remote server and must not hit local disk. */

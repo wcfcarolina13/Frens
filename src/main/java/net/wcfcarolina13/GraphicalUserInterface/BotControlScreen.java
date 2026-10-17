@@ -123,6 +123,11 @@ public class BotControlScreen extends Screen {
     // Per-bot setting widgets (scroll panel only — no globals)
     private final List<SettingGroup> settingGroups = new ArrayList<>();
     private final List<CyclingButtonWidget<?>> settingWidgets = new ArrayList<>();
+    // True when there is no world key to file per-bot edits under (see editWorldKey).
+    private boolean perBotUnavailable;
+    private static final String PER_BOT_UNAVAILABLE_TEXT =
+            "Per-bot settings are unavailable because this server did not send its world. "
+                    + "Update Frens on the server to 1.1.254 or newer.";
 
     // Dirty buffer for per-alias edits
     private final Map<String, SettingsSnapshot> dirtySettings = new LinkedHashMap<>();
@@ -478,10 +483,12 @@ public class BotControlScreen extends Screen {
 
         // Per-bot settings only (globals are handled separately)
         SettingsSnapshot snap = dirtySettings.get(selectedAlias);
-        String clientWorldKey = null;
-        net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
-        if (mc != null && mc.getServer() != null) {
-            clientWorldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(mc.getServer());
+        String clientWorldKey = editWorldKey();
+        perBotUnavailable = clientWorldKey == null;
+        if (perBotUnavailable) {
+            // No world to file the edits under (a remote server that sent no world key): an
+            // edit here could never be saved, so the per-bot panel shows a message instead.
+            return;
         }
         ManualConfig.BotControlSettings cfg =
                 Frens.CONFIG.getOrCreateBotControl(selectedAlias, clientWorldKey);
@@ -529,6 +536,20 @@ public class BotControlScreen extends Screen {
         List<SettingEntry> dialogue = new ArrayList<>();
         dialogue.add(makeOnOff("Voiced Dialogue (this bot)", "Per-bot override under the global Scripted Voice master: both must be ON for this bot's pre-baked voice lines to play. Category muting lives under the Scripted Voice row's Adv… button. Soul TTS is separate (Soul Voice).", voiced, TOGGLE_W));
         settingGroups.add(new SettingGroup("Dialogue & AI — per-bot overrides", dialogue));
+    }
+
+    /**
+     * World key per-bot edits are filed under: the integrated server's current world, or on a
+     * remote server the key it sent with the config sync (botControlsByWorld is what syncs).
+     * Null when neither is known.
+     */
+    private String editWorldKey() {
+        net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
+        net.minecraft.server.MinecraftServer srv = mc != null ? mc.getServer() : null;
+        String integratedKey = srv != null
+                ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv)
+                : null;
+        return Frens.CONFIG.botControlEditWorldKey(integratedKey);
     }
 
     private String canonicalSpawnModeForUi(String raw) {
@@ -615,12 +636,10 @@ public class BotControlScreen extends Screen {
         }
 
         java.util.List<String> autoRespawnJustEnabled = new java.util.ArrayList<>();
-        for (Map.Entry<String, SettingsSnapshot> entry : dirtySettings.entrySet()) {
-            String saveWorldKey = null;
-            net.minecraft.client.MinecraftClient mc2 = net.minecraft.client.MinecraftClient.getInstance();
-            if (mc2 != null && mc2.getServer() != null) {
-                saveWorldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(mc2.getServer());
-            }
+        String saveWorldKey = editWorldKey();
+        // Without a world key there is nowhere to keep per-bot edits (the panel is hidden then).
+        Map<String, SettingsSnapshot> perBotEdits = saveWorldKey != null ? dirtySettings : Map.of();
+        for (Map.Entry<String, SettingsSnapshot> entry : perBotEdits.entrySet()) {
             ManualConfig.BotControlSettings s = config.getOrCreateBotControl(entry.getKey(), saveWorldKey);
             SettingsSnapshot v = entry.getValue();
             boolean wasAutoRespawn = s.isAutoRespawnOnDeath();
@@ -1011,9 +1030,10 @@ public class BotControlScreen extends Screen {
     private void applyBulkAutoRespawn(boolean value) {
         net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
         net.minecraft.server.MinecraftServer srv = mc != null ? mc.getServer() : null;
-        String worldKey = srv != null
-                ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv)
-                : null;
+        String worldKey = editWorldKey();
+        if (worldKey == null) {
+            return;
+        }
 
         List<String> justEnabled = new ArrayList<>();
         Map<String, Map<String, ManualConfig.BotControlSettings>> byWorld =
@@ -1032,6 +1052,8 @@ public class BotControlScreen extends Screen {
             }
         }
         Frens.CONFIG.save();
+        // save() is skipped on a remote server: the server keeps the change only once it gets it.
+        configNetworkManager.sendSaveConfigPacket(ConfigJsonUtil.configToJson());
 
         // Drop any staged per-bot edits and rebuild so the settings panel reflects
         // the new live config values.
@@ -1053,11 +1075,10 @@ public class BotControlScreen extends Screen {
      * on world load only; it does not directly spawn or despawn any live bot.
      */
     private void applyBulkAutoSpawnOnLoad(boolean value) {
-        net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
-        net.minecraft.server.MinecraftServer srv = mc != null ? mc.getServer() : null;
-        String worldKey = srv != null
-                ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv)
-                : null;
+        String worldKey = editWorldKey();
+        if (worldKey == null) {
+            return;
+        }
 
         Map<String, Map<String, ManualConfig.BotControlSettings>> byWorld =
                 Frens.CONFIG.getBotControlsByWorld();
@@ -1071,6 +1092,7 @@ public class BotControlScreen extends Screen {
             }
         }
         Frens.CONFIG.save();
+        configNetworkManager.sendSaveConfigPacket(ConfigJsonUtil.configToJson());
 
         dirtySettings.clear();
         rebuildSettingsWidgets();
@@ -1232,6 +1254,15 @@ public class BotControlScreen extends Screen {
                 }
 
                 currentY += rowH;
+            }
+        }
+
+        if (perBotUnavailable) {
+            int msgY = clipT + 6;
+            for (net.minecraft.text.OrderedText line
+                    : this.textRenderer.wrapLines(Text.literal(PER_BOT_UNAVAILABLE_TEXT), Math.max(40, innerW - 8))) {
+                context.drawText(this.textRenderer, line, innerL + 4, msgY, COL_DESC, false);
+                msgY += this.textRenderer.fontHeight + 2;
             }
         }
 
