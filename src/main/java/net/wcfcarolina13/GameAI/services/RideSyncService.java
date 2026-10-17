@@ -3644,6 +3644,7 @@ public final class RideSyncService {
             }
         }
         LEASH_TARGET.remove(bot.getUuid());
+        MountPersistenceService.forgetHeldByBot(bot, mob.getUuid(), LeashTargetPolicy.Event.TIED_TO_FENCE);
         return SecureResult.TETHERED_TO_FENCE;
     }
 
@@ -4206,7 +4207,7 @@ public final class RideSyncService {
             return;
         }
         if (!mob.isAlive()) {
-            LEASH_TARGET.remove(bot.getUuid());
+            forgetLostLead(bot, mountId, "mount dead");
             maybeAnnounceLeashIssue(bot, pickRandom(
                     "The horse I was holding is gone.", "I lost track of the horse I was holding.",
                     "I lost the horse I was leading.", "I can't find the horse.",
@@ -4217,7 +4218,7 @@ public final class RideSyncService {
         double lastDist = LAST_LEASH_DIST.getOrDefault(bot.getUuid(), distSq);
         LAST_LEASH_DIST.put(bot.getUuid(), distSq);
         if (Math.abs(distSq - lastDist) > 64.0D) {
-            LEASH_TARGET.remove(bot.getUuid());
+            forgetLostLead(bot, mountId, "lead snapped");
             maybeAnnounceLeashIssue(bot, pickRandom(
                     "The lead snapped after a sudden drop.", "The lead broke after that fall.",
                     "The lead snapped on that drop."));
@@ -4251,6 +4252,20 @@ public final class RideSyncService {
             return;
         }
         BotActions.interactEntity(bot, mob, Hand.MAIN_HAND);
+    }
+
+    /**
+     * The held mount died or its lead snapped: forget the in-memory target (with its distance and
+     * attempt bookkeeping, so the next target does not inherit a stale distance) and the saved
+     * held-lead record when it is that mount ({@link LeashTargetPolicy.Event#LEAD_LOST}).
+     * Server thread (the leash tick).
+     */
+    private static void forgetLostLead(ServerPlayerEntity bot, UUID mountId, String why) {
+        if (LeashTargetPolicy.shouldClear(LeashTargetPolicy.Event.LEAD_LOST, false)) {
+            clearLeashTarget(bot.getUuid());
+        }
+        MountPersistenceService.forgetHeldByBot(bot, mountId, LeashTargetPolicy.Event.LEAD_LOST);
+        LOGGER.info("[leash-target] {} cleared leash target {} ({})", bot.getName().getString(), mountId, why);
     }
 
     /**
@@ -4293,6 +4308,7 @@ public final class RideSyncService {
         if (!mob.isLeashed() || mob.getLeashHolder() != bot) {
             LEASH_TARGET.remove(bot.getUuid());
             LAST_LEASH_DIST.remove(bot.getUuid());
+            MountPersistenceService.forgetHeldByBot(bot, mob.getUuid(), LeashTargetPolicy.Event.TIED_TO_FENCE);
             maybeAnnounceLeashIssue(bot, pickRandom(
                     "Tied the horse to a fence.",
                     "Tethered the animal to a nearby fence.",

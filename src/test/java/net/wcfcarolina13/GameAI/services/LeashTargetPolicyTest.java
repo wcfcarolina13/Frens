@@ -80,4 +80,17 @@ class LeashTargetPolicyTest {
         assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(Event.RELEASED, true, false));
         assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(Event.RELEASED, false, true));
     }
+
+    @Test
+    void aLostLeadForgetsTheTarget() {
+        assertTrue(LeashTargetPolicy.shouldClear(Event.LEAD_LOST, false));
+        assertTrue(LeashTargetPolicy.shouldClear(Event.LEAD_LOST, true));
+    }
+
+    @Test
+    void aLostLeadForgetsTheHeldRecordOnlyForThatMount() {
+        assertTrue(LeashTargetPolicy.shouldForgetHeldRecord(Event.LEAD_LOST, true, true));
+        assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(Event.LEAD_LOST, true, false));
+        assertFalse(LeashTargetPolicy.shouldForgetHeldRecord(Event.LEAD_LOST, false, true));
+    }
 }
