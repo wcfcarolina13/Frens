@@ -307,6 +307,15 @@ public final class DropSweeper {
         return player.getInventory().getEmptySlot() == -1;
     }
 
+    /** Bots whose current sweep must not store into, or place, chests or drop items (death retrieval). */
+    private static final java.util.Set<java.util.UUID> NO_OFFLOAD = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** While set, a full inventory only packs bundles: no chest store, no crafting table, no dropping. */
+    public static void setNoOffload(java.util.UUID botUuid, boolean noOffload) {
+        if (botUuid == null) return;
+        if (noOffload) NO_OFFLOAD.add(botUuid); else NO_OFFLOAD.remove(botUuid);
+    }
+
     public static boolean ensureSpaceForDropSweep(ServerCommandSource source, ServerPlayerEntity player) {
         return ensureSpaceForDropSweep(source, player, resolveCommanderForBundle(player, source));
     }
@@ -322,6 +331,10 @@ public final class DropSweeper {
         }
         if (BundleService.packInventory(source, player, commander) && !isInventoryFull(player)) {
             return true;
+        }
+        if (NO_OFFLOAD.contains(player.getUuid())) {
+            LOGGER.info("Drop sweep: {} is full and offload is off for this run; stopping.", player.getName().getString());
+            return false;
         }
         boolean chestStoreSucceeded = false;
         if (source != null) {

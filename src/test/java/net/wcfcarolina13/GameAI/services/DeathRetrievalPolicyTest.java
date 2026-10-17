@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import net.wcfcarolina13.GameAI.services.DeathRetrievalPolicy.Offset;
 import net.wcfcarolina13.GameAI.services.DeathRetrievalPolicy.ReturnMode;
 import net.wcfcarolina13.GameAI.services.DeathRetrievalPolicy.Verdict;
+import net.wcfcarolina13.GameAI.services.DeathRetrievalPolicy.Warning;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -20,49 +21,77 @@ class DeathRetrievalPolicyTest {
     private static final int LO = DeathRetrievalPolicy.STAND_DY_MIN;
     private static final int HI = DeathRetrievalPolicy.STAND_DY_MAX;
 
-    // ── Cause rule ──────────────────────────────────────────────────────────
+    // ── Refusals ────────────────────────────────────────────────────────────
 
     @Test
     void lavaAndVoidAreRefused() {
-        assertEquals(Verdict.REFUSE_LAVA, DeathRetrievalPolicy.judge("minecraft:lava", null, NOW, NOW));
-        assertEquals(Verdict.REFUSE_VOID, DeathRetrievalPolicy.judge("minecraft:out_of_world", null, NOW, NOW));
-        // Even when a mob pushed them in.
-        assertEquals(Verdict.REFUSE_LAVA, DeathRetrievalPolicy.judge("minecraft:lava", "minecraft:zombie", NOW, NOW));
+        assertEquals(Verdict.REFUSE_LAVA, DeathRetrievalPolicy.judge("minecraft:lava", false));
+        assertEquals(Verdict.REFUSE_VOID, DeathRetrievalPolicy.judge("minecraft:out_of_world", false));
         assertTrue(Verdict.REFUSE_LAVA.refused());
         assertTrue(Verdict.REFUSE_VOID.refused());
     }
 
     @Test
-    void mobKillsWarnButGo() {
-        assertEquals(Verdict.WARN_MOB, DeathRetrievalPolicy.judge("minecraft:mob_attack", "minecraft:zombie", NOW, NOW));
-        assertEquals(Verdict.WARN_MOB, DeathRetrievalPolicy.judge("minecraft:mob_projectile", null, NOW, NOW));
-        assertEquals(Verdict.WARN_MOB, DeathRetrievalPolicy.judge("minecraft:explosion", "minecraft:creeper", NOW, NOW));
-        assertFalse(Verdict.WARN_MOB.refused());
-    }
-
-    @Test
-    void otherCausesAndUnknownGo() {
-        for (String cause : List.of("minecraft:generic_kill", "minecraft:fall", "minecraft:hot_floor",
-                "minecraft:drown", "minecraft:on_fire", "unknown")) {
-            assertEquals(Verdict.GO, DeathRetrievalPolicy.judge(cause, null, NOW, NOW), cause);
+    void keepInventoryRefusesWhateverTheCause() {
+        for (String cause : List.of("minecraft:generic_kill", "minecraft:lava", "unknown")) {
+            assertEquals(Verdict.REFUSE_KEEP_INVENTORY, DeathRetrievalPolicy.judge(cause, true), cause);
         }
-        assertEquals(Verdict.GO, DeathRetrievalPolicy.judge(null, null, null, NOW));
-        assertEquals(Verdict.GO, DeathRetrievalPolicy.judge(null, " ", 0L, NOW));
+        assertEquals(Verdict.REFUSE_KEEP_INVENTORY, DeathRetrievalPolicy.judge(null, true));
+        assertTrue(Verdict.REFUSE_KEEP_INVENTORY.refused());
     }
 
-    // ── Age window ──────────────────────────────────────────────────────────
+    @Test
+    void everythingElseGoes() {
+        for (String cause : List.of("minecraft:generic_kill", "minecraft:fall", "minecraft:hot_floor",
+                "minecraft:in_fire", "minecraft:on_fire", "minecraft:drown", "minecraft:mob_attack", "unknown")) {
+            assertEquals(Verdict.GO, DeathRetrievalPolicy.judge(cause, false), cause);
+        }
+        assertEquals(Verdict.GO, DeathRetrievalPolicy.judge(null, false));
+        assertFalse(Verdict.GO.refused());
+    }
+
+    // ── Warnings ────────────────────────────────────────────────────────────
 
     @Test
-    void deathsOlderThanTwentyMinutesAreRefused() {
+    void mobKillsWarn() {
+        assertEquals(List.of(Warning.MOB), DeathRetrievalPolicy.warnings("minecraft:mob_attack", "minecraft:zombie", NOW, NOW));
+        assertEquals(List.of(Warning.MOB), DeathRetrievalPolicy.warnings("minecraft:mob_projectile", null, NOW, NOW));
+        assertEquals(List.of(Warning.MOB), DeathRetrievalPolicy.warnings("minecraft:explosion", "minecraft:creeper", NOW, NOW));
+    }
+
+    @Test
+    void fireCausesWarnThatItemsMayHaveBurned() {
+        for (String cause : List.of("minecraft:in_fire", "minecraft:on_fire", "minecraft:hot_floor", "minecraft:campfire")) {
+            assertEquals(List.of(Warning.FIRE), DeathRetrievalPolicy.warnings(cause, null, NOW, NOW), cause);
+        }
+    }
+
+    @Test
+    void oldDeathsWarnInsteadOfRefusing() {
         long max = DeathRetrievalPolicy.MAX_AGE_MS;
-        assertEquals(Verdict.GO, DeathRetrievalPolicy.judge("minecraft:fall", null, NOW - max, NOW));
-        assertEquals(Verdict.REFUSE_TOO_OLD, DeathRetrievalPolicy.judge("minecraft:fall", null, NOW - max - 1, NOW));
-        assertEquals(Verdict.REFUSE_TOO_OLD, DeathRetrievalPolicy.judge("minecraft:mob_attack", "minecraft:zombie", NOW - max - 1, NOW));
         assertEquals(20L * 60L * 1000L, max);
+        assertEquals(List.of(), DeathRetrievalPolicy.warnings("minecraft:fall", null, NOW - max, NOW));
+        assertEquals(List.of(Warning.OLD), DeathRetrievalPolicy.warnings("minecraft:fall", null, NOW - max - 1, NOW));
+        assertEquals(List.of(Warning.OLD, Warning.MOB),
+                DeathRetrievalPolicy.warnings("minecraft:mob_attack", "minecraft:zombie", NOW - max - 1, NOW));
+        assertEquals(Verdict.GO, DeathRetrievalPolicy.judge("minecraft:fall", false));
     }
 
     @Test
-    void unknownOrFutureTimesCountAsFresh() {
+    void unknownAgeWarns() {
+        assertEquals(List.of(Warning.UNKNOWN_AGE), DeathRetrievalPolicy.warnings(null, null, null, NOW));
+        assertEquals(List.of(Warning.UNKNOWN_AGE), DeathRetrievalPolicy.warnings("unknown", " ", 0L, NOW));
+        // A future time (clock change) is fresh, not unknown.
+        assertEquals(List.of(), DeathRetrievalPolicy.warnings("minecraft:fall", null, NOW + 5_000L, NOW));
+    }
+
+    @Test
+    void plainFreshDeathsHaveNoWarning() {
+        assertEquals(List.of(), DeathRetrievalPolicy.warnings("minecraft:generic_kill", null, NOW - 60_000L, NOW));
+    }
+
+    @Test
+    void ageIsZeroWhenUnknownOrInTheFuture() {
         assertEquals(0L, DeathRetrievalPolicy.ageMs(null, NOW));
         assertEquals(0L, DeathRetrievalPolicy.ageMs(0L, NOW));
         assertEquals(0L, DeathRetrievalPolicy.ageMs(NOW + 5_000L, NOW));
@@ -170,9 +199,23 @@ class DeathRetrievalPolicyTest {
     @Test
     void keyLinesReadPlainly() {
         assertEquals("No point going: your death was in lava, so the items burned up.",
-                DeathRetrievalPolicy.refusal(Verdict.REFUSE_LAVA, "your", 0));
-        assertEquals("No point going: Jake's death was 25 minutes ago. Dropped items vanish after about 5 minutes while the area is loaded.",
-                DeathRetrievalPolicy.refusal(Verdict.REFUSE_TOO_OLD, "Jake's", 25L * 60_000L));
+                DeathRetrievalPolicy.refusal(Verdict.REFUSE_LAVA, "your"));
+        assertEquals("Nothing to fetch: keepInventory is on, so nothing dropped.",
+                DeathRetrievalPolicy.refusal(Verdict.REFUSE_KEEP_INVENTORY, "Jake's"));
+        assertEquals("That death was 25 minutes ago, the items may be gone.",
+                DeathRetrievalPolicy.warningLine(Warning.OLD, "Bob", null, 25L * 60_000L));
+        assertEquals("I don't know when that death happened, the items may be gone.",
+                DeathRetrievalPolicy.warningLine(Warning.UNKNOWN_AGE, "Bob", null, 0));
+        assertEquals("That death was in fire, so some items may have burned.",
+                DeathRetrievalPolicy.warningLine(Warning.FIRE, "Bob", null, 0));
+        assertEquals("Careful: a skeleton did that, and Bob may run into it.",
+                DeathRetrievalPolicy.warningLine(Warning.MOB, "Bob", "minecraft:skeleton", 0));
+        assertEquals("Bob died at the death spot.", DeathRetrievalPolicy.diedAtDeathSpot("Bob"));
+        assertEquals("Bob is full and left some items behind.", DeathRetrievalPolicy.leftItemsBehind("Bob"));
+        assertEquals("Bob could not finish the sweep (drop_sweep paused due to nearby threat). It is staying at the death spot.",
+                DeathRetrievalPolicy.sweepFailedStaying("Bob", "drop_sweep paused due to nearby threat."));
+        assertEquals("Bob could not finish the sweep (unknown reason). It is staying at the death spot.",
+                DeathRetrievalPolicy.sweepFailedStaying("Bob", null));
         assertEquals("Bob is heading to your death spot at 1, 64, -3 in the Nether. Items on the ground last about 5 minutes while the area is loaded.",
                 DeathRetrievalPolicy.departing("Bob", "your", 1, 64, -3, "minecraft:the_nether"));
         assertEquals("Careful: a zombie did that, and Bob may run into it.",
@@ -203,16 +246,22 @@ class DeathRetrievalPolicyTest {
                 DeathRetrievalPolicy.notOwner("Bob"),
                 DeathRetrievalPolicy.notOwnerOfDead("Jake"),
                 DeathRetrievalPolicy.alreadyTraveling("Bob"),
-                DeathRetrievalPolicy.refusal(Verdict.REFUSE_LAVA, "your", 0),
-                DeathRetrievalPolicy.refusal(Verdict.REFUSE_VOID, "your", 0),
-                DeathRetrievalPolicy.refusal(Verdict.REFUSE_TOO_OLD, "your", 3_600_000L),
+                DeathRetrievalPolicy.refusal(Verdict.REFUSE_LAVA, "your"),
+                DeathRetrievalPolicy.refusal(Verdict.REFUSE_VOID, "your"),
+                DeathRetrievalPolicy.refusal(Verdict.REFUSE_KEEP_INVENTORY, "your"),
+                DeathRetrievalPolicy.warningLine(Warning.OLD, "Bob", null, 3_600_000L),
+                DeathRetrievalPolicy.warningLine(Warning.UNKNOWN_AGE, "Bob", null, 0),
+                DeathRetrievalPolicy.warningLine(Warning.FIRE, "Bob", null, 0),
+                DeathRetrievalPolicy.warningLine(Warning.MOB, "Bob", "minecraft:zombie", 0),
+                DeathRetrievalPolicy.diedAtDeathSpot("Bob"),
+                DeathRetrievalPolicy.leftItemsBehind("Bob"),
                 DeathRetrievalPolicy.worldUnavailable("mymod:moon"),
                 DeathRetrievalPolicy.noStandSpot("Bob"),
                 DeathRetrievalPolicy.cannotSetOff("Bob"),
                 DeathRetrievalPolicy.departing("Bob", "your", 0, 0, 0, "minecraft:overworld"),
                 DeathRetrievalPolicy.mobWarning("Bob", null),
                 DeathRetrievalPolicy.arrivedAtFallback("Bob"),
-                DeathRetrievalPolicy.sweepFailed("Bob", "Another skill is already running."),
+                DeathRetrievalPolicy.sweepFailedStaying("Bob", "Another skill is already running."),
                 DeathRetrievalPolicy.result("Bob", 3),
                 DeathRetrievalPolicy.returning("Bob", 0),
                 DeathRetrievalPolicy.stayingOffline("Bob"),

@@ -264,10 +264,6 @@ public final class BotPersistenceService {
         LAST_SAVE_TICK.remove(bot.getUuid());
     }
 
-    public static void onBotDeath(ServerPlayerEntity bot) {
-        onBotDeath(bot, null);
-    }
-
     /**
      * @param damageSource what killed the bot, for the last-death record; null records "unknown"
      */

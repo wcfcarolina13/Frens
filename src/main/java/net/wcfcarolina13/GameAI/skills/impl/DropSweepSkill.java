@@ -51,6 +51,11 @@ public SkillExecutionResult execute(SkillContext context) {
     long durationMs = getLongParameter(context.parameters(), "durationMs", 8000L);
     int passes = Math.max(1, getIntParameter(context.parameters(), "passes", 3));
     boolean reuseRecent = getBooleanParameter(context.parameters(), "reuseRecent", true);
+    // Caps for the per-pass widening (default: up to 8 blocks past the start).
+    double maxRadius = Math.max(3.0D, getDoubleParameter(context.parameters(), "maxRadius", radius + 8.0D));
+    double maxVertical = Math.max(4.0D, getDoubleParameter(context.parameters(), "maxVertical", vertical + 8.0D));
+    // noOffload: a full inventory stops the sweep instead of storing into or placing chests here.
+    boolean noOffload = getBooleanParameter(context.parameters(), "noOffload", false);
 
     if (context.sharedState() != null) {
         SharedStateUtils.setValue(context.sharedState(), "dropSweep.last.radius", radius);
@@ -62,13 +67,16 @@ public SkillExecutionResult execute(SkillContext context) {
         return SkillExecutionResult.failure("drop_sweep paused due to nearby threat.");
     }
 
-        double effectiveRadius = Math.max(radius, 3.0D);
-        double effectiveVertical = Math.max(vertical, 4.0D);
+        double effectiveRadius = Math.min(Math.max(radius, 3.0D), maxRadius);
+        double effectiveVertical = Math.min(Math.max(vertical, 4.0D), maxVertical);
         ServerWorld world = source.getWorld();
         int pass = 0;
         int collectedCount = 0;
         int remaining = countItemsInRange(world, bot, effectiveRadius, effectiveVertical);
 
+        if (noOffload) {
+            DropSweeper.setNoOffload(bot.getUuid(), true);
+        }
         try {
             while (pass < passes) {
                 if (SkillManager.shouldAbortSkill(bot)) {
@@ -140,8 +148,8 @@ public SkillExecutionResult execute(SkillContext context) {
                 }
 
                 pass++;
-                effectiveRadius = Math.min(effectiveRadius + 2.5D, radius + 8.0D);
-                effectiveVertical = Math.min(effectiveVertical + 2.5D, vertical + 8.0D);
+                effectiveRadius = Math.min(effectiveRadius + 2.5D, maxRadius);
+                effectiveVertical = Math.min(effectiveVertical + 2.5D, maxVertical);
 
                 if (!collectedThisPass && pass >= passes) {
                     LOGGER.info("drop_sweep reached max passes with remaining items; stopping expansion.");
@@ -149,6 +157,9 @@ public SkillExecutionResult execute(SkillContext context) {
             }
         } finally {
             BotActions.sneak(bot, false);
+            if (noOffload) {
+                DropSweeper.setNoOffload(bot.getUuid(), false);
+            }
         }
 
         String detail = String.format(Locale.ROOT,

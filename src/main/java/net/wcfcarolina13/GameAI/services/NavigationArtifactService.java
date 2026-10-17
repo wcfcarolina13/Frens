@@ -748,8 +748,9 @@ public final class NavigationArtifactService {
         double distance = bot.getBlockPos().getManhattanDistance(destination);
         boolean crossDim = !bot.getEntityWorld().getRegistryKey().equals(dimension);
         int delayTicks = calculateDelayTicks(distance, crossDim);
+        // suppressOwnerNotify: the errand sends its own "coming back" line.
         boolean started = beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid,
-                true, false, false, false);
+                true, true, false, false);
         return started ? delayTicks : -1;
     }
 
@@ -1009,7 +1010,7 @@ public final class NavigationArtifactService {
                     int shortfall = (int) Math.ceil(hungerCost) + MIN_POST_TRAVEL_FOOD - totalBudget;
                     int steakEstimate = (int) Math.ceil(shortfall / 8.0);
                     notifyOwner(server, ownerUuid,
-                            "\u00A7e" + botAlias + " needs provisions for this journey \u2014 roughly "
+                            "\u00A7e" + botAlias + " needs provisions for this journey, roughly "
                             + steakEstimate + " cooked steak worth of food (~"
                             + shortfall + " hunger points). Pack extra before sending them off.\u00A7r");
                     return false;

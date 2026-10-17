@@ -1,5 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
@@ -13,12 +15,14 @@ public final class DeathRetrievalPolicy {
 
     private DeathRetrievalPolicy() {}
 
-    /** Past this much real time a death is refused: items last about 5 minutes while loaded. */
+    /** Past this much real time a death gets a warning: items last about 5 minutes while loaded. */
     public static final long MAX_AGE_MS = 20L * 60L * 1000L;
-    /** Drop sweep radius around the stand point (blocks). */
+    /** Drop sweep radius around the stand point (blocks); also the cap on the sweep's widening. */
     public static final double SWEEP_RADIUS = 8.0D;
     /** Drop sweep passes. */
     public static final int SWEEP_PASSES = 3;
+    /** Wait before the one retry of a failed sweep. */
+    public static final long SWEEP_RETRY_DELAY_MS = 3000L;
     /** Stand-point search box around the death position. */
     public static final int STAND_RADIUS = 3;
     public static final int STAND_DY_MIN = -2;
@@ -32,40 +36,72 @@ public final class DeathRetrievalPolicy {
     private static final String VOID = "minecraft:out_of_world";
     private static final Set<String> MOB_CAUSES = Set.of(
             "minecraft:mob_attack", "minecraft:mob_attack_no_aggro", "minecraft:mob_projectile");
+    private static final Set<String> FIRE_CAUSES = Set.of(
+            "minecraft:in_fire", "minecraft:on_fire", "minecraft:hot_floor", "minecraft:campfire");
 
-    /** What to do with one recorded death. */
+    /** Whether a recorded death is worth a trip at all. */
     public enum Verdict {
         GO,
-        /** A mob killed them: go, but say so. */
-        WARN_MOB,
+        REFUSE_KEEP_INVENTORY,
         REFUSE_LAVA,
-        REFUSE_VOID,
-        REFUSE_TOO_OLD;
+        REFUSE_VOID;
 
         public boolean refused() {
-            return this == REFUSE_LAVA || this == REFUSE_VOID || this == REFUSE_TOO_OLD;
+            return this != GO;
         }
     }
 
+    /** Things the sender should know, but the bot still goes. */
+    public enum Warning {
+        /** A mob killed them, it may still be there. */
+        MOB,
+        /** Fire or magma: some items may have burned. */
+        FIRE,
+        /** Older than {@link #MAX_AGE_MS}: items may have despawned. */
+        OLD,
+        /** No recorded time (a death the mod did not see). */
+        UNKNOWN_AGE
+    }
+
     /**
-     * @param causeId     damage type id ({@code minecraft:lava}), or null when unknown
-     * @param killerId    entity type id of a non-player killer, or null
-     * @param epochMs     wall-clock time of the death, or null / non-positive when unknown
-     * @param nowMs       current wall-clock time
+     * @param causeId       damage type id ({@code minecraft:lava}), or null when unknown
+     * @param keepInventory the keepInventory game rule: nothing drops, so nothing to fetch
      */
-    public static Verdict judge(String causeId, String killerId, Long epochMs, long nowMs) {
-        String cause = causeId == null ? "" : causeId.trim().toLowerCase(Locale.ROOT);
+    public static Verdict judge(String causeId, boolean keepInventory) {
+        if (keepInventory) return Verdict.REFUSE_KEEP_INVENTORY;
+        String cause = normalize(causeId);
         if (LAVA.equals(cause)) return Verdict.REFUSE_LAVA;
         if (VOID.equals(cause)) return Verdict.REFUSE_VOID;
-        if (ageMs(epochMs, nowMs) > MAX_AGE_MS) return Verdict.REFUSE_TOO_OLD;
-        if ((killerId != null && !killerId.isBlank()) || MOB_CAUSES.contains(cause)) return Verdict.WARN_MOB;
         return Verdict.GO;
+    }
+
+    /**
+     * Warnings for a death the bot will go to, in the order they are shown.
+     *
+     * @param killerId entity type id of a non-player killer, or null
+     * @param epochMs  wall-clock time of the death, or null / non-positive when unknown
+     */
+    public static List<Warning> warnings(String causeId, String killerId, Long epochMs, long nowMs) {
+        String cause = normalize(causeId);
+        List<Warning> out = new ArrayList<>();
+        if (epochMs == null || epochMs <= 0L) {
+            out.add(Warning.UNKNOWN_AGE);
+        } else if (ageMs(epochMs, nowMs) > MAX_AGE_MS) {
+            out.add(Warning.OLD);
+        }
+        if (FIRE_CAUSES.contains(cause)) out.add(Warning.FIRE);
+        if ((killerId != null && !killerId.isBlank()) || MOB_CAUSES.contains(cause)) out.add(Warning.MOB);
+        return out;
     }
 
     /** Age of a death in ms: 0 when the time is unknown or in the future. */
     public static long ageMs(Long epochMs, long nowMs) {
         if (epochMs == null || epochMs <= 0L) return 0L;
         return Math.max(0L, nowMs - epochMs);
+    }
+
+    private static String normalize(String causeId) {
+        return causeId == null ? "" : causeId.trim().toLowerCase(Locale.ROOT);
     }
 
     // ── Stand point ─────────────────────────────────────────────────────────
@@ -187,13 +223,21 @@ public final class DeathRetrievalPolicy {
         return bot + " is already traveling.";
     }
 
-    public static String refusal(Verdict verdict, String whose, long ageMs) {
+    public static String refusal(Verdict verdict, String whose) {
         return switch (verdict) {
+            case REFUSE_KEEP_INVENTORY -> "Nothing to fetch: keepInventory is on, so nothing dropped.";
             case REFUSE_LAVA -> "No point going: " + whose + " death was in lava, so the items burned up.";
             case REFUSE_VOID -> "No point going: " + whose + " death was in the void, so the items are gone.";
-            case REFUSE_TOO_OLD -> "No point going: " + whose + " death was " + Math.max(1, ageMs / 60_000L)
-                    + " minutes ago. Dropped items vanish after about 5 minutes while the area is loaded.";
-            default -> "";
+            case GO -> "";
+        };
+    }
+
+    public static String warningLine(Warning warning, String bot, String killerId, long ageMs) {
+        return switch (warning) {
+            case OLD -> "That death was " + Math.max(1, ageMs / 60_000L) + " minutes ago, the items may be gone.";
+            case UNKNOWN_AGE -> "I don't know when that death happened, the items may be gone.";
+            case FIRE -> "That death was in fire, so some items may have burned.";
+            case MOB -> mobWarning(bot, killerId);
         };
     }
 
@@ -223,8 +267,19 @@ public final class DeathRetrievalPolicy {
         return bot + " could not reach that world and landed at Overworld spawn. Retrieval canceled.";
     }
 
-    public static String sweepFailed(String bot, String reason) {
-        return bot + " could not finish the sweep: " + (reason == null ? "unknown reason" : reason);
+    /** Both sweep attempts failed: the bot stays put with the items still on the ground. */
+    public static String sweepFailedStaying(String bot, String reason) {
+        String why = reason == null || reason.isBlank() ? "unknown reason" : reason.trim();
+        if (why.endsWith(".")) why = why.substring(0, why.length() - 1);
+        return bot + " could not finish the sweep (" + why + "). It is staying at the death spot.";
+    }
+
+    public static String diedAtDeathSpot(String bot) {
+        return bot + " died at the death spot.";
+    }
+
+    public static String leftItemsBehind(String bot) {
+        return bot + " is full and left some items behind.";
     }
 
     public static String result(String bot, int pickedUp) {

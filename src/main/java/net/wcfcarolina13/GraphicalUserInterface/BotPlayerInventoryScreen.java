@@ -4400,7 +4400,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case RETRIEVE_DROPS -> java.util.List.of(
                 "Retrieve Drops",
                 "The bot fast travels to where you last died, picks up your items and comes back to you.",
-                "Items last about 5 minutes while the area is loaded. Lava and void deaths are refused.",
+                "Items last about 5 minutes while the area is loaded. Lava and void deaths, and keepInventory, are refused.",
                 "Same as /bot retrieve <bot> me. For a bot's death use /bot retrieve <bot> <dead bot>."
             );
             case BASES -> java.util.List.of(

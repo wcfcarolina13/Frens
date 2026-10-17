@@ -179,7 +179,7 @@ public final class TravelMountHandler {
         if (!bot.getInventory().insertStack(vehicleStack)) {
             // Inventory full — leave everything in place
             return MountTravelResult.refuseInventory(
-                    "Your inventory is full — couldn't store the " + item.getName().getString() + ". " +
+                    "Your inventory is full, so I couldn't store the " + item.getName().getString() + ". " +
                     "Free up inventory space and try again.");
         }
 
@@ -369,7 +369,7 @@ public final class TravelMountHandler {
                     bot.getName().getString(), pos.toShortString());
             return MountTravelResult.tethered(vehicle, pos, "current location",
                     "Your mount has been tethered at " + formatPos(pos) + ". " +
-                    "Pick them up when you return — the destination was too tight for them to come along.");
+                    "Pick them up when you return. The destination was too tight for them to come along.");
         }
         // Couldn't tether — refuse the travel. Bot is already dismounted at this point
         // (stopRiding above), so it's safe for the user to either manually remount or
@@ -402,7 +402,7 @@ public final class TravelMountHandler {
         ensureMountPersistence(vehicle);
         MountPersistenceService.recordMount(bot, vehicle, false);
         return MountTravelResult.refuseCrossDim(
-                "Cannot travel to another dimension while mounted — no fence available to tether your mount. " +
+                "Cannot travel to another dimension while mounted. No fence is available to tether your mount. " +
                 "Place a fence nearby or dismount first.");
     }
 
