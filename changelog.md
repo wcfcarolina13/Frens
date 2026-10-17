@@ -2,6 +2,12 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Swapped pathfinder A/B in the sandbox; a walker stuck loop found (2026-10-17, no build)
+
+- **22 minutes, two rounds, finders swapped between the same bots and spots** (`docs/testing/PATHFINDER_AB_2026-10-17.md`, script `tools/sandbox/abtest.py`). Logs are level: unified 170, Baritone 181. Every bot cut more in round 1 than in round 2 whatever its finder.
+- **Unified still plans better:** more routes found in both rounds (14 and 18 routes Baritone missed, against 3 and 0), p90 plan time 20-44 ms against Baritone's 512 ms timeouts in round 1, higher walk reach (68.8% vs 47.4% in round 1).
+- **Round 2 lost to a stuck loop under both finders:** four bots spent 0.5 to 9 minutes in ReturnBaseStuck next to leaf_litter cells and 1-high oak_planks scaffold remnants. Plans were executable, but 144 walks still did not arrive. The log report counts these as 0 stuck episodes. Fix before the next A/B.
+
 ## Player text without em dashes or semicolons; three voice lines that never matched now play; 1.1.260 (2026-10-17)
 
 The project rule (no em dashes or semicolons in player-facing text) applied to the whole mod, with a test that keeps it that way.
