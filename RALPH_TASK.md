@@ -3,7 +3,22 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-17 (1.1.263) — next session starts here
+## Session Handoff 2026-10-17 (1.1.264) — next session starts here
+
+**State:** main = origin/main @ 1.1.264. Suite 2694 green. 1.1.264 = stuck escape reads collision shapes, not air or
+`isSolidBlock` (new pure `StuckCellPolicy`): rescue side cells accept grass, leaf litter and thin snow, the wall nudge sees
+head-level blocks, the return-base quick nudge can drop one block, and fences, walls, glass and panes block the backup
+path. Built as 1.1.262 and shipped as 1.1.264 because 1.1.263 landed first. Sandbox before/after for all four cases:
+`tools/sandbox/stucktest.py wall|clip|pen|lane`. Field items: Phase 6bd (checklist now 315 open items).
+**Next:**
+- Deferred from 1.1.264: diagonal wall nudge (eye-box geometry), scaffold Phase 3 pillaring up while on a pillar, the two
+  off-thread `rescueFromBurial` callers (ReturnBaseStuck async mine escape, MovementService nudge loop).
+- On 1.1.263 a backup jump-sprint logged `succeeded, now at 199, 110, 202` from inside a closed stone pocket. Worth a scope.
+- `ReturnBaseStuckService` counters clear only on arrival at base, so a later return inherits `backupAttempted` from an
+  earlier stuck episode (seen in the sandbox). Worth a scope.
+- Everything in the 1.1.263 block below.
+
+## Session Handoff 2026-10-17 (1.1.263) — superseded
 
 **State:** main = origin/main @ 1.1.263. Suite 2671 green. 1.1.263 = the sunset auto-return segment pick and the
 `canReach` probe honour the bot's pathfinder (per-bot override, then global) through `PathFinder.probePlan`, held to
