@@ -3,7 +3,16 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-16 (1.1.259) — next session starts here
+## Session Handoff 2026-10-17 (1.1.260) — next session starts here
+
+**State:** main = origin/main @ 1.1.260. Suite 2648 green. 1.1.260 = player text without em dashes or semicolons (guard
+test `PlayerTextPunctuationGuardTest`). The 2026-10-16 follow-up batch is done: 1.1.256 spawns, 1.1.257 dig-down dawn
+climb, 1.1.258 retrieval filter and reload, 1.1.259 ranged pause and woodcut stands, 1.1.260 text. Field checklist sections
+1-3 passed in the sandbox. **Next:** a longer swapped pathfinder A/B (`docs/testing/PATHFINDER_AB_2026-10-16.md`), older
+field phases 6ad-6al in the sandbox, record audio for "Hey, incoming!" (snowball_probe_incoming has no clip), extend the
+guard test to the JSON resources. Everything in the 1.1.259 block below still applies.
+
+## Session Handoff 2026-10-16 (1.1.259) — superseded
 
 **State:** main = origin/main @ 1.1.259. Suite 2645 green. 1.1.259 = woodcut stand memory, ranged hits pause tasks,
 cancelled mining INFO. First sandbox pathfinder A/B in `docs/testing/PATHFINDER_AB_2026-10-16.md` (unified ahead, small

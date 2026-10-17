@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Player text without em dashes or semicolons; three voice lines that never matched now play; 1.1.260 (2026-10-17)
+
+The project rule (no em dashes or semicolons in player-facing text) applied to the whole mod, with a test that keeps it that way.
+
+- **271 strings in 66 files** (`9ff70d30` .. `b835856e`): chat lines, system messages, command replies, tooltips, button labels, screen titles, HUD text, the Guide (42 strings), `lang/en_us.json`, quest text and installer error text shown on the installer screens. " — " became ", " or a new sentence, "Label — description" became "Label: description", ";" became "." or ",". § colour codes and format tokens unchanged. Logs, comments, LLM prompt material, map keys, separators and regexes left alone.
+- **Voice lines keyed by their text changed in the same commit** (9 groups). The mapper folds "—" to "-" before lookup, so the old em dash keys never matched: the snowball yield lines now play their recorded clips, and "Hey, incoming!" now resolves to its sound id, whose audio is not recorded yet (it plays nothing, as before, the text and subtitle still show). "Here if you need me", "finding a bed", "falling logs", the greeting, the stuck and late lines keep their clips.
+- **Guard test** (`77539566`, `PlayerTextPunctuationGuardTest`): fails on any string literal in src/main/java with an em dash or semicolon outside log calls, comments and an allowlist of prompt-material files. It does not cover the JSON resources.
+- **Small leftovers** (`8f1c84cf`, `52015cb3`): a stale roster comment in `FrensClient`, and `tools/logtrim/logtrim.py` no longer matches the removed "External override" line.
+- **Tests:** 2645 → 2648 (+1 guard test, +2 counted from the base). Sandbox smoke: follow, stop, `/bot soul status`, no ERROR lines.
+- **Field checks:** none new (wording only).
+
 ## Woodcut remembers unreachable stands, a ranged hit pauses the task, cancelled mining is not an error; 1.1.259 (2026-10-16)
 
 The three skills items left open since 1.1.242.
