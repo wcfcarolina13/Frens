@@ -14,6 +14,7 @@ the caller's budget on the server thread. Classic probes with Baritone (no budge
 - Does `FollowPlannerService` (which walks each sunset segment) honour the finder choice? Not checked in this build.
 - `modCommandRegistry` goto calls `PathFinder.calculatePath` without a bot, so it follows only the global choice.
 - Slice D, then the 6ad-6al bugs A-G, as in the 1.1.261 block below.
+**Needs Bradley:** scope the CLAUDE.md pre-deploy check to the target instance (`pgrep -f "PrismLauncher/instances/1.21.11/natives"`). The any-instance pattern blocks every release while a sandbox test runs. The base CLAUDE.md is hook-blocked for sessions.
 
 Everything in the 1.1.261 block below still applies.
 
