@@ -184,6 +184,16 @@ class DeathRetrievalPolicyTest {
     }
 
     @Test
+    void sweepReportRelaysTheSweepsOwnCount() {
+        assertEquals("Bob at the death spot: Picked up 12 items.",
+                DeathRetrievalPolicy.sweepReport("Bob", "Picked up 12 items.", 0));
+        assertEquals("Bob at the death spot: My inventory is full, so I stopped after picking up 3 items.",
+                DeathRetrievalPolicy.sweepReport("Bob", "My inventory is full, so I stopped after picking up 3 items.", 0));
+        assertEquals("Bob picked up 4 items at the death spot.", DeathRetrievalPolicy.sweepReport("Bob", " ", 4));
+        assertEquals("Bob found nothing to pick up at the death spot.", DeathRetrievalPolicy.sweepReport("Bob", null, 0));
+    }
+
+    @Test
     void noPlayerLineHasAnEmDashOrSemicolon() {
         List<String> lines = List.of(
                 DeathRetrievalPolicy.usage(),

@@ -209,12 +209,14 @@ public final class DeathRetrievalService {
         boolean ok = result != null && result.success();
         LOGGER.info("[Retrieve] {} sweep done: picked={} success={} msg='{}'",
                 botAlias, picked, ok, result == null ? "null" : result.message());
-        if (!ok && picked == 0) {
+        // The sweep's own line carries its tracked count. The inventory diff above under-counts
+        // when the sweep had to store or drop items to make room, so it is for the log only.
+        if (!ok) {
             NavigationArtifactService.notifyPlayer(server, recipient, "§e"
                     + DeathRetrievalPolicy.sweepFailed(botAlias, result == null ? null : result.message()) + "§r");
         } else {
             NavigationArtifactService.notifyPlayer(server, recipient,
-                    "§a" + DeathRetrievalPolicy.result(botAlias, picked) + "§r");
+                    "§a" + DeathRetrievalPolicy.sweepReport(botAlias, result.message(), picked) + "§r");
         }
 
         Optional<DeathRetrievalPolicy.ReturnMode> mode = DeathRetrievalPolicy.parseAction(action.type());

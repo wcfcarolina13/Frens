@@ -1042,7 +1042,7 @@ public final class BotGuideScreen extends Screen {
                             "The bot fast travels to a safe spot next to the death position, even in another dimension. The travel rest time does not apply, but it still needs food for the trip.",
                             "It picks up everything within 8 blocks, tells you how many items it got, and fast travels back to you.",
                             "If you are offline or it can't travel back, it stays at the death spot and tells you.",
-                            "Items on the ground last about 5 minutes while the area is loaded. Bot deaths older than 20 minutes are refused.",
+                            "Items on the ground last about 5 minutes while the area is loaded. Deaths older than 20 minutes are refused.",
                             "Deaths in lava or the void are refused because the items are gone. A death to a mob is allowed, with a warning.",
                             "Only the bot's owner can send it, and only for their own death or one of their own bots."
                         ),

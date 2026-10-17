@@ -232,6 +232,15 @@ public final class DeathRetrievalPolicy {
         return bot + " picked up " + (pickedUp == 1 ? "1 item" : pickedUp + " items") + " at the death spot.";
     }
 
+    /**
+     * The report after a successful sweep: the sweep's own line (it counts what it picked up,
+     * {@code DropSweepMessages}), or {@link #result} when that line is blank.
+     */
+    public static String sweepReport(String bot, String sweepMessage, int inventoryGain) {
+        if (sweepMessage == null || sweepMessage.isBlank()) return result(bot, inventoryGain);
+        return bot + " at the death spot: " + sweepMessage.trim();
+    }
+
     public static String returning(String bot, int seconds) {
         return bot + " is coming back to you (about " + Math.max(1, seconds) + "s).";
     }
