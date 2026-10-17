@@ -328,6 +328,12 @@ public final class DropSweeper {
         else ALLOWED_DROPS.put(botUuid, java.util.Set.copyOf(drops));
     }
 
+    /** Clears every bot's no-offload flag and allowed-drops set (session reset). */
+    public static void clearSweepFlags() {
+        NO_OFFLOAD.clear();
+        ALLOWED_DROPS.clear();
+    }
+
     /** True when the bot's current sweep may target {@code drop}. */
     public static boolean isAllowedDrop(java.util.UUID botUuid, ItemEntity drop) {
         if (botUuid == null || drop == null) return true;

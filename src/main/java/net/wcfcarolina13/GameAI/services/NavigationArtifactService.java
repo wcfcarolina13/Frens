@@ -1681,6 +1681,8 @@ public final class NavigationArtifactService {
             OTHER_WORLD_TRAVELS.clear();
             sessionWorldKey = null;
         }
+        // A sweep worker stuck past the session must not leave a bot filtering or offload-blocked.
+        net.wcfcarolina13.GameAI.DropSweeper.clearSweepFlags();
     }
 
     // ── Persistence ────────────────────────────────────────────────────────
@@ -1748,10 +1750,13 @@ public final class NavigationArtifactService {
     public static void loadPendingTravels(MinecraftServer server) {
         synchronized (LOCK) {
             String currentWorld = null;
+            boolean worldKeyUnreadable = false;
             try {
                 currentWorld = BotWorldStateService.currentWorldKey(server);
             } catch (RuntimeException e) {
-                LOGGER.warn("Pending travels: world key unavailable ({}); restoring every entry", e.getMessage());
+                worldKeyUnreadable = true;
+                LOGGER.warn("Pending travels: world key unavailable ({}); restoring none, every entry kept unchanged in the file",
+                        e.getMessage());
             }
             sessionWorldKey = currentWorld;
             OTHER_WORLD_TRAVELS.clear();
@@ -1770,6 +1775,11 @@ public final class NavigationArtifactService {
 
                 for (SavedTravel s : list) {
                     if (s == null) continue;
+                    if (worldKeyUnreadable) {
+                        // Unknown world: never restore into it, and write the raw entry back as is.
+                        OTHER_WORLD_TRAVELS.add(s);
+                        continue;
+                    }
                     if (!PostArrivalPersistPolicy.sameWorld(s.worldKey, currentWorld)) {
                         OTHER_WORLD_TRAVELS.add(s);
                         LOGGER.info("Pending travel for '{}' belongs to world {}; kept for that world, not restored here",

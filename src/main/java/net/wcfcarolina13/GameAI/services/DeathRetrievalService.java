@@ -171,6 +171,10 @@ public final class DeathRetrievalService {
                                  boolean dimensionFallback, NavigationArtifactService.PostArrivalAction action) {
         server.execute(() -> {
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botAlias);
+            if (bot != null) {
+                // Never inherit a filter a stuck earlier sweep left behind.
+                DropSweeper.setAllowedDrops(bot.getUuid(), null);
+            }
             if (bot == null || bot.isRemoved()) {
                 LOGGER.info("[Retrieve] {} gone after arrival; sweep skipped", botAlias);
                 return;
