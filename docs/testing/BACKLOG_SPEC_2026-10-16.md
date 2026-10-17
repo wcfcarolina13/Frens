@@ -1,5 +1,7 @@
 # Backlog spec, 2026-10-16 (after the dead-code audit, 1.1.251)
 
+**Status: shipped.** Items 1-5 in 1.1.252, 6-8 in 1.1.253, 9-10 in 1.1.254, 11 in 1.1.255 (2026-10-16). Each changelog entry lists its rulings and review fixes.
+
 The contract for the follow-ups left by `DEAD_CODE_AUDIT_2026-10.md` and builds 1.1.243-1.1.251. Scoping reports with
 file:line evidence live in the release worktree's `.superpowers/sdd/backlog/` (not tracked). Decisions marked **(Bradley)**
 were asked on 2026-10-16. The rest take the scoper's recommended answer and say so; each goes in its changelog entry as a
