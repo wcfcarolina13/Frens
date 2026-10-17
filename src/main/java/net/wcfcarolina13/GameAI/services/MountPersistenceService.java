@@ -142,15 +142,6 @@ public final class MountPersistenceService {
         String saveWorldKey = BotWorldStateService.currentWorldKey(server);
         Map<String, MountState> worldMap = STATE.get(alias);
         MountState state = worldMap != null ? worldMap.get(saveWorldKey) : null;
-        if (state == null && worldMap != null) {
-            // Promote legacy entry on first access
-            MountState legacy = worldMap.remove("_legacy");
-            if (legacy != null) {
-                worldMap.put(saveWorldKey, legacy);
-                flush();
-                state = legacy;
-            }
-        }
         if (state == null) {
             return;
         }
@@ -243,18 +234,7 @@ public final class MountPersistenceService {
         if (worldMap == null) {
             return null;
         }
-        MountState state = worldMap.get(saveWorldKey);
-        if (state != null) {
-            return state;
-        }
-        // Promote legacy entry to current world on first access
-        MountState legacy = worldMap.remove("_legacy");
-        if (legacy != null) {
-            worldMap.put(saveWorldKey, legacy);
-            flush();
-            return legacy;
-        }
-        return null;
+        return worldMap.get(saveWorldKey);
     }
 
     public static Entity findRecordedMount(ServerWorld world, MountState state) {
@@ -425,8 +405,7 @@ public final class MountPersistenceService {
                         Object value = entry.getValue();
                         if (value instanceof Map<?, ?> innerMap) {
                             // Old format (MountState fields directly under the alias) is no
-                            // longer converted to a _legacy entry: skip it. New format nests
-                            // worldKey → MountState.
+                            // longer migrated: skip it. New format nests worldKey → MountState.
                             if (MountStateFormatPolicy.isPreWorldFormat(innerMap)) {
                                 LOGGER.info("Skipping pre-per-world mount record for {} (old format, no longer migrated)", alias);
                             } else {
