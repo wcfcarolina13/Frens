@@ -56,7 +56,9 @@ public class ManualConfig {
     private Map<String, BotOwnership> botOwnership = new HashMap<>();
     private Map<String, Boolean> playerPreserveExpensiveGear = new HashMap<>();
     private Map<String, Boolean> playerAutoAcceptPreciousFoods = new HashMap<>();
-    private Map<String, BotSpawn> botSpawnPoints = new HashMap<>();
+    // Old global bot spawns (alias → spawn). Read only by migrateLegacyToPerWorld, then set to
+    // null so the key leaves settings.json5 (Gson skips nulls).
+    private Map<String, BotSpawn> botSpawnPoints = null;
     // Per-world bot spawn points: alias → worldKey → BotSpawn.
     private Map<String, Map<String, BotSpawn>> botSpawnPointsByWorld = new HashMap<>();
     private boolean textDialogueEnabled = true;
@@ -296,8 +298,7 @@ public class ManualConfig {
                 loadedConfig.mutedTextCategories = new ArrayList<>();
             }
             // ── Legacy migration: global → per-world ──
-            // Old configs stored one BotSpawn per alias; migrate to per-world under "_legacy" key.
-            // The first real access with a worldKey will resolve the _legacy entry.
+            // Old configs stored one BotSpawn per alias; migrate it under its level name.
             loadedConfig.migrateLegacyToPerWorld();
             loadedConfig.normalizeAliasBackedMaps();
             if (loadedConfig.applyBaritoneDefaultMigration()) {
@@ -959,7 +960,6 @@ public class ManualConfig {
         }
         removeAliasVariants(botGameProfile, alias);
         removeAliasVariants(botOwnership, alias);
-        removeAliasVariants(botSpawnPoints, alias);
         removeAliasVariants(botQuestMemory, alias);
         removeAliasVariants(botSkinSelections, alias);
         removeNestedAliasVariants(botSpawnPointsByWorld, alias);
@@ -969,7 +969,6 @@ public class ManualConfig {
     private void normalizeAliasBackedMaps() {
         botGameProfile = normalizeAliasMap(botGameProfile);
         botOwnership = normalizeAliasMap(botOwnership);
-        botSpawnPoints = normalizeAliasMap(botSpawnPoints);
         botQuestMemory = normalizeAliasMap(botQuestMemory);
         botSkinSelections = normalizeAliasMap(botSkinSelections);
     }
@@ -1077,33 +1076,27 @@ public class ManualConfig {
     }
 
     /**
-     * Migrates legacy global botSpawnPoints and botControls into per-world maps.
-     * Legacy entries are stored under the "_legacy" worldKey and resolved on first
-     * per-world access (see getBotSpawn/getOrCreateBotControl).
+     * Migrates legacy global botSpawnPoints and botControls into per-world maps, and removes
+     * spawn slots that an older migration left under the "_legacy" world key.
      */
     private void migrateLegacyToPerWorld() {
-        // Migrate botSpawnPoints → botSpawnPointsByWorld
+        // Migrate botSpawnPoints → botSpawnPointsByWorld, keyed by each spawn's level name.
+        if (botSpawnPointsByWorld == null) botSpawnPointsByWorld = new HashMap<>();
         if (botSpawnPoints != null && !botSpawnPoints.isEmpty()) {
-            if (botSpawnPointsByWorld == null) botSpawnPointsByWorld = new HashMap<>();
-            for (Map.Entry<String, BotSpawn> entry : botSpawnPoints.entrySet()) {
-                String alias = entry.getKey();
-                BotSpawn spawn = entry.getValue();
-                if (alias == null || alias.isBlank() || spawn == null) continue;
-                // Only migrate if no per-world entry exists for this alias yet.
-                Map<String, BotSpawn> existing = resolveNestedAliasEntry(botSpawnPointsByWorld, alias);
-                if (existing == null || existing.isEmpty()) {
-                    Map<String, BotSpawn> worldMap = new HashMap<>();
-                    // If the BotSpawn has a levelName, use it as the worldKey hint;
-                    // otherwise store under _legacy for deferred resolution.
-                    String worldKey = (spawn.levelName() != null && !spawn.levelName().isBlank())
-                            ? spawn.levelName()
-                            : "_legacy";
-                    worldMap.put(worldKey, spawn);
-                    botSpawnPointsByWorld.put(alias.trim(), worldMap);
-                }
+            LegacySpawnMigrationPolicy.Result result =
+                    LegacySpawnMigrationPolicy.migrate(botSpawnPoints, botSpawnPointsByWorld);
+            if (!result.migrated().isEmpty()) {
+                LOGGER.info("[Frens] Migrated global bot spawns to per-world format for {}.", result.migrated());
             }
-            botSpawnPoints = new HashMap<>(); // clear legacy
-            LOGGER.info("[Frens] Migrated {} legacy BotSpawn entries to per-world format.", botSpawnPointsByWorld.size());
+            if (!result.dropped().isEmpty()) {
+                LOGGER.info("[Frens] Dropped global bot spawns for {}: no world name, or per-world spawns already exist.", result.dropped());
+            }
+        }
+        // Always null (even when it loaded as an empty map) so the key leaves the saved file.
+        botSpawnPoints = null;
+        List<String> purged = LegacySpawnMigrationPolicy.purgeLegacySlots(botSpawnPointsByWorld);
+        if (!purged.isEmpty()) {
+            LOGGER.info("[Frens] Removed unclaimed _legacy bot spawns for {}.", purged);
         }
 
         // Migrate botControls → botControlsByWorld
