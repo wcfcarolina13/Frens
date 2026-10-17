@@ -2,6 +2,21 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Leash release, leash work on the server thread, base commands follow the Bases screen, base rename keeps its owner; 1.1.252 (2026-10-16)
+
+First build of the backlog spec (`docs/testing/BACKLOG_SPEC_2026-10-16.md` items 1 to 5), with Bradley's 2026-10-16 decisions.
+
+- **`/bot leash release [bot]` and a Release Leads button** (`0c1dbe29`, `c6a0b929`, `ca49cf95`, Bradley: command and button). The bot lets go of every lead it holds, the leads go into its inventory (or at its feet when it is full), and it forgets the animal it was tracking, also when the lead had just snapped or the horse is in an unloaded chunk, so it stops going back for it and a rejoin does not put it back on the lead. Owners who are not operators can use the button (menu entry under Leash on Dismount). "I can't find a fence" now points to the command. Guide: Shortcuts topic.
+- **Leash and dismount work runs on the server thread** (`8719cead`). `/bot leash` used to dismount, swap hotbar items, use fences and change the leash maps from a worker thread. Fetching or crafting a lead or fence stays on the worker, the rest runs in one bounded server hop. If the hop does not finish the bot says so ("couldn't dismount" or "dismounted but couldn't secure the animal").
+- **Every real lead release forgets the saved record** (`f1df6cbb`). Tying to a fence later on its own, the TETHERED branch, a dead mount and a snapped lead now also clear the saved "bot holds this mount" record, so a rejoin no longer re-leashes an animal off a fence (same gap as the 1.1.248 review found). An animal in an unloaded chunk is left alone.
+- **`/bot base set|remove|rename` follow the Bases screen rules** (`65c87c59`). One shared code path for commands and screen. `set` stamps the caller as owner (Server from the console) and refuses a name already used by a base, wall or village (it used to silently move the old base and strip its owner). `remove` and `rename` work on walls and villages too, with the screen's owner check.
+- **Renaming a base keeps its owner and radius** (`5400ca8a`, found during this build). Every rename, from the screen or the command, rebuilt the base from its name and position only, so it became admin-only and its radius reset.
+- **TorchPlacer** (`e0211d9f`). No more thread per placed torch: the map it fed has had no reader since 1.1.247.
+- **Rulings (cost if wrong):** (1) An op can no longer use `/bot base set` to move a base (cost: remove then set). (2) A dead mount or a snapped lead forgets the saved record, an entity that is merely not loaded does not (cost: a horse that died in an unloaded chunk keeps a stale record until the bot meets the gap). (3) Release replies count leads, not animals (leashed boats count too).
+- **Review:** one Important (release did not forget a tracked animal it was not holding right then), fixed in `ca49cf95`. Threading checked against every `beginDelayedTravel` caller.
+- **Tests:** 2502 → 2518. Sandbox smoke: release with nothing held answers, base set, duplicate refused, rename keeps the base, remove, no ERROR lines.
+- **Field checks:** Phase 6at.
+
 ## Legacy LLM chat retired, part 2: dead stack and its libraries deleted, jar 52.6 MB to 33.3 MB (audit Q2, Q3); 1.1.251 (2026-10-15)
 
 Second half of Bradley's answers 2 and 3 (`docs/testing/DEAD_CODE_AUDIT_2026-10.md` section 5a). 1.1.250 made the pre-souls LLM chat unreachable, this build deletes it. About 10,050 lines and 107 files removed.

@@ -3,7 +3,15 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-15 (1.1.251) — next session starts here
+## Session Handoff 2026-10-16 (1.1.252) — next session starts here
+
+**State:** main = origin/main @ 1.1.252. Suite 2518 green. Working through `docs/testing/BACKLOG_SPEC_2026-10-16.md` (the
+contract, with Bradley's 2026-10-16 decisions). 1.1.252 = items 1-5 (leash release, leash threading and records, base
+commands, base rename owner fix, TorchPlacer). Field items: Phase 6at.
+**Next:** 1.1.253 shelter follow-ups (items 6-8, built and in review), 1.1.254 config cleanups (items 9-10, built and in
+review), 1.1.255 death retrieval (item 11). Builds need JDK 21. Everything in the 1.1.251 block below still applies.
+
+## Session Handoff 2026-10-15 (1.1.251) — superseded
 
 **State:** main = origin/main @ 1.1.251. Suite 2502 green. Dead-code audit phase 2 COMPLETE: every item Bradley approved on
 2026-10-15 shipped in 1.1.243-1.1.251 (removals ~19,000 lines, wall-off shelter, combat callouts, /bot base owner, leash
