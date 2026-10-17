@@ -1564,7 +1564,7 @@ public final class BotHomeService {
 
             if (oldNorm.equals(newNorm)) {
                 // Same normalized key: just update display label.
-                wd.basesByLabel.put(oldNorm, new SavedBase(newTrim, existing.pos));
+                wd.basesByLabel.put(oldNorm, existing.withLabel(newTrim));
                 changed = true;
             } else {
                 if (wd.basesByLabel.containsKey(newNorm)) {
@@ -1572,7 +1572,7 @@ public final class BotHomeService {
                     return false;
                 }
                 wd.basesByLabel.remove(oldNorm);
-                wd.basesByLabel.put(newNorm, new SavedBase(newTrim, existing.pos));
+                wd.basesByLabel.put(newNorm, existing.withLabel(newTrim));
                 changed = true;
             }
 
@@ -1997,6 +1997,13 @@ public final class BotHomeService {
             this.pos = pos;
             this.ownerUuid = ownerUuid;
             this.ownerName = ownerName;
+        }
+
+        /** Same base under a new display label: keeps the position, radius and owner. */
+        private SavedBase withLabel(String newLabel) {
+            SavedBase copy = new SavedBase(newLabel, pos, ownerUuid, ownerName);
+            copy.radius = radius;
+            return copy;
         }
 
         @Override
