@@ -167,6 +167,15 @@ public final class BotControlApplier {
             ManualConfig.BotSpawn finalSpawn = spawn;
             boolean finalHasWorldState = hasWorldState;
             Runnable task = () -> {
+                // A bot restored mid-trip arrives by itself: /bot spawn would cancel the trip and
+                // drop its post-arrival action. Checked here, not at queue time, because on a
+                // dedicated server the queue is built before loadPendingTravels runs.
+                NavigationArtifactService.PendingTravel trip = NavigationArtifactService.getPendingTravelByName(alias);
+                if (trip != null) {
+                    Frens.LOGGER.info("Auto-spawn skipped for {}: in transit to {}, it arrives there instead",
+                            alias, trip.destination().toShortString());
+                    return;
+                }
                 int observed = server.getPlayerManager().getCurrentPlayerCount();
                 int max = server.getPlayerManager().getMaxPlayerCount();
                 baseline.compareAndSet(-1, observed);
