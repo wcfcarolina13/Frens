@@ -22,18 +22,17 @@ import static org.junit.jupiter.api.Assertions.fail;
  * The finder choice (global {@code PathFinder.ACTIVE} plus per-bot {@code PathFinderOverrides}) is
  * honoured only if callers go through {@code PathFinder}. Up to 1.1.261 the sunset auto-return
  * called {@code BaritoneStylePathFinder} directly and so ignored it. This scan keeps every production
- * reference to {@code BaritoneStylePathFinder} (comments stripped) inside the PathFinding package.
+ * reference to a concrete finder ({@code BaritoneStylePathFinder}, {@code UnifiedPathFinder};
+ * comments and string literals stripped) inside the PathFinding package.
  * It fails loudly when the source tree cannot be found, so it cannot pass by reading nothing.
  */
 class FinderChoiceBypassGuardTest {
 
     private static final String PACKAGE_DIR = "net/wcfcarolina13/PathFinding/";
-    private static final Pattern REFERENCE = Pattern.compile("\\bBaritoneStylePathFinder\\b");
-    private static final Pattern BLOCK_COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
-    private static final Pattern LINE_COMMENT = Pattern.compile("(?m)(^|[^:\"])//.*$");
+    private static final Pattern REFERENCE = Pattern.compile("\\b(?:BaritoneStylePathFinder|UnifiedPathFinder)\\b");
 
     @Test
-    void noProductionFileOutsidePathFindingNamesBaritoneStylePathFinder() throws IOException {
+    void noProductionFileOutsidePathFindingNamesAConcreteFinder() throws IOException {
         Path root = findMainJavaRoot();
         List<String> offenders = new ArrayList<>();
         int scanned = 0;
@@ -67,11 +66,55 @@ class FinderChoiceBypassGuardTest {
         assertFalse(REFERENCE.matcher(stripComments("a(); // BaritoneStylePathFinder.calculatePath")).find());
         assertTrue(REFERENCE.matcher(stripComments("x = BaritoneStylePathFinder.calculatePath(a, b, w);")).find());
         assertFalse(REFERENCE.matcher("BaritoneStylePathFinderTest").find());
+        assertTrue(REFERENCE.matcher(stripComments("p = UnifiedPathFinder.search(ctx);")).find());
+        // A "/*" inside a string must not open a comment that swallows the real reference after it.
+        assertTrue(REFERENCE.matcher(stripComments(
+                "String g = \"src/*.java\"; x = BaritoneStylePathFinder.calculatePath(a, b, w); String h = \"*/\";")).find());
+        assertTrue(REFERENCE.matcher(stripComments("String u = \"http://x\"; UnifiedPathFinder.search(c);")).find());
+        assertTrue(REFERENCE.matcher(stripComments("char q = '\"'; UnifiedPathFinder.search(c); // \"")).find());
+        assertTrue(REFERENCE.matcher(stripComments("String t = \"\"\"\n /* \n\"\"\"; UnifiedPathFinder.search(c);")).find());
+        assertFalse(REFERENCE.matcher(stripComments("log(\"UnifiedPathFinder failed\");")).find());
     }
 
-    private static String stripComments(String source) {
-        String noBlocks = BLOCK_COMMENT.matcher(source).replaceAll(" ");
-        return LINE_COMMENT.matcher(noBlocks).replaceAll("$1");
+    /**
+     * Drops comments and the contents of string, text-block and char literals with a small state
+     * machine, so a {@code /*} or {@code //} inside a literal never starts a comment.
+     */
+    static String stripComments(String source) {
+        StringBuilder out = new StringBuilder(source.length());
+        int n = source.length();
+        int i = 0;
+        while (i < n) {
+            char c = source.charAt(i);
+            char next = i + 1 < n ? source.charAt(i + 1) : '\0';
+            if (c == '/' && next == '/') {
+                while (i < n && source.charAt(i) != '\n') {
+                    i++;
+                }
+            } else if (c == '/' && next == '*') {
+                int end = source.indexOf("*/", i + 2);
+                i = end < 0 ? n : end + 2;
+                out.append(' ');
+            } else if (source.startsWith("\"\"\"", i)) {
+                int end = source.indexOf("\"\"\"", i + 3);
+                while (end > 0 && source.charAt(end - 1) == '\\') {
+                    end = source.indexOf("\"\"\"", end + 1);
+                }
+                i = end < 0 ? n : end + 3;
+                out.append("\"\"");
+            } else if (c == '"' || c == '\'') {
+                i++;
+                while (i < n && source.charAt(i) != c && source.charAt(i) != '\n') {
+                    i += source.charAt(i) == '\\' ? 2 : 1;
+                }
+                i++;
+                out.append(c).append(c);
+            } else {
+                out.append(c);
+                i++;
+            }
+        }
+        return out.toString();
     }
 
     private static Path findMainJavaRoot() {

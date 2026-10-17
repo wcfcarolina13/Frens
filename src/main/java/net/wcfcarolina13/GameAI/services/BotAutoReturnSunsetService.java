@@ -50,6 +50,8 @@ public final class BotAutoReturnSunsetService {
     private static final double SEGMENT_REFRESH_REACH_SQ = 6.0D * 6.0D;
     private static final double MAX_SEGMENT_PROGRESS = 24.0D;
     private static final double MIN_SEGMENT_PROGRESS = 8.0D;
+    /** At most one INFO "Sunset segment" line per session per ~10 s unless the finder changes. */
+    private static final long SEGMENT_LOG_INFO_INTERVAL_TICKS = 200L;
     private static final double COMMANDER_FALLBACK_RANGE_SQ = 48.0D * 48.0D;
     private static final double ALLY_FALLBACK_RANGE_SQ = 48.0D * 48.0D;
     private static final double CHEST_FALLBACK_RANGE_SQ = 32.0D * 32.0D;
@@ -96,8 +98,10 @@ public final class BotAutoReturnSunsetService {
         private int routeFailures;
         private boolean tacticalShelterTriggered;
         private long localReassessUntilTick;
-        /** finder + next goal of the last INFO "Sunset segment" line; repeats log at DEBUG. */
-        private String lastSegmentLogKey;
+        /** Finder of the last INFO "Sunset segment" line (null before the session's first). */
+        private String lastSegmentLogFinder;
+        /** Server tick of the last INFO "Sunset segment" line. */
+        private long lastSegmentLogTick;
     }
 
     private static final AtomicInteger AUTO_THREAD_ID = new AtomicInteger(0);
@@ -861,7 +865,7 @@ public final class BotAutoReturnSunsetService {
             // Server thread: the bot's own finder, bounded by the 200 ms budget in every branch.
             PathFinder.PlanResult probe = PathFinder.probePlan(botPos, anchor, world, bot.getUuid(), 200L);
             nextGoal = chooseSegmentGoal(botPos, anchor, probe.nodes());
-            logSegment(bot, session, probe, nextGoal);
+            logSegment(bot, world, session, probe, nextGoal);
             if (nextGoal == null) {
                 return false;
             }
@@ -888,20 +892,25 @@ public final class BotAutoReturnSunsetService {
     }
 
     /**
-     * One INFO line when the finder or the chosen segment goal changes; the 40-tick re-route of an
-     * unchanged goal logs at DEBUG, so a long walk home does not repeat the same line every 2 s.
+     * INFO on the session's first segment, when the finder changes, or when
+     * {@link #SEGMENT_LOG_INFO_INTERVAL_TICKS} have passed since the last INFO; DEBUG otherwise. The
+     * next goal moves on most 2 s refreshes while the bot walks, so it is not a trigger.
      */
-    private static void logSegment(ServerPlayerEntity bot, SunsetSession session, PathFinder.PlanResult probe,
-                                   BlockPos nextGoal) {
+    private static void logSegment(ServerPlayerEntity bot, ServerWorld world, SunsetSession session,
+                                   PathFinder.PlanResult probe, BlockPos nextGoal) {
         String finder = probe.finder().label();
         String next = nextGoal != null ? nextGoal.toShortString() : "none";
-        String key = finder + "|" + next;
         String name = bot.getName().getString();
-        if (key.equals(session.lastSegmentLogKey)) {
+        long tick = world.getServer() != null ? world.getServer().getTicks() : 0L;
+        boolean info = session.lastSegmentLogFinder == null
+                || !session.lastSegmentLogFinder.equals(finder)
+                || tick - session.lastSegmentLogTick >= SEGMENT_LOG_INFO_INTERVAL_TICKS;
+        if (!info) {
             LOGGER.debug("Sunset segment for {} finder={} pathLen={} next={}", name, finder, probe.nodes().size(), next);
             return;
         }
-        session.lastSegmentLogKey = key;
+        session.lastSegmentLogFinder = finder;
+        session.lastSegmentLogTick = tick;
         LOGGER.info("Sunset segment for {} finder={} pathLen={} next={}", name, finder, probe.nodes().size(), next);
     }
 

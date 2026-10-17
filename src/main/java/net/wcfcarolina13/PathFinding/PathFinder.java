@@ -431,7 +431,8 @@ public class PathFinder {
      * a non-empty node list. No log line, no plan ID. A null {@code botUuid} follows the global choice.
      */
     public static boolean canReach(BlockPos start, BlockPos goal, ServerWorld world, UUID botUuid, long timeoutMs) {
-        PlanResult result = probePlan(start, goal, world, botUuid, timeoutMs);
+        // Status only: no node conversion, so nothing runs after the search's budget.
+        PlanResult result = probe(start, goal, world, botUuid, timeoutMs, false);
         if (result.plan() != null) {
             return result.plan().status() != PlanStatus.NO_PATH;
         }
@@ -447,8 +448,8 @@ public class PathFinder {
      * <ul>
      *   <li>UNIFIED: {@link PlanRequest#probe(long)} (the budget is the whole budget, no failure
      *   extension, the probe node cap) with {@link WorldTerrainView.BotSnapshot#NONE}. An exception
-     *   logs one WARN and falls back to Baritone with the same {@code timeoutMs}, returned as a
-     *   BARITONE result.</li>
+     *   logs one WARN and falls back to Baritone with what is left of {@code timeoutMs} (at least
+     *   1 ms), returned as a BARITONE result.</li>
      *   <li>BARITONE (and classic): the Baritone-style finder with {@code timeoutMs}.</li>
      * </ul>
      *
@@ -457,13 +458,23 @@ public class PathFinder {
      */
     public static PlanResult probePlan(BlockPos start, BlockPos goal, ServerWorld world, UUID botUuid,
                                        long timeoutMs) {
+        return probe(start, goal, world, botUuid, timeoutMs, true);
+    }
+
+    /**
+     * {@link #probePlan}; with {@code withNodes} false a unified result carries the plan but an empty
+     * node list ({@link #canReach} reads only the status).
+     */
+    private static PlanResult probe(BlockPos start, BlockPos goal, ServerWorld world, UUID botUuid,
+                                    long timeoutMs, boolean withNodes) {
+        long probeStart = System.nanoTime();
         PathFinderChoice choice = PathFinderProbePolicy.budgetedFinder(PathFinderOverrides.resolveFor(botUuid, ACTIVE));
         if (choice == PathFinderChoice.UNIFIED) {
             try {
                 SearchContext ctx = unifiedContext(start, goal, world, PlanRequest.probe(timeoutMs),
                         WorldTerrainView.BotSnapshot.NONE, 0L);
                 PathPlan plan = UnifiedPathFinder.search(ctx);
-                List<PathNode> nodes = plan.status() == PlanStatus.NO_PATH
+                List<PathNode> nodes = !withNodes || plan.status() == PlanStatus.NO_PATH
                         ? new ArrayList<>() : new ArrayList<>(PlanAdapter.toPathNodes(plan, ctx));
                 return new PlanResult(PathFinderChoice.UNIFIED, 0L, nodes, plan, ctx, plan.elapsedMs(), false);
             } catch (RuntimeException e) {
@@ -471,8 +482,11 @@ public class PathFinder {
                         start.toShortString(), goal.toShortString(), e.toString());
             }
         }
+        // The fallback gets only what the unified attempt left, so the probe stays within timeoutMs.
+        long spentMs = (System.nanoTime() - probeStart) / 1_000_000;
+        long budgetMs = Math.max(1L, timeoutMs - spentMs);
         return new PlanResult(PathFinderChoice.BARITONE, 0L,
-                BaritoneStylePathFinder.calculatePath(start, goal, world, timeoutMs), null, null, 0L, false);
+                BaritoneStylePathFinder.calculatePath(start, goal, world, budgetMs), null, null, 0L, false);
     }
 
     /** Original bidirectional A* implementation. */
