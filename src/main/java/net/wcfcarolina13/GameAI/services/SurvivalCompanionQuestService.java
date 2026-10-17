@@ -189,7 +189,7 @@ public final class SurvivalCompanionQuestService {
             return Response.ofLines(List.of(
                     "This place has a pulse now.",
                     "I won't vanish when it gets hard.",
-                    "Call it what you want — I'm staying."), st.getCompanionQuestStage(), true);
+                    "Call it what you want. I'm staying."), st.getCompanionQuestStage(), true);
         }
 
         return switch (k) {
@@ -473,7 +473,7 @@ public final class SurvivalCompanionQuestService {
     private static List<String> buildStageIntroLines(int stage) {
         return switch (stage) {
             case 1 -> List.of("Next: light the area so nights stop being a gamble.");
-            case 2 -> List.of("Next: give this place a center — a bell, and people to answer it.");
+            case 2 -> List.of("Next: give this place a center, a bell, and people to answer it.");
             case 3 -> List.of("Next: build a perimeter. Make it hard to die here.");
             case 4 -> List.of("That's the last of it.");
             default -> List.of("Let's start with the basics.");
@@ -498,7 +498,7 @@ public final class SurvivalCompanionQuestService {
             }
             case 1 -> {
                 if (p.lightRatio < LIGHT_REQUIRED_RATIO) {
-                    out.add(String.format(java.util.Locale.ROOT, "- More lighting (need %.0f%%+ coverage at night; currently %.0f%%).",
+                    out.add(String.format(java.util.Locale.ROOT, "- More lighting (need %.0f%%+ coverage at night, currently %.0f%%).",
                             LIGHT_REQUIRED_RATIO * 100.0D, p.lightRatio * 100.0D));
                 } else {
                     out.add("- Lighting looks good. Ask me to check progress.");
@@ -517,7 +517,7 @@ public final class SurvivalCompanionQuestService {
             }
             case 3 -> {
                 if (p.perimeterRing < PERIMETER_REQUIRED_COUNT) {
-                    out.add("- A perimeter: fences/walls/gates (need " + PERIMETER_REQUIRED_COUNT + "+ blocks around the edge; currently " + p.perimeterRing + ").");
+                    out.add("- A perimeter: fences/walls/gates (need " + PERIMETER_REQUIRED_COUNT + "+ blocks around the edge, currently " + p.perimeterRing + ").");
                 } else {
                     out.add("- Perimeter looks solid. Ask me to check progress.");
                 }

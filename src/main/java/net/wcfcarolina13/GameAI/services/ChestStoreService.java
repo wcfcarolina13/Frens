@@ -266,7 +266,7 @@ public final class ChestStoreService {
                     }
                 }
                 String msg = deposit
-                        ? "No chest targeted or nearby; I couldn't place one to deposit into."
+                        ? "No chest targeted or nearby, and I couldn't place one to deposit into."
                         : "No chest targeted or nearby to withdraw from. Look at a chest or stand near one.";
                 server.execute(() -> ChatUtils.sendSystemMessage(source, msg));
                 return;

@@ -93,7 +93,7 @@ public final class ToolCraftShortfallPolicy {
             }
         }
         String target = n == 1 ? article(tool) + " " + tool : n + " " + tool + (tool.endsWith("s") ? "" : "s");
-        return "I need " + need + " for " + target + " — I have "
+        return "I need " + need + " for " + target + ". I have "
                 + (haveParts == 0 ? "none of that" : have.toString()) + ".";
     }
 

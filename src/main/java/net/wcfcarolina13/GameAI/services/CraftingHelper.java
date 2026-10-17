@@ -435,7 +435,7 @@ public final class CraftingHelper {
             }
             effectiveMaterial = parsed.material();
             if ("netherite".equals(effectiveMaterial)) {
-                if (source != null) say(source, "Netherite tools aren't crafted — they're upgraded from diamond ones at a smithing table.");
+                if (source != null) say(source, "Netherite tools aren't crafted. They're upgraded from diamond ones at a smithing table.");
                 return 0;
             }
         }
@@ -547,7 +547,7 @@ public final class CraftingHelper {
         if (!ensureSticks(bot, source, neededSticks)) {
             int haveSticks = countItem(bot, Items.STICK);
             int planks = countPlanks(bot);
-            say(source, "Missing sticks for ladders; need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + ").");
+            say(source, "Missing sticks for ladders. Need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + ").");
             return 0;
         }
 
@@ -842,7 +842,7 @@ public final class CraftingHelper {
             reportMissing(source, "torch",
                     Map.of("stick", craftsNeeded),
                     Map.of("stick", countItem(bot, Items.STICK)),
-                    "Torches need sticks; I don't have enough.");
+                    "Torches need sticks, and I don't have enough.");
             return 0;
         }
         ensureItemAvailable(bot, source, Items.COAL, craftsNeeded);
@@ -1438,7 +1438,7 @@ public final class CraftingHelper {
             }
             int haveSticks = countItem(bot, Items.STICK);
             int planks = countPlanks(bot);
-            sendCraftTableNeededOnce(bot, source, "Missing sticks; need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + "). Add planks/logs and retry.");
+            sendCraftTableNeededOnce(bot, source, "Missing sticks. Need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + "). Add planks/logs and retry.");
             return 0;
         }
         int sticks = countItem(bot, Items.STICK);

@@ -208,8 +208,8 @@ public final class BotZzzSleepService {
             StateEntry existing = ACTIVE.get(botId);
             if (existing != null) {
                 String msg = switch (existing.state()) {
-                    case ATTEMPTING -> botName + " is already trying to sleep — give them a moment.";
-                    case WAITING_LOGOFF -> botName + " already tried — waiting to see if you sleep.";
+                    case ATTEMPTING -> botName + " is already trying to sleep. Give them a moment.";
+                    case WAITING_LOGOFF -> botName + " already tried, waiting to see if you sleep.";
                 };
                 ChatUtils.sendSystemMessage(source, "§7" + msg + "§r");
                 continue;
@@ -221,13 +221,13 @@ public final class BotZzzSleepService {
             // Vanilla refuses sleep while mounted. Skip the doomed 20s WAITING_LOGOFF wait.
             if (bot.hasVehicle()) {
                 ChatUtils.sendSystemMessage(source,
-                        "§7" + botName + " can't sleep while mounted — dismount them first.§r");
+                        "§7" + botName + " can't sleep while mounted. Dismount them first.§r");
                 continue;
             }
             // Not night / no thunder → vanilla refuses. Don't waste 20s; tell user clearly.
             if (!canSleepInWorld) {
                 ChatUtils.sendSystemMessage(source,
-                        "§7" + botName + " can't sleep right now — it's not night yet.§r");
+                        "§7" + botName + " can't sleep right now, it's not night yet.§r");
                 continue;
             }
             // Mark ATTEMPTING before invoking SleepService so a re-fire mid-attempt is debounced.
@@ -355,7 +355,7 @@ public final class BotZzzSleepService {
                 // Tell the user — otherwise the 20s wait just looks like nothing happened.
                 if (sender != null && !sender.isRemoved()) {
                     ChatUtils.sendSystemMessage(sender.getCommandSource(),
-                            "§7" + botName + " couldn't sleep, and you're not in bed either — staying online.§r");
+                            "§7" + botName + " couldn't sleep, and you're not in bed either, so they're staying online.§r");
                 }
                 continue;
             }
@@ -403,7 +403,7 @@ public final class BotZzzSleepService {
         // resolved for system message; dropping: '... went to sleep...'").
         if (sender != null && !sender.isRemoved()) {
             sender.sendMessage(net.minecraft.text.Text.literal(
-                    "§7" + name + " went to sleep — they'll be back when the cycle's done.§r"),
+                    "§7" + name + " went to sleep. They'll be back when the cycle's done.§r"),
                     false);
         }
     }
