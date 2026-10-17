@@ -136,6 +136,12 @@ PATTERNS = [
     ("ensureAtSurface: ", re.compile(r"ensureAtSurface: " + BOTNAME + r" failed at " + POS_RE), "stuck_surface"),
     ("holding still after a stop", re.compile(r"holding still after a stop"), "stuck"),
     ("trapped on join", re.compile(r"trapped on join"), "stuck"),
+    # Wall-clock stuck lines that name the bot (worker or Server thread, so no thread binding).
+    ("stuck for ", re.compile(r"(?:ReturnBaseStuck: bot=|Bot )" + BOTNAME + r" stuck for (\d+) ticks"), "stuck_named"),
+    ("attempting escape movement", re.compile(r"Bot " + BOTNAME + r" attempting escape movement toward (\w+)"),
+     "stuck_named"),
+    # The integrated server paused (pause menu): bot workers keep logging failures on wall-clock time.
+    ("Saving and pausing game", re.compile(r"Saving and pausing game"), "server_paused"),
     ("Woodcut: selected tree", re.compile(r"Woodcut: selected tree target base=" + POS_RE), "wc_selected"),
     ("Woodcut approach: abandoned", re.compile(
         r"Woodcut approach: abandoned (dry stand )?" + POS_RE + r".*?\(reason=([^)]*?)(?: detail=|\))"),
@@ -195,6 +201,7 @@ class Analyzer(object):
         self.spam_cur = Counter()
         self.spam = {}  # masked -> [peak, peak_minute_t, minutes_over, total_over]
         self.files = []  # type: List[dict]
+        self.pauses = []  # type: List[int]
         # attribution
         self.roster = []  # type: List[str]
         self.mention_re = None
@@ -482,6 +489,12 @@ class Analyzer(object):
         if bot:
             self._stuck_event(bot, t, msg)
 
+    def _h_stuck_named(self, m, t, thread, bot, msg, level):
+        self._stuck_event(m.group(1), t, msg)
+
+    def _h_server_paused(self, m, t, thread, bot, msg, level):
+        self.pauses.append(t)
+
     def _h_stuck_surface(self, m, t, thread, bot, msg, level):
         self._stuck_event(m.group(1), t, "ensureAtSurface failed at %s,%s,%s" % (m.group(2), m.group(3), m.group(4)))
 
@@ -614,6 +627,7 @@ class Analyzer(object):
                       "lines_in_hot_minutes": v[3]} for k, v in spam],
             "system_chat_top": [{"text": k, "count": n} for k, n in self.system_chat.most_common(top)],
             "player_deaths": [{"t": hms(t), "msg": m} for t, m in self.player_deaths[:top]],
+            "server_paused_at": [hms(t) for t in self.pauses],
         }
 
     def _bots_report(self):
@@ -874,6 +888,11 @@ def render_md(rep, timeline_max=TIMELINE_KINDS_MAX):
     o.append("Span %s to %s (%dm), %d lines (%d unparsed), levels %s. Bots: %s" % (
         ov["span"][0], ov["span"][1], ov["span_s"] // 60, ov["lines"], ov["unparsed_lines"],
         " ".join("%s=%d" % kv for kv in sorted(ov["levels"].items())), ", ".join(ov["bots"]) or "none"))
+    if ov.get("server_paused_at"):
+        o.append("")
+        o.append("**SERVER PAUSED at %s** (pause menu). Bots do not move while paused but their workers keep "
+                 "logging walk failures, so finder and stuck numbers after a pause are not valid."
+                 % ", ".join(ov["server_paused_at"]))
     if ov["warn_patterns"]:
         o.append("")
         o.append("Top WARN/ERROR patterns (count, first, last):")

@@ -8,10 +8,9 @@ test_command: "./gradlew build -x test"
 **State:** main = origin/main @ 1.1.260. Suite 2648 green. 1.1.260 = player text without em dashes or semicolons (guard
 test `PlayerTextPunctuationGuardTest`). The 2026-10-16 follow-up batch is done: 1.1.256 spawns, 1.1.257 dig-down dawn
 climb, 1.1.258 retrieval filter and reload, 1.1.259 ranged pause and woodcut stands, 1.1.260 text. Field checklist sections
-1-3 passed in the sandbox. Swapped 22-minute pathfinder A/B done (`docs/testing/PATHFINDER_AB_2026-10-17.md`): logs level
-(unified 170, Baritone 181), round 2 lost to a walker stuck loop on leaf_litter and plank remnants under both finders.
-**Next:** fix that stuck loop (and count it in the log report), rerun `tools/sandbox/abtest.py 1|2`, older
-field phases 6ad-6al in the sandbox, record audio for "Hey, incoming!" (snowball_probe_incoming has no clip), extend the
+1-3 passed in the sandbox. Swapped 22-minute pathfinder A/B done (`docs/testing/PATHFINDER_AB_2026-10-17.md`): unified 274 logs vs
+Baritone 257, walk reach 66.7% vs 51.4%, recommend unified as default (Bradley's call). **Next:** the default switch if
+Bradley agrees, older field phases 6ad-6al in the sandbox, record audio for "Hey, incoming!" (snowball_probe_incoming has no clip), extend the
 guard test to the JSON resources. Everything in the 1.1.259 block below still applies.
 
 ## Session Handoff 2026-10-16 (1.1.259) — superseded

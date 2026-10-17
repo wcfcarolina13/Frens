@@ -2,11 +2,12 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
-## Swapped pathfinder A/B in the sandbox; a walker stuck loop found (2026-10-17, no build)
+## Swapped pathfinder A/B in the sandbox: unified ahead; paused-server guard in the harness and report (2026-10-17, no build)
 
-- **22 minutes, two rounds, finders swapped between the same bots and spots** (`docs/testing/PATHFINDER_AB_2026-10-17.md`, script `tools/sandbox/abtest.py`). Logs are level: unified 170, Baritone 181. Every bot cut more in round 1 than in round 2 whatever its finder.
-- **Unified still plans better:** more routes found in both rounds (14 and 18 routes Baritone missed, against 3 and 0), p90 plan time 20-44 ms against Baritone's 512 ms timeouts in round 1, higher walk reach (68.8% vs 47.4% in round 1).
-- **Round 2 lost to a stuck loop under both finders:** four bots spent 0.5 to 9 minutes in ReturnBaseStuck next to leaf_litter cells and 1-high oak_planks scaffold remnants. Plans were executable, but 144 walks still did not arrive. The log report counts these as 0 stuck episodes. Fix before the next A/B.
+- **22 minutes over two valid rounds, finders crossed on the same bots and spots** (`docs/testing/PATHFINDER_AB_2026-10-17.md`, script `tools/sandbox/abtest.py 1|2`). Unified cut 274 logs and Baritone 257 (+6.6%). Unified was ahead on 3 of 4 spots and level on the fourth. It reached its walk goal on 66.7% of walks against 51.4%, found 22 routes Baritone missed against 5, and kept p90 plan time near 45 ms where Baritone sits at its 500 ms timeout. There were no deaths or ERROR lines. **Recommendation: unified as default** (Bradley's call).
+- **A discarded round 2:** the integrated server paused at 01:02:15 (pause screen) and stayed frozen for 8.7 minutes. Bot workers kept logging walk failures and wall-clock "stuck for N ticks", which looked like a leaf_litter stuck loop. It was not one: leaf_litter is `noCollision` in 1.21.11. The first commit of this doc (`e2dc066e`) drew that wrong conclusion. This rewrite replaces it.
+- **Guards:** `abtest.py` watches for "Saving and pausing game" and closes the screen. `frens_log_report.py` prints **SERVER PAUSED at T**, and counts `stuck for N ticks` and `attempting escape movement` lines as stuck episodes (they reported 0 before). Log report tests 29 → 30.
+- **Sandbox:** `LowMemWarning=false` had been overwritten by a running Prism. It is set again with the launcher closed (the memory dialog blocks `--launch` at EnsureAvailableMemory).
 
 ## Player text without em dashes or semicolons; three voice lines that never matched now play; 1.1.260 (2026-10-17)
 

@@ -4,11 +4,12 @@
   abtest.py 1   round 1: Wally + Trainee unified, Smokey + Abby Baritone
   abtest.py 2   round 2: the same bots on the same spots with the finders swapped
 Each round: day locked, mobs off, stone axe + bread, pathcompare on, woodcut on all four for MINUTES.
-Report afterwards: tools/logs/frens_log_report.py latest.log --since <printed start time>.
+A pause screen is closed if one opens (it freezes the server). Report afterwards: tools/logs/frens_log_report.py latest.log --since <printed start time>.
 """
 import json, sys, time, urllib.request
 
 API = "http://127.0.0.1:9876/api/cmd"
+LOG = "/Users/roti/Library/Application Support/PrismLauncher/instances/mcp-sandbox/minecraft/logs/latest.log"
 MINUTES = 11
 SPOTS = {"Wally": (70, 172), "Smokey": (78, 190), "Trainee": (74, 208), "Abby": (80, 240)}
 UNIFIED_FIRST = {"Wally", "Trainee"}
@@ -56,7 +57,19 @@ chat("/tp @s 75 120 205")
 for bot in SPOTS:
     chat(f"/bot skill woodcut {bot}", 1)
 print("start", time.strftime("%H:%M:%S"), flush=True)
-time.sleep(MINUTES * 60)
+# A pause screen freezes the integrated server while bot workers keep logging failures (round 2 on 2026-10-17
+# lost 8.7 minutes that way). Watch for it and close it; the report also flags "SERVER PAUSED".
+log_mark = len(open(LOG, errors="replace").read().splitlines())
+deadline = time.time() + MINUTES * 60
+while time.time() < deadline:
+    time.sleep(10)
+    new = open(LOG, errors="replace").read().splitlines()[log_mark:]
+    log_mark += len(new)
+    if any("Saving and pausing game" in line for line in new):
+        print("paused at", time.strftime("%H:%M:%S"), "screen", cmd(cmd="screen_info")[:120], flush=True)
+        cmd(cmd="enter_control_mode")
+        cmd(cmd="press_key", key="escape")
+        deadline += 10  # roughly the paused time
 for bot in SPOTS:
     chat(f"/bot stop {bot}", 1)
 print("end", time.strftime("%H:%M:%S"))

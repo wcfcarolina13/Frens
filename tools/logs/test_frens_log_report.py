@@ -90,6 +90,21 @@ class ReportFixtureTest(unittest.TestCase):
 
 
 class ReportUnitTest(unittest.TestCase):
+    def test_named_stuck_lines_count_episodes_and_pause_is_flagged(self):
+        rep = run_lines("""
+[10:00:00] [mod-command-skill-1/INFO]: Skill 'woodcut' starting for bot Wally on thread mod-command-skill-1
+[10:00:05] [mod-command-skill-1/INFO]: ReturnBaseStuck: bot=Wally stuck for 1979 ticks, attempting obstruction mining escape toward base
+[10:00:06] [Server thread/INFO]: Bot Smokey attempting escape movement toward up
+[10:00:16] [Server thread/INFO]: Bot Smokey attempting escape movement toward up
+[10:05:00] [Server thread/INFO]: Bot Smokey attempting escape movement toward east
+[10:05:01] [Server thread/INFO]: Saving and pausing game...
+""")
+        self.assertEqual(rep["bots"]["Wally"]["stuck_episodes"], 1)
+        self.assertEqual(rep["bots"]["Smokey"]["stuck_episodes"], 2)
+        self.assertEqual(rep["bots"]["Smokey"]["stuck_events"], 3)
+        self.assertEqual(rep["overview"]["server_paused_at"], ["10:05:01"])
+        self.assertIn("SERVER PAUSED at 10:05:01", flr.render_md(rep))
+
     def test_thread_binding_rebinds(self):
         rep = run_lines("""
 [10:00:00] [mod-command-skill-1/INFO]: Skill 'woodcut' starting for bot Jake on thread mod-command-skill-1
