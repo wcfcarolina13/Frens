@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
  * a whitespace-split argument list, scanned from the END, so the resolved name is appended last
  * there and no client token may equal {@code all}, {@code each} or a bot name. The other commands
  * bind the bot at a fixed grammar slot, which is not always last: {@code leash <bot>} (a plain
- * string slot), {@code leash release <bot>}, {@code guard <bot> <radius>}, {@code patrol <bot> <radius>}, {@code compass home <bot> <name>},
+ * string slot), {@code leash release <bot>}, {@code retrieve <bot> me}, {@code guard <bot> <radius>}, {@code patrol <bot> <radius>}, {@code compass home <bot> <name>},
  * {@code compass travel <bot> [name]}. Slots typed {@code EntityArgumentType.player()} (return,
  * guard, patrol, craft, cook) need a name of at most 16 chars, quoted when it has other chars.
  */
@@ -112,6 +112,8 @@ public final class BotActionPolicy {
         CRAFT(Access.BOT_OWNER, true),
         /** [item id, fuel: none|auto|item id] -> {@code cook <item> <fuel> <bot>} */
         COOK(Access.BOT_OWNER, true),
+        /** [] -> {@code retrieve <bot> me} (fetch the sender's own death drops) */
+        RETRIEVE(Access.BOT_OWNER, false),
         /** [] with the NEW bot name as alias -> {@code spawn <name> admin} */
         SPAWN(Access.SERVER_ADMIN, false);
 
@@ -403,6 +405,12 @@ public final class BotActionPolicy {
                 // leash release takes the bot in a StringArgumentType.string() slot named target.
                 yield a.size() == 1 && "release".equals(a.get(0)) ? withStr("leash release", bot) : null;
             }
+            case RETRIEVE -> {
+                // retrieve takes the bot in a StringArgumentType.string() slot named target, then
+                // the who slot ("me" is the sender's own death).
+                if (bot.untargeted() || !a.isEmpty()) yield null;
+                yield "retrieve " + bot.str() + " me";
+            }
             case SKILL -> {
                 if (a.size() != 1 || !SIMPLE_SKILLS.contains(a.get(0))) yield null;
                 yield withToken("skill " + a.get(0), bot);
@@ -640,7 +648,7 @@ public final class BotActionPolicy {
      * Argument names that bind the bot in the grammar of every {@link Action}'s target node:
      * {@code bot} (return, guard, patrol, craft, cook, companion), {@code bots} (come, go_to_look,
      * follow, follow toggle, follow-distance), {@code target} (stop, resume, standdown, sleep,
-     * follow stop, leash, fish forget, the toggles, hobby), {@code alias} (open) and
+     * follow stop, leash, retrieve, fish forget, the toggles, hobby), {@code alias} (open) and
      * {@code bot_name} (compass home/travel, spawn). Not {@code player} (follow's target player)
      * and not {@code name} (a compass label or hobby name).
      */

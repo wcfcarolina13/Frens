@@ -1034,6 +1034,23 @@ public final class BotGuideScreen extends Screen {
                         "drop sweep pickup"
                 ),
                 new GuideTopic(
+                        "retrieve_drops",
+                        "Gathering",
+                        "Retrieve Drops",
+                        "Sends the bot to where you or another bot last died to pick up the items, then it comes back to you.",
+                        List.of(
+                            "The bot fast travels to a safe spot next to the death position, even in another dimension. The travel rest time does not apply, but it still needs food for the trip.",
+                            "It picks up everything within 8 blocks, tells you how many items it got, and fast travels back to you.",
+                            "If you are offline or it can't travel back, it stays at the death spot and tells you.",
+                            "Items on the ground last about 5 minutes while the area is loaded. Bot deaths older than 20 minutes are refused.",
+                            "Deaths in lava or the void are refused because the items are gone. A death to a mob is allowed, with a warning.",
+                            "Only the bot's owner can send it, and only for their own death or one of their own bots."
+                        ),
+                        "bot retrieve " + target + " [me|<dead bot>]",
+                        "Actions menu: Retrieve Drops (your own death)",
+                        "retrieve death died drops items lost recover corpse grave fetch"
+                ),
+                new GuideTopic(
                         "gather_fish",
                         "Gathering",
                         "Fishing",
@@ -1383,6 +1400,7 @@ public final class BotGuideScreen extends Screen {
                                 "Stop -> \\ -> bot stop <bot>",
                                 "Leash / tether helper -> ' -> leash action when available",
                                 "Let go of leads -> Release Leads in the bot menu -> bot leash release <bot>",
+                                "Fetch your drops after dying -> Retrieve Drops in the bot menu -> bot retrieve <bot> me",
                                 "Resume -> (bind key.frens.resume) -> bot resume <bot>",
                                 "Open Spells -> (bind key.frens.open_spells) -> opens spells menu when unlocked",
                                 "Recruit Contact -> (optional bind key.frens.recruit_contact) -> opens recruitment contact flow",
@@ -1390,7 +1408,7 @@ public final class BotGuideScreen extends Screen {
                         ),
                         "bot follow toggle <bot> | bot go_to_look | bot stop <bot> | bot resume <bot>",
                         "Minecraft Controls: Follow, Go To Look, Open Guide, Stop, Leash, Resume, Open Spells, Recruit Contact",
-                        "shortcut hotkey keybind follow stop goto go to look leash release leads lead"
+                        "shortcut hotkey keybind follow stop goto go to look leash release leads lead retrieve death drops"
                 ),
                 new GuideTopic(
                         "items_nav_artifacts",

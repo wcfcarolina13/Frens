@@ -408,6 +408,16 @@ class BotActionPolicyTest {
     // ── Untargeted (admin, blank alias) ─────────────────────────────────────
 
     @Test
+    void retrieveSendsTheBotForTheSendersOwnDeath() {
+        assertEquals("retrieve Bob me", ok(RETRIEVE, "Bob"));
+        assertEquals("retrieve \"Old Bob\" me", ok(RETRIEVE, "Old Bob"));
+        assertEquals(Optional.empty(), BotActionPolicy.build(RETRIEVE, List.of(), null, KNOWN));
+        assertEquals(Optional.empty(), BotActionPolicy.build(RETRIEVE, List.of("Jake"), "Bob", KNOWN));
+        assertEquals(Optional.empty(), BotActionPolicy.build(RETRIEVE, List.of("me"), "Bob", KNOWN));
+        assertEquals(Access.BOT_OWNER, RETRIEVE.access());
+    }
+
+    @Test
     void untargetedFormsExistOnlyWhereTheGrammarHasThem() {
         assertEquals("stop", ok(STOP, null));
         assertEquals("return", ok(RETURN_HOME, null));
@@ -417,7 +427,7 @@ class BotActionPolicyTest {
         assertEquals("craft stick 4", ok(CRAFT, null, "stick", "4"));
         assertEquals("cook beef none", ok(COOK, null, "beef", "none"));
         assertEquals("idle_hobbies toggle", ok(TOGGLE, null, "idle_hobbies", "toggle"));
-        Set<Action> none = EnumSet.of(COMPASS_HOME, COMPASS_TRAVEL, SPAWN);
+        Set<Action> none = EnumSet.of(COMPASS_HOME, COMPASS_TRAVEL, RETRIEVE, SPAWN);
         for (Action a : Action.values()) {
             assertEquals(!none.contains(a), a.hasUntargetedForm(), a.name());
         }

@@ -528,6 +528,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         LEASH_ON_DISMOUNT,
         LEASH_RELEASE,
         DROP_SWEEP,
+        RETRIEVE_DROPS,
         BASES,
         CRAFTING,
         COOKING,
@@ -651,6 +652,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
             TopicEntry.skillHeader("Utilities"),
             TopicEntry.skill("Cleanup", TopicAction.DROP_SWEEP, false, 0),
+            TopicEntry.skill("Retrieve Drops", TopicAction.RETRIEVE_DROPS, false, 0),
             TopicEntry.skill("Bases >", TopicAction.BASES, false, 0),
             TopicEntry.skill("Crafting >", TopicAction.CRAFTING, false, 0),
             TopicEntry.skill("Construction >", TopicAction.CONSTRUCTION, false, 0),
@@ -3824,6 +3826,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case LEASH_ON_DISMOUNT -> "⌁";
             case LEASH_RELEASE -> "↺";
             case DROP_SWEEP -> "🧹";
+            case RETRIEVE_DROPS -> "☠";
             case BASES -> "⌂";
             case OPEN_SPELLS -> "✦";
             case CRAFTING -> "⚒";
@@ -4393,6 +4396,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case DROP_SWEEP -> java.util.List.of(
                 "Cleanup",
                 "Runs a quick item sweep to pick up nearby drops after combat, mining, or building."
+            );
+            case RETRIEVE_DROPS -> java.util.List.of(
+                "Retrieve Drops",
+                "The bot fast travels to where you last died, picks up your items and comes back to you.",
+                "Items last about 5 minutes while the area is loaded. Lava and void deaths are refused.",
+                "Same as /bot retrieve <bot> me. For a bot's death use /bot retrieve <bot> <dead bot>."
             );
             case BASES -> java.util.List.of(
                 "Bases",
@@ -5149,6 +5158,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case LEASH_ON_DISMOUNT -> toggleLeashOnDismount();
             case LEASH_RELEASE -> runLeashReleaseCommand();
             case DROP_SWEEP -> runSkillCommand("drop_sweep", null);
+            case RETRIEVE_DROPS -> runRetrieveDropsCommand();
             case BASES -> openBasesManager();
             case CRAFTING -> openCraftingHistory();
             case COOKING -> openCookingMenu();
@@ -5789,6 +5799,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String arg = fishTargetCount > 0 ? Integer.toString(fishTargetCount) : null;
         runSkillCommand("fish", arg, BotActionPolicy.Action.SKILL_FISH,
                 arg != null ? List.of(arg) : List.of());
+    }
+
+    private void runRetrieveDropsCommand() {
+        BotActionClientSender.send(BotActionPolicy.Action.RETRIEVE, botAlias, List.of(),
+                "bot retrieve " + formatBotTarget() + " me");
+        this.close();
     }
 
     private void runLeashReleaseCommand() {
