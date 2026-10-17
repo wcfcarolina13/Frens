@@ -1938,43 +1938,39 @@ public class CollectDirtSkill implements Skill {
                                 double baseRadius,
                                 boolean squareMode,
                                 BlockPos squareCenter) {
-        try {
-            if (isInventoryFull(player)) {
-                LOGGER.info("Drop cleanup skipped because {} inventory is full.", player.getName().getString());
-                return;
-            }
-            double radius = Math.max(baseRadius, DROP_SEARCH_RADIUS * 1.5D);
-            if (squareMode && squareCenter != null) {
-                radius = Math.max(radius, baseRadius + 2.0D);
-            }
-            double vertical = Math.max(radius, 6.0D);
-            for (int attempt = 0; attempt < 3; attempt++) {
-                BotEventHandler.collectNearbyDrops(player, radius);
-                try {
-                    DropSweeper.sweep(
-                            source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                            radius,
-                            vertical,
-                            20,
-                            9000L
-                    );
-                } catch (Exception sweepError) {
+        if (isInventoryFull(player)) {
+            LOGGER.info("Drop cleanup skipped because {} inventory is full.", player.getName().getString());
+            return;
+        }
+        double radius = Math.max(baseRadius, DROP_SEARCH_RADIUS * 1.5D);
+        if (squareMode && squareCenter != null) {
+            radius = Math.max(radius, baseRadius + 2.0D);
+        }
+        double vertical = Math.max(radius, 6.0D);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            BotEventHandler.collectNearbyDrops(player, radius);
+            try {
+                DropSweeper.sweep(
+                        source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
+                        radius,
+                        vertical,
+                        20,
+                        9000L
+                );
+            } catch (Exception sweepError) {
                 LOGGER.warn("Cleanup drop sweep attempt {} failed: {}", attempt + 1, sweepError.getMessage());
                 break;
             }
-                int remaining = source.getWorld().getEntitiesByClass(
-                        net.minecraft.entity.ItemEntity.class,
-                        player.getBoundingBox().expand(radius, vertical, radius),
-                        item -> !item.isRemoved()
-                ).size();
-                if (remaining <= 0) {
-                    break;
-                }
-                radius += 2.0D;
-                vertical += 2.0D;
+            int remaining = source.getWorld().getEntitiesByClass(
+                    net.minecraft.entity.ItemEntity.class,
+                    player.getBoundingBox().expand(radius, vertical, radius),
+                    item -> !item.isRemoved()
+            ).size();
+            if (remaining <= 0) {
+                break;
             }
-        } finally {
-            BotEventHandler.setExternalOverrideActive(false);
+            radius += 2.0D;
+            vertical += 2.0D;
         }
     }
 

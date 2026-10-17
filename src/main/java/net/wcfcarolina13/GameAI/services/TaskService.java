@@ -476,7 +476,6 @@ public final class TaskService {
                 ? reason
                 : "§cPausing current task due to nearby threat.");
         LOGGER.info("Task '{}' pause requested: {}", ticket.name(), ticket.cancelReason());
-        BotEventHandler.setExternalOverrideActive(false);
         return true;
     }
 
@@ -601,7 +600,6 @@ public final class TaskService {
             return;
         }
         tickets.forEach(ticket -> abortTicket(ticket, reason));
-        BotEventHandler.setExternalOverrideActive(false);
     }
 
     public static void forceAbort(UUID botUuid, String reason) {
@@ -620,7 +618,6 @@ public final class TaskService {
         if (ticket != null) {
             abortTicket(ticket, reason, announce);
         }
-        BotEventHandler.setExternalOverrideActive(false);
     }
 
     /**

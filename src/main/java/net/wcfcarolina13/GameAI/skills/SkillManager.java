@@ -238,7 +238,6 @@ public final class SkillManager {
 
         FollowResumeState followResume = suspendFollowMode(botPlayer);
 
-        BotEventHandler.setExternalOverrideActive(true);
         AutoFaceEntity.setBotExecutingTask(true);
         SkillExecutionResult result = SkillExecutionResult.failure("Skill '" + name + "' ended unexpectedly.");
         try {
@@ -298,7 +297,6 @@ public final class SkillManager {
             if (botPlayer != null) {
                 botPlayer.setPitch(0);
             }
-            BotEventHandler.setExternalOverrideActive(false);
             boolean success = result != null && result.success() && !abortRequested;
             // Complete before resuming follow: setFollowMode refuses while this ticket is still
             // active, which used to chat "Busy with another task right now." and drop the follow.

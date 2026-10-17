@@ -4,7 +4,6 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
-import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.impl.SurfaceRecoverySkill;
@@ -50,7 +49,6 @@ public final class SurfaceRecoveryService {
             LOGGER.info("Background drop sweep canceled for {} because surface recovery started", bot.getName().getString());
         }
 
-        BotEventHandler.setExternalOverrideActive(true);
         AutoFaceEntity.setBotExecutingTask(true);
 
         SkillExecutionResult result = SkillExecutionResult.failure("Surface recovery ended unexpectedly.");
@@ -81,7 +79,6 @@ public final class SurfaceRecoveryService {
                     abortRequested,
                     result != null ? result.message() : "null");
             AutoFaceEntity.setBotExecutingTask(false);
-            BotEventHandler.setExternalOverrideActive(false);
             boolean success = result != null && result.success() && !abortRequested;
             TaskService.complete(ticket, success);
         }
