@@ -16,7 +16,6 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotCommandStateService;
 import net.wcfcarolina13.GameAI.services.TravelMountHandler;
 import net.wcfcarolina13.network.NavigationRequestPayload;
-import net.wcfcarolina13.PathFinding.BaritoneStylePathFinder;
 import net.wcfcarolina13.PathFinding.PathFinder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -97,6 +96,8 @@ public final class BotAutoReturnSunsetService {
         private int routeFailures;
         private boolean tacticalShelterTriggered;
         private long localReassessUntilTick;
+        /** finder + next goal of the last INFO "Sunset segment" line; repeats log at DEBUG. */
+        private String lastSegmentLogKey;
     }
 
     private static final AtomicInteger AUTO_THREAD_ID = new AtomicInteger(0);
@@ -857,8 +858,10 @@ public final class BotAutoReturnSunsetService {
         int manhattan = Math.abs(anchor.getX() - botPos.getX()) + Math.abs(anchor.getZ() - botPos.getZ());
         BlockPos nextGoal = anchor;
         if (manhattan > 60) {
-            List<PathFinder.PathNode> path = BaritoneStylePathFinder.calculatePath(botPos, anchor, world, 200L);
-            nextGoal = chooseSegmentGoal(botPos, anchor, path);
+            // Server thread: the bot's own finder, bounded by the 200 ms budget in every branch.
+            PathFinder.PlanResult probe = PathFinder.probePlan(botPos, anchor, world, bot.getUuid(), 200L);
+            nextGoal = chooseSegmentGoal(botPos, anchor, probe.nodes());
+            logSegment(bot, session, probe, nextGoal);
             if (nextGoal == null) {
                 return false;
             }
@@ -882,6 +885,24 @@ public final class BotAutoReturnSunsetService {
         FollowDebugService.clear(bot.getUuid());
         FollowPlannerService.requestPlanToGoal(LOGGER, bot, nextGoal.toImmutable(), true, "sunset-segment");
         return true;
+    }
+
+    /**
+     * One INFO line when the finder or the chosen segment goal changes; the 40-tick re-route of an
+     * unchanged goal logs at DEBUG, so a long walk home does not repeat the same line every 2 s.
+     */
+    private static void logSegment(ServerPlayerEntity bot, SunsetSession session, PathFinder.PlanResult probe,
+                                   BlockPos nextGoal) {
+        String finder = probe.finder().label();
+        String next = nextGoal != null ? nextGoal.toShortString() : "none";
+        String key = finder + "|" + next;
+        String name = bot.getName().getString();
+        if (key.equals(session.lastSegmentLogKey)) {
+            LOGGER.debug("Sunset segment for {} finder={} pathLen={} next={}", name, finder, probe.nodes().size(), next);
+            return;
+        }
+        session.lastSegmentLogKey = key;
+        LOGGER.info("Sunset segment for {} finder={} pathLen={} next={}", name, finder, probe.nodes().size(), next);
     }
 
     private static BlockPos chooseSegmentGoal(BlockPos start, BlockPos anchor, List<PathFinder.PathNode> path) {

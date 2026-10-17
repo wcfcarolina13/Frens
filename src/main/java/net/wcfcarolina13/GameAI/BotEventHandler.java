@@ -2146,7 +2146,7 @@ public class BotEventHandler {
                     && server.getTicks() % 40 == 0
                     && bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld reachWorld) {
                 reachable = net.wcfcarolina13.PathFinding.PathFinder.canReach(
-                        bot.getBlockPos(), target.getBlockPos(), reachWorld, 150L);
+                        bot.getBlockPos(), target.getBlockPos(), reachWorld, bot.getUuid(), 150L);
             }
             if (liveHorizSq <= 8.0D * 8.0D && liveDeltaY <= 10.0D && reachable) {
                 state.followFixedGoal = null;
@@ -5155,7 +5155,7 @@ public class BotEventHandler {
         // were causing severe lag during segmented sunset returns.
         if (bot.getBlockPos().getSquaredDistance(goal) <= COME_REACHABILITY_PROBE_RANGE_SQ
                 && bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld probeWorld) {
-            if (net.wcfcarolina13.PathFinding.PathFinder.canReach(bot.getBlockPos(), goal, probeWorld, COME_REACHABILITY_PROBE_TIMEOUT_MS)) {
+            if (net.wcfcarolina13.PathFinding.PathFinder.canReach(bot.getBlockPos(), goal, probeWorld, bot.getUuid(), COME_REACHABILITY_PROBE_TIMEOUT_MS)) {
                 LOGGER.info("[ComeRecovery] surface path exists to {} — forcing replan instead of mining",
                         goal.toShortString());
                 requestFollowPathPlanToGoal(bot, goal, true, "come-reachable-replan");

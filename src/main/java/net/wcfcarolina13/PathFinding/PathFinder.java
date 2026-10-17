@@ -415,24 +415,64 @@ public class PathFinder {
     }
 
     /**
-     * Quick reachability probe. Returns true if the finder finds ANY path (even partial) within the
-     * given time budget. Does NOT cache or return the path. Use for "can I walk there?" decisions
-     * without committing to full navigation. With {@link #ACTIVE} UNIFIED it is a unified probe
-     * ({@link PlanRequest#probe}: the caller's budget is the whole budget, no swim, 3000 nodes);
-     * otherwise the Baritone-style finder as before. No log line, no plan ID.
+     * Quick reachability probe for the global choice ({@link #ACTIVE}); see
+     * {@link #canReach(BlockPos, BlockPos, ServerWorld, UUID, long)}.
      */
     public static boolean canReach(BlockPos start, BlockPos goal, ServerWorld world, long timeoutMs) {
-        if (ACTIVE == PathFinderChoice.UNIFIED) {
+        return canReach(start, goal, world, null, timeoutMs);
+    }
+
+    /**
+     * Quick reachability probe. Returns true if the bot's finder finds ANY path (even partial) within
+     * the given time budget. Does NOT cache or return the path. Use for "can I walk there?" decisions
+     * without committing to full navigation. The finder is the bot's {@link PathFinderOverrides}
+     * entry, else {@link #ACTIVE}, made budget-safe by {@link PathFinderProbePolicy} (classic probes
+     * with Baritone); see {@link #probePlan}. Unified succeeds on any status but NO_PATH, Baritone on
+     * a non-empty node list. No log line, no plan ID. A null {@code botUuid} follows the global choice.
+     */
+    public static boolean canReach(BlockPos start, BlockPos goal, ServerWorld world, UUID botUuid, long timeoutMs) {
+        PlanResult result = probePlan(start, goal, world, botUuid, timeoutMs);
+        if (result.plan() != null) {
+            return result.plan().status() != PlanStatus.NO_PATH;
+        }
+        return !result.nodes().isEmpty();
+    }
+
+    /**
+     * A budgeted, bot-aware plan for callers that need the path but cannot afford a full walk plan,
+     * including the server thread (sunset segment routing, {@link #canReach}). The finder is
+     * {@link PathFinderProbePolicy#budgetedFinder} of the bot's resolved choice; every branch is
+     * bounded by {@code timeoutMs}:
+     *
+     * <ul>
+     *   <li>UNIFIED: {@link PlanRequest#probe(long)} (the budget is the whole budget, no failure
+     *   extension, the probe node cap) with {@link WorldTerrainView.BotSnapshot#NONE}. An exception
+     *   logs one WARN and falls back to Baritone with the same {@code timeoutMs}, returned as a
+     *   BARITONE result.</li>
+     *   <li>BARITONE (and classic): the Baritone-style finder with {@code timeoutMs}.</li>
+     * </ul>
+     *
+     * Quiet like {@link #canReach}: no {@code [PathFinder] mode=} line, no plan ID, no PathCompare
+     * shadow, no {@link #noteLastPlan}, no bot inventory read. The caller logs what it decides.
+     */
+    public static PlanResult probePlan(BlockPos start, BlockPos goal, ServerWorld world, UUID botUuid,
+                                       long timeoutMs) {
+        PathFinderChoice choice = PathFinderProbePolicy.budgetedFinder(PathFinderOverrides.resolveFor(botUuid, ACTIVE));
+        if (choice == PathFinderChoice.UNIFIED) {
             try {
-                PathPlan plan = UnifiedPathFinder.search(unifiedContext(start, goal, world, PlanRequest.probe(timeoutMs),
-                        WorldTerrainView.BotSnapshot.NONE, 0L));
-                return plan.status() != PlanStatus.NO_PATH;
+                SearchContext ctx = unifiedContext(start, goal, world, PlanRequest.probe(timeoutMs),
+                        WorldTerrainView.BotSnapshot.NONE, 0L);
+                PathPlan plan = UnifiedPathFinder.search(ctx);
+                List<PathNode> nodes = plan.status() == PlanStatus.NO_PATH
+                        ? new ArrayList<>() : new ArrayList<>(PlanAdapter.toPathNodes(plan, ctx));
+                return new PlanResult(PathFinderChoice.UNIFIED, 0L, nodes, plan, ctx, plan.elapsedMs(), false);
             } catch (RuntimeException e) {
                 LOGGER.warn("[PathFinder] unified probe failed from={} to={}: {}; using baritone",
                         start.toShortString(), goal.toShortString(), e.toString());
             }
         }
-        return !BaritoneStylePathFinder.calculatePath(start, goal, world, timeoutMs).isEmpty();
+        return new PlanResult(PathFinderChoice.BARITONE, 0L,
+                BaritoneStylePathFinder.calculatePath(start, goal, world, timeoutMs), null, null, 0L, false);
     }
 
     /** Original bidirectional A* implementation. */
