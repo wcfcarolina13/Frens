@@ -1860,9 +1860,13 @@ public final class CraftingHelper {
             return false;
         }
         LOGGER.info("No crafting table found; attempting to craft one.");
-        CRAFT_TABLE_CRAFT_COOLDOWN.put(bot.getUuid(), System.currentTimeMillis());
         ensurePlanksAvailable(bot, source, 4);
         boolean crafted = craftCraftingTable(source, bot, source.getPlayer(), 1);
+        if (crafted) {
+            // Only a table actually made arms the no-spam cooldown: a craft that failed for want
+            // of planks must not stop a retry once the planks are there.
+            CRAFT_TABLE_CRAFT_COOLDOWN.put(bot.getUuid(), System.currentTimeMillis());
+        }
         if (crafted && findItemInInventory(bot, Items.CRAFTING_TABLE) != -1) {
             PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);
             if (prepared == null) {
