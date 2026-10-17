@@ -773,8 +773,8 @@ public final class BotGuideScreen extends Screen {
                                 "AI chat runs a local model through Ollama on the machine that runs the world (the server machine in multiplayer). Nothing is sent to an online service.",
                                 "Open the checklist with the AI setup button at the top right of this guide, or Setup… on the Soul Chat row in Bot Controls.",
                                 "It walks you through: install Ollama, download a model (1B ≈4 GB RAM, 3B ≈6 GB, 8B ≈12 GB, plus Minecraft's own memory), turn Soul Chat on, enable each companion, then say hi in chat.",
-                                "Soul Chat is the world-wide switch; each companion also has to be enabled. The checklist shows both.",
-                                "In multiplayer only an operator or the host can change the server's AI settings; you can still enable your own companions.",
+                                "Soul Chat is the world-wide switch. Each companion also has to be enabled. The checklist shows both.",
+                                "In multiplayer only an operator or the host can change the server's AI settings. You can still enable your own companions.",
                                 "Voice is optional and can be added last."
                         ),
                         "UI: Guide > AI setup (or /bot soul system on, /bot soul enable <bot>)",
@@ -790,7 +790,7 @@ public final class BotGuideScreen extends Screen {
                                 "Type in normal chat, without a slash: Bots, what should we do next?",
                                 "All bots, how is everyone doing? works too.",
                                 "With Souls and Soul Party enabled, up to four nearby companions with active Soul profiles join the conversation, nearest first.",
-                                "They must be within 32 blocks in the same world. Normally only your owned bots qualify; operators can also address other owners' bots.",
+                                "They must be within 32 blocks in the same world. Normally only your owned bots qualify. Operators can also address other owners' bots.",
                                 "If only one companion qualifies, they receive the message directly. A group conversation does not require every bot to reply.",
                                 "Voice input works the same way if your dictation sends the words into normal Minecraft chat. Frens does not provide microphone transcription itself.",
                                 "Use Bots or All bots explicitly: Everyone and Guys are not group-address shortcuts."
@@ -820,7 +820,7 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                                 "Use when you're sniping mobs and don't want the bot running out to grab XP, drops, or chase.",
                                 "Different from Stop: Stop clears all state. Stand Down keeps the follow target so the bot rejoins formation when the timer expires.",
-                                "Drop-sweep is suppressed for the full 60s — drops on the ground are left alone.",
+                                "Drop-sweep is suppressed for the full 60s, so drops on the ground are left alone.",
                                 "Issuing any other command (stop, follow, come) cancels the auto-resume."
                         ),
                         "bot standdown " + target,
@@ -895,8 +895,8 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                                 "When ON (default), the bot respawns instantly at the world spawn / bed / saved base.",
                                 "When OFF, the bot's death triggers a chat prompt: 'Respawn now? (yes/no)'. Reply yes to bring them back, no to stand down.",
-                                "If you don't answer before the session ends, the bot stays shelved; use /bot spawn <name> or toggle Auto Respawn back ON to bring them back.",
-                                "Toggling Auto Respawn ON while a bot is shelved auto-spawns them — useful as a revive shortcut."
+                                "If you don't answer before the session ends, the bot stays shelved. Use /bot spawn <name> or toggle Auto Respawn back ON to bring them back.",
+                                "Toggling Auto Respawn ON while a bot is shelved auto-spawns them, which is useful as a revive shortcut."
                         ),
                         "",
                         "Bot Controls > Spawning > Auto Respawn",
@@ -910,8 +910,8 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                                 "Opens automatically after you pick Admin Mode on a fresh world, or when you press the [-] go-to-look hotkey while no bots are present.",
                                 "You can also open it any time from Bot Controls → 'Spawn Bots…' button in the footer.",
-                                "Tick one or more saved bots and click 'Spawn Selected (N)' — they spawn in a ring around your look position so they don't pile up.",
-                                "Create a brand-new bot with the name input field. Names follow Minecraft username rules (letters, numbers, _-.', max 24 chars). Random skin is assigned — customize later via the bot's inventory → skin chooser.",
+                                "Tick one or more saved bots and click 'Spawn Selected (N)'. They spawn in a ring around your look position so they don't pile up.",
+                                "Create a brand-new bot with the name input field. Names follow Minecraft username rules (letters, numbers, _-.', max 24 chars). Random skin is assigned. Customize later via the bot's inventory → skin chooser.",
                                 "The 'Manage settings → Bot Controls' link at the bottom opens the full Bot Controls panel for per-bot spawning rules."
                         ),
                         "",
@@ -925,9 +925,9 @@ public final class BotGuideScreen extends Screen {
                         "One-click reset buttons that set a spawning flag for every bot in this world.",
                         List.of(
                                 "Expand the global toggles panel in Bot Controls to find them at the bottom.",
-                                "Auto Respawn — All Bots [ALL ON] / [ALL OFF]: resets the per-bot Auto Respawn flag for every bot. ALL ON also auto-spawns any inactive bot that was waiting on a respawn decision.",
-                                "Auto Spawn on Load — All Bots [ALL ON] / [ALL OFF]: resets the per-bot Auto Spawn on Load flag for every bot.",
-                                "These are reset buttons, not persistent toggles — they just apply the value and exit. Per-bot settings you tweak later still take precedence."
+                                "Auto Respawn: All Bots [ALL ON] / [ALL OFF]: resets the per-bot Auto Respawn flag for every bot. ALL ON also auto-spawns any inactive bot that was waiting on a respawn decision.",
+                                "Auto Spawn on Load: All Bots [ALL ON] / [ALL OFF]: resets the per-bot Auto Spawn on Load flag for every bot.",
+                                "These are reset buttons, not persistent toggles. They just apply the value and exit. Per-bot settings you tweak later still take precedence."
                         ),
                         "",
                         "Bot Controls > Global Settings (expanded) > Bulk Apply",
@@ -957,7 +957,7 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                                 "Useful when a recreated world inherits the old mode-selection state (save-path collision) and the welcome screen doesn't reappear.",
                                 "Run /bot worldmode reset. You'll get a chat confirmation.",
-                                "Then press the open-roster hotkey (or rejoin) — the mode selection screen will open again.",
+                                "Then press the open-roster hotkey (or rejoin) and the mode selection screen will open again.",
                                 "Requires bot command permission (admin)."
                         ),
                         "bot worldmode reset",
@@ -984,7 +984,7 @@ public final class BotGuideScreen extends Screen {
                         "Wolf-style catch-up teleport during follow mode.",
                         List.of(
                                 "When enabled, the bot teleports near you if it falls more than 15 blocks behind, gets stuck for 3 seconds, or loses vertical contact (10+ block Y gap).",
-                                "This only affects follow mode — it does not enable teleport during skills, sweeps, or other behaviors.",
+                                "This only affects follow mode. It does not enable teleport during skills, sweeps, or other behaviors.",
                                 "The bot finds a safe spot behind you, so it won't teleport into lava or off cliffs.",
                                 "Toggle in Bot Controls > Behavior > Follow Teleport.",
                                 "Admins can control which players see this toggle in Player Settings."
@@ -1072,7 +1072,7 @@ public final class BotGuideScreen extends Screen {
                                 "When a bot is mid-session the sunset auto-return saves the current stand so it can resume there at sunrise.",
                                 "If the saved spot is bad (unreachable, no nearby chest, unsafe shoreline), the bot can end up fast-travelling back to it every morning and failing.",
                                 "Running this clears the saved session and the sunrise-resume record for the target bot.",
-                                "Lodestone compasses are NOT touched — the next fresh /bot fish still fast-travels to the nearest compass target."
+                                "Lodestone compasses are NOT touched. The next fresh /bot fish still fast-travels to the nearest compass target."
                         ),
                         "bot fish forget " + target,
                         "Actions menu: Forget Spot (under Fishing)",
@@ -1082,7 +1082,7 @@ public final class BotGuideScreen extends Screen {
                         "gather_woodcut",
                         "Gathering",
                         "Woodcut",
-                        "Fells nearby trees. Defaults to 'Until sunset' mode; use +/- to set a specific tree count.",
+                        "Fells nearby trees. Defaults to 'Until sunset' mode. Use +/- to set a specific tree count.",
                         List.of(
                                 "At the default (Until sunset), the bot cuts trees until dusk then stops.",
                                 "Use +/- to set a minimum tree count instead.",
@@ -1115,8 +1115,8 @@ public final class BotGuideScreen extends Screen {
                         "Collects leaf litter from the ground for cheap furnace fuel.",
                         List.of(
                                 "Works best in forested biomes where leaf litter is abundant.",
-                                "Leaf litter is the cheapest fuel — always preferred over logs or coal.",
-                                "Manual command collects up to a full stack; idle hobby collects a few."
+                                "Leaf litter is the cheapest fuel, always preferred over logs or coal.",
+                                "Manual command collects up to a full stack, idle hobby collects a few."
                         ),
                         "bot skill leaf_litter " + target,
                         "Actions menu",
@@ -1225,10 +1225,10 @@ public final class BotGuideScreen extends Screen {
                                 "Moat is 3 blocks deep with cobblestone floor. Gatehouse has a walkable bridge across the moat.",
                                 "Towers at each hull vertex, walls along edges, and a gatehouse on the longest edge.",
                                 "Give the bot stone bricks, cobblestone, or slabs before starting.",
-                                "Village structures are detected and excluded — walls route around buildings automatically.",
-                                "dry_run — preview layout with particles (orange=towers, blue=walls, gold=gate, dark blue=moat, purple=overhang, red=clear).",
-                                "status <name> — per-edge completion stats + particles highlighting missing blocks in red.",
-                                "resume / patch / drift / expand / merge / list / name — manage saved walls and schema updates.",
+                                "Village structures are detected and excluded. Walls route around buildings automatically.",
+                                "dry_run: preview layout with particles (orange=towers, blue=walls, gold=gate, dark blue=moat, purple=overhang, red=clear).",
+                                "status <name>: per-edge completion stats + particles highlighting missing blocks in red.",
+                                "resume / patch / drift / expand / merge / list / name: manage saved walls and schema updates.",
                                 "Tip: Use the Base Manager screen for wall status, ownership, and nearby village mapping."
                         ),
                         "bot fortify " + target,
@@ -1241,13 +1241,13 @@ public final class BotGuideScreen extends Screen {
                         "Fast-Travel Gates",
                         "Which items/conditions let the bot fast-travel, and at what speed.",
                         List.of(
-                                "§eTier 2 (1.0×, instant-class)§r — any one of these alone qualifies:",
+                                "§eTier 2 (1.0×, instant-class)§r: any one of these alone qualifies:",
                                 "  • Bot holds a §flodestone compass bound to a target§r",
                                 "  • Bot §for§r owner has an §fEye of Ender§r",
                                 "  • Bot §for§r owner has a §fWizard's Tome§r",
                                 "  • Bot §for§r owner is within 6 blocks of an §fEnchanting Table§r",
                                 "  • §fBoth§r bot and owner hold §fEnder Pearls§r",
-                                "§eSurface Tier 1§r — needs at least one gate (Tier 2 unmet):",
+                                "§eSurface Tier 1§r: needs at least one gate (Tier 2 unmet):",
                                 "  • §fMap + Compass§r and destination pixel rendered on one of the bot's maps, OR",
                                 "  • §fSmoke signal§r: destination is inside a labeled base, lit campfire on hay at base centre, bot within 5× base radius",
                                 "  • §fSpyglass§r in bot inventory shaves one tier step",
@@ -1256,7 +1256,7 @@ public final class BotGuideScreen extends Screen {
                                 "  • Map + Compass §fplus torch/lantern§r → 2.0×",
                                 "  • Lodestone compass without bound target → 2.0×",
                                 "  • Smoke signal within §f2× base radius§r → 3.0× (tight range)",
-                                "  • Otherwise refused — bot walks",
+                                "  • Otherwise refused, bot walks",
                                 "§cNote:§r these gates apply to automatic fast-travel (sunset return, sunrise resume, /bot home). The §fSummon§r button in the spellbook uses the Eye of Ender (60s cooldown) as its own gate. The §fRemote Guidance§r and §fChorus Recall§r spells in Bot Inventory are separate manual spells with their own pearl/chorus costs.",
                                 "Chat tells you which gate activated each time fast-travel fires, so you can tune your setup."
                         ),
@@ -1270,11 +1270,11 @@ public final class BotGuideScreen extends Screen {
                         "Home & Bases Explained",
                         "Two kinds of rows in the Base Manager, and two meanings of [Home].",
                         List.of(
-                                "§eYellow [Base]§r rows are registered bases — saved locations with a protection radius (r=40). Use 'Set Home' to mark one as the bot's preferred home.",
-                                "§fWhite rows§r are lodestone compasses in the bot's inventory. They have no protection; they're just named travel targets.",
+                                "§eYellow [Base]§r rows are registered bases, saved locations with a protection radius (r=40). Use 'Set Home' to mark one as the bot's preferred home.",
+                                "§fWhite rows§r are lodestone compasses in the bot's inventory. They have no protection. They're just named travel targets.",
                                 "[Home] before a §eyellow§r name = this base is the bot's §epreferred home§r. Used by sunset-return and most 'go home' logic.",
                                 "[Home] before a §fwhite§r name = this lodestone compass is the bot's §edesignated home compass§r. Used by the fast-travel mechanics.",
-                                "You can have a preferred home base AND a designated home compass at the same time — they are independent.",
+                                "You can have a preferred home base AND a designated home compass at the same time. They are independent.",
                                 "Sunset-return picks the CLOSEST of: last-slept bed, preferred home, or nearest base. If your preferred home is far away and Spawn is closer, the bot may go to Spawn instead.",
                                 "To force a specific base on return, either delete the closer alternatives or keep the bot geographically near the preferred home.",
                                 "Admins can set who owns a base with /bot base owner <base> <player|server|none>. Put base names with spaces in quotes, for example /bot base owner \"My Base\" server. Operators and the host only."
@@ -1320,7 +1320,7 @@ public final class BotGuideScreen extends Screen {
                         "Admins can permit specific non-operator players to choose world mode.",
                         List.of(
                             "Use mode_access allow/revoke to manage delegated players.",
-                            "Operators can always choose mode; delegates are world-specific.",
+                            "Operators can always choose mode. Delegates are world-specific.",
                             "Clear removes all delegates for the current world."
                         ),
                         "bot recruit mode_access allow <player> | revoke <player> | clear",
@@ -1349,7 +1349,7 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                             "Admin entries like Learning Status / Start / Stop control a recording session, not normal companion progression.",
                             "Captured traces can include movement, camera, interactions, and local context for analysis.",
-                            "Use this for testing and tuning; see the Roadmap topic for the larger ML / LLM direction."
+                            "Use this for testing and tuning. See the Roadmap topic for the larger ML / LLM direction."
                         ),
                         "bot learn status | arm | start | stop | list | report",
                         "No keybind by default",
@@ -1419,7 +1419,7 @@ public final class BotGuideScreen extends Screen {
                                 "Compass / Map (basic): bot can navigate to its nearest or preferred base, same dimension only.",
                                 "Eye of Ender (enhanced): navigate to any named base, cross-dimension, instant teleport. Either you or the bot can hold it.",
                                 "Use /bot open <alias> to give items to your companion via its inventory screen.",
-                                "Navigation artifacts are reusable — they are not consumed."
+                                "Navigation artifacts are reusable. They are not consumed."
                         ),
                         "/bot open <alias>",
                         "Give item via Bot Inventory screen",
@@ -1434,7 +1434,7 @@ public final class BotGuideScreen extends Screen {
                                 "Both you and your companion must hold at least one Ender Pearl.",
                                 "Choose destination: guide to your location or to a known base.",
                                 "Both pearls are consumed when travel begins.",
-                                "Travel always uses fast travel \u2014 the bot disappears briefly and reappears at your location.",
+                                "Travel always uses fast travel. The bot disappears briefly and reappears at your location.",
                                 "Open the Spells tab to cast this spell."
                         ),
                         "UI-only action (Spells tab)",
@@ -1449,7 +1449,7 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                                 "Both you and your companion must hold one Ender Pearl AND one Chorus Fruit.",
                                 "Choose direction: teleport bot to you, or you to bot.",
-                                "Works across dimensions. Always instant — no delay.",
+                                "Works across dimensions. Always instant, no delay.",
                                 "All four items are consumed (one pearl + one chorus from each)."
                         ),
                         "UI-only action (Spells tab)",
@@ -1478,9 +1478,9 @@ public final class BotGuideScreen extends Screen {
                         "Keep your bots from wearing out your best tools.",
                         List.of(
                                 "When enabled, your bots refuse to use enchanted items and gear made of gold, diamond, netherite, or turtle shell once durability drops below 11%.",
-                                "In combat, the threshold drops to 3% \u2014 the bot will push a risky item harder when lives are on the line.",
+                                "In combat, the threshold drops to 3%, so the bot will push a risky item harder when lives are on the line.",
                                 "When a tool is locked out, the bot tries to swap to a cheaper alternative from its inventory, walks to a registered chest for a replacement, or crafts a new one at a nearby crafting table.",
-                                "If nothing is available, the bot pauses and speaks up \u2014 check its inventory and give it a refill.",
+                                "If nothing is available, the bot pauses and speaks up. Check its inventory and give it a refill.",
                                 "Note on Mending: items with the Mending enchantment are also preserved. If you want a Mending item used continuously for XP self-repair, disable this toggle.",
                                 "Toggle this under the bot's Admin tab \u2192 Behavior section. The setting is per player and applies to every bot you own. Default: OFF."
                         ),
@@ -1497,9 +1497,9 @@ public final class BotGuideScreen extends Screen {
                                 "Wizard's Tome: full access to all companion spells anywhere.",
                                 "Enchanting Table (nearby): full access to all spells.",
                                 "Goat Horn: regroup only (player holds).",
-                                "Eye of Ender: summon only with 60s cooldown (player holds); enhanced navigation (either holds).",
-                                "Ender Pearl (paired): Remote Guidance spell \u2014 both must hold, consumed.",
-                                "Ender Pearl + Chorus Fruit (paired): Chorus Recall \u2014 instant teleport, consumed."
+                                "Eye of Ender: summon only with 60s cooldown (player holds), enhanced navigation (either holds).",
+                                "Ender Pearl (paired): Remote Guidance spell, both must hold, consumed.",
+                                "Ender Pearl + Chorus Fruit (paired): Chorus Recall, instant teleport, consumed."
                         ),
                         "UI-only action (Spells tab)",
                         "Hold item or be near Enchanting Table to unlock spells",
@@ -1514,9 +1514,9 @@ public final class BotGuideScreen extends Screen {
                                 "Quick Store: Actions \u2192 Core Actions \u2192 Quick Store. Bot walks to the chest and deposits.",
                                 "Quick Fetch: Actions \u2192 Core Actions \u2192 Quick Fetch. Bot walks to the chest and takes items into its inventory.",
                                 "Point at any container (chest, barrel, shulker box) and left-click to confirm.",
-                                "Quick Store \u2014 plain click: deposits loose items, keeps the bot's equipped armor, mainhand tool, food, and bundles.",
-                                "Quick Store \u2014 shift+click: dumps everything (including armor, tools, and food). Use when swapping loadouts.",
-                                "The bot physically walks to the chest before interacting \u2014 it must be within 32 blocks.",
+                                "Quick Store, plain click: deposits loose items, keeps the bot's equipped armor, mainhand tool, food, and bundles.",
+                                "Quick Store, shift+click: dumps everything (including armor, tools, and food). Use when swapping loadouts.",
+                                "The bot physically walks to the chest before interacting. It must be within 32 blocks.",
                                 "If the chest fills up (store) or the bot\u2019s inventory fills up (fetch), remaining items stay put.",
                                 "The bot does NOT remember chests used this way. Only automated-task chests appear in Storage.",
                                 "Right-click to cancel targeting mode.",
@@ -1574,7 +1574,7 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                                 "Open the Spells menu while near an Enchanting Table.",
                                 "Click 'Enchant' to open the vanilla enchanting UI for your bot.",
-                                "The inventory grid shows the bot's items \u2014 drag items and lapis into the enchanting slots.",
+                                "The inventory grid shows the bot's items. Drag items and lapis into the enchanting slots.",
                                 "Enchantment offers are based on the bot's XP level, not yours.",
                                 "XP and lapis are deducted from the bot. You keep your own levels.",
                                 "Bookshelves around the table affect enchantment quality as normal.",
@@ -1593,7 +1593,7 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                                 "Open the Spells menu while near an Anvil.",
                                 "Click 'Anvil' to open the vanilla anvil UI for your bot.",
-                                "The inventory grid shows the bot's items \u2014 place items in the input slots as normal.",
+                                "The inventory grid shows the bot's items. Place items in the input slots as normal.",
                                 "Repair: combine a damaged tool with its repair material or another copy.",
                                 "Enchant: combine an item with an Enchanted Book to add enchantments.",
                                 "Rename: type a new name in the text field (costs 1 level).",
