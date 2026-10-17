@@ -671,6 +671,11 @@ public class BotEventHandler {
                     // launching break-free would undermine the stop command.
                     Long stopGrace = STOP_COMMAND_GRACE_UNTIL_TICK.get(candidate.getUuid());
                     if (stopGrace != null && srv.getTicks() < stopGrace) return;
+                    // A shelter saved before the reload (wall-off, dig-down, cliff, village house) is
+                    // restored first, even near a base or with the commander close: its record is
+                    // exact (same dimension and cell, still validates) and carries the type-correct
+                    // dawn exit, which the JOIN_ENCLOSED fallback below does not.
+                    if (BotFleeService.restoreShelterFromJoin(candidate)) return;
                     // Suppress enclosure check when near a registered base — underground bases
                     // always look "enclosed" but the bot is at home, not trapped.
                     if (net.wcfcarolina13.GameAI.services.BotHomeService.isNearAnyBase(candidate, 32.0D)) {

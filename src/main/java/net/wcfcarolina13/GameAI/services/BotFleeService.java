@@ -274,6 +274,142 @@ public final class BotFleeService {
         return true;
     }
 
+    // ── Shelter persistence across a reload ─────────────────────────────
+
+    /**
+     * Marks the bot sheltered and, for the saved types ({@link ShelterRestorePolicy#PERSISTED_TYPES}),
+     * writes the record so a reload restores it. Called at each successful registration only, never
+     * by the per-tick revalidation.
+     */
+    private static void registerShelter(ServerPlayerEntity bot, ShelterInfo info) {
+        SHELTER_ACTIVE.put(bot.getUuid(), info);
+        if (!ShelterRestorePolicy.persisted(info.type().name())) {
+            return;
+        }
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null || info.interiorPos() == null) {
+            return;
+        }
+        int[][] placed = new int[info.placedBlocks().size()][];
+        for (int i = 0; i < placed.length; i++) {
+            placed[i] = xyz(info.placedBlocks().get(i));
+        }
+        ShelterPersistenceStore.save(
+                bot.getName().getString().toLowerCase(),
+                BotWorldStateService.currentWorldKey(server),
+                new ShelterPersistenceStore.ShelterRecord(
+                        bot.getEntityWorld().getRegistryKey().getValue().toString(),
+                        info.type().name(),
+                        info.capPos() != null ? xyz(info.capPos()) : null,
+                        info.entryDir() != null ? info.entryDir().name() : null,
+                        xyz(info.interiorPos()),
+                        placed));
+        LOGGER.info("Bot {} shelter saved type={} interior={}",
+                bot.getName().getString(), info.type().name().toLowerCase(), info.interiorPos().toShortString());
+    }
+
+    /**
+     * Deletes the saved shelter: break-free started, or the shelter was invalidated. Not called on
+     * disconnect or reset, so a reload keeps it.
+     */
+    private static void forgetPersistedShelter(ServerPlayerEntity bot, String reason) {
+        MinecraftServer server = bot != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return;
+        }
+        if (ShelterPersistenceStore.forget(bot.getName().getString().toLowerCase(),
+                BotWorldStateService.currentWorldKey(server))) {
+            LOGGER.info("Bot {} saved shelter deleted ({})", bot.getName().getString(), reason);
+        }
+    }
+
+    /**
+     * Server thread, from the join check: restore the bot's saved shelter when it is for this
+     * dimension and the exact cell the bot stands in and still validates. The record is consumed
+     * whatever the outcome (re-saved when restored). If it is already day the shelter is restored
+     * anyway and {@link #validateAndTickShelter} runs its type-correct exit.
+     *
+     * @return true when the shelter was restored (the join check stops there)
+     */
+    public static boolean restoreShelterFromJoin(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null) {
+            return false;
+        }
+        String name = bot.getName().getString();
+        ShelterPersistenceStore.ShelterRecord record = ShelterPersistenceStore.take(
+                name.toLowerCase(), BotWorldStateService.currentWorldKey(server));
+        BlockPos pos = bot.getBlockPos().toImmutable();
+        String dimension = world.getRegistryKey().getValue().toString();
+        ShelterRestorePolicy.Verdict verdict = ShelterRestorePolicy.precheck(
+                record != null,
+                record != null ? record.type() : null,
+                record != null ? record.dimension() : null,
+                dimension,
+                record != null ? record.interior() : null,
+                pos.getX(), pos.getY(), pos.getZ());
+        if (verdict == ShelterRestorePolicy.Verdict.NO_RECORD) {
+            return false;
+        }
+        if (verdict != null) {
+            LOGGER.info("Bot {} saved shelter not restored reason={} saved={} at={}",
+                    name, verdict.name().toLowerCase(), record.type(), pos.toShortString());
+            return false;
+        }
+        ShelterType type = ShelterType.valueOf(record.type());
+        BlockPos cap = toBlockPos(record.cap());
+        Direction entryDir = horizontalByName(record.entryDir());
+        ShelterAssessment assessment = assessShelterAt(bot, world, pos, type, cap, entryDir);
+        String reason = assessment.reason().name().toLowerCase();
+        boolean wallOff = type == ShelterType.WALL_OFF;
+        boolean secured = wallOff && isShelterEntranceSecured(world, assessment.standPos(), type, cap, entryDir);
+        verdict = ShelterRestorePolicy.afterAssess(assessment.valid(), wallOff, reason, secured);
+        if (verdict != ShelterRestorePolicy.Verdict.RESTORE) {
+            LOGGER.info("Bot {} saved shelter not restored reason={} type={} at={}",
+                    name, reason, type.name().toLowerCase(), pos.toShortString());
+            return false;
+        }
+        List<BlockPos> placed = new ArrayList<>();
+        if (record.placedBlocks() != null) {
+            for (int[] cell : record.placedBlocks()) {
+                BlockPos p = toBlockPos(cell);
+                if (p != null) {
+                    placed.add(p);
+                }
+            }
+        }
+        long tick = server.getTicks();
+        registerShelter(bot, new ShelterInfo(tick, type, cap, entryDir, assessment.standPos(), tick,
+                ShelterInvalidReason.VALID, placed));
+        LOGGER.info("Bot {} shelter restored on join type={} interior={} blocks={} (day={})",
+                name, type.name().toLowerCase(), assessment.standPos().toShortString(), placed.size(),
+                world.isDay());
+        return true;
+    }
+
+    private static int[] xyz(BlockPos pos) {
+        return new int[]{pos.getX(), pos.getY(), pos.getZ()};
+    }
+
+    private static BlockPos toBlockPos(int[] xyz) {
+        return xyz != null && xyz.length >= 3 ? new BlockPos(xyz[0], xyz[1], xyz[2]) : null;
+    }
+
+    private static Direction horizontalByName(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (dir.name().equals(name)) {
+                return dir;
+            }
+        }
+        return null;
+    }
+
     /**
      * Validates shelter state: auto-clears when undead burn (tod ~23460+).
      * Normal exit is via {@link #checkDaylightBreakFree} (waits until tod 1000).
@@ -301,6 +437,7 @@ public final class BotFleeService {
                                     info.capPos(), info.entryDir()));
             if (!assessment.valid() && !keptSealed) {
                 SHELTER_ACTIVE.remove(bot.getUuid());
+                forgetPersistedShelter(bot, "invalidated " + assessment.reason().name().toLowerCase());
                 LOGGER.info("Bot {} shelter invalidated reason={} type={} pos={}",
                         bot.getName().getString(),
                         assessment.reason().name().toLowerCase(),
@@ -1153,7 +1290,7 @@ public final class BotFleeService {
                         assessment != null ? assessment.reason().name().toLowerCase() : "assess-timeout");
                 return;
             }
-            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+            registerShelter(bot, new ShelterInfo(
                     server.getTicks(),
                     ShelterType.DIG_DOWN,
                     capPos,
@@ -1567,7 +1704,7 @@ public final class BotFleeService {
         }
 
         long tick = server.getTicks();
-        SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+        registerShelter(bot, new ShelterInfo(
                 tick,
                 ShelterType.WALL_OFF,
                 capPos,
@@ -1989,7 +2126,7 @@ public final class BotFleeService {
         ShelterAssessment current = assessShelterAt(bot, world, bot.getBlockPos(), ShelterType.VILLAGE_HOUSE, findAdjacentDoor(world, bot.getBlockPos(), 3), null);
         if (current.valid() && SurvivalRecruitmentService.isVillageSignalNearby(world, bot.getBlockPos())) {
             long tick = bot.getCommandSource().getServer() != null ? bot.getCommandSource().getServer().getTicks() : 0L;
-            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+            registerShelter(bot, new ShelterInfo(
                     tick,
                     ShelterType.VILLAGE_HOUSE,
                     findAdjacentDoor(world, current.standPos(), 3),
@@ -2033,7 +2170,7 @@ public final class BotFleeService {
             return false;
         }
         long tick = bot.getCommandSource().getServer() != null ? bot.getCommandSource().getServer().getTicks() : 0L;
-        SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+        registerShelter(bot, new ShelterInfo(
                 tick,
                 ShelterType.VILLAGE_HOUSE,
                 candidate.doorPos(),
@@ -2453,7 +2590,7 @@ public final class BotFleeService {
                     wallFeet.toImmutable(),
                     digDir);
             if (assessment.valid()) {
-                SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                registerShelter(bot, new ShelterInfo(
                         server.getTicks(),
                         ShelterType.CLIFF,
                         wallFeet.toImmutable(),
@@ -2590,6 +2727,8 @@ public final class BotFleeService {
      * then escapes to surface if still underground.
      */
     private static void breakFreeFromShelter(ServerPlayerEntity bot, ShelterInfo info) {
+        // Every break-free (dawn, starvation, command, forced) starts here: the saved shelter goes.
+        forgetPersistedShelter(bot, "break-free");
         if (shouldAbortSurvival(bot)) {
             return;
         }
