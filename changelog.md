@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Dig-down climbs out at dawn, shelter exits hold the lock, quieter shelter logs, cliff seals feet first, dead override removed; 1.1.257 (2026-10-16)
+
+Follow-ups from the 2026-10-16 sandbox runs.
+
+- **Dig-down dawn exit climbs out right away** (`f84a8b36`). A dig-down shelter now remembers where it was dug (saved with the shelter), and at dawn the bot breaks the cap and pillars straight up out of the pit with the blocks it dug, filling it flush with the ground. Before, it sat in the pit for 60 s (its own exit had just started the "recently exited shelter" grace) and the later surface recovery pillar left a dirt block standing above ground. Shelters saved by an older build keep the old exit. Sandbox: `dig-down dawn exit: climbing out`, `pillared 3/3`, `out` within 2 s, pit filled, nothing above ground.
+- **Shelter exits hold the shelter lock** (`2545858d`, `cb51e9cb`, Fable review I1). The dawn and the starvation break-free started their thread without the shelter lock, so for the length of the exit (now a climb) underground survival or an idle hobby could start a second surface recovery under the same bot. Both now take the lock like the command exit, and keep the shelter for the next tick if another exit holds it.
+- **Shelter skip lines once per night** (`4326372d`). "dig-down skipped reason=..." (and the centring line) print once per bot, reason and game day instead of every 30 s all night.
+- **Cliff seal feet first** (`3566644b`). The head block of a cliff seal is placed only once the feet block is really there, so a sand or gravel head no longer falls into an open entrance.
+- **Dead "external override" removed** (`397697bd`, `8ba0055a`). A flag left over from the deleted training mode, set and cleared around tasks and read by nothing that changed behaviour, and its "pausing training loop" log lines.
+- **Rulings (cost if wrong):** no dig-down mark at dawn, so the bot may dig there again next night (the pit is filled, so it is a fresh column). The noteShelterExit grace now starts after the exit, for every shelter type (review checked wall-off, cliff, village, join-enclosed: no loop).
+- **Sandbox (Wall Test, `tools/sandbox/sheltertest.py`):** capped dig-down and dawn climb-out, wall-off seal and dawn teardown under the new lock, one `no-seal-block` line per night. A test base left from the section 3 run had protected the overhang site (`cell1-protected`, correct), removed before the rerun. No ERROR lines.
+- **Tests:** 2606 → 2611. **Field checks:** Phase 6ax.
+
 ## Global bot spawns retired, spawn `_legacy` slots purged; 1.1.256 (2026-10-16)
 
 Follow-up to 1.1.254 (bot controls): the same retirement for saved spawn points.

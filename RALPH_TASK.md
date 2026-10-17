@@ -3,7 +3,15 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-16 (1.1.256) — next session starts here
+## Session Handoff 2026-10-16 (1.1.257) — next session starts here
+
+**State:** main = origin/main @ 1.1.257. Suite 2611 green. 1.1.257 = dig-down dawn climb-out, shelter exits hold the lock,
+skip logs once a night, cliff seal feet first, dead external override removed. Field items: Phase 6ax.
+**In flight:** retrieval follow-ups (reload mid-trip, only the death drops; reviewed merge-ready, small fix wave), skills
+(woodcut unstandable stands, ranged hit pauses a task, cancelled mining INFO; fix wave for the retrieval sweep), then the
+player-text sweep. Everything in the 1.1.256 block below still applies.
+
+## Session Handoff 2026-10-16 (1.1.256) — superseded
 
 **State:** main = origin/main @ 1.1.256. Suite 2606 green. 1.1.256 = global bot spawns retired (spawn `_legacy` purged).
 Section 1-3 of the field checklist (Phases 6an-6aw) were run by Claude in the mcp-sandbox over MCP on 2026-10-16: all pass
