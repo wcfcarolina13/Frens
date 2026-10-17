@@ -7,7 +7,8 @@ test_command: "./gradlew build -x test"
 
 **State:** main = origin/main @ 1.1.261. Suite 2663 green. 1.1.261 = the unified pathfinder is the default and Baritone is
 the opt-in fallback. A one-time config migration moves saved Baritone to unified and keeps classic. The command saves all
-three choices. The decision rests on the swapped A/B (`docs/testing/PATHFINDER_AB_2026-10-17.md`). Field items: Phase 6ba.
+three choices. The decision rests on the swapped A/B (`docs/testing/PATHFINDER_AB_2026-10-17.md`). Field items: Phase 6ba (checklist now 333 items). Minor: after the first shared-settings save the file stores
+`"pathfinder": "unified"` explicitly rather than null, so a later default change would not move that install.
 **Next:**
 - Field time on the new default.
 - Slice D (remove the legacy boolean and bidir) once the default has held.
