@@ -60,6 +60,7 @@ import net.wcfcarolina13.GameAI.skills.support.WoodcutHazardScanner;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutHungerPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutProtectionNudgePolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutTreeClaims;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutUnstandableStands;
 import net.wcfcarolina13.PathFinding.GoTo;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -184,6 +185,8 @@ public final class WoodcutSkill implements Skill {
      * worked, released in the per-tree finally and all at once in the run's finally.
      */
     private static final WoodcutTreeClaims TREE_CLAIMS = new WoodcutTreeClaims();
+    /** Stands the unified finder refused as GOAL_NOT_STANDABLE, per bot, across runs (5 min). */
+    private static final WoodcutUnstandableStands UNSTANDABLE_STANDS = new WoodcutUnstandableStands();
     /** The tree each bot's run currently holds a claim on, for cheap refreshes; lost once another bot took it. */
     private record ActiveTreeClaim(WoodcutTreeClaims.TreeKey tree, long runToken, boolean lost) {
     }
@@ -3819,6 +3822,15 @@ public final class WoodcutSkill implements Skill {
             }
             return false;
         }
+        if (UNSTANDABLE_STANDS.isBlocked(bot.getUuid(), stand.asLong())) {
+            LOGGER.info("Woodcut stand skipped: stand={} target={} reason=remembered-goal-not-standable",
+                    stand.toShortString(),
+                    target == null ? "none" : target.toShortString());
+            if (reachSession != null) {
+                reachSession.recordFailedReroute(target, stand, "goal-not-standable");
+            }
+            return false;
+        }
         if (!isSafeWoodcutWorkStand(world, stand)) {
             LOGGER.info("Woodcut canopy route rejected: stand={} target={} reason=unsafe-work-stand canopy={} support={}",
                     stand.toShortString(),
@@ -3876,9 +3888,17 @@ public final class WoodcutSkill implements Skill {
                 lastStandMoveDetailByBot.put(bot.getUuid(), detail);
             }
         }
-        return result.success()
+        boolean closeEnough = result.success()
                 || bot.getBlockPos().getSquaredDistance(stand) <= 4.0D
                 || (target != null && isWithinReach(bot, target));
+        if (!closeEnough && WoodcutUnstandableStands.isGoalNotStandable(result.detail())) {
+            UNSTANDABLE_STANDS.record(bot.getUuid(), stand.asLong());
+            LOGGER.info("Woodcut stand remembered as unstandable: stand={} target={} for {}s",
+                    stand.toShortString(),
+                    target == null ? "none" : target.toShortString(),
+                    WoodcutUnstandableStands.TTL_MS / 1000L);
+        }
+        return closeEnough;
     }
 
     private boolean tryRerouteUnsafeWoodcutMove(ServerCommandSource source,
@@ -3940,6 +3960,7 @@ public final class WoodcutSkill implements Skill {
                 .filter(Objects::nonNull)
                 .filter(pos -> isWithinRequestedBounds(bot, pos))
                 .filter(pos -> reachSession == null || !reachSession.isBlacklistedReroute(target, pos))
+                .filter(pos -> !UNSTANDABLE_STANDS.isBlocked(bot.getUuid(), pos.asLong()))
                 .sorted(Comparator.comparingDouble(pos -> {
                     SafePositionService.SurfaceCandidateAssessment assessment =
                             SafePositionService.analyzeSurfaceCandidate(world, pos, pos);
