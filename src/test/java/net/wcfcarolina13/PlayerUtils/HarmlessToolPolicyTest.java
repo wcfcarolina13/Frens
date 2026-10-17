@@ -121,4 +121,44 @@ class HarmlessToolPolicyTest {
         assertTrue(HarmlessToolPolicy.isAvoided("item.minecraft.IRON_AXE", "Axe"));
         assertFalse(HarmlessToolPolicy.isAvoided("item.minecraft.iron_shovel", "axe"));
     }
+
+    @Test
+    void shearsWasteLeavesOnlyForShearsOnLeaves() {
+        assertTrue(HarmlessToolPolicy.shearsWasteLeaves(true, true));
+        assertFalse(HarmlessToolPolicy.shearsWasteLeaves(true, false));   // hoe or hand on leaves
+        assertFalse(HarmlessToolPolicy.shearsWasteLeaves(false, true));   // shears on wool, vines
+        assertFalse(HarmlessToolPolicy.shearsWasteLeaves(false, false));
+    }
+
+    @Test
+    void heldShearsOnLeavesAreNotKeptEvenThoughEffective() {
+        // shears: damageable, effective on leaves, not a weapon, but they drop the leaf block
+        assertFalse(HarmlessToolPolicy.keepHeldWhenNoEffectiveTool(false, true, true, false, true));
+    }
+
+    @Test
+    void heldHoeOnLeavesIsStillKept() {
+        // hoe: damageable, effective on leaves (#mineable/hoe), keeps the sapling drop
+        assertTrue(HarmlessToolPolicy.keepHeldWhenNoEffectiveTool(false, true, true, false, false));
+    }
+
+    @Test
+    void emptyHandIsKeptEvenWhenTheWasteFlagIsSet() {
+        assertTrue(HarmlessToolPolicy.keepHeldWhenNoEffectiveTool(true, false, false, false, true));
+    }
+
+    @Test
+    void fourArgFormMatchesFiveArgWithoutWaste() {
+        boolean[] b = {false, true};
+        for (boolean empty : b) for (boolean dmg : b) for (boolean eff : b) for (boolean weapon : b) {
+            assertTrue(HarmlessToolPolicy.keepHeldWhenNoEffectiveTool(empty, dmg, eff, weapon)
+                    == HarmlessToolPolicy.keepHeldWhenNoEffectiveTool(empty, dmg, eff, weapon, false));
+        }
+    }
+
+    @Test
+    void shearsOnLeavesAreNeverKeptAsLastResort() {
+        // ToolSelector passes heldWeapon || wastesDrop: a packed inventory still gets EMPTY
+        assertFalse(HarmlessToolPolicy.keepHeldAsLastResort(false, false, true));
+    }
 }

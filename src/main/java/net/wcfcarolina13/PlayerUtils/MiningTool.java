@@ -5,6 +5,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -161,7 +162,7 @@ public class MiningTool {
                         bestTool.isEmpty() ? "empty-hand" : bestTool.getItem().toString(),
                         bot.getAbilities().creativeMode);
                 if (!switchToTool(bot, bestTool)) {
-                    switchToHarmlessFallback(bot);
+                    switchToHarmlessFallback(bot, blockState);
                 }
             } else {
                 ItemStack held = bot.getMainHandStack();
@@ -169,7 +170,12 @@ public class MiningTool {
                     LOGGER.info("Mining {} refusing to preserve held weapon {}; switching to harmless fallback",
                             targetBlockPos,
                             held.getItem());
-                    switchToHarmlessFallback(bot);
+                    switchToHarmlessFallback(bot, blockState);
+                    held = bot.getMainHandStack();
+                } else if (wastesDrop(held, blockState)) {
+                    LOGGER.info("Mining {} refusing to preserve held shears on leaves; switching to harmless fallback",
+                            targetBlockPos);
+                    switchToHarmlessFallback(bot, blockState);
                     held = bot.getMainHandStack();
                 }
                 LOGGER.debug("Preparing to mine {} with preserved held item={} (creative={})",
@@ -242,29 +248,34 @@ public class MiningTool {
                     return;
                 }
 
-                if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld serverWorld) {
-                    var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos,
-                            isTreeBlock(serverWorld.getBlockState(targetBlockPos)));
-                    if (!auth.allowed()) {
-                        miningResult.complete("⚠️ Cannot mine: protected claim.");
-                        return;
-                    }
-                }
-                
                 try {
                     BlockState currentState = bot.getEntityWorld().getBlockState(targetBlockPos);
+                    // Gone wins over the claim: once the log breaks the live state is air, which is
+                    // not a tree, so a claim check first would refuse a block that already dropped.
+                    boolean blockGone = currentState.isAir();
+                    boolean claimAllowed = blockGone
+                            || !(bot.getEntityWorld() instanceof ServerWorld serverWorld)
+                            || BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld,
+                                    targetBlockPos, isTreeBlock(currentState)).allowed();
+                    switch (MiningTickPolicy.verdict(blockGone, claimAllowed)) {
+                        case COMPLETE -> {
+                            // Clear break animation
+                            if (bot.getEntityWorld() instanceof ServerWorld sw) {
+                                sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, -1);
+                            }
+                            LOGGER.info("Mining complete at {}", targetBlockPos);
+                            miningResult.complete("Mining complete!");
+                            return;
+                        }
+                        case REFUSE_CLAIM -> {
+                            miningResult.complete("⚠️ Cannot mine: protected claim.");
+                            return;
+                        }
+                        case CONTINUE -> { }
+                    }
                     if (ProtectedStructureBlockHelper.isNeverBreakAt(bot.getEntityWorld(), targetBlockPos)
                             || isNeverMineBlock(currentState)) {
                         miningResult.complete("⚠️ Refusing to mine a protected block.");
-                        return;
-                    }
-                    if (currentState.isAir()) {
-                        // Clear break animation
-                        if (bot.getEntityWorld() instanceof ServerWorld sw) {
-                            sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, -1);
-                        }
-                        LOGGER.info("Mining complete at {}", targetBlockPos);
-                        miningResult.complete("Mining complete!");
                         return;
                     }
 
@@ -279,7 +290,7 @@ public class MiningTool {
                                     targetBlockPos);
                             boolean swapped = switchToTool(bot, repolled);
                             if (!swapped) {
-                                switchToHarmlessFallback(bot);
+                                switchToHarmlessFallback(bot, currentState);
                             }
                             // Recalculate required ticks from the new tool
                             float newDelta = currentState.calcBlockBreakingDelta(bot, bot.getEntityWorld(), targetBlockPos);
@@ -487,18 +498,18 @@ public class MiningTool {
         }
     }
 
-    private static void switchToHarmlessFallback(ServerPlayerEntity bot) {
+    private static void switchToHarmlessFallback(ServerPlayerEntity bot, BlockState target) {
         if (bot == null) {
             return;
         }
         // Scans and mutates inventory in one pass — must be a single server-thread unit.
         callOnServer(bot, () -> {
-            switchToHarmlessFallbackOnThread(bot);
+            switchToHarmlessFallbackOnThread(bot, target);
             return Boolean.TRUE;
         }, Boolean.FALSE);
     }
 
-    private static void switchToHarmlessFallbackOnThread(ServerPlayerEntity bot) {
+    private static void switchToHarmlessFallbackOnThread(ServerPlayerEntity bot, BlockState target) {
         PlayerInventory inventory = bot.getInventory();
         for (int i = 0; i < 9; i++) {
             ItemStack stack = inventory.getStack(i);
@@ -522,7 +533,8 @@ public class MiningTool {
         // Last tier: a damageable non-weapon (axe, shovel) is not harmless, but at 1 durability per
         // block it still beats a sword at 2. ToolSelector keeps such an item as its packed-inventory
         // last resort, so the 20-tick re-poll settles on it instead of resetting progress.
-        selectFallbackMatching(bot, inventory, MiningTool::isNonWeaponMiningFallback);
+        selectFallbackMatching(bot, inventory,
+                stack -> isNonWeaponMiningFallback(stack) && !wastesDrop(stack, target));
     }
 
     private static boolean selectFallbackMatching(ServerPlayerEntity bot, PlayerInventory inventory,
@@ -546,6 +558,13 @@ public class MiningTool {
 
     private static boolean isWeaponOnlyItem(ItemStack stack) {
         return BotActions.isCombatClassItem(stack);
+    }
+
+    /** Shears on leaves lose the sapling/stick drop ({@link HarmlessToolPolicy#shearsWasteLeaves}). */
+    private static boolean wastesDrop(ItemStack stack, BlockState target) {
+        return stack != null
+                && HarmlessToolPolicy.shearsWasteLeaves(
+                        target != null && target.isIn(BlockTags.LEAVES), stack.isOf(Items.SHEARS));
     }
 
     /** Non-food item that costs nothing to swing ({@link HarmlessToolPolicy#isHarmlessFallback}). */

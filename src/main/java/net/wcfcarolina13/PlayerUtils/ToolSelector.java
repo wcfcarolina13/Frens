@@ -44,17 +44,9 @@ public class ToolSelector {
         boolean priorWasFiltered = !priorHeld.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, priorHeld);
 
         if (blockState != null && blockState.isIn(BlockTags.LEAVES)) {
-            ItemStack shears = findShears(bot);
-            if (!shears.isEmpty() && !DurabilityPolicyService.shouldAvoid(bot, shears)) {
-                return shears;
-            }
-            if (!shears.isEmpty() && DurabilityPolicyService.shouldAvoid(bot, shears)) {
-                // Preserved shears below threshold — request fallback refresh, then fall through.
-                DurabilityFallbackService.requestRefresh(
-                        bot, DurabilityFallbackService.GearCategory.SHEARS);
-            }
-            // No usable shears: keep a held hoe (leaves are #mineable/hoe in 1.21.11), but never an
-            // axe or other damageable item that only loses durability on leaves.
+            // Never shears: they drop the leaf block instead of saplings and sticks
+            // (HarmlessToolPolicy.shearsWasteLeaves). Keep a held hoe (leaves are #mineable/hoe in
+            // 1.21.11), but never an axe or other damageable item that only loses durability on leaves.
             return heldOrHarmlessFallback(bot, blockState);
         }
 
@@ -277,17 +269,22 @@ public class ToolSelector {
         if (selected.isEmpty()) {
             return ItemStack.EMPTY;
         }
+        boolean wastesDrop = HarmlessToolPolicy.shearsWasteLeaves(
+                blockState != null && blockState.isIn(BlockTags.LEAVES), selected.isOf(Items.SHEARS));
         boolean keep = HarmlessToolPolicy.keepHeldWhenNoEffectiveTool(
                 false,
                 selected.isDamageable(),
                 blockState != null && HarmlessToolPolicy.isEffective(selected.getMiningSpeedMultiplier(blockState)),
-                isWeaponOnlyItem(selected));
+                isWeaponOnlyItem(selected),
+                wastesDrop);
         if (keep) {
             return selected;
         }
         ItemStack harmless = findHarmlessHotbarFallback(bot, blockState);
+        // Shears on leaves are refused like a weapon: EMPTY sends MiningTool to its fallback,
+        // whose last tier skips shears on leaves, so the re-poll settles on another item.
         if (HarmlessToolPolicy.keepHeldAsLastResort(!harmless.isEmpty(), hasAnyEmptyMainSlot(bot),
-                isWeaponOnlyItem(selected))) {
+                isWeaponOnlyItem(selected) || wastesDrop)) {
             // Packed inventory with nothing harmless: MiningTool could not free a hand either, and
             // returning EMPTY here would make its 20-tick re-poll swap and reset progress forever.
             // Never a weapon: EMPTY sends MiningTool to its fallback, whose last tier takes any
@@ -318,26 +315,6 @@ public class ToolSelector {
             }
             if (HarmlessToolPolicy.isHarmlessFallback(false, isWeaponOnlyItem(stack), stack.isDamageable(),
                     stack.getMiningSpeedMultiplier(reference))) {
-                return stack;
-            }
-        }
-        return ItemStack.EMPTY;
-    }
-
-    private static ItemStack findShears(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return ItemStack.EMPTY;
-        }
-        // Check hotbar first
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isOf(Items.SHEARS)) {
-                return stack;
-            }
-        }
-        for (int slot = 9; slot < 36; slot++) {
-            ItemStack stack = bot.getInventory().getStack(slot);
-            if (stack.isOf(Items.SHEARS)) {
                 return stack;
             }
         }

@@ -45,16 +45,35 @@ public final class HarmlessToolPolicy {
      */
     public static boolean keepHeldWhenNoEffectiveTool(boolean heldEmpty, boolean heldDamageable,
                                                       boolean heldEffectiveOnBlock, boolean heldWeapon) {
+        return keepHeldWhenNoEffectiveTool(heldEmpty, heldDamageable, heldEffectiveOnBlock, heldWeapon, false);
+    }
+
+    /**
+     * As {@link #keepHeldWhenNoEffectiveTool(boolean, boolean, boolean, boolean)}, plus: an item
+     * that would waste the block's drop (see {@link #shearsWasteLeaves}) is never kept, even
+     * though it is effective on the block.
+     */
+    public static boolean keepHeldWhenNoEffectiveTool(boolean heldEmpty, boolean heldDamageable,
+                                                      boolean heldEffectiveOnBlock, boolean heldWeapon,
+                                                      boolean heldWastesDrop) {
         if (heldEmpty) {
             return true;
         }
-        if (heldWeapon) {
+        if (heldWeapon || heldWastesDrop) {
             return false;
         }
         if (heldEffectiveOnBlock) {
             return true;
         }
         return !heldDamageable;
+    }
+
+    /**
+     * Shears on leaves drop the leaf block itself instead of saplings, sticks and apples, which
+     * is what the bot wants from a tree. So shears are never used to mine leaves, however fast.
+     */
+    public static boolean shearsWasteLeaves(boolean targetIsLeaves, boolean itemIsShears) {
+        return targetIsLeaves && itemIsShears;
     }
 
     /**
