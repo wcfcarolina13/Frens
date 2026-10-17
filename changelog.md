@@ -18,6 +18,7 @@ Four misclassifications found while scoping the 2026-10-17 pathfinder A/B. The m
   - Water is now an acceptable rescue side cell (lava is not). The rescue fires on IN_WALL damage only and water is already excluded from the stuck test, so it does not pull the bot back out.
   - An open fence gate passes the stuck nudge (empty collision) though the pathfinders refuse gates for pens. Cost: a one-cell nudge through an open pen gate.
   - Top slabs and the back of a stair still count as standable at feet (as before 1.1.262, when `isSolidBlock` passed them). Cost: a nudge can still try into one and fail, as it did before.
+- **Ruling (deploy check):** another session had the mcp-sandbox open at deploy time, so the any-instance `pgrep` hit. Deployed with the check scoped to `instances/1.21.11/natives`, as in 1.1.263. Cost if wrong: none found, the scoped check still refuses while Nirn is open.
 - **Deferred:** diagonal wall nudge (needs the eye-box geometry), drop of 2+ (fall damage, `isDangerousDropCell` already covers it), the scaffold Phase 3 pillar-up while standing on a pillar (a behaviour change), and the two pre-existing off-thread `rescueFromBurial` callers (`ReturnBaseStuckService` async mine escape, `MovementService` nudge loop).
 - **Seen in passing:** on 1.1.263 the backup jump-sprint logged `jump-sprint north succeeded, now at 199, 110, 202` from inside a closed stone pocket (z 199-201). Not chased here.
 - **Tests:** 2671 → 2694 (23 new in `StuckCellPolicyTest`). **Field checks:** Phase 6bd.
