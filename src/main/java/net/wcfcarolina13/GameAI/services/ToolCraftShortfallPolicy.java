@@ -97,6 +97,21 @@ public final class ToolCraftShortfallPolicy {
                 + (haveParts == 0 ? "none of that" : have.toString()) + ".";
     }
 
+    /** The answer when there is no table and nothing else is short. */
+    public static final String STATION_ONLY_LINE = "I need a crafting table placed nearby to craft that.";
+
+    /**
+     * The one line an explicit tool craft sends when no crafting table could be had: the
+     * materials line (from {@link #message}) with the table added, or the table alone when the
+     * materials line is empty, so the table reason is never lost.
+     */
+    public static String withStationNeeded(String materialsLine) {
+        if (materialsLine == null || materialsLine.isBlank()) {
+            return STATION_ONLY_LINE;
+        }
+        return materialsLine.trim() + " I'd also need a crafting table nearby.";
+    }
+
     private static String noun(String item, int count) {
         String name = pretty(item);
         if (count <= 1 || MASS_NOUNS.contains(name) || name.endsWith("s")) {

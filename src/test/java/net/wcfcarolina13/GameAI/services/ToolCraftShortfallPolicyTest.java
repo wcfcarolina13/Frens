@@ -79,4 +79,23 @@ class ToolCraftShortfallPolicyTest {
         assertFalse(ToolCraftShortfallPolicy.isShort(null));
         assertEquals("", ToolCraftShortfallPolicy.message("stone axe", 1, null));
     }
+    @Test
+    void stationNeededAddsTheTableToTheMaterialsLine() {
+        List<Missing> reqs = ToolCraftShortfallPolicy.requirements("planks", 3, 2, 1, 0, 0, 0, true);
+        String line = ToolCraftShortfallPolicy.message("wooden axe", 1, reqs);
+        assertEquals("I need 3 planks and 2 sticks for a wooden axe. I have none of that."
+                        + " I'd also need a crafting table nearby.",
+                ToolCraftShortfallPolicy.withStationNeeded(line));
+    }
+
+    @Test
+    void stationNeededAloneWhenNothingElseIsShort() {
+        // Materials all held: the table is the only reason, and it must still be said.
+        assertEquals("I need a crafting table placed nearby to craft that.",
+                ToolCraftShortfallPolicy.withStationNeeded(""));
+        assertEquals("I need a crafting table placed nearby to craft that.",
+                ToolCraftShortfallPolicy.withStationNeeded(null));
+        assertEquals("I need a crafting table placed nearby to craft that.",
+                ToolCraftShortfallPolicy.withStationNeeded("   "));
+    }
 }

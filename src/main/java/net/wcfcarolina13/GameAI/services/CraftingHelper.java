@@ -392,7 +392,9 @@ public final class CraftingHelper {
             return false;
         }
 
-        int crafts = craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amountRequested);
+        // Quiet: a failure here is the station's to report, and the caller's own line (or the
+        // tool craft's shortfall line) already names the missing table.
+        int crafts = craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amountRequested, true);
         if (crafts > 0) {
             LOGGER.info("Crafted {} crafting table(s) for a station sub-step", crafts);
             return true;
@@ -444,7 +446,7 @@ public final class CraftingHelper {
             return craftPlanks(bot, source, commander, amount, target);
         }
         return switch (normalized) {
-            case "crafting_table" -> craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amount);
+            case "crafting_table" -> craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amount, false);
             case "sticks", "stick" -> craftSticks(bot, source, commander, amount);
             case "torch", "torches" -> craftTorches(bot, source, commander, amount);
             case "door", "doors" -> craftDoor(bot, source, commander, amount);
@@ -469,7 +471,7 @@ public final class CraftingHelper {
             case "bucket" -> craftSimple(bot, source, commander, amount, Items.BUCKET, Items.IRON_INGOT, 3);
             case "shears" -> craftSimple(bot, source, commander, amount, Items.SHEARS, Items.IRON_INGOT, 2);
             case "furnace" -> craftCobbleBlock(bot, source, commander, amount, Items.FURNACE, 8);
-            case "chest" -> craftWithPlanks(bot, source, commander, Identifier.of("minecraft", "chest"), 8, Items.CHEST, amount);
+            case "chest" -> craftWithPlanks(bot, source, commander, Identifier.of("minecraft", "chest"), 8, Items.CHEST, amount, false);
             case "planks", "plank" -> craftPlanks(bot, source, commander, amount, null);
             case "ladder", "ladders" -> craftLadders(bot, source, commander, amount);
             case "bed", "beds" -> craftBed(bot, source, commander, amount);
@@ -767,31 +769,32 @@ public final class CraftingHelper {
                                        Identifier recipeId,
                                        int planksPerItem,
                                        net.minecraft.item.Item output,
-                                       int amountRequested) {
+                                       int amountRequested,
+                                       boolean quiet) {
         if (!output.equals(Items.CRAFTING_TABLE)) {
-            if (!ensureCraftingStation(bot, source)) {
-                sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
+            if (!ensureCraftingStation(bot, source, quiet)) {
+                if (!quiet) sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
                 return 0;
             }
         }
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            if (!quiet) say(source, "I don't know how to craft that yet.");
             return 0;
         }
         if (!ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)) {
-            sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft.");
+            if (!quiet) sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft.");
             return 0;
         }
         int plankCount = countPlanks(bot);
         int maxByPlanks = plankCount / planksPerItem;
         int crafts = Math.min(amountRequested, maxByPlanks);
         if (crafts <= 0) {
-            sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft. Missing " + (planksPerItem - plankCount) + ".");
+            if (!quiet) sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft. Missing " + (planksPerItem - plankCount) + ".");
             return 0;
         }
         ensureInventorySpaceForOutput(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of());
         if (!consumePlanks(bot, crafts * planksPerItem)) {
-            say(source, "I couldn't reserve planks for crafting.");
+            if (!quiet) say(source, "I couldn't reserve planks for crafting.");
             return 0;
         }
         distributeOutput(bot, output, crafts);
@@ -1412,15 +1415,15 @@ public final class CraftingHelper {
         };
         int headCount = headCountFor(kind, mat);
 
-        // Ensure crafting table nearby for 3x3 recipes
-        if (!ensureCraftingStation(bot, source)) {
-            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
-            if (shortfall != null && shortfall.message == null) {
+        // Ensure crafting table nearby for 3x3 recipes. An explicit-material craft answers with
+        // one shortfall line that names the table too, so the station stays quiet for it.
+        if (!ensureCraftingStation(bot, source, shortfall != null)) {
+            if (shortfall == null) {
+                sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
+            } else if (shortfall.message == null) {
                 // No chest pull without a table, so this is the inventory alone.
-                String line = toolShortfallLine(bot, kind, mat, amount, headCount, stickCount);
-                if (!line.isEmpty()) {
-                    shortfall.message = line + " I'd also need a crafting table nearby.";
-                }
+                shortfall.message = ToolCraftShortfallPolicy.withStationNeeded(
+                        toolShortfallLine(bot, kind, mat, amount, headCount, stickCount));
             }
             return STATION_UNAVAILABLE;
         }
@@ -1556,6 +1559,14 @@ public final class CraftingHelper {
     }
 
     public static boolean ensureCraftingStation(ServerPlayerEntity bot, ServerCommandSource source) {
+        return ensureCraftingStation(bot, source, false);
+    }
+
+    /**
+     * @param quiet the caller sends its own line for a missing table, so the table-craft and
+     *              table-needed failure lines here stay unsaid (log lines are unchanged)
+     */
+    private static boolean ensureCraftingStation(ServerPlayerEntity bot, ServerCommandSource source, boolean quiet) {
         if (bot == null) return false;
         // On the server thread (idle hobbies, /bot cook, auto-cook, RideSync) the bot never walks,
         // nudges or carves: a walk there only sets velocity and waits for a tick that cannot run.
@@ -1856,7 +1867,7 @@ public final class CraftingHelper {
             PreparedPlacement prepared = prepareNearbyUtilityPlacement(source, bot, world, bot.getBlockPos(), "crafting_table", STATION_REACH_SQ);
             if (prepared == null) {
                 warnStationStep(onServerThread, "Crafted a crafting table but failed to place it near {}", botPos.toShortString());
-                tellStationFailure(bot, source, "I crafted a crafting table but couldn't place it here.");
+                if (!quiet) tellStationFailure(bot, source, "I crafted a crafting table but couldn't place it here.");
                 declineIfTickSide(bot, onServerThread, "no-placement-cell");
                 return false;
             }
@@ -1869,7 +1880,7 @@ public final class CraftingHelper {
             if (!placed) {
                 warnStationStep(onServerThread, "Crafted a crafting table but failed to place it near {} detail={}",
                         bot.getBlockPos().toShortString(), placeResult.reason());
-                tellStationFailure(bot, source, "I crafted a crafting table but couldn't place it here.");
+                if (!quiet) tellStationFailure(bot, source, "I crafted a crafting table but couldn't place it here.");
                 declineIfTickSide(bot, onServerThread, placeFailureReason(placeResult));
                 return false;
             }
@@ -1900,7 +1911,7 @@ public final class CraftingHelper {
         }
 
         logStationStep(onServerThread, "No crafting table within {} blocks of {}", radius, botPos.toShortString());
-        sendCraftTableNeededOnce(bot, source, "I need a crafting table nearby to craft that.");
+        if (!quiet) sendCraftTableNeededOnce(bot, source, "I need a crafting table nearby to craft that.");
         declineIfTickSide(bot, onServerThread, skippedTableOutOfReach ? "far-table" : "no-table");
         return false;
     }
