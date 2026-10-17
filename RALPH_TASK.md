@@ -3,7 +3,23 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-17 (1.1.265) — next session starts here
+## Session Handoff 2026-10-17 (1.1.266) — next session starts here
+
+**State:** main = origin/main @ 1.1.266. Suite 2748 green. 1.1.266 = the sandbox bugs A-G from field phases 6ad-6al
+(`docs/testing/FIELD_6AD_6AL_SANDBOX_2026-10-17.md`): no shears on leaves (A), empty forest cleanup bounded and honest (B,
+resumable scans, `CleanupScanMemo`), one line for a failed craft plus the table cooldown, pickup count and trailing bot name
+(C, C2-C4), relocation walks scale their deadline and keep going while they gain ground, 90 s per attempt (D), a log broken
+inside a claim completes (E), unified plans cut before a self-conflicting move (F, cause logged), tree claims cover the trunk
+(G). Reviewed by Fable, one fix wave, re-review clean. Field items: Phase 6bf (checklist now 323 open items).
+**Next:**
+- Sandbox recheck of 6bf if not already done in this session (see the 1.1.266 changelog entry for what was rechecked).
+- F route fix: make the unified search refuse a move whose support an earlier move mines (today the walk stops on the
+  partial). `canReach` and the PathCompare shadow still use the raw search.
+- Minors: C2 chest-pull retries every station call with no planks; a held unplaceable table still gives two lines on a
+  strict craft; `MountedLeafClearingService` still shears leaves; a bot named after a material reads as the material.
+- Everything in the 1.1.265 block below.
+
+## Session Handoff 2026-10-17 (1.1.265) — superseded
 
 **State:** main = origin/main @ 1.1.265. Suite 2695 green. 1.1.265 = `/bot go_to` plans with the bot's own finder (per-bot
 override, then global), and the no-bot `calculatePath` / `canReach` overloads are gone so the gap cannot come back
