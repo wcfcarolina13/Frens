@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Woodcut remembers unreachable stands, a ranged hit pauses the task, cancelled mining is not an error; 1.1.259 (2026-10-16)
+
+The three skills items left open since 1.1.242.
+
+- **Woodcut remembers stands it cannot stand on** (`0e866559`). When the unified finder reports GOAL_NOT_STANDABLE for a woodcut stand, the bot remembers that stand for 5 minutes (across runs) and skips it, instead of walking at it again on every approach and every resume. Pure `WoodcutUnstandableStands`, with a test pinning the two MovementService detail strings it reads. Baritone gives no reason, so it is unaffected.
+- **A ranged hit pauses the task** (`1bb85ddc`, `ae6e3a8c`, `4d900b07`). A bot whose task is running and that is hit by a projectile from a hostile mob within 16 blocks now pauses the task (debounced) so combat or flee can run, then resumes as the other pauses do. Before, only a hostile within 10 blocks paused it, and the combat loop and the skill fought over the bot while a skeleton shot it from range (Eve died to a Bogged). The recently-damaged window is now 5 s (a Bogged shoots every 2.5 to 3.5 s). The retrieval sweep and surface recovery are never paused. A line says why a hit did not pause. Bogged and Parched joined the skeleton callout lists. Sandbox: `paused task for ranged hit: shooter=minecraft:bogged ranged=true distance=15.3`, "Pausing current task: I'm being shot.", resumed 10 s later. Note: `/summon` with NBT gives a mob no default gear in 1.21.11, so the first sandbox Bogged had no bow and meleed (the hook rightly ignored it).
+- **Cancelled mining logs INFO** (`7aee3a2a`). `/bot stop` mid-mine logged "Failed to mine ... null" at ERROR and counted a path failure. It now logs "Woodcut: mining <pos> cancelled (Stopped by the player.)", restores the interrupt flag and does not count it. Real failures still log ERROR with the exception. Sandbox: as described, `pathFailures=0`.
+- **Pathfinder A/B, sandbox pass** (`docs/testing/PATHFINDER_AB_2026-10-16.md`): over 9 minutes unified bots cut 68 logs and reached 58.7% of walks, Baritone bots 19 logs and 36%. Encouraging, too small to switch the default.
+- **Rulings (cost if wrong):** any hostile projectile pauses (blaze fireball, drowned trident too). A paused hobby is not resumed (the scheduler picks another later). Baritone failures do not mark a stand.
+- **Review (Fable):** the first version paused the retrieval sweep for good, fixed (`ae6e3a8c`).
+- **Tests:** 2628 → 2645. **Field checks:** Phase 6az.
+
 ## Retrieval fetches only the death's own drops and survives a reload; a bot mid-trip is no longer auto-spawned back home; 1.1.258 (2026-10-16)
 
 Follow-ups to 1.1.255 death retrieval.

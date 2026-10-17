@@ -3,7 +3,15 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-16 (1.1.258) — next session starts here
+## Session Handoff 2026-10-16 (1.1.259) — next session starts here
+
+**State:** main = origin/main @ 1.1.259. Suite 2645 green. 1.1.259 = woodcut stand memory, ranged hits pause tasks,
+cancelled mining INFO. First sandbox pathfinder A/B in `docs/testing/PATHFINDER_AB_2026-10-16.md` (unified ahead, small
+sample). Field items: Phase 6az. **Next:** player-text sweep (em dashes, semicolons; scope in the worktree
+`.superpowers/sdd/backlog2/scope-text.md`), a longer swapped A/B, older field phases 6ad-6al in the sandbox.
+Everything in the 1.1.258 block below still applies.
+
+## Session Handoff 2026-10-16 (1.1.258) — superseded
 
 **State:** main = origin/main @ 1.1.258. Suite 2628 green. 1.1.258 = retrieval fetches only the death's drops, trips keep
 their action across a reload, a bot in transit is not auto-spawned back (older bug). Field items: Phase 6ay.
