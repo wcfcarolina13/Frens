@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Global bot spawns retired, spawn `_legacy` slots purged; 1.1.256 (2026-10-16)
+
+Follow-up to 1.1.254 (bot controls): the same retirement for saved spawn points.
+
+- **Global spawns migrate once, then the key is gone** (`21192adc`). Pure `LegacySpawnMigrationPolicy`: a pre-March global spawn moves to its world (keyed by the spawn's level name), entries with no level name or for a bot that already has per-world spawns are dropped and logged, and any old `_legacy` spawn slot is removed on load. The global `botSpawnPoints` key leaves `settings.json5` on the next save (sandbox: gone). 9 tests, including one that runs the real load steps and checks the key is absent.
+- **No more `_legacy` claim** (`20ae0bae`). Respawn and auto-spawn read only this world's spawn. The deprecated global accessor and its readers are gone, and the roster treats only a blank key as "no world". Nirn and the sandbox had no `_legacy` spawn and an empty global map.
+- **Rulings (cost if wrong):** drop `_legacy` instead of letting the first world claim it, as it could carry one save's coordinates into another (cost: a pre-March bot with no level name respawns at the world spawn once). No level-name to fingerprint adoption (backlog, none on disk).
+- **Review (Fable):** merge-ready, minors only: until the first save after updating, each boot logs that the old global map was dropped again (data is right). A stale comment in `FrensClient` goes with the text sweep.
+- **Tests:** 2597 → 2606. Sandbox smoke: bots auto-spawn, follow and stop, no ERROR lines. **Field checks:** none new.
+
 ## Death retrieval: send a bot to fetch your drops or a bot's (audit Q11); 1.1.255 (2026-10-16)
 
 Last build of `docs/testing/BACKLOG_SPEC_2026-10-16.md` (item 11). Bradley's decisions: your own death and each bot's, and the bot comes back to whoever sent it.

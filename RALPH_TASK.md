@@ -3,7 +3,17 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-16 (1.1.255) — next session starts here
+## Session Handoff 2026-10-16 (1.1.256) — next session starts here
+
+**State:** main = origin/main @ 1.1.256. Suite 2606 green. 1.1.256 = global bot spawns retired (spawn `_legacy` purged).
+Section 1-3 of the field checklist (Phases 6an-6aw) were run by Claude in the mcp-sandbox over MCP on 2026-10-16: all pass
+(`tools/sandbox/section3.py`, `sheltertest.py`, `rettest.py`). Never test in Nirn (Bradley's main world).
+**In flight (side builds, isolated worktrees):** polish (dig-down dawn climb-out, skip logs once, cliff head seal, dead
+external override), retrieval follow-ups (reload mid-trip, only the death drops), skills (woodcut unstandable stands, ranged
+shooters pause a task, cancelled mining not an ERROR), then a player-text sweep (em dashes, semicolons).
+Everything in the 1.1.255 block below still applies.
+
+## Session Handoff 2026-10-16 (1.1.255) — superseded
 
 **State:** main = origin/main @ 1.1.255. Suite 2597 green. `docs/testing/BACKLOG_SPEC_2026-10-16.md` is fully shipped
 (1.1.252 leash and base commands, 1.1.253 shelters, 1.1.254 config, 1.1.255 death retrieval), every build reviewed by Fable
