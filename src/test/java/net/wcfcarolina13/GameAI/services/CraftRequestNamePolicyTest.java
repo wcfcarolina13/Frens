@@ -102,6 +102,25 @@ class CraftRequestNamePolicyTest {
     }
 
     @Test
+    void materialWordsAreRecognised() {
+        assertTrue(CraftRequestNamePolicy.isMaterialWord("stone"));
+        assertTrue(CraftRequestNamePolicy.isMaterialWord("Wooden"));
+        assertTrue(CraftRequestNamePolicy.isMaterialWord(" golden "));
+        assertTrue(CraftRequestNamePolicy.isMaterialWord("minecraft:iron"));
+        assertTrue(CraftRequestNamePolicy.isMaterialWord("netherite"));
+    }
+
+    @Test
+    void botNamesAndOtherWordsAreNotMaterials() {
+        assertFalse(CraftRequestNamePolicy.isMaterialWord("Jake"));
+        assertFalse(CraftRequestNamePolicy.isMaterialWord("Crafty"));
+        assertFalse(CraftRequestNamePolicy.isMaterialWord("copper"));
+        assertFalse(CraftRequestNamePolicy.isMaterialWord("stone_axe"));
+        assertFalse(CraftRequestNamePolicy.isMaterialWord(""));
+        assertFalse(CraftRequestNamePolicy.isMaterialWord(null));
+    }
+
+    @Test
     void emptyAndNullAreSafe() {
         assertPlain(null, "");
         assertPlain("", "");

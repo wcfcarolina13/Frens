@@ -858,11 +858,10 @@ public class modCommandRegistry {
                                                         null,
                                                         getActiveBotOrThrow(context)))
                                                 .then(CommandManager.argument("material", StringArgumentType.string())
-                                                        .executes(context -> executeCraftGeneric(context,
+                                                        .executes(context -> executeCraftImplicitBot(context,
                                                                 StringArgumentType.getString(context, "item"),
                                                                 IntegerArgumentType.getInteger(context, "amount"),
-                                                                StringArgumentType.getString(context, "material"),
-                                                                getActiveBotOrThrow(context)))
+                                                                StringArgumentType.getString(context, "material")))
                                                         .then(CommandManager.argument("bot", EntityArgumentType.player())
                                                                 .executes(context -> executeCraftGeneric(context,
                                                                         StringArgumentType.getString(context, "item"),
@@ -870,11 +869,10 @@ public class modCommandRegistry {
                                                                         StringArgumentType.getString(context, "material"),
                                                                         EntityArgumentType.getPlayer(context, "bot"))))))
                                         .then(CommandManager.argument("material", StringArgumentType.string())
-                                                .executes(context -> executeCraftGeneric(context,
+                                                .executes(context -> executeCraftImplicitBot(context,
                                                         StringArgumentType.getString(context, "item"),
                                                         1,
-                                                        StringArgumentType.getString(context, "material"),
-                                                        getActiveBotOrThrow(context)))
+                                                        StringArgumentType.getString(context, "material")))
                                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                                         .executes(context -> executeCraftGeneric(context,
                                                                 StringArgumentType.getString(context, "item"),
@@ -2593,6 +2591,23 @@ public class modCommandRegistry {
         }
         boolean plural = count != 1 && !name.toLowerCase(Locale.ROOT).endsWith("s");
         return "Crafted " + count + " " + name + (plural ? "s" : "") + ".";
+    }
+
+    /**
+     * {@code /bot craft <item> [amount] <material>} with no bot argument. The bare-string material
+     * node is declared before the bot node, so {@code /bot craft axe Jake} parses "Jake" as the
+     * material (reordering would break {@code /bot craft axe stone}). A word that is not a
+     * material and names an online bot is taken as that bot, with no material.
+     */
+    private static int executeCraftImplicitBot(CommandContext<ServerCommandSource> context, String item, int amount,
+                                               String material) throws CommandSyntaxException {
+        if (material != null && !net.wcfcarolina13.GameAI.services.CraftRequestNamePolicy.isMaterialWord(material)) {
+            ServerPlayerEntity named = context.getSource().getServer().getPlayerManager().getPlayer(material.trim());
+            if (named instanceof createFakePlayer) {
+                return executeCraftGeneric(context, item, amount, null, named);
+            }
+        }
+        return executeCraftGeneric(context, item, amount, material, getActiveBotOrThrow(context));
     }
 
     private static int executeCraftGeneric(CommandContext<ServerCommandSource> context, String item, int amount, String material, ServerPlayerEntity bot) {

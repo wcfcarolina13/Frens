@@ -51,6 +51,15 @@ public final class CraftRequestNamePolicy {
         return new Parsed(kind, material);
     }
 
+    /**
+     * Whether {@code word} names a tool material ("stone", "wooden", "Golden", ...). The
+     * {@code /bot craft <item> <material>} branch uses it to tell a material from a bot's name,
+     * since the bare-string material argument also matches {@code /bot craft axe Jake}.
+     */
+    public static boolean isMaterialWord(String word) {
+        return MATERIAL_WORDS.containsKey(normalize(word));
+    }
+
     /** Trim, lower-case, drop a {@code minecraft:} prefix, and join words with single underscores. */
     public static String normalize(String raw) {
         if (raw == null) {
