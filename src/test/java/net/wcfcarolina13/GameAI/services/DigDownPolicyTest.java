@@ -7,6 +7,7 @@ import net.wcfcarolina13.GameAI.services.DigDownPolicy.Step;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -203,6 +204,25 @@ class DigDownPolicyTest {
         assertTrue(DigDownPolicy.isMarked(List.of(mark), OW, 1, 1, 3));
         assertFalse(DigDownPolicy.isMarked(List.of(mark), OW, 1, 1, 4));
         assertFalse(DigDownPolicy.isMarked(null, OW, 0, 0, 3));
+    }
+
+    @Test
+    void skipReasonLoggedOncePerReasonPerDay() {
+        assertTrue(DigDownPolicy.firstReasonLog(null, "no-seal-block", 3));
+        Set<String> logged = DigDownPolicy.withReason(null, "no-seal-block", 3);
+        assertFalse(DigDownPolicy.firstReasonLog(logged, "no-seal-block", 3));
+        assertTrue(DigDownPolicy.firstReasonLog(logged, "not-centred", 3));
+        assertTrue(DigDownPolicy.firstReasonLog(logged, "no-seal-block", 4));
+    }
+
+    @Test
+    void withReasonPrunesOlderDays() {
+        Set<String> logged = DigDownPolicy.withReason(null, "no-seal-block", 3);
+        logged = DigDownPolicy.withReason(logged, "not-centred", 3);
+        assertEquals(Set.of("no-seal-block@3", "not-centred@3"), logged);
+        logged = DigDownPolicy.withReason(logged, "preflight-timeout", 4);
+        assertEquals(Set.of("preflight-timeout@4"), logged);
+        assertTrue(DigDownPolicy.firstReasonLog(logged, "no-seal-block", 4));
     }
 
     @Test

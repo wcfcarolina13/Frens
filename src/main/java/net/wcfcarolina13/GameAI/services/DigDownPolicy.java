@@ -218,6 +218,34 @@ public final class DigDownPolicy {
         return mark != null && (alreadyLogged == null || !alreadyLogged.contains(mark));
     }
 
+    /** Key of a logged skip reason: one reason on one game day. */
+    static String reasonKey(String reason, long day) {
+        return reason + "@" + day;
+    }
+
+    /**
+     * Every other {@code dig-down skipped reason=} line is logged once per bot per reason per night:
+     * true the first time {@code reason} is seen on {@code day}.
+     */
+    public static boolean firstReasonLog(Set<String> alreadyLogged, String reason, long day) {
+        return alreadyLogged == null || !alreadyLogged.contains(reasonKey(reason, day));
+    }
+
+    /** The logged keys to keep after logging {@code reason} on {@code day}: older days are dropped. */
+    public static Set<String> withReason(Set<String> alreadyLogged, String reason, long day) {
+        String suffix = "@" + day;
+        Set<String> out = new java.util.HashSet<>();
+        if (alreadyLogged != null) {
+            for (String key : alreadyLogged) {
+                if (key.endsWith(suffix)) {
+                    out.add(key);
+                }
+            }
+        }
+        out.add(reasonKey(reason, day));
+        return Set.copyOf(out);
+    }
+
     /** The marks to keep after adding {@code added}: expired ones are dropped. */
     public static List<Mark> withMark(List<Mark> marks, Mark added, long nowDay) {
         List<Mark> out = new ArrayList<>();

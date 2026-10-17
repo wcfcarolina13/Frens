@@ -1205,6 +1205,19 @@ public final class BotFleeService {
         return first[0];
     }
 
+    /** Every other skip reason already logged per bot, keyed {@code reason@day} (once per reason per night). */
+    private static final ConcurrentHashMap<UUID, Set<String>> LOGGED_SKIP_REASONS = new ConcurrentHashMap<>();
+
+    /** True the first time {@code reason} is seen for this bot on {@code day}; older days are pruned. */
+    private static boolean firstSkipReason(ServerPlayerEntity bot, String reason, long day) {
+        boolean[] first = {false};
+        LOGGED_SKIP_REASONS.compute(bot.getUuid(), (id, logged) -> {
+            first[0] = DigDownPolicy.firstReasonLog(logged, reason, day);
+            return first[0] ? DigDownPolicy.withReason(logged, reason, day) : logged;
+        });
+        return first[0];
+    }
+
     /** Per-bot no-dig-down marks left by an uncapped dig, kept until the next dawn. */
     private static final ConcurrentHashMap<UUID, List<DigDownPolicy.Mark>> NO_DIG_DOWN_MARKS = new ConcurrentHashMap<>();
     /** Timeout for each bounded server-thread hop of the dig-down step. */
@@ -1249,11 +1262,19 @@ public final class BotFleeService {
                 return digDownPreflight(bot, world);
             }, DIG_DOWN_HOP_TIMEOUT_MS, null);
             if (pre == null) {
-                LOGGER.info("Bot {} dig-down skipped reason=preflight-timeout", name);
+                // The timeout itself is the event: log it when even the day cannot be read.
+                Long day = callOnServer(server, () -> DigDownPolicy.gameDay(world.getTimeOfDay()),
+                        DIG_DOWN_HOP_TIMEOUT_MS, null);
+                if (day == null || firstSkipReason(bot, "preflight-timeout", day)) {
+                    LOGGER.info("Bot {} dig-down skipped reason=preflight-timeout", name);
+                }
                 return;
             }
             if (pre.skipReason() != null) {
-                if (pre.coveringMark() == null || firstMarkedSkip(bot, pre.coveringMark())) {
+                boolean first = pre.coveringMark() != null
+                        ? firstMarkedSkip(bot, pre.coveringMark())
+                        : firstSkipReason(bot, pre.skipReason(), pre.day());
+                if (first) {
                     LOGGER.info("Bot {} dig-down skipped reason={} at {}", name, pre.skipReason(), pre.origin().toShortString());
                 }
                 return;
@@ -1262,12 +1283,17 @@ public final class BotFleeService {
             // The bot's box is 0.6 wide: off centre it straddles a neighbour cell and never drops
             // into the 1x1 shaft it digs.
             boolean centred = centreOnDigCell(bot, server, digPos);
-            LOGGER.info("Bot {} dig-down: centred={} at {} over {}", name, centred,
-                    String.format(java.util.Locale.ROOT, "%.2f,%.2f", bot.getX(), bot.getZ()), digPos.toShortString());
             // Straddling the rim, the bot would not drop in and the open shaft would stay behind.
             String centreSkip = DigDownPolicy.centreSkipReason(centred);
+            boolean logCentre = centreSkip == null || firstSkipReason(bot, centreSkip, pre.day());
+            if (logCentre) {
+                LOGGER.info("Bot {} dig-down: centred={} at {} over {}", name, centred,
+                        String.format(java.util.Locale.ROOT, "%.2f,%.2f", bot.getX(), bot.getZ()), digPos.toShortString());
+            }
             if (centreSkip != null) {
-                LOGGER.info("Bot {} dig-down skipped reason={} at {}", name, centreSkip, digPos.toShortString());
+                if (logCentre) {
+                    LOGGER.info("Bot {} dig-down skipped reason={} at {}", name, centreSkip, digPos.toShortString());
+                }
                 return;
             }
             Thread.sleep(300);
