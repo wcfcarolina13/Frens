@@ -1,6 +1,7 @@
 package net.wcfcarolina13.PathFinding.unified;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -70,6 +71,7 @@ class MoveCostsInvariantTest {
     @Test
     void heuristicNeverExceedsOptimalBeyondTheTieBreak() {
         int checked = 0;
+        int selfConflicting = 0;
         for (long seed = 1; seed <= 150; seed++) {
             Random rnd = new Random(seed * 7919);
             VoxelGrid g = randomGrid(rnd);
@@ -90,7 +92,6 @@ class MoveCostsInvariantTest {
                 continue;
             }
             double optimal = reference.totalTicks();
-            checked++;
             double h = MoveCosts.heuristic(ctx, s[0], s[1], s[2], t[0], t[1], t[2]);
             assertTrue(h <= optimal * 1.001 + 1e-6, "h " + h + " > optimal " + optimal + " seed " + seed);
             if (UnifiedPathFinder.truncateToExecutable(ctx, reference).truncated()) {
@@ -98,13 +99,20 @@ class MoveCostsInvariantTest {
                 // since 1.1.267, so it may route dearer or find nothing. It is never cheaper.
                 assertTrue(plan.status() != PlanStatus.FULL || plan.totalTicks() + 1e-6 >= optimal,
                         "cheaper than optimal, seed " + seed);
+                if (plan.status() == PlanStatus.FULL) {
+                    assertFalse(UnifiedPathFinder.truncateToExecutable(ctx, plan).truncated(),
+                            "finder plan not executable, seed " + seed);
+                }
+                selfConflicting++;
                 continue;
             }
+            checked++;
             assertEquals(PlanStatus.FULL, plan.status(), "seed " + seed);
             assertTrue(plan.totalTicks() <= optimal * 1.01 + 1e-6, "ratio over 1.01, seed " + seed);
             assertTrue(plan.totalTicks() + 1e-6 >= optimal, "cheaper than optimal, seed " + seed);
         }
-        assertTrue(checked > 40, "enough reachable pairs: " + checked);
+        // Seeds whose raw optimum conflicts with itself are not compared to it, so they do not count.
+        assertTrue(checked > 40, "enough reachable pairs: " + checked + " (+" + selfConflicting + " self-conflicting)");
     }
 
     @Test

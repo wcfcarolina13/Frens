@@ -22,8 +22,12 @@ public record PlanRequest(boolean allowBreak,
                           int nodeCap,
                           Set<Long> forbiddenFirstHops) {
 
-    /** Node cap for probes and server-thread searches (design section 5.2). */
-    public static final int PROBE_NODE_CAP = 3000;
+    /**
+     * Node cap for probes and server-thread searches (design section 5.2). 4500 since 1.1.267: the
+     * mutated layer (field bug F) keys a second node per cell, so the old 3000 ended break-heavy
+     * probes early as BUDGET partials. Time budgets are unchanged and still bound the search.
+     */
+    public static final int PROBE_NODE_CAP = 4500;
 
     public PlanRequest {
         maxFall = Math.max(1, Math.min(SearchContext.DEFAULT_MAX_FALL, maxFall));

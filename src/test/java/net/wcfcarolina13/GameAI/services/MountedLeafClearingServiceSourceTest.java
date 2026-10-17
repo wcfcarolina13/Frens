@@ -33,4 +33,14 @@ class MountedLeafClearingServiceSourceTest {
         assertTrue(src.contains("ToolSelector.selectBestToolForBlock(bot, leafState)"));
         assertTrue(src.contains("instanceof ShearsItem"), "a pass is skipped while the main hand holds shears");
     }
+
+    @Test
+    void emptyPickMeansBareHand() throws IOException {
+        String src = source();
+        assertTrue(src.contains("hotbarSlotOf(bot, ItemStack.EMPTY)"),
+                "an empty pick selects an empty hotbar slot instead of keeping a held weapon or shears");
+        assertTrue(src.contains("if (empty < 0) {\n                    return false;"),
+                "no empty hotbar slot skips the pass");
+        assertTrue(src.contains("ItemStack.areEqual("), "a copied pick still finds its slot");
+    }
 }

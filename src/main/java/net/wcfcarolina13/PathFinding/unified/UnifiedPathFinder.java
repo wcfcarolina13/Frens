@@ -174,6 +174,8 @@ public final class UnifiedPathFinder {
         boolean failing = true;
         boolean budgetHit = false;
         int expanded = 0;
+        // Successors refused because an earlier move of their own path undoes them: feeds SELF_CONFLICT.
+        int selfRefused = 0;
         MoveCosts.Refusals refusals = buf.refusals;
         List<PlannedMove> succ = buf.successors;
         // The terrain as the popped node's own path left it, rebuilt per expansion from its mutator chain.
@@ -219,6 +221,7 @@ public final class UnifiedPathFinder {
                     continue;
                 }
                 if (mutated && undoneByOwnPath(ctx, changed, cur, mv)) {
+                    selfRefused++;
                     continue;
                 }
                 if (!(c > 0)) {
@@ -294,7 +297,24 @@ public final class UnifiedPathFinder {
             return new PathPlan(ctx.planId(), PlanStatus.PARTIAL, reason, COEFFICIENTS[k], moves, ticks, expanded,
                     clock.getAsLong() - t0);
         }
-        return PathPlan.noPath(ctx.planId(), reason, expanded, clock.getAsLong() - t0);
+        return PathPlan.noPath(ctx.planId(), selfConflictOr(reason, selfRefused), expanded,
+                clock.getAsLong() - t0);
+    }
+
+    /**
+     * The NO_PATH reason once the search's own refusals count: SELF_CONFLICT when it refused at least
+     * one successor that an earlier move of its path undoes and {@code reason} is only the generic
+     * exhausted-region family (BOXED_IN, BLOCKED_UNBREAKABLE, NO_SCAFFOLD). BUDGET, UNLOADED,
+     * BLOCKED_PROTECTED and GOAL_NOT_STANDABLE are more specific and stay.
+     */
+    static NoPathReason selfConflictOr(NoPathReason reason, int selfRefused) {
+        if (selfRefused <= 0) {
+            return reason;
+        }
+        return switch (reason) {
+            case BOXED_IN, BLOCKED_UNBREAKABLE, NO_SCAFFOLD -> NoPathReason.SELF_CONFLICT;
+            default -> reason;
+        };
     }
 
     private static boolean mutates(PlannedMove mv) {

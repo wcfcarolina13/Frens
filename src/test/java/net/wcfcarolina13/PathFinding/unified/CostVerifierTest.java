@@ -121,6 +121,22 @@ class CostVerifierTest {
         assertFalse(UnifiedPathFinder.truncateToExecutable(ctx, plan).truncated());
     }
 
+    @Test
+    void aNoPathCausedByTheSearchsOwnRefusalsIsSelfConflict() {
+        SearchContext ctx = minesItsOwnStep();
+        PathPlan plan = UnifiedPathFinder.search(ctx, () -> 0L);
+        assertEquals(PlanStatus.NO_PATH, plan.status(), plan.moves().toString());
+        assertEquals(NoPathReason.SELF_CONFLICT, plan.reason());
+        // Only the generic exhausted-region reasons give way; the specific ones stay.
+        assertEquals(NoPathReason.SELF_CONFLICT, UnifiedPathFinder.selfConflictOr(NoPathReason.BOXED_IN, 1));
+        assertEquals(NoPathReason.SELF_CONFLICT,
+                UnifiedPathFinder.selfConflictOr(NoPathReason.BLOCKED_UNBREAKABLE, 1));
+        assertEquals(NoPathReason.BOXED_IN, UnifiedPathFinder.selfConflictOr(NoPathReason.BOXED_IN, 0));
+        assertEquals(NoPathReason.BUDGET, UnifiedPathFinder.selfConflictOr(NoPathReason.BUDGET, 3));
+        assertEquals(NoPathReason.BLOCKED_PROTECTED,
+                UnifiedPathFinder.selfConflictOr(NoPathReason.BLOCKED_PROTECTED, 3));
+    }
+
     /**
      * {@link #minesItsOwnStep} with a lawful detour: the corridor runs west to a step at x=0, and from
      * the step a raised lane (z=2, feet y=3) runs east to above the dirt, where a DESCEND lands on it.

@@ -118,21 +118,53 @@ public final class MountedLeafClearingService {
 
     /**
      * Holds the item {@link ToolSelector#selectBestToolForBlock} picks for leaves (never shears:
-     * they drop the leaf block instead of saplings and sticks). Selects that hotbar slot only when
-     * it is not already held. Server tick only: the leaf branch of the selector reads the hotbar and
-     * never swaps, reaches into bundles or hops threads. Returns false when the main hand still holds
-     * shears, so the caller skips this pass.
+     * they drop the leaf block instead of saplings and sticks). An empty pick means the bare hand,
+     * so a held weapon or shears is put away by selecting the first empty hotbar slot. Selects a
+     * slot only when the pick is not already held. Server tick only: the leaf branch of the
+     * selector reads the hotbar and never swaps, reaches into bundles or hops threads. Returns false
+     * (the caller skips this pass) when the pick cannot be held: no empty hotbar slot for a bare
+     * hand, a pick not found in the hotbar, or shears still in the main hand.
      */
     private static boolean holdLeafTool(ServerPlayerEntity bot, BlockState leafState) {
         ItemStack tool = ToolSelector.selectBestToolForBlock(bot, leafState);
-        if (!tool.isEmpty() && tool != bot.getMainHandStack()) {
+        ItemStack held = bot.getMainHandStack();
+        if (tool.isEmpty()) {
+            if (!held.isEmpty()) {
+                int empty = hotbarSlotOf(bot, ItemStack.EMPTY);
+                if (empty < 0) {
+                    return false;
+                }
+                bot.getInventory().setSelectedSlot(empty);
+            }
+        } else if (tool != held) {
+            int slot = hotbarSlotOf(bot, tool);
+            if (slot < 0) {
+                return false;
+            }
+            bot.getInventory().setSelectedSlot(slot);
+        }
+        return !(bot.getMainHandStack().getItem() instanceof ShearsItem);
+    }
+
+    /**
+     * Hotbar slot holding {@code wanted}: an empty slot for {@link ItemStack#EMPTY}, otherwise the
+     * same live stack the selector returned, falling back to an equal stack so a selector that
+     * ever returns a copy still selects a slot. -1 when none.
+     */
+    private static int hotbarSlotOf(ServerPlayerEntity bot, ItemStack wanted) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (wanted.isEmpty() ? stack.isEmpty() : stack == wanted) {
+                return i;
+            }
+        }
+        if (!wanted.isEmpty()) {
             for (int i = 0; i < 9; i++) {
-                if (bot.getInventory().getStack(i) == tool) {
-                    bot.getInventory().setSelectedSlot(i);
-                    break;
+                if (ItemStack.areEqual(bot.getInventory().getStack(i), wanted)) {
+                    return i;
                 }
             }
         }
-        return !(bot.getMainHandStack().getItem() instanceof ShearsItem);
+        return -1;
     }
 }
