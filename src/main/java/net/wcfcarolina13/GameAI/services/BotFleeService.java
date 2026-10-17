@@ -493,15 +493,29 @@ public final class BotFleeService {
                     nowTick,
                     ShelterInvalidReason.VALID,
                     info.placedBlocks()));
-            if (shouldBreakShelterForStarvation(bot, world)) {
+            // Same shelter lock as the dawn and command break-frees, taken before the shelter is
+            // cleared. Busy lock: a break-free is already running, the shelter stays, next tick retries.
+            AtomicBoolean breakLock = shouldBreakShelterForStarvation(bot, world)
+                    ? SHELTER_LOCK.computeIfAbsent(bot.getUuid(), k -> new AtomicBoolean(false)) : null;
+            if (breakLock != null && breakLock.compareAndSet(false, true)) {
                 SHELTER_ACTIVE.remove(bot.getUuid());
                 LOGGER.info("Bot {} breaking tactical shelter for urgent food recovery (food={})",
                         bot.getName().getString(),
                         bot.getHungerManager().getFoodLevel());
-                Thread t = new Thread(() -> breakFreeFromShelter(bot, info),
-                        "shelter-breakfree-" + bot.getName().getString());
+                Thread t = new Thread(() -> {
+                    try {
+                        breakFreeFromShelter(bot, info);
+                    } finally {
+                        breakLock.set(false);
+                    }
+                }, "shelter-breakfree-" + bot.getName().getString());
                 t.setDaemon(true);
-                t.start();
+                try {
+                    t.start();
+                } catch (RuntimeException | Error startError) {
+                    breakLock.set(false);
+                    throw startError;
+                }
                 return false;
             }
             long tod = world.getTimeOfDay() % 24000L;
