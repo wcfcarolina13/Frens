@@ -1724,29 +1724,46 @@ public class Frens implements ModInitializer {
             return;
         }
         long now = server.getTicks();
+        String taskName = net.wcfcarolina13.GameAI.services.TaskService.getActiveTaskName(bot.getUuid()).orElse(null);
+        if (taskName == null) {
+            return; // no task, nothing to pause and nothing worth a line
+        }
         boolean projectile = source.isIn(net.minecraft.registry.tag.DamageTypeTags.IS_PROJECTILE);
         double distance = Math.sqrt(attacker.squaredDistanceTo(bot));
-        boolean shouldPause = net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.shouldPause(
-                net.wcfcarolina13.GameAI.services.TaskService.getActiveTaskName(bot.getUuid()).orElse(null),
+        String typeId = net.minecraft.entity.EntityType.getId(attacker.getType()).toString();
+        String skip = net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.skipReason(
+                taskName,
                 true,
                 projectile,
                 distance,
                 net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.pausedRecently(bot.getUuid(), now));
-        if (!shouldPause) {
-            return;
+        if (skip == null) {
+            net.wcfcarolina13.Entity.AutoFaceEntity.isBotMoving = false;
+            net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
+            net.wcfcarolina13.GameAI.services.BotFleeService.captureInterruptedSurvival(bot);
+            if (net.wcfcarolina13.GameAI.skills.SkillManager.requestSkillPause(
+                    bot, net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.PAUSE_MESSAGE)) {
+                net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.notePause(bot.getUuid(), now);
+                net.wcfcarolina13.GameAI.services.SkillResumeService.requestAutoResume(bot);
+                LOGGER.info("Bot {} paused task for ranged hit: shooter={} ranged={} distance={}",
+                        bot.getName().getString(),
+                        typeId,
+                        net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.isRangedShooter(typeId),
+                        String.format(java.util.Locale.ROOT, "%.1f", distance));
+                return;
+            }
+            skip = "pause-refused";
         }
-        String typeId = net.minecraft.entity.EntityType.getId(attacker.getType()).toString();
-        net.wcfcarolina13.Entity.AutoFaceEntity.isBotMoving = false;
-        net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
-        net.wcfcarolina13.GameAI.services.BotFleeService.captureInterruptedSurvival(bot);
-        if (net.wcfcarolina13.GameAI.skills.SkillManager.requestSkillPause(
-                bot, net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.PAUSE_MESSAGE)) {
-            net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.notePause(bot.getUuid(), now);
-            net.wcfcarolina13.GameAI.services.SkillResumeService.requestAutoResume(bot);
-            LOGGER.info("Bot {} paused task for ranged hit: shooter={} ranged={} distance={}",
+        if (net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.claimSkipLog(bot.getUuid(), now)) {
+            Entity direct = source.getSource();
+            LOGGER.info("Bot {} hostile hit did not pause task: reason={} task={} attacker={} source={} damageType={} projectile={} distance={}",
                     bot.getName().getString(),
+                    skip,
+                    taskName,
                     typeId,
-                    net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.isRangedShooter(typeId),
+                    direct == null ? "none" : net.minecraft.entity.EntityType.getId(direct.getType()).toString(),
+                    source.getTypeRegistryEntry().getIdAsString(),
+                    projectile,
                     String.format(java.util.Locale.ROOT, "%.1f", distance));
         }
     }

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -46,6 +47,30 @@ class RangedThreatPausePolicyTest {
         assertFalse(RangedThreatPausePolicy.isNeverPauseTask(null));
         // Other tasks, hobbies included, still pause.
         assertTrue(RangedThreatPausePolicy.shouldPause("skill:mining", true, true, 8.0D, false));
+    }
+
+    @Test
+    void skipReasonNamesTheFirstFailingCheck() {
+        assertEquals(null, RangedThreatPausePolicy.skipReason(WOODCUT, true, true, 9.0D, false));
+        assertEquals("no-task", RangedThreatPausePolicy.skipReason(null, true, true, 9.0D, false));
+        assertEquals("never-pause-task", RangedThreatPausePolicy.skipReason("skill:drop_sweep", true, true, 9.0D, false));
+        assertEquals("not-hostile", RangedThreatPausePolicy.skipReason(WOODCUT, false, true, 9.0D, false));
+        // An unarmed mob (e.g. a /summon with NBT gets no bow) hits in melee: not a projectile.
+        assertEquals("not-projectile", RangedThreatPausePolicy.skipReason(WOODCUT, true, false, 1.2D, false));
+        assertEquals("too-far", RangedThreatPausePolicy.skipReason(WOODCUT, true, true, 20.0D, false));
+        assertEquals("too-far", RangedThreatPausePolicy.skipReason(WOODCUT, true, true, Double.NaN, false));
+        assertEquals("debounced", RangedThreatPausePolicy.skipReason(WOODCUT, true, true, 9.0D, true));
+    }
+
+    @Test
+    void skipLogIsThrottledPerBot() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        assertTrue(RangedThreatPausePolicy.claimSkipLog(a, 100L));
+        assertFalse(RangedThreatPausePolicy.claimSkipLog(a, 100L + RangedThreatPausePolicy.SKIP_LOG_THROTTLE_TICKS - 1));
+        assertTrue(RangedThreatPausePolicy.claimSkipLog(b, 101L));
+        assertTrue(RangedThreatPausePolicy.claimSkipLog(a, 100L + RangedThreatPausePolicy.SKIP_LOG_THROTTLE_TICKS));
+        assertFalse(RangedThreatPausePolicy.claimSkipLog(null, 500L));
     }
 
     @Test

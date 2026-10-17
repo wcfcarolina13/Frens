@@ -76,13 +76,55 @@ public final class RangedThreatPausePolicy {
                                       boolean projectileDamage,
                                       double distance,
                                       boolean alreadyPausedRecently) {
-        return activeTaskName != null
-                && !isNeverPauseTask(activeTaskName)
-                && attackerHostile
-                && projectileDamage
-                && !Double.isNaN(distance)
-                && distance <= MAX_SHOOTER_DISTANCE
-                && !alreadyPausedRecently;
+        return skipReason(activeTaskName, attackerHostile, projectileDamage, distance, alreadyPausedRecently) == null;
+    }
+
+    /**
+     * Why a hit does not pause the task, or null when it does. The first failing check wins:
+     * no-task, never-pause-task, not-hostile, not-projectile, too-far, debounced.
+     */
+    public static String skipReason(String activeTaskName,
+                                    boolean attackerHostile,
+                                    boolean projectileDamage,
+                                    double distance,
+                                    boolean alreadyPausedRecently) {
+        if (activeTaskName == null) {
+            return "no-task";
+        }
+        if (isNeverPauseTask(activeTaskName)) {
+            return "never-pause-task";
+        }
+        if (!attackerHostile) {
+            return "not-hostile";
+        }
+        if (!projectileDamage) {
+            return "not-projectile";
+        }
+        if (Double.isNaN(distance) || distance > MAX_SHOOTER_DISTANCE) {
+            return "too-far";
+        }
+        if (alreadyPausedRecently) {
+            return "debounced";
+        }
+        return null;
+    }
+
+    /** Minimum gap between two "hit did not pause" log lines for one bot. */
+    public static final long SKIP_LOG_THROTTLE_TICKS = 20L;
+
+    private static final Map<UUID, Long> LAST_SKIP_LOG_TICK = new ConcurrentHashMap<>();
+
+    /** True (and remembered) when this bot may log another "did not pause" line now. */
+    public static boolean claimSkipLog(UUID bot, long nowTick) {
+        if (bot == null) {
+            return false;
+        }
+        Long last = LAST_SKIP_LOG_TICK.get(bot);
+        if (last != null && nowTick >= last && nowTick - last < SKIP_LOG_THROTTLE_TICKS) {
+            return false;
+        }
+        LAST_SKIP_LOG_TICK.put(bot, nowTick);
+        return true;
     }
 
     public static boolean pausedRecently(long nowTick, Long lastPauseTick) {
@@ -104,5 +146,6 @@ public final class RangedThreatPausePolicy {
 
     static void resetForTests() {
         LAST_PAUSE_TICK.clear();
+        LAST_SKIP_LOG_TICK.clear();
     }
 }
