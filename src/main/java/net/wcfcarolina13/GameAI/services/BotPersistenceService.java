@@ -265,10 +265,20 @@ public final class BotPersistenceService {
     }
 
     public static void onBotDeath(ServerPlayerEntity bot) {
+        onBotDeath(bot, null);
+    }
+
+    /**
+     * @param damageSource what killed the bot, for the last-death record; null records "unknown"
+     */
+    public static void onBotDeath(ServerPlayerEntity bot, net.minecraft.entity.damage.DamageSource damageSource) {
         MinecraftServer server = extractServer(bot);
         if (!(bot instanceof createFakePlayer) || server == null) {
             return;
         }
+
+        // Last-death record for /bot retrieve: every bot, whatever its mode or auto-respawn setting.
+        BotDeathRecordService.recordBotDeath(server, bot, damageSource);
 
         LOGGER.info("[PersistCheck] death-pre-snapshot bot={} tick={} pos={} vitals={} inv={}",
                 bot.getName().getString(),

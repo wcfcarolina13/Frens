@@ -1217,7 +1217,13 @@ public class Frens implements ModInitializer {
                             BotEventHandler.ensureRespawnHandled(serverPlayer);
                         }
                 }
-                BotPersistenceService.onBotDeath(serverPlayer);
+                if (serverPlayer instanceof net.wcfcarolina13.Entity.createFakePlayer) {
+                    BotPersistenceService.onBotDeath(serverPlayer, damageSource);
+                } else {
+                    // A real player's death: cause and time for /bot retrieve <bot> me.
+                    net.wcfcarolina13.GameAI.services.BotDeathRecordService.recordPlayerDeath(
+                            serverPlayer.getCommandSource().getServer(), serverPlayer, damageSource);
+                }
                 // After death persistence has run: if auto-respawn was disabled,
                 // prompt the controller for respawn approval, shelve the bot, and
                 // remove the ghost entity.  A "yes" reply (or toggling Auto Respawn
