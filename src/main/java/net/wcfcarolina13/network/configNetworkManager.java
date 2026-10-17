@@ -177,7 +177,7 @@ public final class configNetworkManager {
                     if (ConfigSaveReloadPolicy.shouldNotifyDenial(now, previous)) {
                         LAST_DENIAL_MS.put(senderId, now);
                         Frens.LOGGER.warn("Rejected config save from non-operator {}", sender.getName().getString());
-                        sender.sendMessage(Text.literal("Only an operator or the host can change this server's Frens settings — your change was not saved."), false);
+                        sender.sendMessage(Text.literal("Only an operator or the host can change this server's Frens settings. Your change was not saved."), false);
                     } else {
                         Frens.LOGGER.debug("Repeated rejected config save from non-operator {}", sender.getName().getString());
                     }

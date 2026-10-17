@@ -622,7 +622,7 @@ public final class AiSetupNetworkManager {
                     }
                     if (err != null) {
                         LOGGER.warn("[ai-setup] reloadSettings failed after setup change: {}", err.toString());
-                        reply(server, playerId, message.get() + " Reload reported an error; check the server log.");
+                        reply(server, playerId, message.get() + " Reload reported an error. Check the server log.");
                     } else {
                         reply(server, playerId, message.get());
                     }

@@ -145,7 +145,7 @@ public final class BaseNetworkManager {
                     int radius = Math.max(1, Math.min(requested, cap));
                     if (requested > cap) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(),
-                                "Radius " + requested + " exceeds server cap of " + cap + "; clamped.");
+                                "Radius " + requested + " exceeds server cap of " + cap + ", so it was clamped.");
                     }
                     // Check whether growing to `radius` would intrude on another owner's base.
                     // Pass `label` as excludeLabel so the base being resized doesn't conflict

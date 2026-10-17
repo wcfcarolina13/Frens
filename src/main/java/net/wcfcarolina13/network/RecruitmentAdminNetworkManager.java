@@ -198,7 +198,7 @@ public final class RecruitmentAdminNetworkManager {
                 }
 
                 out.add("Recruitment reset for world '" + (worldKey == null ? "default" : worldKey) + "'.");
-                out.add("Recruited=false; stage=0; permanent=false; anchor cleared.");
+                out.add("Recruited=false, stage=0, permanent=false, anchor cleared.");
             }
             case "enable", "disable" -> {
                 boolean enabled = "enable".equals(action);

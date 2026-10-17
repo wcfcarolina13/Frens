@@ -93,7 +93,7 @@ public final class AiSetupChecklistPolicy {
             modelDetail = "No model chosen yet.";
         } else if (!ollama.reachable()) {
             modelState = State.UNKNOWN;
-            modelDetail = "Model " + model + " is chosen; start Ollama to check it's downloaded.";
+            modelDetail = "Model " + model + " is chosen. Start Ollama to check it's downloaded.";
         } else if (isModelInstalled(model, ollama.installedTags())) {
             modelState = State.DONE;
             modelDetail = "Using " + model + ".";
