@@ -987,7 +987,9 @@ public class BotControlScreen extends Screen {
             bulkAutoRespawnOnRect  = new Rect(bulkAutoRespawnOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
             drawBulkButton(context, bulkAutoRespawnOnRect,  "ALL ON",  true,  mouseX, mouseY, "ar_on");
             drawBulkButton(context, bulkAutoRespawnOffRect, "ALL OFF", false, mouseX, mouseY, "ar_off");
-            if (bulkAutoRespawnOnRect.contains(mouseX, mouseY) && tooltipText == null) {
+            if (perBotUnavailable) {
+                // Inactive buttons: no tooltip promising an action.
+            } else if (bulkAutoRespawnOnRect.contains(mouseX, mouseY) && tooltipText == null) {
                 updateTooltipCandidate("bulk:ar_on",
                         "Sets Auto Respawn = ON for every bot in this world. Any inactive bot whose flag flipped will also be re-spawned.",
                         mouseX, mouseY);
@@ -1009,7 +1011,9 @@ public class BotControlScreen extends Screen {
             bulkAutoSpawnOnLoadOnRect  = new Rect(bulkAutoSpawnOnLoadOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
             drawBulkButton(context, bulkAutoSpawnOnLoadOnRect,  "ALL ON",  true,  mouseX, mouseY, "sl_on");
             drawBulkButton(context, bulkAutoSpawnOnLoadOffRect, "ALL OFF", false, mouseX, mouseY, "sl_off");
-            if (bulkAutoSpawnOnLoadOnRect.contains(mouseX, mouseY) && tooltipText == null) {
+            if (perBotUnavailable) {
+                // Inactive buttons: no tooltip promising an action.
+            } else if (bulkAutoSpawnOnLoadOnRect.contains(mouseX, mouseY) && tooltipText == null) {
                 updateTooltipCandidate("bulk:sl_on",
                         "Un-shelves every bot: they will auto-spawn next time you load the world.",
                         mouseX, mouseY);
@@ -1023,9 +1027,11 @@ public class BotControlScreen extends Screen {
 
     /**
      * Apply {@code autoRespawnOnDeath = value} to every bot that has a settings
-     * entry in the current world.  If {@code value == true}, any bot whose
-     * autoRespawn flipped false→true and is not currently active will be
-     * auto-spawned via {@link net.wcfcarolina13.GameAI.services.BotRespawnPromptService#onAutoRespawnEnabled}.
+     * entry in the current world.  If {@code value == true} and this client runs the
+     * integrated server, any bot whose autoRespawn flipped false→true and is not currently
+     * active is spawned now via {@link net.wcfcarolina13.GameAI.services.BotRespawnPromptService#onAutoRespawnEnabled}.
+     * On a remote server the setting reaches the server through the save packet and takes
+     * effect on its next respawn check (no immediate spawn).
      */
     private void applyBulkAutoRespawn(boolean value) {
         net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
@@ -1105,13 +1111,18 @@ public class BotControlScreen extends Screen {
 
     private void drawBulkButton(DrawContext context, Rect rect, String label, boolean onFlavor,
                                 int mouseX, int mouseY, String pulseKey) {
-        boolean hover = rect.contains(mouseX, mouseY);
+        // Inactive (greyed, no hover, no pulse) when there is no world key to file edits under.
+        boolean inactive = perBotUnavailable;
+        boolean hover = !inactive && rect.contains(mouseX, mouseY);
         long now = System.currentTimeMillis();
-        boolean pulsing = pulseKey != null
+        boolean pulsing = !inactive
+                && pulseKey != null
                 && pulseKey.equals(bulkPulseTarget)
                 && now < bulkPulseEndMs;
 
-        int fill = onFlavor
+        int fill = inactive
+                ? 0xFF2A2A2A
+                : onFlavor
                 ? (hover ? 0xFF3C713C : 0xFF2E5A2E)
                 : (hover ? 0xFF613333 : 0xFF4A2A2A);
         if (pulsing) {
@@ -1138,7 +1149,7 @@ public class BotControlScreen extends Screen {
         int tx = rect.x + (rect.w - this.textRenderer.getWidth(label)) / 2;
         // 1px text nudge while pulsing to simulate a "press" feel.
         int ty = rect.y + (rect.h - this.textRenderer.fontHeight) / 2 + (pulsing ? 1 : 0);
-        context.drawText(this.textRenderer, label, tx, ty, 0xFFEFEFEF, false);
+        context.drawText(this.textRenderer, label, tx, ty, inactive ? 0xFF777777 : 0xFFEFEFEF, false);
     }
 
     /**
@@ -1586,7 +1597,10 @@ public class BotControlScreen extends Screen {
                 }
             }
 
-            // Bulk Apply buttons
+            // Bulk Apply buttons (inactive without a world key: consume the click, no pulse)
+            if (perBotUnavailable) {
+                return true;
+            }
             if (bulkAutoRespawnOnRect != null && bulkAutoRespawnOnRect.contains(mx, my)) {
                 triggerBulkPulse("ar_on");
                 applyBulkAutoRespawn(true);
