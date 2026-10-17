@@ -2,15 +2,23 @@ package net.wcfcarolina13.Commands;
 
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.wcfcarolina13.ChatUtils.ChatUtils;
+import net.wcfcarolina13.GameAI.services.BotTargetingService;
+import net.wcfcarolina13.GameAI.services.LeashReleasePolicy;
+import net.wcfcarolina13.GameAI.services.RideSyncService;
 import net.wcfcarolina13.GameAI.schematic.SchematicWriter;
 import net.wcfcarolina13.GameAI.schematic.SimpleSchematicBuilder;
 import net.wcfcarolina13.GameAI.schematic.SchematicData;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 
 final class BotSkillCommands {
 
@@ -161,16 +169,50 @@ final class BotSkillCommands {
     /**
      * Leash command for tying leashed animals to fences.
      * Usage: /bot leash
-     *        /bot hitch (alias)
+     *        /bot leash release [bot]   (let go of every lead, no fence)
+     *        /bot hitch (alias, without release)
      */
     static ArgumentBuilder<ServerCommandSource, ?> buildLeash() {
         return CommandManager.literal("leash")
                 .executes(context -> modCommandRegistry.executeSkillTargets(context, "leash", null))
+                .then(CommandManager.literal("release")
+                        .executes(context -> executeLeashRelease(context, null))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> executeLeashRelease(context,
+                                        StringArgumentType.getString(context, "target")))))
                 .then(CommandManager.argument("target", StringArgumentType.string())
                         .executes(context -> modCommandRegistry.executeSkillTargets(
                                 context,
                                 "leash",
                                 StringArgumentType.getString(context, "target"))));
+    }
+
+    /**
+     * {@code /bot leash release [bot]}: each bot lets go of every animal it holds on a lead, the
+     * leads go back into its inventory. Brigadier runs executors on the server thread, which
+     * {@link net.wcfcarolina13.GameAI.services.RideSyncService#releaseHeldLeads} needs.
+     */
+    static int executeLeashRelease(CommandContext<ServerCommandSource> context, String targetArg)
+            throws CommandSyntaxException {
+        List<ServerPlayerEntity> targets;
+        try {
+            targets = BotTargetingService.resolve(context.getSource(), targetArg);
+        } catch (CommandSyntaxException e) {
+            if (targetArg != null) {
+                throw e;
+            }
+            ServerPlayerEntity active = modCommandRegistry.getActiveBotOrThrow(context);
+            BotTargetingService.remember(context.getSource(), active.getGameProfile().name());
+            targets = List.of(active);
+        }
+        int released = 0;
+        for (ServerPlayerEntity bot : targets) {
+            RideSyncService.ReleaseResult result = RideSyncService.releaseHeldLeads(bot);
+            released += result.released();
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    LeashReleasePolicy.reply(bot.getName().getString(), result.released(), result.dropped()));
+        }
+        return Math.max(released, targets.isEmpty() ? 0 : 1);
     }
 
     static ArgumentBuilder<ServerCommandSource, ?> buildHitch() {

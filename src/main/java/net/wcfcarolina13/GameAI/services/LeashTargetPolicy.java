@@ -16,7 +16,9 @@ public final class LeashTargetPolicy {
         /** The bot died, which drops every lead it held. */
         DIED,
         /** The bot left the server. The target is what restores the mount on rejoin. */
-        DISCONNECT
+        DISCONNECT,
+        /** The owner ran {@code /bot leash release}: the bot let go of every lead it held. */
+        RELEASED
     }
 
     private LeashTargetPolicy() {
@@ -34,7 +36,7 @@ public final class LeashTargetPolicy {
         }
         return switch (event) {
             case TIED_TO_FENCE -> !targetStillHeldByBot;
-            case DIED -> true;
+            case DIED, RELEASED -> true;
             case HELD_BY_BOT, DISCONNECT -> false;
         };
     }
@@ -43,7 +45,7 @@ public final class LeashTargetPolicy {
      * Whether the saved mount record ({@code MountPersistenceService}) should drop its
      * {@code heldByBot} flag, so a rejoin does not put the animal back on the bot's lead.
      *
-     * @param event              what happened (only TIED_TO_FENCE and DIED ever rewrite)
+     * @param event              what happened (only TIED_TO_FENCE, DIED and RELEASED ever rewrite)
      * @param recordHeldByBot    the saved record says the bot holds the mount on a lead
      * @param recordMountMatches the saved record's mount is the leash target that was let go.
      *                           Ignored for {@link Event#DIED}: death drops every lead
@@ -53,7 +55,7 @@ public final class LeashTargetPolicy {
             return false;
         }
         return switch (event) {
-            case TIED_TO_FENCE -> recordMountMatches;
+            case TIED_TO_FENCE, RELEASED -> recordMountMatches;
             case DIED -> true;
             case HELD_BY_BOT, DISCONNECT -> false;
         };

@@ -75,6 +75,18 @@ class BotActionPolicyTest {
     }
 
     @Test
+    void leashReleaseIsTheOnlyLeashArgumentAndQuotesItsStringSlot() {
+        assertEquals("leash release Bob", ok(LEASH, "Bob", "release"));
+        assertEquals("leash release \"Big Bob\"", ok(LEASH, "Big Bob", "release"));
+        assertEquals(Optional.of("leash release"), BotActionPolicy.build(LEASH, List.of("release"), null, KNOWN));
+        assertEquals(Optional.of("leash"), BotActionPolicy.build(LEASH, List.of(), null, KNOWN));
+        bad(LEASH, "Bob", "Release");
+        bad(LEASH, "Bob", "release", "x");
+        bad(LEASH, "Bob", "tie");
+        bad(LEASH, "Bob", "");
+    }
+
+    @Test
     void stringSlotsQuoteNamesWithSpacesOrApostrophes() {
         assertEquals("stop \"Big Bob\"", ok(STOP, "Big Bob"));
         assertEquals("companion come \"O'Neil\"", ok(COMPANION, "O'Neil", "come"));

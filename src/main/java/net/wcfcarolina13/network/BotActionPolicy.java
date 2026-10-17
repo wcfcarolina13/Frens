@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
  * a whitespace-split argument list, scanned from the END, so the resolved name is appended last
  * there and no client token may equal {@code all}, {@code each} or a bot name. The other commands
  * bind the bot at a fixed grammar slot, which is not always last: {@code leash <bot>} (a plain
- * string slot), {@code guard <bot> <radius>}, {@code patrol <bot> <radius>}, {@code compass home <bot> <name>},
+ * string slot), {@code leash release <bot>}, {@code guard <bot> <radius>}, {@code patrol <bot> <radius>}, {@code compass home <bot> <name>},
  * {@code compass travel <bot> [name]}. Slots typed {@code EntityArgumentType.player()} (return,
  * guard, patrol, craft, cook) need a name of at most 16 chars, quoted when it has other chars.
  */
@@ -67,7 +67,7 @@ public final class BotActionPolicy {
         GUARD(Access.BOT_OWNER, true),
         /** [radius 3..32] -> {@code patrol <bot> <radius>} */
         PATROL(Access.BOT_OWNER, true),
-        /** [] -> {@code leash <bot>} */
+        /** [] -> {@code leash <bot>}, or ["release"] -> {@code leash release <bot>} */
         LEASH(Access.BOT_OWNER, true),
         /** [] -> {@code fish forget <bot>} */
         FISH_FORGET(Access.BOT_OWNER, true),
@@ -398,7 +398,11 @@ public final class BotActionPolicy {
             }
             case GUARD -> guardOrPatrol("guard", a, bot);
             case PATROL -> guardOrPatrol("patrol", a, bot);
-            case LEASH -> a.isEmpty() ? withToken("leash", bot) : null;
+            case LEASH -> {
+                if (a.isEmpty()) yield withToken("leash", bot);
+                // leash release takes the bot in a StringArgumentType.string() slot named target.
+                yield a.size() == 1 && "release".equals(a.get(0)) ? withStr("leash release", bot) : null;
+            }
             case SKILL -> {
                 if (a.size() != 1 || !SIMPLE_SKILLS.contains(a.get(0))) yield null;
                 yield withToken("skill " + a.get(0), bot);

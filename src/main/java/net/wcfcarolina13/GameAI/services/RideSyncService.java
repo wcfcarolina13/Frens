@@ -163,6 +163,60 @@ public final class RideSyncService {
         LAST_LEASH_DIST.remove(botId);
         LAST_LEASH_ATTEMPT_TICK.remove(botId);
     }
+
+    /** What {@link #releaseHeldLeads} did: animals let go of, and leads dropped because the inventory was full. */
+    public record ReleaseResult(int released, int dropped) {
+    }
+
+    /**
+     * {@code /bot leash release}: the bot lets go of every animal it holds on a lead. Each lead
+     * goes back into its inventory, or on the ground at its feet when the inventory is full. The
+     * in-memory leash target and the saved held-lead record of each released animal are forgotten
+     * ({@link LeashTargetPolicy.Event#RELEASED}). Holding nothing changes nothing.
+     * Server thread only (entity, inventory and the leash maps).
+     */
+    public static ReleaseResult releaseHeldLeads(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return new ReleaseResult(0, 0);
+        }
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server != null && !server.isOnThread()) {
+            LOGGER.warn("[leash-release] {} refused: called off the server thread", bot.getName().getString());
+            return new ReleaseResult(0, 0);
+        }
+        List<net.minecraft.entity.Leashable> held = net.minecraft.entity.Leashable.collectLeashablesHeldBy(bot);
+        if (held.isEmpty()) {
+            return new ReleaseResult(0, 0);
+        }
+        List<UUID> releasedIds = new ArrayList<>();
+        int dropped = 0;
+        for (net.minecraft.entity.Leashable leashable : held) {
+            if (!(leashable instanceof Entity entity) || leashable.getLeashHolder() != bot) {
+                continue;
+            }
+            leashable.detachLeashWithoutDrop();
+            releasedIds.add(entity.getUuid());
+            ItemStack lead = new ItemStack(Items.LEAD);
+            bot.getInventory().insertStack(lead);
+            if (!lead.isEmpty()) {
+                bot.dropItem(lead, false, false);
+                dropped++;
+            }
+        }
+        if (releasedIds.isEmpty()) {
+            return new ReleaseResult(0, 0);
+        }
+        UUID target = LEASH_TARGET.get(bot.getUuid());
+        if (LeashTargetPolicy.shouldClear(LeashTargetPolicy.Event.RELEASED, false)) {
+            clearLeashTarget(bot.getUuid());
+        }
+        for (UUID id : releasedIds) {
+            MountPersistenceService.forgetHeldByBot(bot, id, LeashTargetPolicy.Event.RELEASED);
+        }
+        LOGGER.info("[leash-release] {} let go of {} animal(s), {} lead(s) dropped, leash target {} cleared",
+                bot.getName().getString(), releasedIds.size(), dropped, target);
+        return new ReleaseResult(releasedIds.size(), dropped);
+    }
     private static final long LEASH_ATTEMPT_COOLDOWN_TICKS = 20L;
     private static final double MOUNT_REACH_SQ = 4.5D * 4.5D;
     private static final double LEASH_KEEP_RANGE_SQ = 10.0D * 10.0D;
