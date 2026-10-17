@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Sandbox `ft.py` stream hooks; livestream tooling in its own repo (2026-10-17, no build)
+
+`tools/sandbox/ft.py` gains `item`, `verdict`, `say`, `idle`, `segment`, `pip`, `cam` and `stream-reset`, which write the stream state file. The livestream director, panel and capture moved to the private repo `~/dev/frens-stream` with their history (Frens commits `483fa572`, `1603bed0`, `d8610d7f`, branch backed up as `backup/livestream-tools-2026-10-17`). Bradley: it streams Frens but is not part of the mod.
+
 ## Sandbox bugs A-G from field phases 6ad-6al fixed; 1.1.266 (2026-10-17)
 
 The seven bug notes in `docs/testing/FIELD_6AD_6AL_SANDBOX_2026-10-17.md`, each scoped read-only against the source first. Two notes were partly wrong as written (C3, F), see below.
