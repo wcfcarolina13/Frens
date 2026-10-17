@@ -775,14 +775,14 @@ public final class DialogueTextMapper {
 
         // Foliage-stuck reactions (via CompanionOverheadDialogueService LEAF_STUCK_LINES)
         EXACT_MAP.put("These branches are thick!", BotDialogueSounds.LINE_FOLIAGE_STUCK_BRANCHES_THICK);
-        EXACT_MAP.put("Hold on - stuck in some branches.", BotDialogueSounds.LINE_FOLIAGE_STUCK_IN_BRANCHES);
+        EXACT_MAP.put("Hold on, stuck in some branches.", BotDialogueSounds.LINE_FOLIAGE_STUCK_IN_BRANCHES);
         EXACT_MAP.put("Can't get through these leaves.", BotDialogueSounds.LINE_FOLIAGE_STUCK_CANT_GET_THROUGH);
         EXACT_MAP.put("Just a sec... foliage's got me.", BotDialogueSounds.LINE_FOLIAGE_STUCK_GOT_ME);
 
         // Snowball-fight (1.1.81) — text emitted inline by BotSnowballFightService.
         EXACT_MAP.put("Catch this!", BotDialogueSounds.LINE_SNOWBALL_PROBE_CATCH_THIS);
         EXACT_MAP.put("Heads up!", BotDialogueSounds.LINE_SNOWBALL_PROBE_HEADS_UP);
-        EXACT_MAP.put("Hey — incoming!", BotDialogueSounds.LINE_SNOWBALL_PROBE_INCOMING);
+        EXACT_MAP.put("Hey, incoming!", BotDialogueSounds.LINE_SNOWBALL_PROBE_INCOMING);
         EXACT_MAP.put("Snowball fight!", BotDialogueSounds.LINE_SNOWBALL_PROBE_FIGHT);
         EXACT_MAP.put("Bet you can't dodge this one!", BotDialogueSounds.LINE_SNOWBALL_PROBE_BET);
         EXACT_MAP.put("Snowball fight?", BotDialogueSounds.LINE_SNOWBALL_PROBE_FIGHT_Q);
@@ -807,9 +807,9 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Guess you don't wanna play.", BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_DONT_PLAY);
         EXACT_MAP.put("Suit yourself.", BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_SUIT_YOURSELF);
         EXACT_MAP.put("No fun, huh?", BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_NO_FUN);
-        EXACT_MAP.put("Out of ammo — I yield!", BotDialogueSounds.LINE_SNOWBALL_YIELD_OUT_OF_AMMO);
+        EXACT_MAP.put("Out of ammo, I yield!", BotDialogueSounds.LINE_SNOWBALL_YIELD_OUT_OF_AMMO);
         EXACT_MAP.put("I'm out, I'm out, truce!", BotDialogueSounds.LINE_SNOWBALL_YIELD_IM_OUT);
-        EXACT_MAP.put("No more snowballs — you win!", BotDialogueSounds.LINE_SNOWBALL_YIELD_YOU_WIN);
+        EXACT_MAP.put("No more snowballs, you win!", BotDialogueSounds.LINE_SNOWBALL_YIELD_YOU_WIN);
         EXACT_MAP.put("Mercy! I surrender!", BotDialogueSounds.LINE_SNOWBALL_YIELD_MERCY);
         EXACT_MAP.put("Okay okay, you got me!", BotDialogueSounds.LINE_SNOWBALL_YIELD_GOT_ME);
 

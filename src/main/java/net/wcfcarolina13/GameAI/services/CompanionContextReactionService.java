@@ -307,7 +307,7 @@ public final class CompanionContextReactionService {
 
     private static final WeightedLine[] GUARDIAN_CHARGING_LINES = new WeightedLine[] {
             new WeightedLine("guardian_glowing", "Why is it glowing at me?!", BotDialogueSounds.LINE_GUARDIAN_GLOWING, WEIGHT_COMMON),
-            new WeightedLine("guardian_beam_hurt", "That beam is gonna hurt — move!", BotDialogueSounds.LINE_GUARDIAN_BEAM_HURT, WEIGHT_COMMON)
+            new WeightedLine("guardian_beam_hurt", "That beam is gonna hurt. Move!", BotDialogueSounds.LINE_GUARDIAN_BEAM_HURT, WEIGHT_COMMON)
     };
 
     // Elder guardian — rare, more emphatic. Includes the iconic Mining Fatigue gag.

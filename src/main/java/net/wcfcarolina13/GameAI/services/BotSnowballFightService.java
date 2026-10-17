@@ -81,7 +81,7 @@ public final class BotSnowballFightService {
     private static final String[] PROBE_LINES = {
             "Catch this!",
             "Heads up!",
-            "Hey — incoming!",
+            "Hey, incoming!",
             "Snowball fight!",
             "Bet you can't dodge this one!",
             "Snowball fight?"
@@ -121,9 +121,9 @@ public final class BotSnowballFightService {
     };
     /** Said the instant the bot runs out of snowballs in ACTIVE. */
     private static final String[] YIELD_LINES = {
-            "Out of ammo — I yield!",
+            "Out of ammo, I yield!",
             "I'm out, I'm out, truce!",
-            "No more snowballs — you win!",
+            "No more snowballs, you win!",
             "Mercy! I surrender!",
             "Okay okay, you got me!"
     };

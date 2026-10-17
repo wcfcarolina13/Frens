@@ -48,7 +48,7 @@ public final class CompanionOverheadDialogueService {
 
     private static final String[] LEAF_STUCK_LINES = new String[] {
             "These branches are thick!",
-            "Hold on — stuck in some branches.",
+            "Hold on, stuck in some branches.",
             "Can't get through these leaves.",
             "Just a sec… foliage's got me.",
             "Ugh. Leaves in the way."
@@ -67,29 +67,29 @@ public final class CompanionOverheadDialogueService {
     private static final String[] GEAR_PRESERVE_SWAP_LINES = new String[] {
             "Been using this one a while. Gonna hang it up.",
             "Not risking the good stuff on this.",
-            "This blade's getting thin — grabbing something else.",
+            "This blade's getting thin, grabbing something else.",
             "Yeah no, too nice to wreck out here.",
             "Saving the shiny for when it matters.",
             "I'll spare this one. Held up well.",
             "Don't want to snap it doing grunt work.",
             "Shelving the fancy kit. Back to basics.",
             "This one's earned a break.",
-            "Swapping — rather not push my luck."
+            "Swapping. Rather not push my luck."
     };
 
     private static final String[] GEAR_COMBAT_EDGE_LINES = new String[] {
             "One more hit and she's gone!",
-            "Careful — gear's on the edge!",
+            "Careful, gear's on the edge!",
             "This thing's about to snap!",
             "Running on fumes over here!",
-            "Almost spent — pull back!",
+            "Almost spent, pull back!",
             "Hang on, I'm out of good stuff!"
     };
 
     private static final String[] GEAR_NO_REPLACEMENT_LINES = new String[] {
             "Got nothing else. Give me a minute.",
             "Can't find a spare anywhere.",
-            "Need to restock — this was my last one.",
+            "Need to restock. This was my last one.",
             "I'm out. Someone grab me a new one?",
             "Tried the chests, no luck.",
             "No replacements around. I'm stuck.",

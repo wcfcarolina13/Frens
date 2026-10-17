@@ -625,7 +625,7 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_ENDERMAN_SPOTTED_DONT_LOOK, "Don't look at it.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLIAGE_STUCK_CANT_GET_THROUGH, "Can't get through these leaves.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLIAGE_STUCK_GOT_ME, "Just a sec… foliage's got me.");
-        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLIAGE_STUCK_IN_BRANCHES, "Hold on — stuck in some branches.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLIAGE_STUCK_IN_BRANCHES, "Hold on, stuck in some branches.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLIAGE_STUCK_BRANCHES_THICK, "These branches are thick!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_I_HIT_PLAYER_ACCIDENT, "Accident, my bad!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_I_HIT_PLAYER_MUST_HAVE_HURT, "Sorry, that must have hurt!");
@@ -713,7 +713,7 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_STARING_RIGHT, "It's staring right at me.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_DONT_LIKE, "I don't like the way it's looking at us.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_GLOWING, "Why is it glowing at me?!");
-        SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_BEAM_HURT, "That beam is gonna hurt — move!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_GUARDIAN_BEAM_HURT, "That beam is gonna hurt. Move!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_ELDER_GUARDIAN_BOSS, "That one's the boss. We should leave.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_ELDER_GUARDIAN_FATIGUE, "Mining Fatigue incoming, I just know it.");
 
@@ -751,7 +751,7 @@ public final class BotDialoguePlayer {
         // Snowball-fight (1.1.81) — text emitted inline by BotSnowballFightService
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_CATCH_THIS, "Catch this!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_HEADS_UP, "Heads up!");
-        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_INCOMING, "Hey — incoming!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_INCOMING, "Hey, incoming!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_FIGHT, "Snowball fight!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_BET, "Bet you can't dodge this one!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_PROBE_FIGHT_Q, "Snowball fight?");
@@ -776,9 +776,9 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_DONT_PLAY, "Guess you don't wanna play.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_SUIT_YOURSELF, "Suit yourself.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_TIMEOUT_NO_FUN, "No fun, huh?");
-        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_OUT_OF_AMMO, "Out of ammo — I yield!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_OUT_OF_AMMO, "Out of ammo, I yield!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_IM_OUT, "I'm out, I'm out, truce!");
-        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_YOU_WIN, "No more snowballs — you win!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_YOU_WIN, "No more snowballs, you win!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_MERCY, "Mercy! I surrender!");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_SNOWBALL_YIELD_GOT_ME, "Okay okay, you got me!");
     }
