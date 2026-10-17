@@ -165,33 +165,33 @@ public final class RideSyncService {
         LAST_LEASH_ATTEMPT_TICK.remove(botId);
     }
 
-    /** What {@link #releaseHeldLeads} did: animals let go of, and leads dropped because the inventory was full. */
-    public record ReleaseResult(int released, int dropped) {
+    /**
+     * What {@link #releaseHeldLeads} did: leads let go of, leads dropped because the inventory was
+     * full, and whether a tracked leash target that was not among them was forgotten too.
+     */
+    public record ReleaseResult(int released, int dropped, boolean forgotOtherTarget) {
     }
 
     /**
-     * {@code /bot leash release}: the bot lets go of every animal it holds on a lead. Each lead
-     * goes back into its inventory, or on the ground at its feet when the inventory is full. The
-     * in-memory leash target and the saved held-lead record of each released animal are forgotten
-     * ({@link LeashTargetPolicy.Event#RELEASED}). Holding nothing changes nothing.
+     * {@code /bot leash release}: the bot lets go of every lead it holds. Each lead goes back into
+     * its inventory, or on the ground at its feet when the inventory is full. The saved held-lead
+     * record of each released entity is forgotten ({@link LeashTargetPolicy.Event#RELEASED}). The
+     * tracked leash target is cleared and its record forgotten even when it was not held right now
+     * (a briefly snapped lead, or a horse in an unloaded chunk), so the bot stops going back for it.
      * Server thread only (entity, inventory and the leash maps).
      */
     public static ReleaseResult releaseHeldLeads(ServerPlayerEntity bot) {
         if (bot == null) {
-            return new ReleaseResult(0, 0);
+            return new ReleaseResult(0, 0, false);
         }
         MinecraftServer server = bot.getCommandSource().getServer();
         if (server != null && !server.isOnThread()) {
             LOGGER.warn("[leash-release] {} refused: called off the server thread", bot.getName().getString());
-            return new ReleaseResult(0, 0);
-        }
-        List<net.minecraft.entity.Leashable> held = net.minecraft.entity.Leashable.collectLeashablesHeldBy(bot);
-        if (held.isEmpty()) {
-            return new ReleaseResult(0, 0);
+            return new ReleaseResult(0, 0, false);
         }
         List<UUID> releasedIds = new ArrayList<>();
         int dropped = 0;
-        for (net.minecraft.entity.Leashable leashable : held) {
+        for (net.minecraft.entity.Leashable leashable : net.minecraft.entity.Leashable.collectLeashablesHeldBy(bot)) {
             if (!(leashable instanceof Entity entity) || leashable.getLeashHolder() != bot) {
                 continue;
             }
@@ -204,19 +204,24 @@ public final class RideSyncService {
                 dropped++;
             }
         }
-        if (releasedIds.isEmpty()) {
-            return new ReleaseResult(0, 0);
-        }
-        UUID target = LEASH_TARGET.get(bot.getUuid());
-        if (LeashTargetPolicy.shouldClear(LeashTargetPolicy.Event.RELEASED, false)) {
-            clearLeashTarget(bot.getUuid());
-        }
         for (UUID id : releasedIds) {
             MountPersistenceService.forgetHeldByBot(bot, id, LeashTargetPolicy.Event.RELEASED);
         }
-        LOGGER.info("[leash-release] {} let go of {} animal(s), {} lead(s) dropped, leash target {} cleared",
-                bot.getName().getString(), releasedIds.size(), dropped, target);
-        return new ReleaseResult(releasedIds.size(), dropped);
+        UUID target = LEASH_TARGET.get(bot.getUuid());
+        boolean forgotOtherTarget = false;
+        if (target != null && LeashTargetPolicy.shouldClear(LeashTargetPolicy.Event.RELEASED, false)) {
+            clearLeashTarget(bot.getUuid());
+            if (!releasedIds.contains(target)) {
+                MountPersistenceService.forgetHeldByBot(bot, target, LeashTargetPolicy.Event.RELEASED);
+                forgotOtherTarget = true;
+            }
+        }
+        if (!releasedIds.isEmpty() || target != null) {
+            LOGGER.info("[leash-release] {} let go of {} lead(s), {} dropped, leash target {} cleared (held={})",
+                    bot.getName().getString(), releasedIds.size(), dropped, target,
+                    target != null && releasedIds.contains(target));
+        }
+        return new ReleaseResult(releasedIds.size(), dropped, forgotOtherTarget);
     }
     private static final long LEASH_ATTEMPT_COOLDOWN_TICKS = 20L;
     private static final double MOUNT_REACH_SQ = 4.5D * 4.5D;
@@ -3797,7 +3802,7 @@ public final class RideSyncService {
         if (message == null) {
             LOGGER.warn("forceDismountAndSecure: bot={} server hop did not finish, still mounted={}",
                     botName, bot.hasVehicle());
-            return ForceDismountPlan.fallbackMessage(botName);
+            return ForceDismountPlan.fallbackMessage(botName, bot.hasVehicle());
         }
         return message.isEmpty() ? null : message;
     }

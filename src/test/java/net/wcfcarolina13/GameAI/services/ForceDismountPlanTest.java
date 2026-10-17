@@ -25,9 +25,17 @@ class ForceDismountPlanTest {
 
     @Test
     void fallbackSaysTryAgainWithoutDashesOrSemicolons() {
-        assertEquals("Bob couldn't dismount. Try again.", ForceDismountPlan.fallbackMessage("Bob"));
-        assertEquals("The bot couldn't dismount. Try again.", ForceDismountPlan.fallbackMessage(null));
-        String msg = ForceDismountPlan.fallbackMessage("Bob");
-        assertFalse(msg.contains("—") || msg.contains(";"));
+        assertEquals("Bob couldn't dismount. Try again.", ForceDismountPlan.fallbackMessage("Bob", true));
+        assertEquals("The bot couldn't dismount. Try again.", ForceDismountPlan.fallbackMessage(null, true));
+        for (boolean mounted : new boolean[] {true, false}) {
+            String msg = ForceDismountPlan.fallbackMessage("Bob", mounted);
+            assertFalse(msg.contains("\u2014") || msg.contains(";"));
+        }
+    }
+
+    @Test
+    void fallbackAfterTheDismountOnlyDoubtsTheSecure() {
+        assertEquals("Bob dismounted but couldn't secure the animal. Try /bot leash again.",
+                ForceDismountPlan.fallbackMessage("Bob", false));
     }
 }

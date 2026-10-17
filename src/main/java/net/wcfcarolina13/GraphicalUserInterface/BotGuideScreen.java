@@ -1390,7 +1390,7 @@ public final class BotGuideScreen extends Screen {
                         ),
                         "bot follow toggle <bot> | bot go_to_look | bot stop <bot> | bot resume <bot>",
                         "Minecraft Controls: Follow, Go To Look, Open Guide, Stop, Leash, Resume, Open Spells, Recruit Contact",
-                        "shortcut hotkey keybind follow stop goto go to look"
+                        "shortcut hotkey keybind follow stop goto go to look leash release leads lead"
                 ),
                 new GuideTopic(
                         "items_nav_artifacts",

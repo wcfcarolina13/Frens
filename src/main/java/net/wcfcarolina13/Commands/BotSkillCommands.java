@@ -210,7 +210,8 @@ final class BotSkillCommands {
             RideSyncService.ReleaseResult result = RideSyncService.releaseHeldLeads(bot);
             released += result.released();
             ChatUtils.sendSystemMessage(context.getSource(),
-                    LeashReleasePolicy.reply(bot.getName().getString(), result.released(), result.dropped()));
+                    LeashReleasePolicy.reply(bot.getName().getString(), result.released(), result.dropped(),
+                            result.forgotOtherTarget()));
         }
         return Math.max(released, targets.isEmpty() ? 0 : 1);
     }

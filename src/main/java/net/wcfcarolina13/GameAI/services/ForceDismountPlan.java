@@ -22,9 +22,14 @@ public final class ForceDismountPlan {
         return leashable && hasLead && !fenceInReach;
     }
 
-    /** Chat reply when the server-thread hop timed out or failed: the bot may still be mounted. */
-    public static String fallbackMessage(String botName) {
+    /**
+     * Chat reply when the server-thread hop timed out or failed. If the bot is no longer mounted
+     * the hop got as far as the dismount, so only securing the animal is in doubt.
+     */
+    public static String fallbackMessage(String botName, boolean stillMounted) {
         String name = botName == null || botName.isBlank() ? "The bot" : botName;
-        return name + " couldn't dismount. Try again.";
+        return stillMounted
+                ? name + " couldn't dismount. Try again."
+                : name + " dismounted but couldn't secure the animal. Try /bot leash again.";
     }
 }

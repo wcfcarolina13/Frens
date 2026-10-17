@@ -9,33 +9,43 @@ class LeashReleasePolicyTest {
 
     @Test
     void holdingNothingSaysSo() {
-        assertEquals("Bob isn't holding any animals on a lead.", LeashReleasePolicy.reply("Bob", 0, 0));
+        assertEquals("Bob isn't holding any leads.", LeashReleasePolicy.reply("Bob", 0, 0, false));
+    }
+
+    @Test
+    void holdingNothingButTrackingAnAnimalSaysItWillStopGoingBack() {
+        assertEquals("Bob wasn't holding a lead, but it will stop going back for the animal it was leading.",
+                LeashReleasePolicy.reply("Bob", 0, 0, true));
+        assertEquals("Bob let go of 1 lead. It is in its inventory. It will stop going back for the animal it was leading.",
+                LeashReleasePolicy.reply("Bob", 1, 0, true));
     }
 
     @Test
     void leadsGoBackIntoTheInventory() {
-        assertEquals("Bob let go of 1 animal. The lead is in its inventory.", LeashReleasePolicy.reply("Bob", 1, 0));
-        assertEquals("Bob let go of 3 animals. The leads are in its inventory.", LeashReleasePolicy.reply("Bob", 3, 0));
+        assertEquals("Bob let go of 1 lead. It is in its inventory.", LeashReleasePolicy.reply("Bob", 1, 0, false));
+        assertEquals("Bob let go of 3 leads. They are in its inventory.", LeashReleasePolicy.reply("Bob", 3, 0, false));
     }
 
     @Test
     void aFullInventoryDropsTheLeadsAtItsFeet() {
-        assertEquals("Bob let go of 2 animals. Its inventory is full, so the leads are on the ground at its feet.",
-                LeashReleasePolicy.reply("Bob", 2, 2));
-        assertEquals("Bob let go of 3 animals. 1 lead is in its inventory and 2 on the ground at its feet.",
-                LeashReleasePolicy.reply("Bob", 3, 2));
-        assertEquals("Bob let go of 1 animal. Its inventory is full, so the lead is on the ground at its feet.",
-                LeashReleasePolicy.reply("Bob", 1, 5));
+        assertEquals("Bob let go of 2 leads. Its inventory is full, so they are on the ground at its feet.",
+                LeashReleasePolicy.reply("Bob", 2, 2, false));
+        assertEquals("Bob let go of 3 leads. 1 in its inventory and 2 on the ground at its feet.",
+                LeashReleasePolicy.reply("Bob", 3, 2, false));
+        assertEquals("Bob let go of 1 lead. Its inventory is full, so it is on the ground at its feet.",
+                LeashReleasePolicy.reply("Bob", 1, 5, false));
     }
 
     @Test
     void repliesHaveNoEmDashOrSemicolon() {
         for (int released = 0; released <= 3; released++) {
             for (int dropped = 0; dropped <= released; dropped++) {
-                String reply = LeashReleasePolicy.reply("Bob", released, dropped);
-                assertFalse(reply.contains("—") || reply.contains(";"), reply);
+                for (boolean forgot : new boolean[] {false, true}) {
+                    String reply = LeashReleasePolicy.reply("Bob", released, dropped, forgot);
+                    assertFalse(reply.contains("—") || reply.contains(";"), reply);
+                }
             }
         }
-        assertEquals("The bot isn't holding any animals on a lead.", LeashReleasePolicy.reply(null, 0, 0));
+        assertEquals("The bot isn't holding any leads.", LeashReleasePolicy.reply(null, 0, 0, false));
     }
 }
