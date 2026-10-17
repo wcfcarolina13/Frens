@@ -236,6 +236,7 @@ public final class DropSweeper {
                         ItemEntity.class,
                         Box.of(currentPosition(player), radius * 2, verticalRange * 2, radius * 2),
                         drop -> !drop.isRemoved() && drop.isAlive() && !excludedDrops.contains(drop)
+                                && isAllowedDrop(player.getUuid(), drop)
                                 && drop.squaredDistanceTo(player) > PICKUP_DISTANCE_SQUARED
                                 && drop.getBlockY() - player.getBlockY() <= 4) // skip unreachable elevated drops
                 .stream()
@@ -314,6 +315,23 @@ public final class DropSweeper {
     public static void setNoOffload(java.util.UUID botUuid, boolean noOffload) {
         if (botUuid == null) return;
         if (noOffload) NO_OFFLOAD.add(botUuid); else NO_OFFLOAD.remove(botUuid);
+    }
+
+    /** Per bot: the only item entities its current sweep targets (death retrieval). Absent = all. */
+    private static final java.util.Map<java.util.UUID, java.util.Set<java.util.UUID>> ALLOWED_DROPS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** While set (non-empty), sweeps by this bot only walk to these item entities. Null or empty clears. */
+    public static void setAllowedDrops(java.util.UUID botUuid, java.util.Set<java.util.UUID> drops) {
+        if (botUuid == null) return;
+        if (drops == null || drops.isEmpty()) ALLOWED_DROPS.remove(botUuid);
+        else ALLOWED_DROPS.put(botUuid, java.util.Set.copyOf(drops));
+    }
+
+    /** True when the bot's current sweep may target {@code drop}. */
+    public static boolean isAllowedDrop(java.util.UUID botUuid, ItemEntity drop) {
+        if (botUuid == null || drop == null) return true;
+        return net.wcfcarolina13.GameAI.services.DeathDropFilterPolicy.allowed(ALLOWED_DROPS.get(botUuid), drop.getUuid());
     }
 
     public static boolean ensureSpaceForDropSweep(ServerCommandSource source, ServerPlayerEntity player) {

@@ -170,14 +170,42 @@ public final class DeathRetrievalPolicy {
         return ACTION_PREFIX + (mode == ReturnMode.STAY ? "stay" : "sender");
     }
 
-    /** The return mode of a {@code retrieve:<mode>} action, or empty when it is not one. */
+    /**
+     * {@code retrieve:<mode>:<who>}: whose death the trip is for ({@link #ME} or a bot name), so the
+     * arrival can look up which drops to pick up, also after a reload. No who: {@code retrieve:<mode>}.
+     */
+    public static String actionType(ReturnMode mode, String who) {
+        String base = actionType(mode);
+        return validWho(who) ? base + ":" + who.trim() : base;
+    }
+
+    /** The return mode of a {@code retrieve:<mode>[:<who>]} action, or empty when it is not one. */
     public static Optional<ReturnMode> parseAction(String type) {
         if (type == null || !type.startsWith(ACTION_PREFIX)) return Optional.empty();
-        return switch (type.substring(ACTION_PREFIX.length())) {
+        String rest = type.substring(ACTION_PREFIX.length());
+        int colon = rest.indexOf(':');
+        if (colon >= 0) {
+            if (!validWho(rest.substring(colon + 1))) return Optional.empty();
+            rest = rest.substring(0, colon);
+        }
+        return switch (rest) {
             case "sender" -> Optional.of(ReturnMode.SENDER);
             case "stay" -> Optional.of(ReturnMode.STAY);
             default -> Optional.empty();
         };
+    }
+
+    /** The {@code who} part of a {@code retrieve:<mode>:<who>} action, or empty. */
+    public static Optional<String> parseWho(String type) {
+        if (parseAction(type).isEmpty()) return Optional.empty();
+        String rest = type.substring(ACTION_PREFIX.length());
+        int colon = rest.indexOf(':');
+        return colon < 0 ? Optional.empty() : Optional.of(rest.substring(colon + 1));
+    }
+
+    /** {@link #ME} or a bot name: one Brigadier word (letters, digits, _ . + -), no colon. */
+    private static boolean validWho(String who) {
+        return who != null && who.trim().matches("[A-Za-z0-9_.+\\-]{1,32}");
     }
 
     /** True when {@code who} asks for the sender's own death (null, blank or "me"). */

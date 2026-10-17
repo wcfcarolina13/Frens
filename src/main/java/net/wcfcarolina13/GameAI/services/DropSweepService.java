@@ -191,6 +191,7 @@ public final class DropSweepService {
                 ItemEntity.class,
                 searchBox,
                 drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D
+                        && net.wcfcarolina13.GameAI.DropSweeper.isAllowedDrop(bot.getUuid(), drop)
         );
 
         long now = System.currentTimeMillis();

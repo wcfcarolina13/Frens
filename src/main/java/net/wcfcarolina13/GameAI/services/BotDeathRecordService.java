@@ -6,11 +6,13 @@ import com.google.gson.reflect.TypeToken;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,7 +22,9 @@ import java.io.Writer;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -51,9 +55,11 @@ public final class BotDeathRecordService {
 
     /**
      * One death. {@code cause} is the damage type id ({@code minecraft:lava}), {@code killer} the
-     * entity type id of a non-player attacker, or null.
+     * entity type id of a non-player attacker, or null. {@code dropUuids} are the item entities that
+     * dropped at this death (null in records written before 1.1.257, and when nothing dropped).
      */
-    public record DeathRecord(String dimension, int x, int y, int z, long epochMs, String cause, String killer) {
+    public record DeathRecord(String dimension, int x, int y, int z, long epochMs, String cause, String killer,
+                              List<String> dropUuids) {
         public BlockPos pos() {
             return new BlockPos(x, y, z);
         }
@@ -96,15 +102,38 @@ public final class BotDeathRecordService {
             String dimension = who.getEntityWorld().getRegistryKey().getValue().toString();
             String cause = causeId(source);
             String killer = killerId(source);
+            List<String> drops = tagDeathDrops(who);
             DeathRecord rec = new DeathRecord(dimension, pos.getX(), pos.getY(), pos.getZ(),
-                    System.currentTimeMillis(), cause, killer);
+                    System.currentTimeMillis(), cause, killer, drops.isEmpty() ? null : drops);
             STATE.computeIfAbsent(key, k -> new HashMap<>()).put(worldKey, rec);
             flush();
-            LOGGER.info("[DeathRecord] {} died at {} in {} cause={} killer={} world={}",
-                    who.getName().getString(), pos.toShortString(), dimension, cause, killer, worldKey);
+            LOGGER.info("[DeathRecord] {} died at {} in {} cause={} killer={} world={} drops={}",
+                    who.getName().getString(), pos.toShortString(), dimension, cause, killer, worldKey, drops.size());
         } catch (Throwable t) {
             LOGGER.warn("[DeathRecord] could not record the death of {}: {}", who.getName().getString(), t.toString());
         }
+    }
+
+    /**
+     * UUIDs of the item entities that just dropped at {@code who}'s death position. The death hook
+     * runs at the end of onDeath, after the inventory drop, in the same tick. Server thread.
+     */
+    private static List<String> tagDeathDrops(ServerPlayerEntity who) {
+        List<String> out = new ArrayList<>();
+        double cx = who.getX();
+        double cy = who.getY();
+        double cz = who.getZ();
+        double r = DeathDropFilterPolicy.TAG_RADIUS;
+        Box box = new Box(cx - r, cy + DeathDropFilterPolicy.TAG_DY_MIN, cz - r,
+                cx + r, cy + DeathDropFilterPolicy.TAG_DY_MAX, cz + r);
+        for (ItemEntity item : who.getEntityWorld().getEntitiesByClass(ItemEntity.class, box, e -> !e.isRemoved())) {
+            if (out.size() >= DeathDropFilterPolicy.MAX_TAGGED) break;
+            if (DeathDropFilterPolicy.isDeathDrop(item.getItemAge(),
+                    item.getX() - cx, item.getY() - cy, item.getZ() - cz)) {
+                out.add(item.getUuid().toString());
+            }
+        }
+        return out;
     }
 
     private static DeathRecord get(MinecraftServer server, String key) {
