@@ -107,14 +107,14 @@ public class SoulVoiceEngineScreen extends Screen {
         boolean piperAvail = cfg != null && piperAvailable(cfg);
         List<EngineRow> out = new ArrayList<>(3);
         out.add(new EngineRow(SoulVoiceSettings.ENGINE_DREAMSLEEVE, "Dreamsleeve",
-                "Dreamsleeve — cloned bot voice",
+                "Dreamsleeve: cloned bot voice",
                 dsSupported
                         ? "§7Best quality. Uses the GPU. "
                                 + (dsAvail ? "Available." : "Not set up on this machine.")
-                        : "§8macOS only — Qwen3-TTS server runs on Apple silicon.",
+                        : "§8macOS only. Qwen3-TTS server runs on Apple silicon.",
                 dsAvail, null, dsSupported));
         out.add(new EngineRow(SoulVoiceSettings.ENGINE_POCKET, "Pocket",
-                "Pocket TTS — natural CPU voices",
+                "Pocket TTS: natural CPU voices",
                 "§7Kyutai, 100M params, 21 presets. " + (pocketAvail ? "Installed." : "One-time ~1 GB install."),
                 pocketAvail, () -> {
                     if (this.client != null) {
@@ -122,7 +122,7 @@ public class SoulVoiceEngineScreen extends Screen {
                     }
                 }, true));
         out.add(new EngineRow(SoulVoiceSettings.ENGINE_PIPER, "Piper",
-                "Piper — lightweight generic voice",
+                "Piper: lightweight generic voice",
                 "§7Fast, CPU-only, frees the GPU. " + (piperAvail ? "Installed." : "One-time ~80 MB download."),
                 piperAvail, () -> {
                     if (this.client != null) {
@@ -215,11 +215,11 @@ public class SoulVoiceEngineScreen extends Screen {
     private List<EngineRow> buildRemoteRows() {
         return List.of(
                 new EngineRow(SoulVoiceSettings.ENGINE_DREAMSLEEVE, "Dreamsleeve",
-                        "Dreamsleeve — cloned bot voice", "§7Setup is managed on the server host.", true, null, true),
+                        "Dreamsleeve: cloned bot voice", "§7Setup is managed on the server host.", true, null, true),
                 new EngineRow(SoulVoiceSettings.ENGINE_POCKET, "Pocket",
-                        "Pocket TTS — natural CPU voices", "§7Installed on server by its host.", true, null, true),
+                        "Pocket TTS: natural CPU voices", "§7Installed on server by its host.", true, null, true),
                 new EngineRow(SoulVoiceSettings.ENGINE_PIPER, "Piper",
-                        "Piper — lightweight generic voice", "§7Installed on server by its host.", true, null, true));
+                        "Piper: lightweight generic voice", "§7Installed on server by its host.", true, null, true));
     }
 
     private void selectEngine(String engine) {

@@ -87,7 +87,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     public static boolean guideRemoteOpen = false;
     /** Whether the guide remote open has full inventory access (proximity/operator/artifacts). */
     public static boolean guideRemoteFullAccess = false;
-    /** Human-readable reason for remote access (e.g. "Remote Inventory active — Wizard's Tome"). */
+    /** Human-readable reason for remote access (e.g. "Remote Inventory active: Wizard's Tome"). */
     public static String guideRemoteAccessReason = "";
 
     // Collapsed (shared inventory) quick-actions grid.
@@ -1086,13 +1086,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private String getOverlayFooterHint() {
         if (guideRemoteOpen && !guideRemoteFullAccess) {
-            return "Scroll or drag scrollbar; click an admin action; Esc closes";
+            return "Scroll or drag scrollbar, click an admin action, Esc closes";
         }
         return switch (overlayCategory) {
-            case SKILL -> "Scroll or drag scrollbar; click an action; [ and ] switch bot; Esc closes";
-            case DIALOGUE -> "Scroll or drag scrollbar; click a topic; [ and ] switch bot; Esc closes";
+            case SKILL -> "Scroll or drag scrollbar, click an action, [ and ] switch bot, Esc closes";
+            case DIALOGUE -> "Scroll or drag scrollbar, click a topic, [ and ] switch bot, Esc closes";
             case SPELL -> buildSpellStatusBar();
-            case ADMIN -> "Scroll or drag scrollbar; click an admin action; [ and ] switch bot; Esc closes";
+            case ADMIN -> "Scroll or drag scrollbar, click an admin action, [ and ] switch bot, Esc closes";
         };
     }
 
@@ -2590,7 +2590,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int innerW = Math.max(20, w - pad * 2 - closeSize - 4);
 
         String warnMark = "\u26A0"; // ⚠
-        String message = warnMark + " Dialogue requires Questing mode (in development — expect bugs)";
+        String message = warnMark + " Dialogue requires Questing mode (in development, expect bugs)";
         java.util.List<net.minecraft.text.OrderedText> wrapped = this.textRenderer.wrapLines(
                 net.minecraft.text.Text.literal(message), innerW);
         if (wrapped.isEmpty()) {
@@ -4096,7 +4096,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 return java.util.List.of(
                         "Remote Guidance",
                         "Consumes an Ender Pearl from both you and your companion.",
-                        "The bot fast-travels to your current location \u2014",
+                        "The bot fast-travels to your current location,",
                         "disappearing briefly, then reappearing at your coordinates."
                 );
             }
@@ -4112,8 +4112,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 return java.util.List.of(
                         "Soul of Ender",
                         "Consumes a Chorus Fruit while the bot holds an Eye of Ender.",
-                        "Grants 75 seconds of teleportation freedom \u2014",
-                        "all movement locks are bypassed."
+                        "Grants 75 seconds of teleportation freedom.",
+                        "All movement locks are bypassed."
                 );
             }
             if (entry.action == TopicAction.SPELL_REMOTE_INVENTORY) {
@@ -4188,7 +4188,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "Preserve Expensive Gear",
                         "Bots refuse to use enchanted gear or items made of gold,",
                         "diamond, netherite, or turtle shell when durability drops",
-                        "below 11% — or 3% in combat. They swap to a cheaper",
+                        "below 11%, or 3% in combat. They swap to a cheaper",
                         "alternative, check a chest, or craft a new one.",
                         "Applies to every bot you own. See the in-game guide for details.",
                         "Current: " + (isPreserveExpensiveGearActive() ? "ON" : "OFF")
@@ -4208,7 +4208,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 return java.util.List.of(
                         "Lock Blocks Mode",
                         "Toggle on, then click doors, gates, or trapdoors to mark",
-                        "them as locked — bots will treat them as solid walls and",
+                        "them as locked. Bots will treat them as solid walls and",
                         "route around them. Toggle off to stop marking.",
                         "Current: " + (isLockBlocksModeActive() ? "ON" : "OFF")
                 );
@@ -4230,14 +4230,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                     return java.util.List.of(
                             "Spells",
                             "Full access: Enchanting Table (4 blocks) or Wizard's Tome.",
-                            "Eye of Ender can also open (Summon-only; cooldown)."
+                            "Eye of Ender can also open (Summon-only, cooldown)."
                     );
                 }
 
                 if (hasEye) {
                     return java.util.List.of(
                             "Spells",
-                            "Eye of Ender: limited access (Summon-only; cooldown).",
+                            "Eye of Ender: limited access (Summon-only, cooldown).",
                         "Full access: Enchanting Table nearby (4 blocks) or Wizard's Tome."
                     );
                 }
@@ -4245,7 +4245,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "Spells",
                         "Requires: Enchanting Table nearby (4 blocks)",
                     "or a Wizard's Tome.",
-                        "(Also: Eye of Ender for limited Summon-only access; cooldown applies.)"
+                        "(Also: Eye of Ender for limited Summon-only access, cooldown applies.)"
                 );
             }
 
@@ -4370,7 +4370,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             );
             case ATTACK_NAMED_MOBS -> java.util.List.of(
                 "Attack Named Mobs",
-                "When OFF (default), the bot protects any name-tagged mob — hostile or peaceful — and flees if one attacks it. Turn ON to let the bot engage name-tagged mobs normally."
+                "When OFF (default), the bot protects any name-tagged mob, hostile or peaceful, and flees if one attacks it. Turn ON to let the bot engage name-tagged mobs normally."
             );
             case IDLE_HOBBIES -> java.util.List.of(
                 "Idle Hobbies",
@@ -4453,7 +4453,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 "Forget Fishing Spot",
                 "Clears the bot's saved fishing stand and sunrise-resume record.",
                 "Use this if the bot keeps fast-travelling back to a bad spot each morning.",
-                "Lodestone compasses are untouched — the next /bot fish still routes to the nearest compass."
+                "Lodestone compasses are untouched. The next /bot fish still routes to the nearest compass."
             );
             case SKILL_WOODCUT_CLEANUP -> java.util.List.of(
                 "Woodcut Cleanup",
@@ -4462,7 +4462,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_WOOL -> java.util.List.of(
                 "Wool",
                 "Shears adult sheep and gathers wool without killing them.",
-                "Set a wool target before starting; standalone runs stop at sunset.",
+                "Set a wool target before starting. Standalone runs stop at sunset.",
                 "Toggle [\u2194] to switch +/- between wool count and search range."
             );
             case SKILL_FARM -> java.util.List.of(
@@ -4481,7 +4481,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_LEAF_LITTER -> java.util.List.of(
                 "Leaf Litter",
                 "Collects nearby leaf litter from the ground.",
-                "Leaf litter is cheap furnace fuel; great in forested biomes.",
+                "Leaf litter is cheap furnace fuel, great in forested biomes.",
                 "Requires leaf litter blocks in the area."
             );
             case SKILL_MINING -> java.util.List.of(

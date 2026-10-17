@@ -42,13 +42,13 @@ public class BotControlScreen extends Screen {
             new GlobalToggleDef("Recruitment", "Questing mode for this world. New companions must be recruited through village/settlement progression instead of acting like fully unlocked admin bots."),
             new GlobalToggleDef("Force-Place", "Lets some construction helpers use a non-vanilla placement fallback when normal block placement fails on awkward ledges, corners, or tight build edges."),
             new GlobalToggleDef("Teleport", "When off, no bot can teleport or snap during skills regardless of per-bot settings. When on, individual per-bot teleport settings apply."),
-            new GlobalToggleDef("Scripted Text", "SCRIPTED lane — text of the pre-baked lines (holograms, subtitles, chat fallbacks). Adv… mutes single categories while this is on. Does NOT touch anything the LLM says (see Soul Chat)."),
-            new GlobalToggleDef("Scripted Voice", "SCRIPTED lane — audio of the pre-baked voice lines. Adv… mutes single categories while this is on; per-bot Voiced Dialogue can mute one bot. Does NOT touch the soul TTS (see Soul Voice)."),
-            new GlobalToggleDef("Soul Chat", "SOUL lane master — the local-LLM persona: replies when you talk to a soul-bound bot, plus every unprompted scene below. Off = the LLM says nothing at all. Turns AI chat on for this world (same switch as /bot soul system on). Each bot also has to be enabled — open Set up AI companions (Setup…)."),
-            new GlobalToggleDef("Soul Voice", "SOUL lane — text-to-speech for what the LLM says, in each bot's assigned voice (Eng… picks the engine; /bot soul voice list|install|assign picks voices). Independent of Scripted Voice."),
-            new GlobalToggleDef("Soul Banter", "SOUL lane — companions chat on their own when things are calm (one nearby bot may speak to you; 2+ chat among themselves and may pull you in). Needs Soul Chat. Rate… tunes how often. /bot soul banter status explains the last verdict; /bot soul banter now skips the wait."),
-            new GlobalToggleDef("Soul Active", "SOUL lane — companions also chat while WORKING (a skill running or actively following you). Needs Soul Chat. Own cadence under Rate…; /bot soul banter status shows this lane too."),
-            new GlobalToggleDef("Soul Local", "SOUL lane — companions may react to chat you type near them that wasn't addressed to anyone. Needs Soul Chat. /bot soul local status explains why it is or isn't firing; /bot soul local now skips the cooldown.")
+            new GlobalToggleDef("Scripted Text", "SCRIPTED lane: text of the pre-baked lines (holograms, subtitles, chat fallbacks). Adv… mutes single categories while this is on. Does NOT touch anything the LLM says (see Soul Chat)."),
+            new GlobalToggleDef("Scripted Voice", "SCRIPTED lane: audio of the pre-baked voice lines. Adv… mutes single categories while this is on, and per-bot Voiced Dialogue can mute one bot. Does NOT touch the soul TTS (see Soul Voice)."),
+            new GlobalToggleDef("Soul Chat", "SOUL lane master. The local-LLM persona: replies when you talk to a soul-bound bot, plus every unprompted scene below. Off = the LLM says nothing at all. Turns AI chat on for this world (same switch as /bot soul system on). Each bot also has to be enabled. Open Set up AI companions (Setup…)."),
+            new GlobalToggleDef("Soul Voice", "SOUL lane: text-to-speech for what the LLM says, in each bot's assigned voice (Eng… picks the engine, /bot soul voice list|install|assign picks voices). Independent of Scripted Voice."),
+            new GlobalToggleDef("Soul Banter", "SOUL lane: companions chat on their own when things are calm (one nearby bot may speak to you, 2+ chat among themselves and may pull you in). Needs Soul Chat. Rate… tunes how often. /bot soul banter status explains the last verdict. /bot soul banter now skips the wait."),
+            new GlobalToggleDef("Soul Active", "SOUL lane: companions also chat while WORKING (a skill running or actively following you). Needs Soul Chat. Own cadence under Rate…, and /bot soul banter status shows this lane too."),
+            new GlobalToggleDef("Soul Local", "SOUL lane: companions may react to chat you type near them that wasn't addressed to anyone. Needs Soul Chat. /bot soul local status explains why it is or isn't firing. /bot soul local now skips the cooldown.")
     );
 
     /** Indices in GLOBAL_TOGGLES (wired in init() and saveSettings() — move all three sites together). */
@@ -415,13 +415,13 @@ public class BotControlScreen extends Screen {
     private void updateSubtitleText() {
         boolean isDefault = selectedAlias != null && selectedAlias.equalsIgnoreCase("default");
         if (isDefault) {
-            subtitleText = "Editing fallback profile \u2014 used when a bot has no override.";
+            subtitleText = "Editing fallback profile, used when a bot has no override.";
         } else {
             ManualConfig.BotOwnership ownership = Frens.CONFIG.getOwner(selectedAlias);
             String ownerName = ownership != null && ownership.ownerName() != null
                     && !ownership.ownerName().isBlank()
                     ? ownership.ownerName() : "Unassigned";
-            subtitleText = "Editing " + selectedAlias + " \u2014 Owner: " + ownerName;
+            subtitleText = "Editing " + selectedAlias + ". Owner: " + ownerName;
         }
     }
 
@@ -535,7 +535,7 @@ public class BotControlScreen extends Screen {
 
         List<SettingEntry> dialogue = new ArrayList<>();
         dialogue.add(makeOnOff("Voiced Dialogue (this bot)", "Per-bot override under the global Scripted Voice master: both must be ON for this bot's pre-baked voice lines to play. Category muting lives under the Scripted Voice row's Adv… button. Soul TTS is separate (Soul Voice).", voiced, TOGGLE_W));
-        settingGroups.add(new SettingGroup("Dialogue & AI — per-bot overrides", dialogue));
+        settingGroups.add(new SettingGroup("Dialogue & AI: per-bot overrides", dialogue));
     }
 
     /**
@@ -894,7 +894,7 @@ public class BotControlScreen extends Screen {
                         COL_LABEL, false);
                 if (setupHover && tooltipText == null) {
                     updateTooltipCandidate("global-soul-chat-setup",
-                            "Set up AI companions: a step-by-step checklist (Ollama, model, Soul Chat, enabling each bot, a test chat, optional voice). AI chat is optional — Frens works fully without it.",
+                            "Set up AI companions: a step-by-step checklist (Ollama, model, Soul Chat, enabling each bot, a test chat, optional voice). AI chat is optional. Frens works fully without it.",
                             mouseX, mouseY);
                 }
             }
@@ -913,23 +913,23 @@ public class BotControlScreen extends Screen {
                 if (advHover && tooltipText == null) {
                     if (i == VOICE_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-voice-adv",
-                                "Mute individual categories of SCRIPTED voice lines (combat, ambient, reactions…). Audio only — text still shows; soul TTS unaffected.",
+                                "Mute individual categories of SCRIPTED voice lines (combat, ambient, reactions…). Audio only. Text still shows, soul TTS unaffected.",
                                 mouseX, mouseY);
                     } else if (i == TEXT_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-text-adv",
-                                "Mute individual categories of SCRIPTED text lines (holograms, subtitles, chat) while Scripted Text is on. Text only — audio and soul chat unaffected.",
+                                "Mute individual categories of SCRIPTED text lines (holograms, subtitles, chat) while Scripted Text is on. Text only. Audio and soul chat unaffected.",
                                 mouseX, mouseY);
                     } else if (i == BANTER_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-dialogue-rates",
-                                "Dialogue frequency sliders: scripted lines, idle banter, active banter and local chime-ins. 50 = shipped cadence; the toggles stay the on/off switches.",
+                                "Dialogue frequency sliders: scripted lines, idle banter, active banter and local chime-ins. 50 = shipped cadence. The toggles stay the on/off switches.",
                                 mouseX, mouseY);
                     } else if (i == SOUL_CHAT_TOGGLE_INDEX) {
                         updateTooltipCandidate("global-soul-chat-llm",
-                                "Manage the soul LLM: see what's installed in Ollama, download a smaller/faster model, and switch — sizes and RAM guidance shown up front.",
+                                "Manage the soul LLM: see what's installed in Ollama, download a smaller/faster model, and switch, with sizes and RAM guidance shown up front.",
                                 mouseX, mouseY);
                     } else {
                         updateTooltipCandidate("global-soul-voice-eng",
-                                "Choose the soul voice engine: Dreamsleeve (cloned voice, GPU) or Piper (lightweight, CPU — one-time download via a transparent installer).",
+                                "Choose the soul voice engine: Dreamsleeve (cloned voice, GPU) or Piper (lightweight, CPU, one-time download via a transparent installer).",
                                 mouseX, mouseY);
                     }
                 }
@@ -981,7 +981,7 @@ public class BotControlScreen extends Screen {
         {
             Rect r = new Rect(rowX, y, rowW, bulkRowH);
             context.fill(r.x, r.y, r.right(), r.bottom(), COL_ROW);
-            context.drawText(this.textRenderer, "Auto Respawn — All Bots",
+            context.drawText(this.textRenderer, "Auto Respawn: All Bots",
                     r.x + 6, r.y + (r.h - this.textRenderer.fontHeight) / 2, COL_LABEL, false);
             bulkAutoRespawnOffRect = new Rect(r.right() - btnW - 6, y + 1, btnW, bulkRowH - 2);
             bulkAutoRespawnOnRect  = new Rect(bulkAutoRespawnOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);
@@ -1005,7 +1005,7 @@ public class BotControlScreen extends Screen {
         {
             Rect r = new Rect(rowX, y, rowW, bulkRowH);
             context.fill(r.x, r.y, r.right(), r.bottom(), COL_ROW);
-            context.drawText(this.textRenderer, "Auto Spawn on Load — All Bots",
+            context.drawText(this.textRenderer, "Auto Spawn on Load: All Bots",
                     r.x + 6, r.y + (r.h - this.textRenderer.fontHeight) / 2, COL_LABEL, false);
             bulkAutoSpawnOnLoadOffRect = new Rect(r.right() - btnW - 6, y + 1, btnW, bulkRowH - 2);
             bulkAutoSpawnOnLoadOnRect  = new Rect(bulkAutoSpawnOnLoadOffRect.x - btnGap - btnW, y + 1, btnW, bulkRowH - 2);

@@ -338,7 +338,7 @@ public class ConstructionScreen extends Screen {
 
     private void renderFooterHelp(DrawContext context, Rect footer, ConstructionEntry hoveredEntry) {
         String help = hoveredEntry != null
-                ? hoveredEntry.label() + " — " + hoveredEntry.description()
+                ? hoveredEntry.label() + ": " + hoveredEntry.description()
                 : "Select a build to close back to gameplay and place it in the world. Fortify tools may run immediately.";
         List<OrderedText> lines = this.textRenderer.wrapLines(Text.literal(help), Math.max(60, footer.w - 16));
         int y = footer.y + 5;

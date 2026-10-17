@@ -61,9 +61,9 @@ public class ConfigureHobbiesScreen extends Screen {
      */
     private static final List<String> TOOLTIPS = List.of(
             // hunt
-            "Opportunistic kill of nearby passive or weak hostile mobs.\nNot the dedicated Auto Hunt service — that's separate.",
+            "Opportunistic kill of nearby passive or weak hostile mobs.\nNot the dedicated Auto Hunt service, that's separate.",
             // fish
-            "Cast a fishing rod at a nearby water tile.\nNot the dedicated fishing skill — that's separate.",
+            "Cast a fishing rod at a nearby water tile.\nNot the dedicated fishing skill, that's separate.",
             // feed_animals
             "Feed nearby commander-owned animals to heal/breed them.",
             // flowers
@@ -73,7 +73,7 @@ public class ConfigureHobbiesScreen extends Screen {
             // mining
             "Mine nearby stone with a pickaxe.\n§cWarning: can dig through terrain to reach buried stone.\nLeave OFF near unprotected builds until the surface gate ships.",
             // shadow_companion
-            "Stand quietly near you while you're nearby — passive presence.",
+            "Stand quietly near you while you're nearby, a passive presence.",
             // hangout
             "Sit and idle by a nearby campfire.",
             // cook
@@ -83,7 +83,7 @@ public class ConfigureHobbiesScreen extends Screen {
             // mushrooms
             "Forage mushrooms in the surrounding area.",
             // wander
-            "Take a low-intensity local stroll.\nThis is the default fallback when nothing else fits;\nturn OFF if you want the bot to stand still when idle.",
+            "Take a low-intensity local stroll.\nThis is the default fallback when nothing else fits.\nTurn OFF if you want the bot to stand still when idle.",
             // woodcut
             "Chop a nearby unprotected tree.",
             // collect_dirt
