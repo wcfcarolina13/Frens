@@ -27,6 +27,9 @@ class CraftingStationPolicyTest {
             "craft-station tick-side: no table in reach for {}, not walking (reason={})";
     /** ensureCraftingStation's server-thread split, as the source spells it (its first occurrence). */
     private static final String TICK_GATE = "if (!CraftingStationPolicy.mayWalk(onServerThread))";
+    /** The body of ensureCraftingStation (the public two-argument form delegates to it). */
+    private static final String STATION_SIGNATURE =
+            "private static boolean ensureCraftingStation(ServerPlayerEntity bot, ServerCommandSource source, boolean quiet)";
 
     // ── walking, nudging and carving ─────────────────────────────────────────────────────────
 
@@ -179,7 +182,7 @@ class CraftingStationPolicyTest {
 
     @Test
     void ensureCraftingStationAsksThePolicyBeforeWalkingOrArmingTheCooldown() throws IOException {
-        String body = bodyOf(craftingHelperSource(), "public static boolean ensureCraftingStation(");
+        String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
         assertTrue(body.contains("CraftingStationPolicy.scanHorizontal(")
                 && body.contains("CraftingStationPolicy.scanVertical("), "the scan box must come from the policy");
         assertEquals(3, count(body, "CraftingStationPolicy.acceptKnownTable("),
@@ -191,8 +194,32 @@ class CraftingStationPolicyTest {
     }
 
     @Test
+    void onlyAMadeTableArmsTheTableCraftCooldown() throws IOException {
+        // Field bug C2: a craft that failed for want of planks armed the 60 s cooldown, so a retry
+        // with enough planks skipped crafting the table without a word.
+        String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
+        int craft = body.indexOf("craftCraftingTable(");
+        int arm = body.indexOf("CRAFT_TABLE_CRAFT_COOLDOWN.put(");
+        assertTrue(craft >= 0 && arm > craft, "the cooldown is armed after the table craft, never before it");
+        assertEquals(1, count(body, "CRAFT_TABLE_CRAFT_COOLDOWN.put("));
+        assertGuarded(body, "CRAFT_TABLE_CRAFT_COOLDOWN.put(", "if (crafted)");
+    }
+
+    @Test
+    void aQuietStationLeavesTheTableLinesToItsCaller() throws IOException {
+        // Field bug C: the tool craft's shortfall line names the table, so the station stays quiet.
+        String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
+        assertGuarded(body, "tellStationFailure(bot, source, \"I crafted a crafting table", "if (!quiet)");
+        assertGuarded(body, "sendCraftTableNeededOnce(", "if (!quiet)");
+        String helper = craftingHelperSource();
+        assertTrue(helper.contains("public static boolean ensureCraftingStation(ServerPlayerEntity bot, ServerCommandSource source) {\n"
+                        + "        return ensureCraftingStation(bot, source, false);"),
+                "the public form keeps its chat lines");
+    }
+
+    @Test
     void theServerThreadSplitComesBeforeAnyWalkAndEndsTheCall() throws IOException {
-        String body = bodyOf(craftingHelperSource(), "public static boolean ensureCraftingStation(");
+        String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
         int gate = body.indexOf(TICK_GATE);
         assertTrue(gate >= 0, "ensureCraftingStation lost its server-thread split");
         for (String walk : List.of("clearPathObstructions(", "MovementService.")) {
@@ -210,7 +237,7 @@ class CraftingStationPolicyTest {
 
     @Test
     void theServerThreadClearsTheChatAndReachCooldownsOnlyForAUsableTable() throws IOException {
-        String body = bodyOf(craftingHelperSource(), "public static boolean ensureCraftingStation(");
+        String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
         String split = blockAfter(body, body.indexOf(TICK_GATE));
         String usable = blockAfter(split, split.indexOf("if (ensureStationInteractable("));
         for (String clear : List.of("CRAFT_TABLE_MSG_COOLDOWN.remove(", "CRAFT_TABLE_REACH_FAILURE.remove(")) {
@@ -224,7 +251,7 @@ class CraftingStationPolicyTest {
 
     @Test
     void theServerThreadForgetsAGoneRememberedTableBeforeItsReachTest() throws IOException {
-        String body = bodyOf(craftingHelperSource(), "public static boolean ensureCraftingStation(");
+        String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
         int forget = body.indexOf("LAST_KNOWN_CRAFTING_TABLE.remove(");
         assertTrue(forget >= 0 && forget < body.indexOf("CraftingStationPolicy.acceptKnownTable("),
                 "a gone remembered table must be forgotten before the reach test, or a miss says far-table");
