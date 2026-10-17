@@ -17,8 +17,7 @@ import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 
 /**
  * Handles torch placement for bots during mining operations.
@@ -28,10 +27,6 @@ public final class TorchPlacer {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("torch-placer");
     private static final int LIGHT_THRESHOLD = 7;
-    
-    // Track recently broken torch positions to avoid re-breaking
-    private static final Map<UUID, Set<BlockPos>> RECENTLY_PLACED_TORCHES = new ConcurrentHashMap<>();
-    private static final long TORCH_PROTECTION_MS = 5000; // Protect torches for 5 seconds after placement
 
     private TorchPlacer() {
     }
@@ -50,31 +45,6 @@ public final class TorchPlacer {
         return lightLevel < LIGHT_THRESHOLD;
     }
     
-    /**
-     * Registers a torch as recently placed for protection.
-     * @param botId The bot's UUID
-     * @param pos The torch position
-     */
-    private static void registerPlacedTorch(UUID botId, BlockPos pos) {
-        RECENTLY_PLACED_TORCHES.computeIfAbsent(botId, k -> ConcurrentHashMap.newKeySet()).add(pos);
-        
-        // Schedule removal after protection period
-        new Thread(() -> {
-            try {
-                Thread.sleep(TORCH_PROTECTION_MS);
-                Set<BlockPos> torches = RECENTLY_PLACED_TORCHES.get(botId);
-                if (torches != null) {
-                    torches.remove(pos);
-                    if (torches.isEmpty()) {
-                        RECENTLY_PLACED_TORCHES.remove(botId);
-                    }
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }).start();
-    }
-
     /**
      * Attempts to replace a torch that was just mined at the specified position.
      * This ensures areas don't go dark when torches are accidentally broken.
@@ -112,7 +82,6 @@ public final class TorchPlacer {
             boolean placed = placeTorchAt(bot, world, pos);
             
             if (placed) {
-                registerPlacedTorch(bot.getUuid(), pos);
                 LOGGER.info("Replaced torch at {} for bot {}", pos, bot.getName().getString());
             }
             
@@ -188,7 +157,6 @@ public final class TorchPlacer {
             // Place the torch
             boolean placed = placeTorchAt(bot, world, targetPos);
             if (placed) {
-                registerPlacedTorch(bot.getUuid(), targetPos);
                 LOGGER.info("Placed torch at {} for bot {}", targetPos, bot.getName().getString());
                 return PlacementResult.SUCCESS;
             }
