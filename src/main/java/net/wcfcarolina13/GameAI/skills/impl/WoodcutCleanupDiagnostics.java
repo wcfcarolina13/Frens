@@ -67,20 +67,83 @@ final class WoodcutCleanupDiagnostics {
     static final int EMPTY_MERGE_STOP_STREAK = 2;
 
     /**
-     * Whether the target loop should stop: {@code consecutiveEmptyMerges} async full scans in a row
-     * came back with nothing new while the cached list was empty. Without this the loop relaunched
-     * a scan every second until its deadline.
+     * Whether the target loop should stop: {@code consecutiveEmptyMerges} async scans in a row came
+     * back with nothing new while the cached list was empty, and the scans since the last find have
+     * covered the whole region at least once ({@link ScanCoverage#coveredSinceLastFind}). A scan cut
+     * short by its budget sees only part of the region, so empty merges alone are not "nothing left".
      */
-    static boolean shouldStopEmpty(int consecutiveEmptyMerges) {
-        return consecutiveEmptyMerges >= EMPTY_MERGE_STOP_STREAK;
+    static boolean shouldStopEmpty(int consecutiveEmptyMerges, boolean coveredSinceLastFind) {
+        return coveredSinceLastFind && consecutiveEmptyMerges >= EMPTY_MERGE_STOP_STREAK;
     }
 
     /**
-     * Time one background region scan may take before it returns what it has. Two empty merges
-     * ({@link #EMPTY_MERGE_STOP_STREAK}) then end an empty run in about 2 x 5 s instead of the whole
+     * Time one background region scan may take before it returns what it has. Each scan resumes
+     * where the last one stopped ({@link ScanCoverage}), so a region one scan covers ends an empty
+     * run in about 2 x 5 s, and a bigger one after enough scans to cover it, instead of the whole
      * skill duration: a scan given the skill deadline outlived the loop and never merged.
      */
     static final long ASYNC_SCAN_BUDGET_MS = 5_000L;
+
+    /** Blocks in the inclusive box between two corners, in any corner order. */
+    static long regionVolume(int ax, int ay, int az, int bx, int by, int bz) {
+        return (long) (Math.abs(bx - ax) + 1) * (Math.abs(by - ay) + 1) * (Math.abs(bz - az) + 1);
+    }
+
+    /**
+     * Offset {dx, dy, dz} of scan index {@code index} in a box of the given size, x fastest, then y,
+     * then z. Indices 0 .. volume-1 map one to one onto the box; larger ones wrap.
+     */
+    static int[] offsetAt(long index, int sizeX, int sizeY, int sizeZ) {
+        long volume = (long) sizeX * sizeY * sizeZ;
+        long i = Math.floorMod(index, volume);
+        int dx = (int) (i % sizeX);
+        int dy = (int) ((i / sizeX) % sizeY);
+        int dz = (int) (i / ((long) sizeX * sizeY));
+        return new int[]{dx, dy, dz};
+    }
+
+    /**
+     * How far the bounded region scans of one run have got: the index the next scan starts at,
+     * blocks scanned in total, and blocks scanned since the last time a target turned up. Successive
+     * scans resume at {@code cursor} and wrap at the end, so they cover new ground instead of the
+     * same prefix from the same corner.
+     */
+    record ScanCoverage(long volume, long cursor, long scannedTotal, long scannedSinceLastFind) {
+
+        static ScanCoverage start(long volume) {
+            return new ScanCoverage(Math.max(0L, volume), 0L, 0L, 0L);
+        }
+
+        /** After a scan that looked at {@code scanned} blocks from the cursor; {@code found} resets the empty run. */
+        ScanCoverage afterScan(long scanned, boolean found) {
+            long n = Math.max(0L, scanned);
+            long next = volume <= 0L ? 0L : Math.floorMod(cursor + n, volume);
+            return new ScanCoverage(volume, next, scannedTotal + n, found ? 0L : scannedSinceLastFind + n);
+        }
+
+        /** Targets are being worked: the region must be covered again with nothing new before an empty stop. */
+        ScanCoverage afterFind() {
+            return scannedSinceLastFind == 0L ? this : new ScanCoverage(volume, cursor, scannedTotal, 0L);
+        }
+
+        /** Every block of the region was looked at at least once this run. */
+        boolean fullyCovered() {
+            return scannedTotal >= volume;
+        }
+
+        /** Every block was looked at at least once since the last target turned up. */
+        boolean coveredSinceLastFind() {
+            return scannedSinceLastFind >= volume;
+        }
+
+        /** Share of the region scanned this run, 0..1. */
+        double fraction() {
+            if (volume <= 0L) {
+                return 1.0D;
+            }
+            return Math.min(1.0D, scannedTotal / (double) volume);
+        }
+    }
 
     /** Time the post-loop fallback sweep (scan plus any mining it finds) may take. */
     static final long FALLBACK_SWEEP_BUDGET_MS = 3_000L;
@@ -123,6 +186,17 @@ final class WoodcutCleanupDiagnostics {
         return success && logsMined == 0 && scaffoldMined == 0;
     }
 
+    /** What a run that found nothing says when its scans did not reach the whole region in time. */
+    static final String PARTIAL_SCAN_LINE = "I checked what I could reach in time and found nothing to clean up.";
+
+    /**
+     * A run that would say "Nothing left to clean up here." although its scans never covered the
+     * whole region: it removed nothing, so it cannot vouch for the part it did not look at.
+     */
+    static boolean isUncoveredNothingToDo(boolean success, int logsMined, int scaffoldMined, boolean fullyCovered) {
+        return !fullyCovered && isNothingToDo(success, logsMined, scaffoldMined);
+    }
+
     /** What a run held back only by protection says (no "couldn't reach", which names the wrong cause). */
     static final String PROTECTED_ONLY_LINE = "Some logs are in a protected area, so I left them.";
 
@@ -150,6 +224,14 @@ final class WoodcutCleanupDiagnostics {
      */
     static String playerLine(boolean success, int logsMined, int scaffoldMined) {
         return playerLine(success, logsMined, scaffoldMined, false);
+    }
+
+    /** {@link #playerLine(boolean, int, int, boolean)}, with the honest line for an uncovered empty run. */
+    static String playerLine(boolean success, int logsMined, int scaffoldMined, boolean blockedOnlyByProtection, boolean fullyCovered) {
+        if (isUncoveredNothingToDo(success, logsMined, scaffoldMined, fullyCovered)) {
+            return PARTIAL_SCAN_LINE;
+        }
+        return playerLine(success, logsMined, scaffoldMined, blockedOnlyByProtection);
     }
 
     static String playerLine(boolean success, int logsMined, int scaffoldMined, boolean blockedOnlyByProtection) {

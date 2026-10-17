@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Light-weight tree identification helpers shared by woodcutting logic.
@@ -650,7 +651,44 @@ public final class TreeDetector {
                 spawnBaseWoodcutAllowed);
     }
 
+    /**
+     * Memo of log components a cleanup run has already explored, so every log of one rejected
+     * component does not redo the component BFS. Only a fully enumerated component (not cut off
+     * at the BFS limit) is stored, and only when its profile alone rejects it: its size and its
+     * grounded / leaves / unsupported flags are ORs over the same connected set from whichever log
+     * the BFS starts, so the profile read from the memo is the one a fresh BFS would compute on an
+     * unchanged world. The per-log signals (human blocks, protection, full tree, lone log) are still
+     * computed for every log, so the classification is identical, only the BFS is reused.
+     * Thread-safe: an async region scan writes it.
+     */
+    public static final class CleanupScanMemo {
+        private final Map<Long, CleanupComponentProfile> profiles = new ConcurrentHashMap<>();
+
+        public void clear() {
+            profiles.clear();
+        }
+
+        public int size() {
+            return profiles.size();
+        }
+    }
+
+    /** A profile for a log whose verdict does not read the component (see {@link TreeCleanupClassifier#needsComponentProfile}). */
+    private static final CleanupComponentProfile UNREAD_PROFILE = new CleanupComponentProfile(0, false, false, false, false);
+
+    private static final int CLEANUP_COMPONENT_LIMIT = 64;
+
     public static CleanupLogDisposition classifyCleanupLog(ServerWorld world, BlockPos pos, boolean rememberedLeftover) {
+        return classifyCleanupLog(world, pos, rememberedLeftover, null);
+    }
+
+    /**
+     * {@link #classifyCleanupLog(ServerWorld, BlockPos, boolean)} with a run's component memo
+     * ({@code null} for none). The full-tree check and the component BFS run only when the verdict
+     * reads them; the classifier returns before reading a signal it does not need, so skipping it
+     * gives the same disposition.
+     */
+    public static CleanupLogDisposition classifyCleanupLog(ServerWorld world, BlockPos pos, boolean rememberedLeftover, CleanupScanMemo memo) {
         if (world == null || pos == null || !world.getBlockState(pos).isIn(BlockTags.LOGS)) {
             return new CleanupLogDisposition(CleanupLogDispositionKind.REJECTED_NON_LOG, false, "not-log");
         }
@@ -676,13 +714,17 @@ public final class TreeDetector {
         WoodcutProtectionDecision protectionDecision = getWoodcutProtectionDecision(world, pos, 4);
         boolean protectedTarget = protectionDecision.blocked();
         boolean fullTree = false;
-        try {
-            fullTree = detectTreeAtForWoodcut(world, pos, TreeDetectionMode.STRICT_STANDING).isPresent();
-        } catch (Exception ignored) {
+        if (TreeCleanupClassifier.needsFullTreeCheck(humanAdjacent, protectedTarget)) {
+            try {
+                fullTree = detectTreeAtForWoodcut(world, pos, TreeDetectionMode.STRICT_STANDING).isPresent();
+            } catch (Exception ignored) {
+            }
         }
 
         boolean loneFloating = isCleanupLoneFloatingLog(world, pos);
-        CleanupComponentProfile profile = inspectCleanupLogComponent(world, pos, 64);
+        CleanupComponentProfile profile = TreeCleanupClassifier.needsComponentProfile(humanAdjacent, protectedTarget, fullTree, loneFloating)
+                ? cleanupComponentProfile(world, pos, memo)
+                : UNREAD_PROFILE;
         return classifyCleanupLogFromSignals(
                 false,
                 protectedTarget,
@@ -744,12 +786,32 @@ public final class TreeDetector {
         return true;
     }
 
-    private static CleanupComponentProfile inspectCleanupLogComponent(ServerWorld world, BlockPos start, int limit) {
+    /** The component profile for {@code pos}, from the memo when an explored rejected component holds it. */
+    private static CleanupComponentProfile cleanupComponentProfile(ServerWorld world, BlockPos pos, CleanupScanMemo memo) {
+        if (memo != null) {
+            CleanupComponentProfile cached = memo.profiles.get(pos.asLong());
+            if (cached != null) {
+                return cached;
+            }
+        }
+        Set<BlockPos> visited = new HashSet<>();
+        CleanupComponentProfile profile = inspectCleanupLogComponent(world, pos, CLEANUP_COMPONENT_LIMIT, visited);
+        if (memo != null
+                && !profile.tooLarge()
+                && TreeCleanupClassifier.profileRejects(profile.size(), profile.grounded(), profile.leavesNearby(),
+                        profile.unsupported(), profile.tooLarge())) {
+            for (BlockPos node : visited) {
+                memo.profiles.put(node.asLong(), profile);
+            }
+        }
+        return profile;
+    }
+
+    private static CleanupComponentProfile inspectCleanupLogComponent(ServerWorld world, BlockPos start, int limit, Set<BlockPos> visited) {
         if (world == null || start == null || !world.getBlockState(start).isIn(BlockTags.LOGS)) {
             return new CleanupComponentProfile(0, false, false, false, false);
         }
         Queue<BlockPos> queue = new ArrayDeque<>();
-        Set<BlockPos> visited = new HashSet<>();
         queue.add(start);
         visited.add(start.toImmutable());
 

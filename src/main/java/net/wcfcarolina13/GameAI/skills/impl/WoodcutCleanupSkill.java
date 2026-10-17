@@ -149,10 +149,14 @@ public final class WoodcutCleanupSkill implements Skill {
     private record MineAttemptResult(boolean mined, boolean visibilityChanged, String failureReason) {
     }
 
-    /** {@code complete} is false when the region scan stopped at its deadline (or an abort) before the last block. */
+    /**
+     * {@code complete} is false when the region scan stopped at its deadline (or an abort) before the
+     * last block. {@code scanned} is how many region blocks it looked at from its start index.
+     */
     private record CleanupTargetCollection(List<CleanupTarget> targets,
                                            WoodcutCleanupDiagnostics.CleanupScanStats stats,
-                                           boolean complete) {
+                                           boolean complete,
+                                           long scanned) {
     }
 
     private final class CleanupScanAccumulator {
@@ -180,10 +184,10 @@ public final class WoodcutCleanupSkill implements Skill {
         }
 
         CleanupTargetCollection build(ServerPlayerEntity bot) {
-            return build(bot, true);
+            return build(bot, true, 0L);
         }
 
-        CleanupTargetCollection build(ServerPlayerEntity bot, boolean complete) {
+        CleanupTargetCollection build(ServerPlayerEntity bot, boolean complete, long scanned) {
             List<CleanupTarget> targets = new ArrayList<>(orderedTargets.values());
             targets.sort(Comparator.<CleanupTarget>comparingInt(t -> priorityFor(t.kind()))
                     .thenComparingInt(t -> hasLineOfSight(bot, Vec3d.ofCenter(t.pos())) ? 0 : 1)
@@ -215,7 +219,8 @@ public final class WoodcutCleanupSkill implements Skill {
                             rejectedFullTree,
                             rejectedGrounded,
                             summarizeReasons(protectedReasons)),
-                    complete);
+                    complete,
+                    scanned);
         }
 
         private String summarizeReasons(Map<String, Integer> reasons) {
@@ -318,6 +323,10 @@ public final class WoodcutCleanupSkill implements Skill {
         // Persists across rescans so we skip expensive BFS/tree-detection on unchanged blocks.
         // ConcurrentHashMap-backed for thread safety during async scans.
         Set<Long> rejectionCache = ConcurrentHashMap.newKeySet();
+        // Explored rejected log components, so each log of one rejected tree skips the BFS.
+        TreeDetector.CleanupScanMemo componentMemo = new TreeDetector.CleanupScanMemo();
+        // Each bounded scan resumes where the last stopped; an empty stop needs the whole region seen.
+        WoodcutCleanupDiagnostics.ScanCoverage coverage = WoodcutCleanupDiagnostics.ScanCoverage.start(regionVolume(scanMin, scanMax));
 
         LOGGER.info("woodcut_cleanup starting: origin={} radius={} vertical={} maxLogs={} maxScaffold={} sweep={} region=[{} -> {}]",
                 origin.toShortString(), radius, verticalRange, maxLogs, maxScaffold, sweepDrops,
@@ -367,18 +376,20 @@ public final class WoodcutCleanupSkill implements Skill {
                                 added++;
                             }
                         }
-                        LOGGER.info("woodcut_cleanup async scan merged: {} new targets, {} total, complete={} budgetMs={}",
+                        boolean emptyMerge = added == 0 && cachedTargets.isEmpty();
+                        coverage = coverage.afterScan(fullScan.scanned(), !emptyMerge);
+                        LOGGER.info("woodcut_cleanup async scan merged: {} new targets, {} total, complete={} budgetMs={} scanned={} coverage={} sinceLastFind={}/{}",
                                 added, cachedTargets.size(), fullScan.complete(),
-                                WoodcutCleanupDiagnostics.ASYNC_SCAN_BUDGET_MS);
-                        consecutiveEmptyMerges = (added == 0 && cachedTargets.isEmpty())
-                                ? consecutiveEmptyMerges + 1
-                                : 0;
+                                WoodcutCleanupDiagnostics.ASYNC_SCAN_BUDGET_MS, fullScan.scanned(),
+                                String.format(Locale.ROOT, "%.2f", coverage.fraction()),
+                                coverage.scannedSinceLastFind(), coverage.volume());
+                        consecutiveEmptyMerges = emptyMerge ? consecutiveEmptyMerges + 1 : 0;
                     } catch (Exception e) {
                         LOGGER.warn("woodcut_cleanup async scan failed: {}", e.getMessage());
                     }
                     asyncScan = null;
-                    if (WoodcutCleanupDiagnostics.shouldStopEmpty(consecutiveEmptyMerges)) {
-                        LOGGER.info("woodcut_cleanup: {} full scans in a row found nothing to do; finishing",
+                    if (WoodcutCleanupDiagnostics.shouldStopEmpty(consecutiveEmptyMerges, coverage.coveredSinceLastFind())) {
+                        LOGGER.info("woodcut_cleanup: {} scans in a row found nothing to do and covered the region; finishing",
                                 consecutiveEmptyMerges);
                         break;
                     }
@@ -399,7 +410,9 @@ public final class WoodcutCleanupSkill implements Skill {
                             rememberedTargets, overheadTargets, attemptedTargets, logsMined);
 
                     // Launch full region scan in background (thread-safe: read-only world access).
-                    if (asyncScan == null || asyncScan.isDone()) {
+                    // Only once the last one merged: a finished scan not merged yet would be dropped,
+                    // and the next scan must start at the cursor the last one left.
+                    if (asyncScan == null) {
                         final Map<Long, Long> cooldownSnapshot = new HashMap<>(failedLogCooldowns);
                         final BlockPos asyncScanMin = scanMin;
                         final BlockPos asyncScanMax = scanMax;
@@ -408,15 +421,18 @@ public final class WoodcutCleanupSkill implements Skill {
                         final long asyncDeadline = WoodcutCleanupDiagnostics.boundedScanDeadline(
                                 System.currentTimeMillis(), deadline, WoodcutCleanupDiagnostics.ASYNC_SCAN_BUDGET_MS);
                         final boolean asyncFloatingOnly = floatingLogsOnly;
+                        final long asyncStartIndex = coverage.cursor();
                         asyncScan = CompletableFuture.supplyAsync(() ->
                                 collectCleanupTargets(world, bot, asyncScanMin, asyncScanMax,
                                         asyncDeadline, asyncFloatingOnly, cooldownSnapshot,
-                                        floaterMemory, rejectionCache));
+                                        floaterMemory, rejectionCache, asyncStartIndex, componentMemo));
                     }
                 }
                 if (cachedTargets.isEmpty()) {
-                    // No fast targets — wait briefly for async scan to finish.
-                    if (asyncScan != null && !asyncScan.isDone()) {
+                    // No fast targets: wait briefly for the async scan, then merge it at the top. A scan
+                    // that already finished but is not merged yet goes straight back to the merge too,
+                    // never into the empty-pass / bounded-stop lines below.
+                    if (asyncScan != null) {
                         for (int waitAttempt = 0; waitAttempt < 4 && !asyncScan.isDone(); waitAttempt++) {
                             sleepQuiet(250L);
                             if (SkillManager.shouldAbortSkill(bot)) {
@@ -460,6 +476,9 @@ public final class WoodcutCleanupSkill implements Skill {
                         emptyVisibleLogPasses = 0;
                         sinceLastScan = RESCAN_INTERVAL;
                         rejectionCache.clear();
+                        componentMemo.clear();
+                        coverage = WoodcutCleanupDiagnostics.ScanCoverage.start(regionVolume(scanMin, scanMax));
+                        consecutiveEmptyMerges = 0;
                         continue;
                     }
                     // Only rescan once more — don't spin launching async scans endlessly.
@@ -470,6 +489,7 @@ public final class WoodcutCleanupSkill implements Skill {
                 }
                 emptyVisibleLogPasses = 0;
                 consecutiveEmptyMerges = 0;
+                coverage = coverage.afterFind();
 
                 // ── Pick next target from cached list ───────────────────────
                 CleanupTarget next = cachedTargets.remove(0);
@@ -775,20 +795,28 @@ public final class WoodcutCleanupSkill implements Skill {
                 floatingLogsOnly,
                 new HashMap<>(),
                 floaterMemory,
-                new HashSet<>() // fresh cache for final count — we want an accurate picture
+                new HashSet<>(), // fresh cache for final count — we want an accurate picture
+                coverage.cursor(), // resume: a truncated final count looks at ground the loop did not reach
+                new TreeDetector.CleanupScanMemo()
         );
         WoodcutCleanupDiagnostics.CleanupScanStats remainingStats = remainingCollection.stats();
         List<CleanupTarget> remainingVisibleLogs = remainingCollection.targets();
+        coverage = coverage.afterScan(remainingCollection.scanned(), !remainingVisibleLogs.isEmpty());
         int remainingOverhead = (int) remainingVisibleLogs.stream()
                 .filter(t -> t.kind() == CleanupTargetKind.OVERHEAD_SUSPENDED)
                 .count();
-        boolean success = WoodcutCleanupDiagnostics.isSuccess(
+        boolean scanSuccess = WoodcutCleanupDiagnostics.isSuccess(
                 remainingRemembered,
                 remainingOverhead,
                 remainingVisibleLogs.size(),
                 logsMined,
                 attemptedTargets,
                 remainingStats);
+        boolean fullyCovered = coverage.fullyCovered();
+        // Nothing removed and part of the region never scanned: not a verdict that nothing is left.
+        boolean uncoveredEmpty = WoodcutCleanupDiagnostics.isUncoveredNothingToDo(
+                scanSuccess, logsMined, scaffoldMined, fullyCovered);
+        boolean success = scanSuccess && !uncoveredEmpty;
         String summary = WoodcutCleanupDiagnostics.buildCompletionSummary(
                 success,
                 logsMined,
@@ -801,12 +829,14 @@ public final class WoodcutCleanupSkill implements Skill {
                 remainingVisibleLogs.size(),
                 remainingStats
         );
-        LOGGER.info("woodcut_cleanup completed: {} [{} remainingRemembered={} remainingOverhead={} finalScanComplete={}]",
+        LOGGER.info("woodcut_cleanup completed: {} [{} remainingRemembered={} remainingOverhead={} finalScanComplete={} coverage={} scanned={}/{} uncoveredEmpty={}]",
                 summary, remainingStats.formatCounts(), remainingRemembered, remainingOverhead,
-                remainingCollection.complete());
+                remainingCollection.complete(),
+                String.format(Locale.ROOT, "%.2f", coverage.fraction()),
+                coverage.scannedTotal(), coverage.volume(), uncoveredEmpty);
         boolean blockedOnlyByProtection = WoodcutCleanupDiagnostics.isBlockedOnlyByProtection(
-                success, remainingRemembered, remainingOverhead, remainingVisibleLogs.size(), remainingStats);
-        String playerLine = WoodcutCleanupDiagnostics.playerLine(success, logsMined, scaffoldMined, blockedOnlyByProtection);
+                scanSuccess, remainingRemembered, remainingOverhead, remainingVisibleLogs.size(), remainingStats);
+        String playerLine = WoodcutCleanupDiagnostics.playerLine(scanSuccess, logsMined, scaffoldMined, blockedOnlyByProtection, fullyCovered);
         return success
                 ? SkillExecutionResult.success(playerLine)
                 : SkillExecutionResult.failure(playerLine);
@@ -867,6 +897,10 @@ public final class WoodcutCleanupSkill implements Skill {
         }
         memory.add(pos.asLong());
         trimScaffoldMemoryInPlace(memory);
+    }
+
+    private static long regionVolume(BlockPos min, BlockPos max) {
+        return WoodcutCleanupDiagnostics.regionVolume(min.getX(), min.getY(), min.getZ(), max.getX(), max.getY(), max.getZ());
     }
 
     private boolean isWithinRegion(BlockPos pos, BlockPos min, BlockPos max) {
@@ -935,27 +969,36 @@ public final class WoodcutCleanupSkill implements Skill {
                                                           boolean floatingLogsOnly,
                                                           Map<Long, Long> failedCooldowns,
                                                           Set<Long> floaterMemory,
-                                                          Set<Long> rejectionCache) {
+                                                          Set<Long> rejectionCache,
+                                                          long startIndex,
+                                                          TreeDetector.CleanupScanMemo componentMemo) {
         CleanupScanAccumulator accumulator = new CleanupScanAccumulator();
         pruneExpiredCooldowns(failedCooldowns);
 
         collectRememberedCleanupTargets(world, min, max, failedCooldowns, floaterMemory, accumulator);
         collectImmediateOverheadCleanupTargets(world, bot, min, max, failedCooldowns, accumulator);
 
-        int scanned = 0;
+        // Walk the box from startIndex and wrap, so a scan cut short by its deadline is resumed by
+        // the next one instead of repeating the same prefix from the same corner.
+        int x0 = Math.min(min.getX(), max.getX());
+        int y0 = Math.min(min.getY(), max.getY());
+        int z0 = Math.min(min.getZ(), max.getZ());
+        int sizeX = Math.abs(max.getX() - min.getX()) + 1;
+        int sizeY = Math.abs(max.getY() - min.getY()) + 1;
+        int sizeZ = Math.abs(max.getZ() - min.getZ()) + 1;
+        long volume = (long) sizeX * sizeY * sizeZ;
+        long scanned = 0L;
         boolean complete = true;
-        for (BlockPos pos : BlockPos.iterate(min, max)) {
-            scanned++;
-            if ((scanned & 0x7F) == 0) {
-                if (System.currentTimeMillis() >= deadline) {
-                    complete = false;
-                    break;
-                }
-                if (SkillManager.shouldAbortSkill(bot)) {
+        for (long i = 0L; i < volume; i++) {
+            if (i > 0L && (i & 0x7FL) == 0L) {
+                if (System.currentTimeMillis() >= deadline || SkillManager.shouldAbortSkill(bot)) {
                     complete = false;
                     break;
                 }
             }
+            scanned = i + 1L;
+            int[] offset = WoodcutCleanupDiagnostics.offsetAt(startIndex + i, sizeX, sizeY, sizeZ);
+            BlockPos pos = new BlockPos(x0 + offset[0], y0 + offset[1], z0 + offset[2]);
             long packed = pos.asLong();
             if (accumulator.orderedTargets.containsKey(packed)) {
                 continue;
@@ -972,7 +1015,7 @@ public final class WoodcutCleanupSkill implements Skill {
                 continue;
             }
             CleanupTarget target = new CleanupTarget(pos.toImmutable(), CleanupTargetKind.GENERIC_FLOATING);
-            TreeDetector.CleanupLogDisposition disposition = TreeDetector.classifyCleanupLog(world, pos, false);
+            TreeDetector.CleanupLogDisposition disposition = TreeDetector.classifyCleanupLog(world, pos, false, componentMemo);
             if (!disposition.actionable()) {
                 accumulator.record(pos, null, disposition);
                 rejectionCache.add(packed);
@@ -980,7 +1023,7 @@ public final class WoodcutCleanupSkill implements Skill {
             }
             accumulator.record(pos, target, disposition);
         }
-        return accumulator.build(bot, complete);
+        return accumulator.build(bot, complete, scanned);
     }
 
     private void collectRememberedCleanupTargets(ServerWorld world,

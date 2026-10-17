@@ -58,6 +58,37 @@ final class TreeCleanupClassifier {
         return rejected(CleanupLogDispositionKind.REJECTED_GROUNDED_OR_NON_FLOATER, "grounded-or-non-floater");
     }
 
+    /**
+     * Whether {@link #classifyFromSignals} (not a remembered leftover) reads {@code fullTree} and
+     * what follows it: a human-adjacent or protected log is decided before that.
+     */
+    static boolean needsFullTreeCheck(boolean humanAdjacent, boolean blockedProtected) {
+        return !humanAdjacent && !blockedProtected;
+    }
+
+    /**
+     * Whether {@link #classifyFromSignals} (not a remembered leftover) reads the component
+     * profile: every earlier signal returns before it.
+     */
+    static boolean needsComponentProfile(boolean humanAdjacent, boolean blockedProtected, boolean fullTree, boolean loneFloating) {
+        return needsFullTreeCheck(humanAdjacent, blockedProtected) && !fullTree && !loneFloating;
+    }
+
+    /**
+     * Whether a log that reaches the component step is rejected by its component profile alone
+     * (neither a suspended fragment nor an orphan cluster). Every log of one fully explored
+     * component that reaches this step gets the same answer.
+     */
+    static boolean profileRejects(int componentSize,
+                                  boolean componentGrounded,
+                                  boolean componentLeavesNearby,
+                                  boolean componentUnsupported,
+                                  boolean componentTooLarge) {
+        return !classifyFromSignals(false, false, "", false, false, false,
+                componentSize, componentGrounded, componentLeavesNearby, componentUnsupported, componentTooLarge)
+                .actionable();
+    }
+
     private static CleanupLogDisposition actionable(CleanupLogDispositionKind kind, String reason) {
         return new CleanupLogDisposition(kind, true, reason);
     }
