@@ -134,7 +134,7 @@ public final class BotIdentityService {
 
         List<String> inventoryFiles = findInventorySnapshots(server, normalizedAlias, profileAliasKeys);
         if (inventoryFiles.size() > 1) {
-            warnings.add("multiple inventory snapshots exist for alias; verify UUID consistency");
+            warnings.add("multiple inventory snapshots exist for alias, verify UUID consistency");
         }
 
         List<String> relatedAliases = collectRelatedAliasKeys(

@@ -118,7 +118,7 @@
   {
     "quest_id": "curiosity_take_a_look_around_here",
     "category": "curiosity",
-    "intent": "Hold up—let's take a look around this place.",
+    "intent": "Hold up, let's take a look around this place.",
     "constraints": {
       "environment_predicates": ["structure_like_block_cluster"],
       "entity_predicates": [],
@@ -195,7 +195,7 @@
   {
     "quest_id": "curiosity_check_the_lighting_here",
     "category": "curiosity",
-    "intent": "Hold up—do we need more light here?",
+    "intent": "Hold up, do we need more light here?",
     "constraints": {
       "environment_predicates": ["structure_like_block_cluster", "low_light"],
       "entity_predicates": [],

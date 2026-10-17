@@ -921,7 +921,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.LockableBlockService.clearAll();
             net.wcfcarolina13.GameAI.services.ProtectedZoneService.clearAll();
             net.wcfcarolina13.GameAI.services.TravelWaitService.clear();
-            net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
+            net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopping, aborting active tasks.");
             for (ServerPlayerEntity bot : server.getPlayerManager().getPlayerList()) {
                 if (!(bot instanceof net.wcfcarolina13.Entity.createFakePlayer)) {
                     continue;
@@ -971,7 +971,7 @@ public class Frens implements ModInitializer {
             BotEventHandler.resetAll();
             AutoFaceEntity.onServerStopped(server);
             // Integrated-server world reloads keep mod static state alive. Ensure task locks don't leak across reloads.
-            net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopped; clearing task state.");
+            net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopped, clearing task state.");
             // Integrated-server world reloads also keep scheduler state alive; clear idle-hobby backoff so
             // "idle hobbies = on" resumes automatically when re-entering the world.
             net.wcfcarolina13.GameAI.services.BotIdleHobbiesService.resetSession();

@@ -776,7 +776,7 @@ public final class LearningModeService {
         SamplingConfig sampling = computeSamplingConfig(profile, detail, radiusOverride, tickHzOverride);
         UUID pairedBotUuid = resolvePairedBotUuid(server, pairedBotAlias);
         if (pairedBotAlias != null && pairedBotUuid == null) {
-            out.add("Paired bot alias not found ('" + pairedBotAlias + "'); recording player-only.");
+            out.add("Paired bot alias not found ('" + pairedBotAlias + "'), recording player-only.");
         }
 
         long sessionToken = Math.max(1L, SESSION_COUNTER.incrementAndGet());
@@ -1482,7 +1482,7 @@ public final class LearningModeService {
         Path summaryPath = sessionDir.resolve("summary.json");
         Path sessionPath = sessionDir.resolve("session.json");
         if (!Files.exists(summaryPath) && Files.exists(sessionPath)) {
-            out.add("summary.json missing; session may still be active or ended abruptly.");
+            out.add("summary.json missing. The session may still be active or ended abruptly.");
         }
         JsonObject summary = readJson(summaryPath);
         JsonObject session = readJson(sessionPath);

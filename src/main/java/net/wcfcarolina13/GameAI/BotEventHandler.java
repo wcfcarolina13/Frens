@@ -1390,7 +1390,7 @@ public class BotEventHandler {
             return "Bot is busy executing another task. Try again after it finishes.";
         }
         if (target == null) {
-            return "Unable to follow — target not found.";
+            return "Unable to follow, target not found.";
         }
         registerBot(bot);
         setFollowTarget(bot, target.getUuid());
@@ -1445,7 +1445,7 @@ public class BotEventHandler {
                                         double stopRange,
                                         boolean allowRecoverySkills) {
         if (bot == null || fixedGoal == null) {
-            return "Unable to come — destination not found.";
+            return "Unable to come, destination not found.";
         }
         registerBot(bot);
         setFollowTarget(bot, commander != null ? commander.getUuid() : null);
@@ -1540,7 +1540,7 @@ public class BotEventHandler {
             return "Bot is busy executing another task. Try again after it finishes.";
         }
         if (target == null) {
-            return "Unable to follow — target not found.";
+            return "Unable to follow, target not found.";
         }
         registerBot(bot);
         setFollowTarget(bot, target.getUuid());
@@ -5173,7 +5173,7 @@ public class BotEventHandler {
             if (skyVisible && !inSafeZone) {
                 int steps = Math.min(12, Math.max(3, dyBlocks + 1));
                 String pillarAnnounce = bot.getName().getString()
-                        + " is blocked getting to your last location; attempting to pillar up " + steps + " blocks.";
+                        + " is blocked getting to your last location. Attempting to pillar up " + steps + " blocks.";
 
                 state.comeRerouteAttempts = 0;
                 state.comeNextRerouteTick = 0L;
@@ -5204,7 +5204,7 @@ public class BotEventHandler {
                             boolean success = ScaffoldService.pillarUp(bot, finalSteps, false);
                             String resultMsg = success
                                     ? "Pillar-up complete (" + finalSteps + " blocks)."
-                                    : "Pillar-up failed — could not place all blocks.";
+                                    : "Pillar-up failed. Could not place all blocks.";
                             LOGGER.info("[ComeRecovery] pillar-up-result bot={} goal={} success={} steps={}",
                                     bot.getName().getString(),
                                     goal.toShortString(),
@@ -5261,7 +5261,7 @@ public class BotEventHandler {
             if (emptySlots < 2) {
                 LOGGER.info("[ComeRecovery] launch-skip bot={} goal={} reason=inventory-full emptySlots={}",
                         bot.getName().getString(), goal.toShortString(), emptySlots);
-                sendBotMessage(bot, "I can't mine my way to you — my inventory is full. Please clear some space or come closer.");
+                sendBotMessage(bot, "I can't mine my way to you, my inventory is full. Please clear some space or come closer.");
                 return false;
             }
         }
@@ -5302,7 +5302,7 @@ public class BotEventHandler {
         }
 
         String announce = bot.getName().getString()
-                + " is blocked getting to your last location; attempting " + skillName + " (" + rawArgs + ").";
+                + " is blocked getting to your last location. Attempting " + skillName + " (" + rawArgs + ").";
 
         // Avoid spamming skill launches.
         state.comeRerouteAttempts = 0;
