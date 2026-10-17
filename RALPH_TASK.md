@@ -3,7 +3,14 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-16 (1.1.257) — next session starts here
+## Session Handoff 2026-10-16 (1.1.258) — next session starts here
+
+**State:** main = origin/main @ 1.1.258. Suite 2628 green. 1.1.258 = retrieval fetches only the death's drops, trips keep
+their action across a reload, a bot in transit is not auto-spawned back (older bug). Field items: Phase 6ay.
+**Next:** skills build (woodcut unstandable stands, ranged hit pauses a task, cancelled mining INFO; reviewed, fixed) as
+1.1.259, then the player-text sweep. Everything in the 1.1.257 block below still applies.
+
+## Session Handoff 2026-10-16 (1.1.257) — superseded
 
 **State:** main = origin/main @ 1.1.257. Suite 2611 green. 1.1.257 = dig-down dawn climb-out, shelter exits hold the lock,
 skip logs once a night, cliff seal feet first, dead external override removed. Field items: Phase 6ax.

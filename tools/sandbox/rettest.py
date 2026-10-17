@@ -5,6 +5,9 @@ Stages:
   bot      Smokey dies holding 32 cobblestone, Wally is sent to fetch it; prints the [Retrieve] and travel lines
   lava     Smokey dies to lava damage, the retrieval must be refused
   keep     keepInventory on, the retrieval must be refused
+  stranger Smokey dies, 5 dirt is dropped 3 blocks away by "someone else": only the death drops are targeted
+  depart   start a retrieval and return at once (for the reload check: save_and_quit, relaunch, grep
+           'Restored post-arrival action' and the sweep lines)
 """
 import json, re, sys, time, urllib.request
 
@@ -68,5 +71,15 @@ elif stage == "keep":
     chat("/kill Smokey", 8)
     chat("/bot retrieve Wally Smokey", 8)
     chat("/gamerule keep_inventory false")
+elif stage == "stranger":
+    setup(False)
+    chat("/kill Smokey", 6)
+    chat('/summon minecraft:item 103 72 100 {Item:{id:"minecraft:dirt",count:5}}', 2)
+    chat('/summon minecraft:item 97 72 100 {Item:{id:"minecraft:dirt",count:5}}', 2)
+    chat("/bot retrieve Wally Smokey", 60)
+elif stage == "depart":
+    setup(False)
+    chat("/kill Smokey", 6)
+    chat("/bot retrieve Wally Smokey", 2)
 show(m)
 print(cmd(cmd="bot_state", name="Wally")[:300])

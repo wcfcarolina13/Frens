@@ -98,7 +98,7 @@ semicolons in player-facing text, docs and the in-game Guide updated in the same
   `companionDied*` fields stay for the resurrection gate. Resurrection no longer wipes the bot's own record. Ruling,
   recommended.
 - Flow: owner only. Fast travel to a safe standing spot next to the death position (cross-dimension allowed, no travel
-  cooldown, normal food cost), abort if the target world is unavailable. On arrival, sweep everything within 8 blocks for
+  cooldown, normal food cost), abort if the target world is unavailable. On arrival, sweep the items that dropped at that death (1.1.258; everything within 8 blocks before) for
   about 3 passes. **(Bradley: come back)** Fast travel back to whoever sent it and report the count. If they are offline
   or unreachable, it stays put and reports.
 - Refuse lava and void deaths with a clear reason. Warn but go for a mob kill. Tell the player items last about 5 minutes

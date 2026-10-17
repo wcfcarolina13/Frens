@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Retrieval fetches only the death's own drops and survives a reload; a bot mid-trip is no longer auto-spawned back home; 1.1.258 (2026-10-16)
+
+Follow-ups to 1.1.255 death retrieval.
+
+- **Only the items that dropped at that death** (`1978eb14`, `826d6237`, `3bec7bbb`). At death, the items that were just spawned around the body are tagged in the death record (Minecraft gives death drops no owner, checked against the 1.21.11 code, so this is done at the moment of death). The retrieval sweep then targets only those (pure `DeathDropFilterPolicy`), and other players' items nearby are left alone (anything the bot walks over can still be picked up, a vanilla rule). The action now names whose death it is (`retrieve:<mode>:<who>`). Sandbox: `drops=1` at death, `sweeping ... tagged=1`, `picked=32`, stranger dirt left on the ground. Guide text updated.
+- **A retrieval or chest trip survives a reload** (`437ceff5`, `b00a9813`). The after-arrival action is saved with the pending trip, which also now records which save it belongs to: a trip from one world no longer lands in another, and other worlds' trips are kept in the file. The sweep filter and no-offload flags reset with the session.
+- **A bot mid-trip is not auto-spawned back** (`b7a63946`, found in the sandbox, older than these builds). On load, auto-spawn ran `/bot spawn`, which cancels a trip in progress, so any bot fast travelling when the world closed was put back at its last position and its trip lost. Auto-spawn now skips a bot that is in transit, and the trip arrives. Sandbox: `Restored post-arrival action`, `Auto-spawn skipped for Wally: in transit`, arrival, filtered sweep, return.
+- **Rulings (cost if wrong):** sunset skill-resume trips are not saved across a reload (they run a stored command, cost: the bot arrives and does not resume). Vanilla walk-over pickup stays (needs an item mixin). If a session cannot read its world key, saved trips stay in the file untouched and nothing is restored that session.
+- **Review (Fable):** merge-ready, minors fixed (`b00a9813`).
+- **Tests:** 2611 → 2628. **Field checks:** Phase 6ay.
+
 ## Dig-down climbs out at dawn, shelter exits hold the lock, quieter shelter logs, cliff seals feet first, dead override removed; 1.1.257 (2026-10-16)
 
 Follow-ups from the 2026-10-16 sandbox runs.
