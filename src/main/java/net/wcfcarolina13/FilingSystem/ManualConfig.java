@@ -491,15 +491,6 @@ public class ManualConfig {
         playerAutoAcceptPreciousFoods.put(playerUuid.toString(), value);
     }
 
-    /** @deprecated Legacy accessor. Use {@link #getBotSpawnPointsByWorld()} instead. */
-    @Deprecated
-    public Map<String, BotSpawn> getBotSpawnPoints() {
-        if (botSpawnPoints == null) {
-            botSpawnPoints = new HashMap<>();
-        }
-        return botSpawnPoints;
-    }
-
     // ── Per-world BotSpawn accessors ──
 
     public Map<String, Map<String, BotSpawn>> getBotSpawnPointsByWorld() {
@@ -509,26 +500,11 @@ public class ManualConfig {
         return botSpawnPointsByWorld;
     }
 
-    /**
-     * Returns the BotSpawn for the given alias in the given world.
-     * If a legacy entry exists (from pre-per-world config) and no world-specific
-     * entry is found, migrates the legacy entry to the provided worldKey.
-     */
+    /** Returns the BotSpawn for the given alias in the given world, or null when there is none. */
     public BotSpawn getBotSpawn(String alias, String worldKey) {
-        if (alias == null || alias.isBlank()) return null;
+        if (alias == null || alias.isBlank() || worldKey == null || worldKey.isBlank()) return null;
         Map<String, BotSpawn> worldMap = resolveNestedAliasEntry(getBotSpawnPointsByWorld(), alias);
-        if (worldMap == null) return null;
-        if (worldKey != null && !worldKey.isBlank()) {
-            BotSpawn spawn = worldMap.get(worldKey);
-            if (spawn != null) return spawn;
-            // Migrate legacy entry on first per-world access.
-            BotSpawn legacy = worldMap.remove("_legacy");
-            if (legacy != null) {
-                worldMap.put(worldKey, legacy);
-                return legacy;
-            }
-        }
-        return null;
+        return worldMap == null ? null : worldMap.get(worldKey);
     }
 
     public void setBotSpawn(String alias, String worldKey, BotSpawn spawn) {
@@ -539,8 +515,6 @@ public class ManualConfig {
         if (key == null) key = alias.trim();
         Map<String, BotSpawn> worldMap = getBotSpawnPointsByWorld().computeIfAbsent(key, ignored -> new HashMap<>());
         worldMap.put(worldKey, spawn);
-        // Clear legacy entry if present since we now have a real worldKey.
-        worldMap.remove("_legacy");
     }
 
     public void clearBotSpawn(String alias, String worldKey) {
@@ -619,8 +593,6 @@ public class ManualConfig {
         // From per-world maps
         if (botSpawnPointsByWorld != null) aliases.addAll(botSpawnPointsByWorld.keySet());
         if (botControlsByWorld != null) aliases.addAll(botControlsByWorld.keySet());
-        // From legacy maps (in case migration hasn't happened yet)
-        if (botSpawnPoints != null) aliases.addAll(botSpawnPoints.keySet());
         // From identity maps
         if (botGameProfile != null) aliases.addAll(botGameProfile.keySet());
         aliases.remove("default");

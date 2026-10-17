@@ -69,15 +69,15 @@ class RosterScopePolicyTest {
         assertTrue(RosterScopePolicy.isCurrentWorldKey("Nirn", HERE, "Nirn"));
         assertFalse(RosterScopePolicy.isCurrentWorldKey("Nirn#0000beef", HERE, "Nirn"));
         assertFalse(RosterScopePolicy.isCurrentWorldKey("test 1#b5d170e5", HERE, "Nirn"));
-        assertFalse(RosterScopePolicy.isCurrentWorldKey("_legacy", HERE, "Nirn"));
+        assertFalse(RosterScopePolicy.isCurrentWorldKey(" ", HERE, "Nirn"));
         assertFalse(RosterScopePolicy.isCurrentWorldKey("", HERE, "Nirn"));
         assertFalse(RosterScopePolicy.isCurrentWorldKey(null, HERE, "Nirn"));
         assertFalse(RosterScopePolicy.isCurrentWorldKey("Nirn", HERE, " "));
     }
 
     @Test
-    void legacySpawnKeyIsNotAWorld() {
-        assertTrue(RosterScopePolicy.isUnscopedKey("_legacy"));
+    void blankKeyIsNotAWorld() {
+        assertTrue(RosterScopePolicy.isUnscopedKey(""));
         assertTrue(RosterScopePolicy.isUnscopedKey(" "));
         assertTrue(RosterScopePolicy.isUnscopedKey(null));
         assertFalse(RosterScopePolicy.isUnscopedKey(HERE));

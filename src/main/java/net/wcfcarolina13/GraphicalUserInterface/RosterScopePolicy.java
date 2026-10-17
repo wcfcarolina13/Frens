@@ -10,8 +10,8 @@ import java.util.Set;
  * player ever made in any world. Pure so it is unit tested.
  *
  * <p>A companion belongs to this world when it has a spawn point or a saved position under the
- * current world key. A companion with no per-world record anywhere (never persisted, or only a
- * pre per-world legacy spawn) stays in this world, because nothing says it came from elsewhere.
+ * current world key. A companion with no per-world record anywhere (never persisted) stays in
+ * this world, because nothing says it came from elsewhere.
  * When the current world key is unknown (a multiplayer client has no integrated server) every
  * companion stays in this world, which is the roster's behaviour before the split.
  */
@@ -66,10 +66,10 @@ public final class RosterScopePolicy {
     /**
      * Whether a per-world store key counts as the current world: the save fingerprint, or the
      * pre-fingerprint level-name key that the world-state store still migrates on load.
-     * {@code "_legacy"} spawn entries and blank keys never count as any world.
+     * Blank keys never count as any world.
      */
     public static boolean isCurrentWorldKey(String storeKey, String currentFingerprint, String currentLevelName) {
-        if (storeKey == null || storeKey.isBlank() || isUnscopedKey(storeKey)) {
+        if (isUnscopedKey(storeKey)) {
             return false;
         }
         if (currentFingerprint != null && storeKey.equals(currentFingerprint)) {
@@ -78,8 +78,8 @@ public final class RosterScopePolicy {
         return currentLevelName != null && !currentLevelName.isBlank() && storeKey.equals(currentLevelName);
     }
 
-    /** True for keys that do not name a world ({@code "_legacy"} spawn entries, blank keys). */
+    /** True for keys that do not name a world (null or blank keys). */
     public static boolean isUnscopedKey(String storeKey) {
-        return storeKey == null || storeKey.isBlank() || "_legacy".equals(storeKey);
+        return storeKey == null || storeKey.isBlank();
     }
 }

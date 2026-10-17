@@ -51,11 +51,8 @@ public final class BotIdentityService {
         Map<String, ManualConfig.BotOwnership> ownerMap = config != null && config.getBotOwnership() != null
                 ? config.getBotOwnership()
                 : Collections.emptyMap();
-        Map<String, ManualConfig.BotSpawn> spawnMap = config != null && config.getBotSpawnPoints() != null
-                ? config.getBotSpawnPoints()
-                : Collections.emptyMap();
-        // Also include aliases from per-world spawn data
-        Set<String> spawnKeySet = new java.util.LinkedHashSet<>(spawnMap.keySet());
+        // Bot spawns live only in the per-world map (the global map is migrated away on load).
+        Set<String> spawnKeySet = new java.util.LinkedHashSet<>();
         if (config != null && config.getBotSpawnPointsByWorld() != null) {
             spawnKeySet.addAll(config.getBotSpawnPointsByWorld().keySet());
         }
