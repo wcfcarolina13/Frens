@@ -359,10 +359,17 @@ class CraftingStationPolicyTest {
     }
 
     @Test
-    void tableCraftedAsAStationSubStepSaysNothingInChat() throws IOException {
+    void tableCraftedAsAStationSubStepIsQuietOnlyWhenTheStationIs() throws IOException {
         String body = bodyOf(craftingHelperSource(), "public static boolean craftCraftingTable(");
-        assertFalse(body.contains("ChatUtils.sendSystemMessage("), "the sub-step table craft must not chat");
-        assertFalse(body.contains("say("), "the sub-step table craft must not chat");
+        assertFalse(body.contains("ChatUtils.sendSystemMessage("), "the sub-step table craft has no lines of its own");
+        assertFalse(body.contains("say("), "the sub-step table craft has no lines of its own");
+        // Review I1: a hard-coded quiet lost the planks line for a non-strict craft, which then
+        // only said it needed a table. The planks line comes from craftWithPlanks when not quiet.
+        assertTrue(body.contains("Items.CRAFTING_TABLE, amountRequested, quiet);"),
+                "the table craft passes the station's quiet through to craftWithPlanks");
+        String station = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
+        assertTrue(station.contains("craftCraftingTable(source, bot, source.getPlayer(), 1, quiet)"),
+                "the station hands its own quiet to the table sub-step");
     }
 
     // ── tool material order ──────────────────────────────────────────────────────────────────

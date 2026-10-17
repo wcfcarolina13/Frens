@@ -379,11 +379,13 @@ public final class CraftingHelper {
     }
 
     /**
-     * Crafts tables from planks without a chat line. The only caller is ensureCraftingStation, where
-     * the table is a sub-step of another craft: the player asked for the tool, and a placement
-     * failure right after would make two lines for one problem.
+     * Crafts tables from planks as a sub-step of ensureCraftingStation (the only caller). It is
+     * quiet exactly when the station call is: a strict tool craft answers with its own shortfall
+     * line, so the table must not add a second one, while a non-strict craft or an automatic one
+     * needs the planks line here, because the table line after it would name the wrong blocker.
+     * Later table lines in the same call are held back by the once-per-call / cooldown throttle.
      */
-    public static boolean craftCraftingTable(ServerCommandSource source, ServerPlayerEntity bot, ServerPlayerEntity commander, int amountRequested) {
+    public static boolean craftCraftingTable(ServerCommandSource source, ServerPlayerEntity bot, ServerPlayerEntity commander, int amountRequested, boolean quiet) {
         if (bot == null || source == null) {
             return false;
         }
@@ -392,9 +394,7 @@ public final class CraftingHelper {
             return false;
         }
 
-        // Quiet: a failure here is the station's to report, and the caller's own line (or the
-        // tool craft's shortfall line) already names the missing table.
-        int crafts = craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amountRequested, true);
+        int crafts = craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amountRequested, quiet);
         if (crafts > 0) {
             LOGGER.info("Crafted {} crafting table(s) for a station sub-step", crafts);
             return true;
@@ -1861,7 +1861,7 @@ public final class CraftingHelper {
         }
         LOGGER.info("No crafting table found; attempting to craft one.");
         ensurePlanksAvailable(bot, source, 4);
-        boolean crafted = craftCraftingTable(source, bot, source.getPlayer(), 1);
+        boolean crafted = craftCraftingTable(source, bot, source.getPlayer(), 1, quiet);
         if (crafted) {
             // Only a table actually made arms the no-spam cooldown: a craft that failed for want
             // of planks must not stop a retry once the planks are there.
