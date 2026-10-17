@@ -137,7 +137,7 @@ public final class PiperInstaller {
             catalogVoice("en_GB-alan-medium", "en_GB/alan/medium", "British male",
                     63_201_294L, "0a309668932205e762801f1efc2736cd4b0120329622adf62be09e56339d3330",
                     4_888L, "c0f0d124e5895c00e7c03b35dcc8287f319a6998a365b182deb5c8e752ee8c1e"),
-            catalogVoice("en_US-libritts_r-medium", "en_US/libritts_r/medium", "904 speakers — pick one with #N (e.g. #17)",
+            catalogVoice("en_US-libritts_r-medium", "en_US/libritts_r/medium", "904 speakers, pick one with #N (e.g. #17)",
                     78_580_914L, "10bb85e071d616fcf4071f369f1799d0491492ab3c5d552ec19fb548fac13195",
                     20_123L, "b471dc60d2d8335e819c393d196d6fbf792817f40051257b269878505bc9afb3"));
 
@@ -286,10 +286,10 @@ public final class PiperInstaller {
             platformName = "macOS " + (arm ? "(Apple Silicon)" : "(Intel)");
         } else if (os.contains("win")) {
             asset = arm ? null : WINDOWS_AMD64;
-            platformName = "Windows" + (arm ? " (ARM — unsupported)" : " (x64)");
+            platformName = "Windows" + (arm ? " (ARM, unsupported)" : " (x64)");
         } else if (os.contains("linux")) {
             asset = arm ? null : LINUX_X86_64;
-            platformName = "Linux" + (arm ? " (ARM — unsupported)" : " (x64)");
+            platformName = "Linux" + (arm ? " (ARM, unsupported)" : " (x64)");
         } else {
             asset = null;
             platformName = os + "/" + arch;
@@ -488,7 +488,7 @@ public final class PiperInstaller {
         String hex = HexFormat.of().formatHex(sha.digest());
         if (!hex.equalsIgnoreCase(file.sha256())) {
             Files.deleteIfExists(tmp);
-            throw new IOException(file.fileName() + ": checksum mismatch — download rejected");
+            throw new IOException(file.fileName() + ": checksum mismatch, download rejected");
         }
         Files.move(tmp, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
@@ -578,8 +578,8 @@ public final class PiperInstaller {
             }
             Path wav = Path.of(line.toString().trim());
             if (line.isEmpty() || !Files.isRegularFile(wav) || Files.size(wav) <= 44) {
-                throw new IOException("Piper smoke test produced no audio — binary rejected "
-                        + "(a Python 'piper' from pip/pipx may not support this CLI; use Download instead)"
+                throw new IOException("Piper smoke test produced no audio, binary rejected "
+                        + "(a Python 'piper' from pip/pipx may not support this CLI, use Download instead)"
                         + errDetail(stderrTail));
             }
             Files.deleteIfExists(wav);
@@ -591,7 +591,7 @@ public final class PiperInstaller {
     private static String errDetail(StringBuilder stderrTail) {
         synchronized (stderrTail) {
             String s = stderrTail.toString().trim();
-            return s.isEmpty() ? "" : " — " + s;
+            return s.isEmpty() ? "" : ": " + s;
         }
     }
 }

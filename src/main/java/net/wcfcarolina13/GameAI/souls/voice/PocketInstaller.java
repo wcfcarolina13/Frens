@@ -362,7 +362,7 @@ public final class PocketInstaller {
     public static String missingRuntimeHint() {
         return Platform.current().windows()
                 ? "No Python 3.10+/uv found. Install uv or python.org 3.12, Add PATH."
-                : "No Python 3.10+ or uv found — install uv from docs.astral.sh/uv";
+                : "No Python 3.10+ or uv found. Install uv from docs.astral.sh/uv";
     }
 
     /**

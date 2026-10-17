@@ -216,7 +216,7 @@ public final class OllamaModelInstaller {
         } finally {
             conn.disconnect();
         }
-        throw new IOException("Pull stream ended without success — is Ollama still running?");
+        throw new IOException("Pull stream ended without success. Is Ollama still running?");
     }
 
     /** Sets {@code tag} as the soul model and hot-reloads the runtime. */
