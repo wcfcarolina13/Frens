@@ -2738,15 +2738,26 @@ public final class BotFleeService {
             // Seal the entrance with solid blocks (allowIntersecting=true for bounding box edge cases)
             final List<Item> seals = sealBlocksFor(bot);
             boolean[] sealed = {false};
+            // The head goes on only over a confirmed feet block (SealOrderPolicy.headStep): over an
+            // open feet cell it hangs in the air with the entrance still open below.
             server.execute(() -> {
                 BotActions.PlaceResult fResult = BotActions.tryPlaceBlockAt(bot, wallFeet,
                         net.minecraft.util.math.Direction.UP, seals, true);
-                BotActions.PlaceResult hResult = BotActions.tryPlaceBlockAt(bot, wallHead,
-                        net.minecraft.util.math.Direction.UP, seals, true);
-                sealed[0] = fResult.success() && hResult.success();
+                boolean feetSolid = bot.getEntityWorld().getBlockState(wallFeet).blocksMovement();
+                String headReason;
+                if (SealOrderPolicy.headStep(feetSolid) == SealOrderPolicy.HeadStep.PLACE) {
+                    BotActions.PlaceResult hResult = BotActions.tryPlaceBlockAt(bot, wallHead,
+                            net.minecraft.util.math.Direction.UP, seals, true);
+                    headReason = hResult.reason();
+                } else {
+                    headReason = "skipped";
+                    LOGGER.info("Bot {} cliff seal head skipped: feet open at {}",
+                            bot.getName().getString(), wallFeet.toShortString());
+                }
+                sealed[0] = feetSolid && bot.getEntityWorld().getBlockState(wallHead).blocksMovement();
                 if (!sealed[0]) {
                     LOGGER.info("Bot {} seal failed (feet={}, head={})",
-                            bot.getName().getString(), fResult.reason(), hResult.reason());
+                            bot.getName().getString(), fResult.reason(), headReason);
                 }
             });
             Thread.sleep(400);
@@ -2755,10 +2766,15 @@ public final class BotFleeService {
                 server.execute(() -> {
                     if (!bot.getEntityWorld().getBlockState(wallFeet).blocksMovement())
                         BotActions.tryPlaceBlockAt(bot, wallFeet, net.minecraft.util.math.Direction.UP, seals, true);
-                    if (!bot.getEntityWorld().getBlockState(wallHead).blocksMovement())
-                        BotActions.tryPlaceBlockAt(bot, wallHead, net.minecraft.util.math.Direction.UP, seals, true);
-                    sealed[0] = bot.getEntityWorld().getBlockState(wallFeet).blocksMovement()
-                            && bot.getEntityWorld().getBlockState(wallHead).blocksMovement();
+                    boolean feetSolid = bot.getEntityWorld().getBlockState(wallFeet).blocksMovement();
+                    if (SealOrderPolicy.headStep(feetSolid) == SealOrderPolicy.HeadStep.PLACE) {
+                        if (!bot.getEntityWorld().getBlockState(wallHead).blocksMovement())
+                            BotActions.tryPlaceBlockAt(bot, wallHead, net.minecraft.util.math.Direction.UP, seals, true);
+                    } else {
+                        LOGGER.info("Bot {} cliff seal head skipped: feet open at {} (retry)",
+                                bot.getName().getString(), wallFeet.toShortString());
+                    }
+                    sealed[0] = feetSolid && bot.getEntityWorld().getBlockState(wallHead).blocksMovement();
                 });
                 Thread.sleep(300);
             }

@@ -79,6 +79,19 @@ public final class SealOrderPolicy {
         return List.copyOf(out);
     }
 
+    /** Whether a two-block entrance seal places its head block. */
+    public enum HeadStep { PLACE, SKIP_FEET_OPEN }
+
+    /**
+     * The head block goes on only over a feet block that is really there: placed over an open
+     * feet cell it hangs in the air and the entrance stays open below it.
+     *
+     * @param feetBlocksMovement the feet cell blocks movement after the feet attempt
+     */
+    public static HeadStep headStep(boolean feetBlocksMovement) {
+        return feetBlocksMovement ? HeadStep.PLACE : HeadStep.SKIP_FEET_OPEN;
+    }
+
     /**
      * {@code ordered} without the falling blocks (sand, gravel), order kept. For a block placed with
      * air under it, such as the dig-down cap over the bot's head.

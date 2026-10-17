@@ -84,6 +84,12 @@ class SealOrderPolicyTest {
     }
 
     @Test
+    void headPlacedOnlyOverAConfirmedFeetBlock() {
+        assertEquals(SealOrderPolicy.HeadStep.PLACE, SealOrderPolicy.headStep(true));
+        assertEquals(SealOrderPolicy.HeadStep.SKIP_FEET_OPEN, SealOrderPolicy.headStep(false));
+    }
+
+    @Test
     void emptyOrNullGivesEmpty() {
         assertEquals(List.of(), SealOrderPolicy.order(List.of(), false, false));
         assertEquals(List.of(), SealOrderPolicy.order(null, true, false));
