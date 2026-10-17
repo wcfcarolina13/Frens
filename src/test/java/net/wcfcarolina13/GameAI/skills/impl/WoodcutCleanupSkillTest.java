@@ -191,7 +191,10 @@ class WoodcutCleanupSkillTest {
     }
 
     private static String source(String file) throws java.io.IOException {
-        String relative = "src/main/java/net/wcfcarolina13/GameAI/skills/impl/" + file;
+        return sourceAt("src/main/java/net/wcfcarolina13/GameAI/skills/impl/" + file);
+    }
+
+    private static String sourceAt(String relative) throws java.io.IOException {
         java.nio.file.Path dir = java.nio.file.Paths.get(System.getProperty("user.dir")).toAbsolutePath();
         for (java.nio.file.Path at = dir; at != null; at = at.getParent()) {
             java.nio.file.Path candidate = at.resolve(relative);
@@ -328,5 +331,86 @@ class WoodcutCleanupSkillTest {
         long worstTail = WoodcutCleanupDiagnostics.FALLBACK_SWEEP_BUDGET_MS
                 + WoodcutCleanupDiagnostics.FINAL_SCAN_BUDGET_MS;
         assertTrue(emptyStop + worstTail < 20_000L);
+    }
+
+    // ── 1.1.267 B2: an empty run in untouched forest ends well under a minute ──────────────
+
+    @Test
+    void emptyScanPhaseEndsAtTheCapWhenNothingWasFound() {
+        long cap = WoodcutCleanupDiagnostics.EMPTY_SCAN_PHASE_CAP_MS;
+        assertEquals(30_000L, cap);
+        assertFalse(WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(1_000L, 1_000L + cap - 1, 0, 0, 0, cap));
+        assertTrue(WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(1_000L, 1_000L + cap, 0, 0, 0, cap));
+        assertTrue(WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(1_000L, 1_000L + 2 * cap, 0, 0, 0, cap));
+    }
+
+    @Test
+    void aRunThatFoundOrMinedAnythingNeverEndsOnTheEmptyCap() {
+        long cap = WoodcutCleanupDiagnostics.EMPTY_SCAN_PHASE_CAP_MS;
+        long late = 10 * cap;
+        assertFalse(WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(0L, late, 1, 0, 0, cap), "mined a log");
+        assertFalse(WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(0L, late, 0, 1, 0, cap), "attempted a target");
+        assertFalse(WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(0L, late, 0, 0, 3, cap), "targets cached");
+    }
+
+    @Test
+    void emptyScanPhaseNeverEndsBeforeItStartedOrOnAClockStep() {
+        long cap = WoodcutCleanupDiagnostics.EMPTY_SCAN_PHASE_CAP_MS;
+        assertFalse(WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(50_000L, 50_000L, 0, 0, 0, cap));
+        assertFalse(WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(50_000L, 10_000L, 0, 0, 0, cap), "clock went back");
+    }
+
+    @Test
+    void emptyRunInABigRegionEndsWellUnderAMinuteOnBudgets() {
+        // The cap is checked at a merge, which comes at most about one scan budget after the cap
+        // passes; then the post-loop fallback sweep and final count.
+        long worst = WoodcutCleanupDiagnostics.EMPTY_SCAN_PHASE_CAP_MS
+                + WoodcutCleanupDiagnostics.ASYNC_SCAN_BUDGET_MS
+                + WoodcutCleanupDiagnostics.FALLBACK_SWEEP_BUDGET_MS
+                + WoodcutCleanupDiagnostics.FINAL_SCAN_BUDGET_MS;
+        assertTrue(worst < 45_000L, "worst=" + worst);
+    }
+
+    @Test
+    void emptyCapEndsWithThePartialScanLineAndLogsAGreppableLine() throws java.io.IOException {
+        String cleanup = source("WoodcutCleanupSkill.java");
+        int merge = cleanup.indexOf("WoodcutCleanupDiagnostics.shouldStopEmpty(consecutiveEmptyMerges");
+        int cap = cleanup.indexOf("WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(startMs");
+        int rescan = cleanup.indexOf("// ── Rescan when needed");
+        assertTrue(merge > 0 && cap > merge && cap < rescan, "the cap is checked at the merge point, after the covered stop");
+        assertTrue(cleanup.contains("\"woodcut_cleanup empty scan phase capped after {}ms coverage={}\""));
+        // The cap leaves coverage partial, so an empty run keeps the honest line.
+        assertEquals(WoodcutCleanupDiagnostics.PARTIAL_SCAN_LINE,
+                WoodcutCleanupDiagnostics.playerLine(true, 0, 0, false, false));
+    }
+
+    @Test
+    void fastPassWaitsForTheInFlightScanAndTheWaitIsOnTheFuture() throws java.io.IOException {
+        String cleanup = source("WoodcutCleanupSkill.java");
+        assertTrue(cleanup.contains("if (asyncScan == null && (cachedTargets.isEmpty() || sinceLastScan >= RESCAN_INTERVAL)) {"),
+                "no fast pass beside an in-flight region scan");
+        assertTrue(cleanup.contains("asyncScan.get(Math.min(SCAN_WAIT_SLICE_MS, remaining), TimeUnit.MILLISECONDS);"),
+                "the empty-list wait wakes on the scan future");
+        assertFalse(cleanup.contains("waitAttempt < 4"), "the fixed 4 x 250 ms poll is gone");
+    }
+
+    @Test
+    void cleanupFullTreeCheckSkipsTheCanopyBuildAndIsMemoisedPerTrunkBase() throws java.io.IOException {
+        String detector = sourceAt("src/main/java/net/wcfcarolina13/GameAI/skills/support/TreeDetector.java");
+        assertTrue(detector.contains("fullTree = isStandingTreeForWoodcut(world, pos, memo);"));
+        // Same verdict as detectTreeAtForWoodcut(...).isPresent(): the core wraps any resolved trunk
+        // in Optional.of(buildTreeTarget(...)) and the woodcut filter reads only base and height.
+        assertTrue(detector.contains("return Optional.of(buildTreeTarget(world, basic));"));
+        assertTrue(detector.contains(".filter(t -> !getWoodcutProtectionDecision(world, t.base(), Math.max(4, t.height())).blocked());"));
+        assertTrue(detector.contains("new TreeTarget(\n                basic.base(),\n                basic.top(),\n                basic.height(),"),
+                "the target's base and height are the resolved trunk's");
+        String body = detector.substring(detector.indexOf("public static boolean isStandingTreeForWoodcut(ServerWorld world, BlockPos logPos) {"));
+        body = body.substring(0, body.indexOf("\n    }\n"));
+        assertTrue(body.contains("resolveStandingTreeBasic(world, logPos, TreeDetectionMode.STRICT_STANDING)"), body);
+        assertTrue(body.contains("!getWoodcutProtectionDecision(world, basic.get().base(), Math.max(4, basic.get().height())).blocked()"), body);
+        assertFalse(body.contains("buildTreeTarget"), body);
+        String memo = detector.substring(detector.indexOf("public static final class CleanupScanMemo {"));
+        memo = memo.substring(0, memo.indexOf("\n    }\n"));
+        assertTrue(memo.contains("standingTrees.clear();"), "the verdict cache clears with the component memo");
     }
 }

@@ -50,7 +50,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
@@ -85,6 +87,8 @@ public final class WoodcutCleanupSkill implements Skill {
     private static final int MAX_CLEANUP_PILLAR_STEPS = 7;
     /** How many blocks to mine before forcing a rescan (otherwise reuse cached list). */
     private static final int RESCAN_INTERVAL = 4;
+    /** Longest single wait on the region scan before the threat check runs again. */
+    private static final long SCAN_WAIT_SLICE_MS = 250L;
     /** How many blocks to mine before doing an interleaved drop sweep. */
     private static final int DROP_SWEEP_INTERVAL = 3;
 
@@ -310,7 +314,8 @@ public final class WoodcutCleanupSkill implements Skill {
         int sweepMinZ = Math.min(origin.getZ(), Math.min(scanMin.getZ(), scanMax.getZ()));
         int sweepMaxZ = Math.max(origin.getZ(), Math.max(scanMin.getZ(), scanMax.getZ()));
 
-        long deadline = System.currentTimeMillis() + durationMs;
+        long startMs = System.currentTimeMillis();
+        long deadline = startMs + durationMs;
         UUID botUuid = bot.getUuid();
         int logsMined = 0;
         int scaffoldMined = 0;
@@ -346,6 +351,7 @@ public final class WoodcutCleanupSkill implements Skill {
             int sinceLastSweep = 0;
             WoodcutCleanupDiagnostics.CleanupScanStats lastScanStats = null;
             CompletableFuture<CleanupTargetCollection> asyncScan = null;
+            long asyncScanDeadline = 0L;
 
             while (logsMined < maxLogs && System.currentTimeMillis() < deadline) {
                 if (SkillManager.shouldAbortSkill(bot)) {
@@ -393,10 +399,24 @@ public final class WoodcutCleanupSkill implements Skill {
                                 consecutiveEmptyMerges);
                         break;
                     }
+                    // A run that has found nothing at all stops after a fixed time instead of
+                    // scanning a big quiet forest to the skill deadline. Coverage stays partial, so
+                    // the player hears the partial-scan line, not "nothing left".
+                    long nowMs = System.currentTimeMillis();
+                    if (WoodcutCleanupDiagnostics.shouldEndEmptyScanPhase(startMs, nowMs,
+                            logsMined, attemptedTargets, cachedTargets.size(),
+                            WoodcutCleanupDiagnostics.EMPTY_SCAN_PHASE_CAP_MS)) {
+                        LOGGER.info("woodcut_cleanup empty scan phase capped after {}ms coverage={}",
+                                nowMs - startMs, String.format(Locale.ROOT, "%.2f", coverage.fraction()));
+                        break;
+                    }
                 }
 
                 // ── Rescan when needed ──────────────────────────────────────
-                if (cachedTargets.isEmpty() || sinceLastScan >= RESCAN_INTERVAL) {
+                // Not while a region scan is in flight: that scan collects the remembered and
+                // overhead targets itself, and a fast pass beside it only competes for the server
+                // thread its block reads hop to.
+                if (asyncScan == null && (cachedTargets.isEmpty() || sinceLastScan >= RESCAN_INTERVAL)) {
                     // Fast pass: collect remembered + overhead targets instantly.
                     CompanionOverheadHologramService.show(bot, "Scanning for cleanup targets...", 5_000);
                     CleanupTargetCollection fastCollection = collectFastTargets(
@@ -420,6 +440,7 @@ public final class WoodcutCleanupSkill implements Skill {
                         // deadline; otherwise the empty-merge stop never gets a merge to count.
                         final long asyncDeadline = WoodcutCleanupDiagnostics.boundedScanDeadline(
                                 System.currentTimeMillis(), deadline, WoodcutCleanupDiagnostics.ASYNC_SCAN_BUDGET_MS);
+                        asyncScanDeadline = asyncDeadline;
                         final boolean asyncFloatingOnly = floatingLogsOnly;
                         final long asyncStartIndex = coverage.cursor();
                         asyncScan = CompletableFuture.supplyAsync(() ->
@@ -429,12 +450,29 @@ public final class WoodcutCleanupSkill implements Skill {
                     }
                 }
                 if (cachedTargets.isEmpty()) {
-                    // No fast targets: wait briefly for the async scan, then merge it at the top. A scan
+                    // No fast targets: wait for the async scan, then merge it at the top. A scan
                     // that already finished but is not merged yet goes straight back to the merge too,
                     // never into the empty-pass / bounded-stop lines below.
                     if (asyncScan != null) {
-                        for (int waitAttempt = 0; waitAttempt < 4 && !asyncScan.isDone(); waitAttempt++) {
-                            sleepQuiet(250L);
+                        // Wakes when the scan completes (worker thread, never the server thread), in
+                        // short slices so a threat still pauses the skill. Up to the scan's own
+                        // deadline, and at least one slice so a scan running past it does not spin.
+                        long waitUntil = Math.max(asyncScanDeadline, System.currentTimeMillis() + SCAN_WAIT_SLICE_MS);
+                        while (!asyncScan.isDone()) {
+                            long remaining = waitUntil - System.currentTimeMillis();
+                            if (remaining <= 0L) {
+                                break;
+                            }
+                            try {
+                                asyncScan.get(Math.min(SCAN_WAIT_SLICE_MS, remaining), TimeUnit.MILLISECONDS);
+                            } catch (TimeoutException ignored) {
+                                // next slice
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                return SkillExecutionResult.failure("woodcut_cleanup interrupted.");
+                            } catch (ExecutionException | CancellationException e) {
+                                break; // done; the merge reports the failure
+                            }
                             if (SkillManager.shouldAbortSkill(bot)) {
                                 return SkillExecutionResult.failure("woodcut_cleanup paused due to nearby threat.");
                             }

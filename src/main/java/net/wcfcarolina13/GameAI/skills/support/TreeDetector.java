@@ -301,10 +301,7 @@ public final class TreeDetector {
             return Optional.empty();
         }
 
-        BlockPos base = logPos.toImmutable();
-        while (isLog(world.getBlockState(base.down())) && base.getY() > world.getBottomY()) {
-            base = base.down();
-        }
+        BlockPos base = trunkBaseOf(world, logPos);
 
         // Scan downward up to 8 blocks for valid soil — handles cherry trees and
         // hillside trees whose trunks start above ground with air/stone gaps below.
@@ -348,6 +345,48 @@ public final class TreeDetector {
         }
 
         return Optional.of(new BasicTreeInfo(base.toImmutable(), top.toImmutable(), height));
+    }
+
+    /** The lowest log of the straight column {@code logPos} stands in (the trunk base the tree checks start from). */
+    private static BlockPos trunkBaseOf(ServerWorld world, BlockPos logPos) {
+        BlockPos base = logPos.toImmutable();
+        while (isLog(world.getBlockState(base.down())) && base.getY() > world.getBottomY()) {
+            base = base.down();
+        }
+        return base;
+    }
+
+    /**
+     * Same verdict as {@code detectTreeAtForWoodcut(world, logPos).isPresent()}: a strict standing
+     * tree whose base the woodcut protection check allows. {@link #detectTreeAtCore} always wraps a
+     * resolved tree in {@code Optional.of(buildTreeTarget(...))} and the protection filter reads only
+     * its base and height, which {@code buildTreeTarget} copies from the resolved trunk, so the
+     * canopy flood fill and the neighbouring-trunk box it builds never change the answer and are
+     * skipped here.
+     */
+    public static boolean isStandingTreeForWoodcut(ServerWorld world, BlockPos logPos) {
+        Optional<BasicTreeInfo> basic = resolveStandingTreeBasic(world, logPos, TreeDetectionMode.STRICT_STANDING);
+        return basic.isPresent()
+                && !getWoodcutProtectionDecision(world, basic.get().base(), Math.max(4, basic.get().height())).blocked();
+    }
+
+    /**
+     * {@link #isStandingTreeForWoodcut(ServerWorld, BlockPos)} with a run's memo ({@code null} for
+     * none). The verdict is a function of the trunk base alone (the trunk is re-walked up from the
+     * base), so it is cached per base and every log of one column reuses it.
+     */
+    static boolean isStandingTreeForWoodcut(ServerWorld world, BlockPos logPos, CleanupScanMemo memo) {
+        if (memo == null || world == null || logPos == null || !isLog(world.getBlockState(logPos))) {
+            return isStandingTreeForWoodcut(world, logPos);
+        }
+        long key = trunkBaseOf(world, logPos).asLong();
+        Boolean cached = memo.standingTrees.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        boolean verdict = isStandingTreeForWoodcut(world, logPos);
+        memo.standingTrees.put(key, verdict);
+        return verdict;
     }
 
     private static TreeTarget buildTreeTarget(ServerWorld world, BasicTreeInfo basic) {
@@ -657,17 +696,23 @@ public final class TreeDetector {
      * at the BFS limit) is stored, and only when its profile alone rejects it: its size and its
      * grounded / leaves / unsupported flags are ORs over the same connected set from whichever log
      * the BFS starts, so the profile read from the memo is the one a fresh BFS would compute on an
-     * unchanged world. The per-log signals (human blocks, protection, full tree, lone log) are still
-     * computed for every log, so the classification is identical, only the BFS is reused.
+     * unchanged world. It also holds the standing-tree verdict per trunk base
+     * ({@link #isStandingTreeForWoodcut(ServerWorld, BlockPos, CleanupScanMemo)}), so the logs of one
+     * live tree do not each redo the trunk walk and protection check. The other per-log signals
+     * (human blocks, protection, lone log) are still computed for every log, so the classification
+     * is identical on an unchanged world. Cleared with the run's other scan caches.
      * Thread-safe: an async region scan writes it.
      */
     public static final class CleanupScanMemo {
         private final Map<Long, CleanupComponentProfile> profiles = new ConcurrentHashMap<>();
+        private final Map<Long, Boolean> standingTrees = new ConcurrentHashMap<>();
 
         public void clear() {
             profiles.clear();
+            standingTrees.clear();
         }
 
+        /** Logs whose rejected component profile is memoised (standing-tree verdicts not counted). */
         public int size() {
             return profiles.size();
         }
@@ -716,7 +761,7 @@ public final class TreeDetector {
         boolean fullTree = false;
         if (TreeCleanupClassifier.needsFullTreeCheck(humanAdjacent, protectedTarget)) {
             try {
-                fullTree = detectTreeAtForWoodcut(world, pos, TreeDetectionMode.STRICT_STANDING).isPresent();
+                fullTree = isStandingTreeForWoodcut(world, pos, memo);
             } catch (Exception ignored) {
             }
         }

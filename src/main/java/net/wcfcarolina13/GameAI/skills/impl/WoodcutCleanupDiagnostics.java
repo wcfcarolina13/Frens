@@ -145,6 +145,30 @@ final class WoodcutCleanupDiagnostics {
         }
     }
 
+    /**
+     * How long a run that has found nothing at all keeps scanning before it ends with the
+     * partial-scan line. A quiet forest region of ~30k blocks takes a couple of minutes of bounded
+     * scans to cover; a run with no find by now ends instead of filling the skill deadline.
+     */
+    static final long EMPTY_SCAN_PHASE_CAP_MS = 30_000L;
+
+    /**
+     * Whether a run should end its empty scan phase: nothing mined, nothing attempted, nothing
+     * cached to work on, and at least {@code capMs} since the run started. A run that found or
+     * mined anything never ends here.
+     */
+    static boolean shouldEndEmptyScanPhase(long startMs,
+                                           long nowMs,
+                                           int logsMined,
+                                           int attemptedTargets,
+                                           int cachedTargets,
+                                           long capMs) {
+        if (logsMined != 0 || attemptedTargets != 0 || cachedTargets != 0) {
+            return false;
+        }
+        return nowMs - startMs >= capMs;
+    }
+
     /** Time the post-loop fallback sweep (scan plus any mining it finds) may take. */
     static final long FALLBACK_SWEEP_BUDGET_MS = 3_000L;
 
