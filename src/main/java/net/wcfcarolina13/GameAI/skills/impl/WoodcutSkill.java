@@ -200,7 +200,7 @@ public final class WoodcutSkill implements Skill {
     /** Mining and felling detail when the bot's tree claim was lost to another bot mid-tree. */
     private static final String LOST_TREE_CLAIM_DETAIL = "lost-tree-claim";
     /** A strict or loose candidate whose base is this close (XZ) to a claimed base is that bot's tree (moved base). */
-    private static final int CLAIMED_BASE_NEAR_RADIUS = 2;
+    private static final int CLAIMED_BASE_NEAR_RADIUS = WoodcutTreeClaims.NEAR_BASE_RADIUS;
     /** A floating log this close (XZ) to a claimed base is that bot's canopy. */
     private static final int CLAIMED_CANOPY_NEAR_RADIUS = 4;
     /** How long a bot with no target waits on other bots' claimed trees before sharing one. */
@@ -1075,17 +1075,17 @@ public final class WoodcutSkill implements Skill {
                         continue;
                     }
                 }
-                if (!claimTree(bot, target.base(), runToken)) {
+                if (!claimTree(bot, target.base(), target.top().getY(), runToken)) {
                     if (ignoreClaimsThisScan) {
                         // The one rescan after waiting on claimed trees: share rather than idle.
                         LOGGER.info("Woodcut: tree {} is claimed by {}, sharing it (no free tree after waiting)",
-                                target.base().toShortString(), treeClaimOwnerName(bot, target.base()));
+                                target.base().toShortString(), treeClaimOwnerName(bot, target.base(), target.top().getY()));
                     } else {
                         // Raced another bot to this tree (or a remembered site it holds): skipped, but
                         // not marked failed, so it is free again later. Not a failure toward
                         // relocation either: the next scan leaves the claimed tree out.
                         LOGGER.info("Woodcut: tree {} is claimed by {}, picking another",
-                                target.base().toShortString(), treeClaimOwnerName(bot, target.base()));
+                                target.base().toShortString(), treeClaimOwnerName(bot, target.base(), target.top().getY()));
                         totalFailures++;
                         continue;
                     }
@@ -1127,7 +1127,7 @@ public final class WoodcutSkill implements Skill {
                         // Not a failure (no relocation count, not a failed base); the per-tree
                         // finally releases nothing that is theirs.
                         LOGGER.info("Woodcut: abandoning tree {} during approach; claimed by {}",
-                                target.base().toShortString(), treeClaimOwnerName(bot, target.base()));
+                                target.base().toShortString(), treeClaimOwnerName(bot, target.base(), target.top().getY()));
                         continue;
                     }
                     totalFailures++;
@@ -1181,7 +1181,7 @@ public final class WoodcutSkill implements Skill {
                 int envelopeLogsBefore = countEnvelopeLogs(logCountWorld, target);
                 if (!refreshTreeClaim(bot)) {
                     LOGGER.info("Woodcut: abandoning tree {} before felling; claimed by {}",
-                            target.base().toShortString(), treeClaimOwnerName(bot, target.base()));
+                            target.base().toShortString(), treeClaimOwnerName(bot, target.base(), target.top().getY()));
                     continue;
                 }
                 TreeHarvestResult harvest = fellTree(source, bot, target, sharedState, replantSaplings, pendingFloaters, reachSession);
@@ -1192,7 +1192,7 @@ public final class WoodcutSkill implements Skill {
                 scaffoldRemoved += reachSession.scaffoldRemoved;
                 if (!harvest.success() && LOST_TREE_CLAIM_DETAIL.equals(harvest.detail())) {
                     LOGGER.info("Woodcut: abandoning tree {} mid-felling after {} log(s); claimed by {}",
-                            target.base().toShortString(), logsCutFromTree, treeClaimOwnerName(bot, target.base()));
+                            target.base().toShortString(), logsCutFromTree, treeClaimOwnerName(bot, target.base(), target.top().getY()));
                     logTargetTrace(target, reachSession, "LOST_CLAIM");
                     continue;
                 }
@@ -7171,10 +7171,15 @@ public final class WoodcutSkill implements Skill {
         return out;
     }
 
-    /** Claims the target tree for this bot's run; false when another bot holds a live claim on it. */
-    private boolean claimTree(ServerPlayerEntity bot, BlockPos base, long runToken) {
+    /**
+     * Claims the target tree (base, top log at {@code topY}) for this bot's run; false when another
+     * bot holds a live claim on it or on a base within {@link WoodcutTreeClaims#NEAR_BASE_RADIUS} of
+     * it at an overlapping height (the same trunk after its bottom log was cut).
+     */
+    private boolean claimTree(ServerPlayerEntity bot, BlockPos base, int topY, long runToken) {
         WoodcutTreeClaims.TreeKey key = treeKey(bot, base);
-        if (!TREE_CLAIMS.tryClaim(key, bot.getUuid(), runToken, System.currentTimeMillis(), WoodcutTreeClaims.DEFAULT_TTL_MS)) {
+        if (!TREE_CLAIMS.tryClaim(key, topY, bot.getUuid(), runToken, System.currentTimeMillis(),
+                WoodcutTreeClaims.DEFAULT_TTL_MS)) {
             return false;
         }
         activeTreeClaimByBot.put(bot.getUuid(), new ActiveTreeClaim(key, runToken, false));
@@ -7249,7 +7254,17 @@ public final class WoodcutSkill implements Skill {
     }
 
     private static String treeClaimOwnerName(ServerPlayerEntity bot, BlockPos base) {
-        UUID owner = TREE_CLAIMS.ownerOf(treeKey(bot, base), System.currentTimeMillis());
+        return treeClaimOwnerName(bot, base, base.getY());
+    }
+
+    /** The exact claim's owner, else the owner of the near claim that blocks this tree (bug G). */
+    private static String treeClaimOwnerName(ServerPlayerEntity bot, BlockPos base, int topY) {
+        long now = System.currentTimeMillis();
+        WoodcutTreeClaims.TreeKey key = treeKey(bot, base);
+        UUID owner = TREE_CLAIMS.ownerOf(key, now);
+        if (owner == null) {
+            owner = TREE_CLAIMS.ownerOfNear(key, topY, bot.getUuid(), now);
+        }
         if (owner == null) {
             return "another bot";
         }

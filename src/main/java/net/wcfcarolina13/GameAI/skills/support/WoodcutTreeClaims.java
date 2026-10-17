@@ -26,7 +26,15 @@ public final class WoodcutTreeClaims {
     public record TreeKey(String dimension, int x, int y, int z) {
     }
 
-    public record Claim(UUID owner, long runToken, long expiresAtMs) {
+    /**
+     * Another bot's live claim whose base is this close (XZ, square) to a tree is that tree: a 2x2
+     * trunk's other column, or the same trunk read from a higher base once its bottom log is cut
+     * (6ad-6al field bug G). The scan's moved-base skip uses the same radius.
+     */
+    public static final int NEAR_BASE_RADIUS = 2;
+
+    /** A claim; {@code topY} is the claimed tree's top log, for the vertical part of the near rule. */
+    public record Claim(UUID owner, long runToken, long expiresAtMs, int topY) {
         boolean expired(long nowMs) {
             return nowMs >= expiresAtMs;
         }
@@ -35,21 +43,73 @@ public final class WoodcutTreeClaims {
     private final Map<TreeKey, Claim> claims = new ConcurrentHashMap<>();
 
     /**
-     * Claims the tree for this bot's run. Succeeds when the tree is free, its claim expired, or the
-     * bot already holds it; a success (re)sets the expiry to {@code nowMs + ttlMs} and stamps the
-     * claim with {@code runToken}.
+     * Claims the tree for this bot's run, with its top at the base (see the overload). A refresh of a
+     * claim this bot holds keeps the stored top.
      */
     public boolean tryClaim(TreeKey tree, UUID bot, long runToken, long nowMs, long ttlMs) {
+        return tryClaim(tree, tree == null ? 0 : tree.y(), bot, runToken, nowMs, ttlMs);
+    }
+
+    /**
+     * Claims the tree (base {@code tree}, top log at {@code topY}) for this bot's run. Refused while
+     * another bot holds a live claim that {@link #conflicts} with it: the same base, or a base within
+     * {@link #NEAR_BASE_RADIUS} (XZ) whose height range meets this one, so a trunk cut from the
+     * bottom is not claimed again one block up. Otherwise succeeds when the tree is free, its claim
+     * expired, or the bot already holds it; a success (re)sets the expiry to {@code nowMs + ttlMs},
+     * stamps the claim with {@code runToken}, and keeps the higher of the stored and given tops for
+     * the bot's own claim. Synchronized so two bots cannot both pass the near check.
+     */
+    public synchronized boolean tryClaim(TreeKey tree, int topY, UUID bot, long runToken, long nowMs, long ttlMs) {
         if (tree == null || bot == null) {
             return false;
         }
-        Claim result = claims.compute(tree, (key, existing) -> {
-            if (existing == null || existing.expired(nowMs) || bot.equals(existing.owner())) {
-                return new Claim(bot, runToken, nowMs + Math.max(0L, ttlMs));
+        if (conflictingClaim(tree, topY, bot, nowMs) != null) {
+            return false;
+        }
+        Claim existing = claims.get(tree);
+        int top = Math.max(tree.y(), topY);
+        if (existing != null && bot.equals(existing.owner())) {
+            top = Math.max(top, existing.topY());
+        }
+        claims.put(tree, new Claim(bot, runToken, nowMs + Math.max(0L, ttlMs), top));
+        return true;
+    }
+
+    /** Another bot's live claim that conflicts with {@code tree}..{@code topY}, or null. */
+    private Map.Entry<TreeKey, Claim> conflictingClaim(TreeKey tree, int topY, UUID bot, long nowMs) {
+        for (Map.Entry<TreeKey, Claim> entry : claims.entrySet()) {
+            Claim claim = entry.getValue();
+            if (claim.expired(nowMs) || claim.owner().equals(bot)) {
+                continue;
             }
-            return existing;
-        });
-        return bot.equals(result.owner());
+            TreeKey held = entry.getKey();
+            if (conflicts(held.dimension(), held.x(), held.y(), claim.topY(), held.z(),
+                    tree.dimension(), tree.x(), tree.y(), topY, tree.z())) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether a claimed tree (base claimX/claimBaseY/claimZ, top claimTopY) blocks a claim on a tree
+     * with base x/baseY/z and top topY: same dimension, bases within {@link #NEAR_BASE_RADIUS} on both
+     * horizontal axes, and the new tree's height range meets the claimed one widened by a block each
+     * way. A tree on a terrace above or below the claimed tree's logs is a different tree. A top
+     * below its base counts as the base.
+     */
+    public static boolean conflicts(String claimDimension, int claimX, int claimBaseY, int claimTopY, int claimZ,
+                                    String dimension, int x, int baseY, int topY, int z) {
+        if (claimDimension == null || !claimDimension.equals(dimension)) {
+            return false;
+        }
+        if (!withinXZ(claimX, claimZ, x, z, NEAR_BASE_RADIUS)) {
+            return false;
+        }
+        int claimLow = claimBaseY - 1;
+        int claimHigh = Math.max(claimBaseY, claimTopY) + 1;
+        int high = Math.max(baseY, topY);
+        return baseY <= claimHigh && high >= claimLow;
     }
 
     /** Releases the tree only when this bot's run (same token) holds the claim. */
@@ -119,5 +179,18 @@ public final class WoodcutTreeClaims {
     public UUID ownerOf(TreeKey tree, long nowMs) {
         Claim claim = tree == null ? null : claims.get(tree);
         return claim == null || claim.expired(nowMs) ? null : claim.owner();
+    }
+
+    /**
+     * The owner of another bot's live claim that blocks {@code bot} from claiming {@code tree} with
+     * top {@code topY} (see {@link #conflicts}), or null; names the bot in the "claimed by" lines when
+     * the conflict is a near base rather than the exact one.
+     */
+    public synchronized UUID ownerOfNear(TreeKey tree, int topY, UUID bot, long nowMs) {
+        if (tree == null) {
+            return null;
+        }
+        Map.Entry<TreeKey, Claim> entry = conflictingClaim(tree, topY, bot, nowMs);
+        return entry == null ? null : entry.getValue().owner();
     }
 }
