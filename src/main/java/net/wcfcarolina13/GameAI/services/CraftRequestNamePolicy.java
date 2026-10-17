@@ -60,6 +60,23 @@ public final class CraftRequestNamePolicy {
         return MATERIAL_WORDS.containsKey(normalize(word));
     }
 
+    /**
+     * Whether the trailing word of {@code /bot craft <item> [amount] <word>} names the bot rather
+     * than a material. Only a live bot's name can be a bot. A material word stays a material only
+     * when the item takes one, i.e. it is a bare tool kind with no material of its own: so
+     * {@code stone_axe Iron} goes to the bot Iron, while {@code axe Iron} stays an iron axe (the
+     * explicit bot slot {@code axe iron Iron} reaches the bot there). Letter case plays no part.
+     */
+    public static boolean trailingWordIsBot(String item, String word, boolean namesLiveBot) {
+        return namesLiveBot && (!isMaterialWord(word) || !takesMaterialArg(item));
+    }
+
+    /** True when {@code item} is a bare tool kind ("axe", "pickaxes") with no material in its name. */
+    static boolean takesMaterialArg(String item) {
+        Parsed parsed = parse(item);
+        return !parsed.hasMaterial() && toolKind(parsed.genericName()) != null;
+    }
+
     /** Trim, lower-case, drop a {@code minecraft:} prefix, and join words with single underscores. */
     public static String normalize(String raw) {
         if (raw == null) {

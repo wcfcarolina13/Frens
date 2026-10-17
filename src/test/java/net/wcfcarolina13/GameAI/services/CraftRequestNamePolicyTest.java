@@ -127,4 +127,30 @@ class CraftRequestNamePolicyTest {
         assertPlain("   ", "");
         assertPlain("_axe", "axe");
     }
+
+    @Test
+    void materialNamedBotWinsWhenTheItemAlreadyNamesItsMaterial() {
+        assertTrue(CraftRequestNamePolicy.trailingWordIsBot("stone_axe", "Iron", true));
+        assertTrue(CraftRequestNamePolicy.trailingWordIsBot("wooden pickaxe", "Diamond", true));
+    }
+
+    @Test
+    void materialWordStaysMaterialForABareToolKind() {
+        assertFalse(CraftRequestNamePolicy.trailingWordIsBot("axe", "Iron", true));
+        assertFalse(CraftRequestNamePolicy.trailingWordIsBot("pickaxes", "stone", true));
+    }
+
+    @Test
+    void nonMaterialWordNamingALiveBotIsTheBot() {
+        assertTrue(CraftRequestNamePolicy.trailingWordIsBot("axe", "Jake", true));
+        assertTrue(CraftRequestNamePolicy.trailingWordIsBot("torch", "Jake", true));
+        assertTrue(CraftRequestNamePolicy.trailingWordIsBot("torch", "Iron", true), "torch takes no material");
+    }
+
+    @Test
+    void noLiveBotIsNeverABot() {
+        assertFalse(CraftRequestNamePolicy.trailingWordIsBot("stone_axe", "Iron", false));
+        assertFalse(CraftRequestNamePolicy.trailingWordIsBot("axe", "Jake", false));
+        assertFalse(CraftRequestNamePolicy.trailingWordIsBot("torch", "Jake", false));
+    }
 }

@@ -2596,14 +2596,16 @@ public class modCommandRegistry {
     /**
      * {@code /bot craft <item> [amount] <material>} with no bot argument. The bare-string material
      * node is declared before the bot node, so {@code /bot craft axe Jake} parses "Jake" as the
-     * material (reordering would break {@code /bot craft axe stone}). A word that is not a
-     * material and names an online bot is taken as that bot, with no material.
+     * material (reordering would break {@code /bot craft axe stone}). A word that names an online
+     * bot is taken as that bot, with no material, unless it is a material word and the item is a
+     * bare tool kind that takes one ({@code CraftRequestNamePolicy.trailingWordIsBot}).
      */
     private static int executeCraftImplicitBot(CommandContext<ServerCommandSource> context, String item, int amount,
                                                String material) throws CommandSyntaxException {
-        if (material != null && !net.wcfcarolina13.GameAI.services.CraftRequestNamePolicy.isMaterialWord(material)) {
+        if (material != null) {
             ServerPlayerEntity named = context.getSource().getServer().getPlayerManager().getPlayer(material.trim());
-            if (named instanceof createFakePlayer) {
+            if (net.wcfcarolina13.GameAI.services.CraftRequestNamePolicy.trailingWordIsBot(
+                    item, material, named instanceof createFakePlayer)) {
                 return executeCraftGeneric(context, item, amount, null, named);
             }
         }
