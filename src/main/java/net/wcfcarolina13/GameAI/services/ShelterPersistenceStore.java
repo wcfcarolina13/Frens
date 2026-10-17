@@ -45,7 +45,7 @@ public final class ShelterPersistenceStore {
      * @param type        {@code BotFleeService.ShelterType} name
      * @param entryDir    {@code Direction} name, e.g. {@code NORTH}
      * @param interior    the cell the bot stands in
-     * @param placedBlocks the wall-off ledger (empty for other types)
+     * @param placedBlocks the wall-off ledger, or a dig-down's dig origin as its one cell (empty otherwise)
      */
     public record ShelterRecord(String dimension,
                                 String type,

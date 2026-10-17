@@ -171,6 +171,25 @@ public final class DigDownPolicy {
         return Math.max(0, Math.min(realRemovals, scaffoldBlocks));
     }
 
+    /** How a dawn break-free leaves a capped shelter once the cap is mined. */
+    public enum BreakFreeClimb {
+        /** Pillar up the dug column right away (the climb-out used for an uncapped pit). */
+        CLIMB_OUT_PIT,
+        /** Today's path: the surface recovery behind the linger gate does the climb. */
+        LEGACY
+    }
+
+    /**
+     * Only a dig-down shelter that recorded its dig origin climbs out itself: the origin is the
+     * ground level the climb stops at. A join-enclosed shelter, or a dig-down record saved before
+     * the origin was kept, has no origin and keeps the legacy path.
+     *
+     * @param typeName {@code ShelterType} name
+     */
+    public static BreakFreeClimb breakFreeClimb(String typeName, boolean hasOrigin) {
+        return "DIG_DOWN".equals(typeName) && hasOrigin ? BreakFreeClimb.CLIMB_OUT_PIT : BreakFreeClimb.LEGACY;
+    }
+
     /** True when the feet are back at (or above) the original ground level. */
     public static boolean climbedOut(int feetY, int groundFeetY) {
         return feetY >= groundFeetY;

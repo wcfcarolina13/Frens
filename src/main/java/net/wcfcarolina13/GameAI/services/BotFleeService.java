@@ -83,7 +83,9 @@ public final class BotFleeService {
 
     /**
      * Metadata for an active tactical shelter. {@code placedBlocks} is the wall-off ledger: the
-     * cells the bot placed, the only cells its dawn teardown may mine. Empty for every other type.
+     * cells the bot placed, the only cells its dawn teardown may mine. For a dig-down it holds one
+     * cell, the dig origin (the original feet cell), which the dawn climb-out stops at; a dig-down
+     * saved before 1.1.256 has none. Empty for every other type.
      */
     public record ShelterInfo(long enteredTick,
                               ShelterType type,
@@ -1403,7 +1405,8 @@ public final class BotFleeService {
                     null,
                     assessment.standPos(),
                     server.getTicks(),
-                    ShelterInvalidReason.VALID));
+                    ShelterInvalidReason.VALID,
+                    List.of(digPos)));
             settled = true;
 
             // Wait for bot to settle inside the bunker before placing torch
@@ -2962,15 +2965,16 @@ public final class BotFleeService {
                 return;
             }
 
+            // 3. Surface escape — if still underground after breaking seal, pillar up
+            escapeToSurface(bot, world);
+
             // Record shelter exit so the underground linger system doesn't immediately
-            // re-trigger surface recovery after a shelter breakfree.
+            // re-trigger surface recovery after a shelter breakfree. Noted after the escape: noted
+            // before it, the grace suppressed this very escape for 60 s.
             MinecraftServer srv = bot.getCommandSource().getServer();
             if (srv != null) {
                 noteShelterExit(bot.getUuid(), srv.getTicks());
             }
-
-            // 3. Surface escape — if still underground after breaking seal, pillar up
-            escapeToSurface(bot, world);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -3024,7 +3028,11 @@ public final class BotFleeService {
         LOGGER.info("Bot {} broke free from cliff shelter", bot.getName().getString());
     }
 
-    /** Break free from a dig-down shelter: mine the cap block, then pillar up. */
+    /**
+     * Break free from a dig-down shelter: mine the cap block, then pillar up. A dig-down that kept
+     * its dig origin climbs out of the pit right away; a join-enclosed shelter or an older record
+     * leaves the climb to {@link #escapeToSurface}.
+     */
     private static void breakFreeDugDown(ServerPlayerEntity bot, ServerWorld world, ShelterInfo info)
             throws InterruptedException {
         BlockPos capPos = info.capPos();
@@ -3035,7 +3043,15 @@ public final class BotFleeService {
         }
         LOGGER.info("Bot {} broke cap of dig-down shelter at {}", bot.getName().getString(),
                 capPos.toShortString());
-        // Pillar up is handled by escapeToSurface()
+        BlockPos origin = info.placedBlocks().isEmpty() ? null : info.placedBlocks().get(0);
+        MinecraftServer server = bot.getCommandSource().getServer();
+        DigDownPolicy.BreakFreeClimb climb = DigDownPolicy.breakFreeClimb(info.type().name(), origin != null);
+        if (climb == DigDownPolicy.BreakFreeClimb.CLIMB_OUT_PIT && server != null && !shouldAbortSurvival(bot)) {
+            LOGGER.info("Bot {} dig-down dawn exit: climbing out to {}", bot.getName().getString(),
+                    origin.toShortString());
+            climbOutOfDigDownPit(bot, server, world, origin);
+        }
+        // Otherwise (and if the climb fell short) escapeToSurface() pillars up.
     }
 
     /**

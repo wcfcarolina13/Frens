@@ -207,6 +207,29 @@ class DigDownPolicyTest {
     }
 
     @Test
+    void breakFreeClimbsOutOnlyFromAnOriginKnownDigDown() {
+        assertEquals(DigDownPolicy.BreakFreeClimb.CLIMB_OUT_PIT, DigDownPolicy.breakFreeClimb("DIG_DOWN", true));
+        assertEquals(DigDownPolicy.BreakFreeClimb.LEGACY, DigDownPolicy.breakFreeClimb("DIG_DOWN", false));
+        assertEquals(DigDownPolicy.BreakFreeClimb.LEGACY, DigDownPolicy.breakFreeClimb("JOIN_ENCLOSED", true));
+        assertEquals(DigDownPolicy.BreakFreeClimb.LEGACY, DigDownPolicy.breakFreeClimb("JOIN_ENCLOSED", false));
+        assertEquals(DigDownPolicy.BreakFreeClimb.LEGACY, DigDownPolicy.breakFreeClimb(null, true));
+    }
+
+    @Test
+    void dawnClimbFromACappedPitRefillsToGroundLevel() {
+        // Origin feet at y=64; the bot stands 3 (or 2) deep after the cap is mined.
+        for (int dug = 2; dug <= 3; dug++) {
+            int feetY = 64 - dug;
+            int depth = DigDownPolicy.pitDepth(feetY, 64);
+            assertEquals(dug, depth);
+            int steps = DigDownPolicy.climbSteps(depth, 64);
+            assertEquals(dug, steps);
+            assertFalse(DigDownPolicy.climbedOut(feetY, 64));
+            assertTrue(DigDownPolicy.climbedOut(feetY + steps, 64));
+        }
+    }
+
+    @Test
     void skipReasonLoggedOncePerReasonPerDay() {
         assertTrue(DigDownPolicy.firstReasonLog(null, "no-seal-block", 3));
         Set<String> logged = DigDownPolicy.withReason(null, "no-seal-block", 3);
