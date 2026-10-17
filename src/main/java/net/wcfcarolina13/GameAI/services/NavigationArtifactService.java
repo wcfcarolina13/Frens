@@ -136,7 +136,19 @@ public final class NavigationArtifactService {
         public String mountEntityTypeId;
         public double travelDistance;
         public boolean magicTravel;
+        /** Save fingerprint ({@link BotWorldStateService#currentWorldKey}); null in pre-1.1.257 files. */
+        public String worldKey;
+        /** Post-arrival action saved with the trip (see {@link PostArrivalPersistPolicy}); all null when none. */
+        public String paType;
+        public Integer paTargetX, paTargetY, paTargetZ;
+        public String paOwner;
+        public Double paReturnX, paReturnY, paReturnZ;
     }
+
+    /** Save world whose travels this session owns; set on load, cleared on reset. */
+    private static volatile String sessionWorldKey;
+    /** Entries of other save worlds read from the file: not restored here, written back unchanged. */
+    private static final List<SavedTravel> OTHER_WORLD_TRAVELS = new ArrayList<>();
 
     private static Path travelFile() {
         return FabricLoader.getInstance().getConfigDir().resolve("frens").resolve(TRAVEL_FILE);
@@ -629,6 +641,11 @@ public final class NavigationArtifactService {
     public static void schedulePostArrival(String botAlias, PostArrivalAction action) {
         if (botAlias != null && action != null) {
             PENDING_POST_ARRIVAL.put(botAlias.toLowerCase(java.util.Locale.ROOT), action);
+            // Retrieve schedules after its travel's last flush: save again so a reload keeps it.
+            // Withdraw schedules before the travel begins, so begin's flush picks it up.
+            if (PostArrivalPersistPolicy.persistable(action.type()) && getPendingTravelByName(botAlias) != null) {
+                flushPendingTravels();
+            }
         }
     }
 
@@ -1660,6 +1677,10 @@ public final class NavigationArtifactService {
         PENDING_POST_SPAWN.clear();
         PENDING_POST_ARRIVAL.clear();
         TRAVEL_COOLDOWNS.clear();
+        synchronized (LOCK) {
+            OTHER_WORLD_TRAVELS.clear();
+            sessionWorldKey = null;
+        }
     }
 
     // ── Persistence ────────────────────────────────────────────────────────
@@ -1689,8 +1710,25 @@ public final class NavigationArtifactService {
                     s.mountEntityTypeId = t.mountEntityTypeId();
                     s.travelDistance = t.travelDistance();
                     s.magicTravel = t.magicTravel();
+                    s.worldKey = sessionWorldKey;
+                    PostArrivalAction pa = t.botAlias() == null ? null
+                            : PENDING_POST_ARRIVAL.get(t.botAlias().toLowerCase(java.util.Locale.ROOT));
+                    if (pa != null && pa.target() != null && PostArrivalPersistPolicy.persistable(pa.type())) {
+                        s.paType = pa.type();
+                        s.paTargetX = pa.target().getX();
+                        s.paTargetY = pa.target().getY();
+                        s.paTargetZ = pa.target().getZ();
+                        s.paOwner = pa.ownerUuid() != null ? pa.ownerUuid().toString() : null;
+                        if (pa.returnPos() != null) {
+                            s.paReturnX = pa.returnPos().x;
+                            s.paReturnY = pa.returnPos().y;
+                            s.paReturnZ = pa.returnPos().z;
+                        }
+                    }
                     list.add(s);
                 }
+                // Other save worlds' trips stay in the shared file until their own world loads.
+                list.addAll(OTHER_WORLD_TRAVELS);
 
                 try (Writer writer = Files.newBufferedWriter(file)) {
                     GSON.toJson(list, writer);
@@ -1709,6 +1747,14 @@ public final class NavigationArtifactService {
      */
     public static void loadPendingTravels(MinecraftServer server) {
         synchronized (LOCK) {
+            String currentWorld = null;
+            try {
+                currentWorld = BotWorldStateService.currentWorldKey(server);
+            } catch (RuntimeException e) {
+                LOGGER.warn("Pending travels: world key unavailable ({}); restoring every entry", e.getMessage());
+            }
+            sessionWorldKey = currentWorld;
+            OTHER_WORLD_TRAVELS.clear();
             Path file = travelFile();
             if (!Files.exists(file)) {
                 return;
@@ -1723,6 +1769,14 @@ public final class NavigationArtifactService {
                 long now = server.getOverworld().getTime();
 
                 for (SavedTravel s : list) {
+                    if (s == null) continue;
+                    if (!PostArrivalPersistPolicy.sameWorld(s.worldKey, currentWorld)) {
+                        OTHER_WORLD_TRAVELS.add(s);
+                        LOGGER.info("Pending travel for '{}' belongs to world {}; kept for that world, not restored here",
+                                s.botAlias, s.worldKey);
+                        continue;
+                    }
+                    boolean travelRestored = false;
                     try {
                         UUID botUuid = UUID.fromString(s.botUuid);
                         UUID ownerUuid = s.ownerUuid != null ? UUID.fromString(s.ownerUuid) : null;
@@ -1740,6 +1794,7 @@ public final class NavigationArtifactService {
                                 now, newArrival, ownerUuid, s.mountEntityTypeId, s.travelDistance,
                                 s.magicTravel);
                         PENDING_TRAVELS.put(botUuid, travel);
+                        travelRestored = true;
 
                         LOGGER.info("Restored pending travel for '{}': destination {} in {}, ETA {} ticks",
                                 s.botAlias, dest.toShortString(), s.dimension, remainingTicks);
@@ -1747,11 +1802,43 @@ public final class NavigationArtifactService {
                         LOGGER.warn("Skipping malformed saved travel entry for '{}': {}",
                                 s.botAlias, e.getMessage());
                     }
+                    restorePostArrival(s, currentWorld, travelRestored);
                 }
             } catch (IOException e) {
                 LOGGER.warn("Failed to load pending travels: {}", e.getMessage());
             }
         }
+    }
+
+    /** Restores the post-arrival action saved with one travel entry, when it still fits that trip. */
+    private static void restorePostArrival(SavedTravel s, String currentWorld, boolean travelRestored) {
+        if (s.paType == null || s.botAlias == null) {
+            return;
+        }
+        if (!PostArrivalPersistPolicy.persistable(s.paType)) {
+            LOGGER.info("Post-arrival action '{}' for '{}' not restored: type is not saved across reloads",
+                    s.paType, s.botAlias);
+            return;
+        }
+        int[] target = PostArrivalPersistPolicy.intTriple(s.paTargetX, s.paTargetY, s.paTargetZ);
+        PostArrivalPersistPolicy.Restore verdict = PostArrivalPersistPolicy.restore(s.worldKey, currentWorld,
+                travelRestored, PostArrivalPersistPolicy.targetEqualsDest(target, s.destX, s.destY, s.destZ));
+        if (verdict != PostArrivalPersistPolicy.Restore.KEEP) {
+            LOGGER.info("Post-arrival action '{}' for '{}' not restored: {}", s.paType, s.botAlias, verdict);
+            return;
+        }
+        UUID owner = null;
+        try {
+            owner = s.paOwner != null ? UUID.fromString(s.paOwner) : null;
+        } catch (IllegalArgumentException ignored) {
+        }
+        double[] ret = PostArrivalPersistPolicy.doubleTriple(s.paReturnX, s.paReturnY, s.paReturnZ);
+        PostArrivalAction action = new PostArrivalAction(s.paType,
+                new BlockPos(target[0], target[1], target[2]), owner,
+                ret == null ? null : new Vec3d(ret[0], ret[1], ret[2]));
+        PENDING_POST_ARRIVAL.put(s.botAlias.toLowerCase(java.util.Locale.ROOT), action);
+        LOGGER.info("Restored post-arrival action '{}' for '{}' at {}", s.paType, s.botAlias,
+                action.target().toShortString());
     }
 
     // ── Internals ─────────────────────────────────────────────────────────
