@@ -2,6 +2,25 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Unified pathfinder is the default, Baritone the opt-in fallback; 1.1.261 (2026-10-17)
+
+The decision from the swapped A/B (`docs/testing/PATHFINDER_AB_2026-10-17.md`: unified 274 logs vs 257, walk reach 66.7% vs 51.4%, no Baritone 500 ms timeouts).
+
+- **Default flipped** (`7e64e8dc`): `PathFinderChoice.DEFAULT = UNIFIED`, `PathFinder.ACTIVE` starts unified, the per-bot override fallback is the default. The choice is saved as a word in a new `pathfinder` config field (null = default), read through the pure `PathFinderDefaultPolicy` at all three config sites (server start, shared-settings save, GUI toggle).
+- **One-time migration** (marker `unifiedDefaultMigrated`, same shape as the 1.1.240 Baritone one): a saved `baritonePathfinderEnabled: true` becomes the default (unified), a saved `false` stays classic. It logs one INFO line naming the way back, `/bot config pathfinder baritone`. Any explicit word chosen later is never touched again.
+- **Command and GUI:** `/bot config pathfinder unified|baritone|classic` now saves all three (unified used to be memory-only). Per-bot stays a debug override that is not saved. The settings topic is now "Unified Pathfinder" (on = unified, off = Baritone). The admin permission key is unchanged and only its wording changed.
+- **Multiplayer** (`57c760f9`, review fix): shared settings always carry an explicit word ("unified" for the default), so a client's stale local pick can't overwrite the server's choice, and a server's choice doesn't leak into the client's own file after leaving. The GUI toggle now reaches a dedicated server. The old boolean is still sent for older clients but ignored on arrival.
+- **Rulings (cost if wrong):**
+  - A pre-1.1.261 explicit `baritone` can't be told apart from the old default, so it moves to unified. Cost: one command to go back, and the log line says which.
+  - Rolling back to 1.1.260 after the migration loads classic, not Baritone. Cost: one command.
+  - An older client on a 1.1.261 server can't change the finder from its toggle.
+- **Deferred:**
+  - Removing the boolean and bidir (slice D): wait for field time on the new default.
+  - `canReach` ignores per-bot overrides: pre-existing.
+  - The sunset auto-return calls the Baritone-style finder directly: pre-existing, separate fix.
+- **Review (Fable):** one Important (nulls dropped from the shared-settings sync) and one Minor (the toggle never reached a dedicated server). Both fixed in `57c760f9`.
+- **Tests:** 2648 → 2663. **Field checks:** Phase 6ba.
+
 ## Swapped pathfinder A/B in the sandbox: unified ahead; paused-server guard in the harness and report (2026-10-17, no build)
 
 - **22 minutes over two valid rounds, finders crossed on the same bots and spots** (`docs/testing/PATHFINDER_AB_2026-10-17.md`, script `tools/sandbox/abtest.py 1|2`). Unified cut 274 logs and Baritone 257 (+6.6%). Unified was ahead on 3 of 4 spots and level on the fourth. It reached its walk goal on 66.7% of walks against 51.4%, found 22 routes Baritone missed against 5, and kept p90 plan time near 45 ms where Baritone sits at its 500 ms timeout. There were no deaths or ERROR lines. **Recommendation: unified as default** (Bradley's call).

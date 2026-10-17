@@ -3,7 +3,23 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-17 (1.1.260) — next session starts here
+## Session Handoff 2026-10-17 (1.1.261) — next session starts here
+
+**State:** main = origin/main @ 1.1.261. Suite 2663 green. 1.1.261 = the unified pathfinder is the default and Baritone is
+the opt-in fallback. A one-time config migration moves saved Baritone to unified and keeps classic. The command saves all
+three choices. The decision rests on the swapped A/B (`docs/testing/PATHFINDER_AB_2026-10-17.md`). Field items: Phase 6ba.
+**Next:**
+- Field time on the new default.
+- Slice D (remove the legacy boolean and bidir) once the default has held.
+- Older field phases 6ad-6al in the sandbox.
+- Audio for "Hey, incoming!".
+- Extend the punctuation guard to the JSON resources.
+- Scope findings worth a look: escape checks that accept only `isAir` in BotRescueService, no drop-1 in ReturnBaseStuck
+  quick nudge, `isSolidBlock` blocking tests there.
+
+Everything in the 1.1.260 block below still applies.
+
+## Session Handoff 2026-10-17 (1.1.260) — superseded
 
 **State:** main = origin/main @ 1.1.260. Suite 2648 green. 1.1.260 = player text without em dashes or semicolons (guard
 test `PlayerTextPunctuationGuardTest`). The 2026-10-16 follow-up batch is done: 1.1.256 spawns, 1.1.257 dig-down dawn
