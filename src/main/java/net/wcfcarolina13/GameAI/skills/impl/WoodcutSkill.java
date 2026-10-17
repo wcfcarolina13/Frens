@@ -756,7 +756,7 @@ public final class WoodcutSkill implements Skill {
         try {
             int startTimeOfDay = bot.getEntityWorld() != null ? (int) (bot.getEntityWorld().getTimeOfDay() % 24000L) : 0;
         if (!internal && startTimeOfDay >= SUNSET_TIME_OF_DAY) {
-            return SkillExecutionResult.failure("It's getting late; I'll cut trees tomorrow.");
+            return SkillExecutionResult.failure("It's getting late. I'll cut trees tomorrow.");
         }
 
         if (bot.getEntityWorld() instanceof ServerWorld world
@@ -902,7 +902,7 @@ public final class WoodcutSkill implements Skill {
                 if (!internal) {
                     int timeOfDay = (int) (bot.getEntityWorld().getTimeOfDay() % 24000L);
                     if (timeOfDay >= SUNSET_TIME_OF_DAY) {
-                        ChatUtils.sendSystemMessage(source, "It's getting late; I'm stopping woodcut for the day.");
+                        ChatUtils.sendSystemMessage(source, "It's getting late. I'm stopping woodcut for the day.");
                         break;
                     }
                 }
@@ -911,7 +911,7 @@ public final class WoodcutSkill implements Skill {
                     totalFailures++;
                     consecutiveFailures++;
                     lastFailureReason = WoodcutFailureReason.INVENTORY_BLOCKED;
-                    ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't store items; stopping woodcut.");
+                    ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't store items, stopping woodcut.");
                     break;
                 }
 
@@ -1316,9 +1316,9 @@ public final class WoodcutSkill implements Skill {
                 finalResult = SkillExecutionResult.failure(AXE_BOOTSTRAP_CRAFT_FAILED_LINE);
             } else if (felled == 0 && selectedTargets > 0) {
                 finalResult = switch (lastFailureReason) {
-                    case PROTECTED_AT_MINING -> SkillExecutionResult.failure("Found a tree, but couldn’t cut it; protection checks blocked the trunk.");
+                    case PROTECTED_AT_MINING -> SkillExecutionResult.failure("Found a tree, but couldn’t cut it. Protection checks blocked the trunk.");
                     case PATH_OR_REACH_FAILURE -> SkillExecutionResult.failure("Found a tree, but couldn’t finish cutting it after repeated reach/path failures.");
-                    case INVENTORY_BLOCKED -> SkillExecutionResult.failure("Inventory is full and I couldn't store items; stopping woodcut.");
+                    case INVENTORY_BLOCKED -> SkillExecutionResult.failure("Inventory is full and I couldn't store items, stopping woodcut.");
                     case TRUNK_NEVER_STARTED -> SkillExecutionResult.failure("Found a tree, but never reached a valid trunk-hit state.");
                     case PILLAR_NO_REACH -> SkillExecutionResult.failure("Found a tree, but pillar reach still never reached the trunk.");
                     case SCAFFOLD_CLEANUP_INCOMPLETE -> SkillExecutionResult.failure("Stopped after reaching the tree, but scaffold cleanup could not finish cleanly.");
@@ -1327,7 +1327,7 @@ public final class WoodcutSkill implements Skill {
             } else if (felled == 0) {
                 finalResult = SkillExecutionResult.failure("No valid trees nearby. Try moving closer or adjust radius.");
             } else if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                finalResult = SkillExecutionResult.failure("Stopped after cutting " + felled + " tree(s); repeated failures reaching remaining targets (path/LOS/inventory).");
+                finalResult = SkillExecutionResult.failure("Stopped after cutting " + felled + " tree(s). Repeated failures reaching remaining targets (path/LOS/inventory).");
             } else if (radiusClearMode && !openEnded) {
                 finalResult = SkillExecutionResult.success("Cleared the local woodcut area after " + felled + " target(s).");
             } else if (felled < targetTrees) {

@@ -104,7 +104,7 @@ final class FortifyTowerHelper {
                 continue;
             }
 
-            ChatUtils.sendSystemMessage(source, String.format("§7  Patching tower at (%d, %d) — %d missing blocks (%d/%d present)",
+            ChatUtils.sendSystemMessage(source, String.format("§7  Patching tower at (%d, %d): %d missing blocks (%d/%d present)",
                     vertex.x(), vertex.z(), missingBefore, presentBefore, plannedCount));
 
             int placed = executeTowerVertexWithRetries(

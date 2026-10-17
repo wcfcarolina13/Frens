@@ -1709,7 +1709,7 @@ public class FarmSkill implements Skill {
                 LOGGER.info("clearBlockingTrees pass={} local bounded clear removed {} blocker(s)", attempts, locallyCleared);
             }
             if (!woodcutResult.success()) {
-                ChatUtils.sendSystemMessage(source, "Tree clearing attempt " + attempts + " failed; trying again if needed.");
+                ChatUtils.sendSystemMessage(source, "Tree clearing attempt " + attempts + " failed, trying again if needed.");
             } else if (nextBlockingTreeBlocks <= 0) {
                 break;
             }
@@ -2284,7 +2284,7 @@ public class FarmSkill implements Skill {
                 return true;
             }
             if (waterBuckets >= 1) {
-                ChatUtils.sendSystemMessage(source, "Proceeding with one water bucket; could not find enough water to fill two.");
+                ChatUtils.sendSystemMessage(source, "Proceeding with one water bucket. Could not find enough water to fill two.");
                 return true;
             }
         }

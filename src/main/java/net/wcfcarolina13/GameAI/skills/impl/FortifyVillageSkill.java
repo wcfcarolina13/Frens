@@ -112,10 +112,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private static final int FORTIFY_MOAT_SIDESTEP_NO_PROGRESS_LIMIT = 3;
 
     private static final List<String> CAVITY_DIALOGUES = List.of(
-            "Noted a pocket in the wall—flagging it for you.",
-            "Found a tiny cavity here; it’s safe but needs eyes on.",
-            "Here’s the gap I marked—no mobs, just a small void.",
-            "Spotting the ignored cavity; we can patch later together.",
+            "Noted a pocket in the wall, flagging it for you.",
+            "Found a tiny cavity here. It’s safe but needs eyes on.",
+            "Here’s the gap I marked. No mobs, just a small void.",
+            "Spotting the ignored cavity. We can patch later together.",
             "This nook is harmless, but I’m calling it out for you."
     );
 
@@ -528,7 +528,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 return SkillExecutionResult.success("Moat aborted after dig phase. " + totalDug + " blocks cleared.");
             }
         } else {
-            ChatUtils.sendChatMessages(source, "§a[Fortify] No moat blocks to dig — moat already clear.");
+            ChatUtils.sendChatMessages(source, "§a[Fortify] No moat blocks to dig, moat already clear.");
         }
 
         // Place moat structural blocks: MOAT_FLOOR, MOAT_INNER_FACE, MOAT_OVERHANG
@@ -613,7 +613,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 status = "§e[" + f.getCompletedEdges().size() + " edges done]";
             }
             String moatTag = f.isMoatComplete() ? " §b[MOAT]" : "";
-            ChatUtils.sendSystemMessage(source, String.format("§7  %s %s%s — center (%d,%d,%d), %d blocks placed",
+            ChatUtils.sendSystemMessage(source, String.format("§7  %s %s%s, center (%d,%d,%d), %d blocks placed",
                     f.getName(), status, moatTag,
                     f.getCenter().getX(), f.getCenter().getY(), f.getCenter().getZ(),
                     f.getTotalBlocksPlaced()));
@@ -858,7 +858,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
                 String color = pct >= 95 ? "§a" : pct >= 50 ? "§e" : "§c";
                 String label = edgeIdx == -1 ? "Towers" : "Edge " + (edgeIdx + 1);
-                ChatUtils.sendSystemMessage(source, String.format("§7  %s: %s%d/%d (%d%%)§7 — %d to repair%s",
+                ChatUtils.sendSystemMessage(source, String.format("§7  %s: %s%d/%d (%d%%)§7, %d to repair%s",
                         label, color, present, planned, pct, edgeMissing.size(), diagnosis));
             }
 
@@ -1043,9 +1043,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 : " (" + ignoredCavityPositions.size() + " cavities ignored)";
         if (aborted) {
             ChatUtils.sendChatMessages(source, "§e[Fortify] Auto-patch aborted after " + passNumber
-                    + " passes; " + grandTotalRepaired + " blocks repaired." + cavitySummary);
+                    + " passes, " + grandTotalRepaired + " blocks repaired." + cavitySummary);
             return SkillExecutionResult.failure("Auto-patch aborted after " + passNumber
-                    + " passes; " + grandTotalRepaired + " blocks repaired." + cavitySummary);
+                    + " passes, " + grandTotalRepaired + " blocks repaired." + cavitySummary);
         }
         ChatUtils.sendChatMessages(source, "§a[Fortify] Auto-patch complete: " + grandTotalRepaired + " total blocks repaired across " + passNumber + " passes." + cavitySummary);
         return SkillExecutionResult.success("Auto-patched " + grandTotalRepaired + " blocks across " + passNumber + " passes." + cavitySummary);
@@ -1137,7 +1137,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             int pct = planned > 0 ? (present * 100) / planned : 100;
             String color = pct >= 95 ? "§a" : pct >= 50 ? "§e" : "§c";
             String label = edgeIdx == -1 ? "Towers" : "Edge " + (edgeIdx + 1);
-            ChatUtils.sendSystemMessage(source, String.format("§7  %s: %s%d/%d (%d%%)§7 — %d missing",
+            ChatUtils.sendSystemMessage(source, String.format("§7  %s: %s%d/%d (%d%%)§7, %d missing",
                     label, color, present, planned, pct, missing));
         }
 
@@ -1329,7 +1329,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             }
             FortificationPersistenceService.save(server, existing);
             ChatUtils.sendChatMessages(source,
-                    "§a[Fortify] Schema is already up to date — no expansion needed.");
+                    "§a[Fortify] Schema is already up to date. No expansion needed.");
             return SkillExecutionResult.success("Schema already up to date.");
         }
 
@@ -1374,7 +1374,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         String mergedDesc = VillageFortificationLayoutService.describePlan(mergedLayout);
         ChatUtils.sendChatMessages(source, "§a[Fortify] Schema expanded! " + mergedDesc);
         ChatUtils.sendSystemMessage(source, String.format(Locale.ROOT,
-                "§7  Carry-over scan retained %d placed blocks; %d edges already above completion threshold.",
+                "§7  Carry-over scan retained %d placed blocks. %d edges already above completion threshold.",
                 progress.totalPresent(), progress.completedEdges().size()));
         ChatUtils.sendSystemMessage(source, "§7  Moat completion flag reset for the expanded perimeter. Auto-resuming build...");
 
@@ -1578,7 +1578,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         FortificationLayout layout = VillageFortificationLayoutService.generateLayout(world, bounds.center(), 64);
 
         if (layout.edges().isEmpty()) {
-            return SkillExecutionResult.failure("Could not generate wall layout — hull computation failed.");
+            return SkillExecutionResult.failure("Could not generate wall layout. Hull computation failed.");
         }
 
         String planDesc = VillageFortificationLayoutService.describePlan(layout);
@@ -1733,7 +1733,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                         continue;
                     }
 
-                    ChatUtils.sendSystemMessage(source, String.format("§7  Tower %d/%d at (%d, %d) — %d blocks (%d present)",
+                    ChatUtils.sendSystemMessage(source, String.format("§7  Tower %d/%d at (%d, %d): %d blocks (%d present)",
                             vi + 1, towerVertices.size(), vertex.x(), vertex.z(), plannedCount, presentCount));
 
                     int placed = towerHelper.executeTowerVertexWithRetries(
@@ -1754,7 +1754,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                     int presentAfter = countPresentBlocks(world, vertexBlocks);
                     if (!towerHelper.isTowerComplete(presentAfter, plannedCount)) {
                         ChatUtils.sendSystemMessage(source, String.format(
-                                "§7    Tower %d incomplete (%d/%d); moving on after bounded retries.",
+                                "§7    Tower %d incomplete (%d/%d), moving on after bounded retries.",
                                 vi + 1, presentAfter, plannedCount));
                     }
 

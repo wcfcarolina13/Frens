@@ -158,7 +158,7 @@ public final class FishingSkill implements Skill {
             Optional<BlockPos> storedChest = handleFullInventory(bot, source, bot.getBlockPos());
             if (storedChest.isEmpty()) {
                 clearSessionAfterStorageFailure(bot);
-                return SkillExecutionResult.failure("Inventory full and no reachable chest. Cleared saved fishing spot — give me a chest near a water spot and try again.");
+                return SkillExecutionResult.failure("Inventory full and no reachable chest. Cleared saved fishing spot. Give me a chest near a water spot and try again.");
             }
             if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
                 return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
@@ -445,7 +445,7 @@ public final class FishingSkill implements Skill {
                 Optional<BlockPos> storedChest = handleFullInventory(bot, source, stand);
                 if (storedChest.isEmpty()) {
                     clearSessionAfterStorageFailure(bot);
-                    return SkillExecutionResult.failure("Inventory full and no reachable chest. Cleared saved fishing spot — give me a chest near a water spot and try again.");
+                    return SkillExecutionResult.failure("Inventory full and no reachable chest. Cleared saved fishing spot. Give me a chest near a water spot and try again.");
                 }
                 if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
                     return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
