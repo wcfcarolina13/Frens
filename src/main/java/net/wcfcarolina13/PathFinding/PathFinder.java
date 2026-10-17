@@ -142,10 +142,6 @@ public class PathFinder {
         return last[0];
     }
 
-    public static List<PathNode> calculatePath(BlockPos start, BlockPos target, ServerWorld world) {
-        return calculatePath(start, target, world, null, null);
-    }
-
     /**
      * Plans for a known bot and returns today's node list. A per-bot {@link PathFinderOverrides}
      * entry wins over {@link #ACTIVE} (debug/A-B only). With the unified finder the request is
@@ -412,14 +408,6 @@ public class PathFinder {
             }
         }
         return true;
-    }
-
-    /**
-     * Quick reachability probe for the global choice ({@link #ACTIVE}); see
-     * {@link #canReach(BlockPos, BlockPos, ServerWorld, UUID, long)}.
-     */
-    public static boolean canReach(BlockPos start, BlockPos goal, ServerWorld world, long timeoutMs) {
-        return canReach(start, goal, world, null, timeoutMs);
     }
 
     /**

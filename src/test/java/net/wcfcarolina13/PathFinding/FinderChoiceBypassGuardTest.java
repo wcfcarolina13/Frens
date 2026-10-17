@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -29,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.fail;
 class FinderChoiceBypassGuardTest {
 
     private static final String PACKAGE_DIR = "net/wcfcarolina13/PathFinding/";
+    private static final Pattern PUBLIC_ENTRY = Pattern.compile(
+            "public\\s+static\\s+[\\w<>.]+\\s+(calculatePath|canReach)\\s*\\(");
     private static final Pattern REFERENCE = Pattern.compile("\\b(?:BaritoneStylePathFinder|UnifiedPathFinder)\\b");
 
     @Test
@@ -58,6 +61,31 @@ class FinderChoiceBypassGuardTest {
         assertTrue(insidePackage > 0, "the scan no longer sees PathFinder's own references; pattern broken?");
         assertEquals(List.of(), offenders,
                 "plan through PathFinder (plan / calculatePath / probePlan / canReach) so the bot's finder choice applies");
+    }
+
+    /**
+     * Up to 1.1.263 {@code /bot go_to} called a no-bot {@code calculatePath} overload and so ignored
+     * the bot's override. 1.1.264 removed that overload and the matching no-bot {@code canReach}; every
+     * public {@code calculatePath} / {@code canReach} on {@code PathFinder} must take the bot's UUID.
+     */
+    @Test
+    void everyPublicPathFinderEntryTakesTheBotUuid() throws IOException {
+        Path file = findMainJavaRoot().resolve(PACKAGE_DIR + "PathFinder.java");
+        String source = stripComments(Files.readString(file, StandardCharsets.UTF_8));
+        Matcher m = PUBLIC_ENTRY.matcher(source);
+        int entries = 0;
+        List<String> noBot = new ArrayList<>();
+        while (m.find()) {
+            entries++;
+            int open = m.end() - 1;
+            int close = source.indexOf(')', open);
+            String params = source.substring(open + 1, close);
+            if (!params.contains("UUID")) {
+                noBot.add(m.group(1) + "(" + params.replaceAll("\\s+", " ").trim() + ")");
+            }
+        }
+        assertTrue(entries >= 2, "found " + entries + " public calculatePath/canReach entries; pattern broken?");
+        assertEquals(List.of(), noBot, "a no-bot entry lets callers skip the per-bot finder override");
     }
 
     @Test

@@ -2750,7 +2750,10 @@ public class modCommandRegistry {
         server.execute(() -> {
             try {
                 // ✅ Calculate the path (PathNode version)
-                List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(finalBot.getBlockPos(), new BlockPos(x_distance, y_distance, z_distance), world);
+                // The bot's own finder: a per-bot override wins over the global choice.
+                List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(finalBot.getBlockPos(),
+                        new BlockPos(x_distance, y_distance, z_distance), world,
+                        finalBot.getUuid(), finalBot.getName().getString());
 
                 // ✅ Simplify + filter
                 List<PathFinder.PathNode> finalPath = PathFinder.simplifyPath(rawPath, world);
