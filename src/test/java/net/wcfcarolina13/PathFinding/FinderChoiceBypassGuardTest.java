@@ -65,7 +65,7 @@ class FinderChoiceBypassGuardTest {
 
     /**
      * Up to 1.1.263 {@code /bot go_to} called a no-bot {@code calculatePath} overload and so ignored
-     * the bot's override. 1.1.264 removed that overload and the matching no-bot {@code canReach}; every
+     * the bot's override. 1.1.265 removed that overload and the matching no-bot {@code canReach}; every
      * public {@code calculatePath} / {@code canReach} on {@code PathFinder} must take the bot's UUID.
      */
     @Test

@@ -3,7 +3,7 @@
 
 Global unified, Wally overridden to baritone, Smokey on the global choice. Each bot gets
 /bot go_to to a spot 20 blocks away. Pass: the [PathFinder] line right after Wally's go_to says
-mode=baritone and the one after Smokey's says mode=unified. Before 1.1.264 both said unified.
+mode=baritone and the one after Smokey's says mode=unified. Before 1.1.265 both said unified.
 """
 import json, re, time, urllib.request
 

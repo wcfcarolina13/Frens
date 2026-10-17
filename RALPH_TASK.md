@@ -3,7 +3,22 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-17 (1.1.264) — next session starts here
+## Session Handoff 2026-10-17 (1.1.265) — next session starts here
+
+**State:** main = origin/main @ 1.1.265. Suite 2695 green. 1.1.265 = `/bot go_to` plans with the bot's own finder (per-bot
+override, then global), and the no-bot `calculatePath` / `canReach` overloads are gone so the gap cannot come back
+(`FinderChoiceBypassGuardTest` checks the public entries take a UUID). Sandbox check passed (`tools/sandbox/gototest.py`).
+Field items: Phase 6be (checklist now 316 open items).
+**Ruling:** `FollowPlannerService` stays as it is. It is the local snapshot steering planner (`FollowPathService` A*,
+at most 49 x 49 blocks, on a worker) under every finder, not a finder choice. The choice already applies at the sunset
+segment pick. Details and cost in the 1.1.265 changelog entry.
+**Next:**
+- go_to plans in `server.getOverworld()` whatever the bot's dimension.
+- In the 1.1.263 sandbox log, unified sunset probes returned `pathLen=0` or `7` with `next=none` inside 200 ms, so the
+  return fell back to a direct follow plan to the far anchor. Worth a scope before Slice D.
+- Everything in the 1.1.264 block below.
+
+## Session Handoff 2026-10-17 (1.1.264) — superseded
 
 **State:** main = origin/main @ 1.1.264. Suite 2694 green. 1.1.264 = stuck escape reads collision shapes, not air or
 `isSolidBlock` (new pure `StuckCellPolicy`): rescue side cells accept grass, leaf litter and thin snow, the wall nudge sees
@@ -26,8 +41,8 @@ the caller's budget on the server thread. Classic probes with Baritone (no budge
 `FinderChoiceBypassGuardTest` stops direct finder calls outside `PathFinding/`. Sandbox check passed
 (`tools/sandbox/sunsettest.py`). Field items: Phase 6bc. 1.1.262 is the parallel escape-code build.
 **Next:**
-- Does `FollowPlannerService` (which walks each sunset segment) honour the finder choice? Not checked in this build.
-- `modCommandRegistry` goto calls `PathFinder.calculatePath` without a bot, so it follows only the global choice.
+- ~~Does `FollowPlannerService` honour the finder choice?~~ Ruled in 1.1.265: local steering layer, no change.
+- ~~`modCommandRegistry` goto calls `PathFinder.calculatePath` without a bot~~ ✅ 1.1.265.
 - Slice D, then the 6ad-6al bugs A-G, as in the 1.1.261 block below.
 **Needs Bradley:** scope the CLAUDE.md pre-deploy check to the target instance (`pgrep -f "PrismLauncher/instances/1.21.11/natives"`). The any-instance pattern blocks every release while a sandbox test runs. The base CLAUDE.md is hook-blocked for sessions.
 

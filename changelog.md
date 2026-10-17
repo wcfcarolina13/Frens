@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## /bot go_to plans with the bot's own pathfinder; 1.1.265 (2026-10-17)
+
+Closes the two questions 1.1.263 left open about the finder choice.
+
+- **go_to** (`588cef7b`): `/bot go_to` called the no-bot `PathFinder.calculatePath(start, target, world)`, so only the global `/bot config pathfinder` choice applied and a per-bot override was ignored. It now passes the bot's UUID and name. It still plans on the server thread, as before.
+- **No-bot overloads removed** (`588cef7b`): the three-argument `calculatePath` and the four-argument `canReach` had no other production caller. Both are gone, so code that has a bot in hand cannot skip its override by accident. `FinderChoiceBypassGuardTest` gains a check that every public `calculatePath` / `canReach` on `PathFinder` takes a UUID.
+- **Ruling, FollowPlannerService (cost if wrong):** no change. Scoped at `FollowPlannerService.requestPlanToGoal` (:282) and `requestPlanToTarget`: neither names a finder. Both capture a `FollowSnapshot` on the server thread (at most 49 x 49 blocks, 21 high) and run `FollowPathService`'s own A* over that snapshot on a worker, with door avoidance, stuck and water modes, an escape plan and waypoint compression. It is the local steering layer under every finder. The finder choice already applies to the sunset walk at the segment pick (`probePlan` with the bot's UUID, 1.1.263), which hands the follow planner a goal at most 60 blocks away. Routing the steering through `PathFinder.plan` would change plain follow mode for every bot and drop the door, stuck and water handling. It would also move Baritone and classic world reads onto the worker, which the snapshot exists to avoid. Cost if wrong: a bot with a per-bot override picks its sunset segments with its own finder but walks the last metres of each with the shared steering planner, as it already did in 1.1.263, which passed the sandbox.
+- **Sandbox check (mcp-sandbox, `tools/sandbox/gototest.py`):** global unified, Wally overridden to baritone, Smokey on the global choice, each sent 18 blocks with `/bot go_to`. The `[PathFinder]` line after Wally's go_to said `mode=baritone` (12 nodes, 531 ms), the one after Smokey's said `mode=unified` (16 nodes, 87 ms), both on the server thread. The test JAR was built before the rebase onto 1.1.264, whose stuck-escape changes do not touch planning. The sandbox was held by the 1.1.262/1.1.264 session until 13:16 and was restored to its JAR afterwards.
+- Release number: 1.1.264 shipped from the parallel stuck-escape build while this one waited for the sandbox, so this one is 1.1.265.
+- Tests 2694 → 2695.
+- **Field checks:** Phase 6be.
+- **Follow-ups (handoff):** go_to plans in `server.getOverworld()` whatever the bot's dimension. In the 1.1.263 sandbox log, unified sunset probes came back `pathLen=0` or `7` with `next=none` inside the 200 ms budget, which drops the return to a direct follow plan to the far anchor. Worth a look before Slice D.
+
 ## Stuck escape reads collision shapes, not air or isSolidBlock; 1.1.264 (2026-10-17)
 
 Four misclassifications found while scoping the 2026-10-17 pathfinder A/B. The minutes-long stuck episodes in that A/B were a paused server, so these were real but not yet seen to matter in live play. Each was reproduced in the mcp-sandbox before (1.1.261, lane on 1.1.263) and after (`tools/sandbox/stucktest.py wall|clip|pen|lane`): wall went from no nudge to `nudged away from wall west ... (head-level)`, clip from `escape movement toward up` to `escape side cell 200, 110, 199 enterable`, pen from `ALL 8 directions blocked` to `quick-nudge drop-1 toward 1,-1`, and lane from a jump-sprint that "succeeded" out of a closed stone pocket to `feet blocked by Oak Fence at 202, 110, 200 (collision shape)`. New pure `StuckCellPolicy` holds every decision.
