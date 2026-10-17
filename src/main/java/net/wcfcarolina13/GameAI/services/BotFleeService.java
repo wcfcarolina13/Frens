@@ -171,6 +171,39 @@ public final class BotFleeService {
             .map(item -> Registries.ITEM.getId(item).toString())
             .collect(Collectors.toUnmodifiableSet());
 
+    /** {@link #SEAL_BLOCKS} as ids in today's order, and back to items, for {@link SealOrderPolicy}. */
+    private static final List<String> SEAL_ID_ORDER = SEAL_BLOCKS.stream()
+            .map(item -> Registries.ITEM.getId(item).toString())
+            .toList();
+    private static final Map<String, Item> SEAL_ITEM_BY_ID = SEAL_BLOCKS.stream()
+            .collect(Collectors.toUnmodifiableMap(item -> Registries.ITEM.getId(item).toString(), item -> item));
+
+    /**
+     * The seal list every shelter seal and the dig-down cap place from, ordered by
+     * {@link SealOrderPolicy} for the tools the bot holds right now. The tool flags are read in one
+     * server hop; on a hop timeout this falls back to today's {@link #SEAL_BLOCKS} order, never an
+     * empty list (an empty list lets {@code tryPlaceBlockAt} place any block item).
+     */
+    private static List<Item> sealBlocksFor(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return SEAL_BLOCKS;
+        }
+        MinecraftServer server = bot.getCommandSource().getServer();
+        boolean[] tools = callOnServer(server, () -> new boolean[]{hasAnyPickaxe(bot), hasAnyAxe(bot)},
+                WALL_OFF_HOP_TIMEOUT_MS, null);
+        if (tools == null) {
+            return SEAL_BLOCKS;
+        }
+        List<Item> ordered = new ArrayList<>(SEAL_BLOCKS.size());
+        for (String id : SealOrderPolicy.order(SEAL_ID_ORDER, tools[0], tools[1])) {
+            Item item = SEAL_ITEM_BY_ID.get(id);
+            if (item != null) {
+                ordered.add(item);
+            }
+        }
+        return ordered.isEmpty() ? SEAL_BLOCKS : List.copyOf(ordered);
+    }
+
     /** Returns true if the bot is currently inside a tactical shelter. */
     public static boolean isInShelter(UUID botId) {
         return SHELTER_ACTIVE.containsKey(botId);
@@ -1032,6 +1065,7 @@ public final class BotFleeService {
             // Try digPos first, then lower positions closer to the bot.
             BlockPos[] capPlacedAt = {null};
             MinecraftServer server = bot.getCommandSource().getServer();
+            final List<Item> seals = sealBlocksFor(bot);
             server.execute(() -> {
                 // Try just above the bot's head first: that is the cell the shelter validator
                 // (hasOverheadCover, stand + 2) reads as cover. Capping higher left stand + 2 as
@@ -1045,7 +1079,7 @@ public final class BotFleeService {
                 };
                 for (BlockPos cap : candidates) {
                     if (bot.getEntityWorld().getBlockState(cap).isAir()) {
-                        if (BotActions.placeBlockAt(bot, cap)) {
+                        if (BotActions.tryPlaceBlockAt(bot, cap, Direction.UP, seals, false).success()) {
                             capPlacedAt[0] = cap.toImmutable();
                             LOGGER.info("Bot {} dig-down cap placed at {} (feet {}, covers={})",
                                     bot.getName().getString(), cap.toShortString(), feetNow.toShortString(),
@@ -1267,6 +1301,7 @@ public final class BotFleeService {
                                                   List<BlockPos> plan,
                                                   Direction primaryDir) throws InterruptedException {
         String name = bot.getName().getString();
+        List<Item> seals = sealBlocksFor(bot);
         List<BlockPos> ledger = new ArrayList<>();
         for (int i = 0; i < plan.size(); i++) {
             if (isStaleShelter(bot, gen)) {
@@ -1274,10 +1309,10 @@ public final class BotFleeService {
                 return false;
             }
             BlockPos cell = plan.get(i);
-            BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, cell, Direction.UP, SEAL_BLOCKS, false);
+            BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, cell, Direction.UP, seals, false);
             if (result == null || !result.success()) {
                 Thread.sleep(300L);
-                result = BotActions.tryPlaceBlockAt(bot, cell, Direction.UP, SEAL_BLOCKS, false);
+                result = BotActions.tryPlaceBlockAt(bot, cell, Direction.UP, seals, false);
             }
             if (result != null && result.success()) {
                 ledger.add(cell);
@@ -2170,12 +2205,13 @@ public final class BotFleeService {
                     String.format("%.1f", bot.squaredDistanceTo(Vec3d.ofCenter(deeperFeet))));
 
             // Seal the entrance with solid blocks (allowIntersecting=true for bounding box edge cases)
+            final List<Item> seals = sealBlocksFor(bot);
             boolean[] sealed = {false};
             server.execute(() -> {
                 BotActions.PlaceResult fResult = BotActions.tryPlaceBlockAt(bot, wallFeet,
-                        net.minecraft.util.math.Direction.UP, SEAL_BLOCKS, true);
+                        net.minecraft.util.math.Direction.UP, seals, true);
                 BotActions.PlaceResult hResult = BotActions.tryPlaceBlockAt(bot, wallHead,
-                        net.minecraft.util.math.Direction.UP, SEAL_BLOCKS, true);
+                        net.minecraft.util.math.Direction.UP, seals, true);
                 sealed[0] = fResult.success() && hResult.success();
                 if (!sealed[0]) {
                     LOGGER.info("Bot {} seal failed (feet={}, head={})",
@@ -2187,9 +2223,9 @@ public final class BotFleeService {
             if (!sealed[0]) {
                 server.execute(() -> {
                     if (!bot.getEntityWorld().getBlockState(wallFeet).blocksMovement())
-                        BotActions.tryPlaceBlockAt(bot, wallFeet, net.minecraft.util.math.Direction.UP, SEAL_BLOCKS, true);
+                        BotActions.tryPlaceBlockAt(bot, wallFeet, net.minecraft.util.math.Direction.UP, seals, true);
                     if (!bot.getEntityWorld().getBlockState(wallHead).blocksMovement())
-                        BotActions.tryPlaceBlockAt(bot, wallHead, net.minecraft.util.math.Direction.UP, SEAL_BLOCKS, true);
+                        BotActions.tryPlaceBlockAt(bot, wallHead, net.minecraft.util.math.Direction.UP, seals, true);
                     sealed[0] = bot.getEntityWorld().getBlockState(wallFeet).blocksMovement()
                             && bot.getEntityWorld().getBlockState(wallHead).blocksMovement();
                 });
@@ -2882,6 +2918,19 @@ public final class BotFleeService {
             if (stack != null && !stack.isEmpty()) {
                 String id = net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).getPath();
                 if (id.endsWith("_pickaxe")) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Check if the bot has any axe in inventory (pickaxes excluded). */
+    private static boolean hasAnyAxe(ServerPlayerEntity bot) {
+        var inv = bot.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack != null && !stack.isEmpty()) {
+                String id = net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).getPath();
+                if (id.endsWith("_axe")) return true;
             }
         }
         return false;
