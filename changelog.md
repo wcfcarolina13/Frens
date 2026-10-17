@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Global bot controls retired, Bot Controls work on a remote server, mount `_legacy` promotion removed; 1.1.254 (2026-10-16)
+
+Third build of `docs/testing/BACKLOG_SPEC_2026-10-16.md` (items 9 and 10, audit Q12 and Q13).
+
+- **Global bot-control fallbacks removed** (`c5e70e22`, Q12). The per-world migration has existed since 2026-03-13 (`migrateLegacyToPerWorld` on every load), so the 1-arg accessors, `getBotControls` and the readers of the old global map go. A blank world key gets default settings that are never stored, the last fallback returns null (every caller checks), and the global `botControls` key leaves `settings.json5` on the next save (sandbox: gone). Pure `LegacyBotControlMigrationPolicy` (9 tests). A global entry dropped because the alias already has per-world settings is now logged instead of silent.
+- **Bot Controls on a remote server** (`3ef555f3`, `ea0fe6bc`, found during scoping). On a client connected to a dedicated or LAN server the per-bot panel wrote into the global map, which never syncs, so remote edits were lost. The server now sends its world key with every config sync (the client never sends it back, and the op-or-host save gate is unchanged), so edits land in the synced per-world map. The bulk Auto Respawn and Auto Spawn on Load buttons now send the save too (they did nothing remotely before). Against an older server the per-bot panel and bulk buttons show "Per-bot settings are unavailable because this server did not send its world. Update Frens on the server to 1.1.254 or newer." and do nothing.
+- **Mount `_legacy` promotion removed** (`9b719624`, Q13). No build since 1.1.246 writes `_legacy`, and Nirn's mount file has none. Ruling: shipped without waiting for Nirn to run 1.1.246 (cost: none on current data).
+- **Rulings (cost if wrong):** no world-load copy of global settings into every world (cost: none, the global map is already empty after the March migration). A remote client's Auto Respawn turned on does not spawn a dead bot at once, the server picks it up at its next respawn check.
+- **Review (Fable):** merge-ready, no Critical or Important. The bulk buttons looking clickable without a world key was fixed (`ea0fe6bc`).
+- **Tests:** 2561 → 2573. Sandbox smoke: follow, stop, `/configMan`, no ERROR lines, global key gone from the saved settings.
+- **Field checks:** Phase 6av.
+
 ## Night shelters: dirt before cobblestone, shelters survive a reload, dig-down never leaves a pit; 1.1.253 (2026-10-16)
 
 Second build of `docs/testing/BACKLOG_SPEC_2026-10-16.md` (items 6 to 8, Bradley chose "climb out" for 8). Sandbox-tested on the throwaway "Wall Test" save with the new `tools/sandbox/sheltertest.py`.
