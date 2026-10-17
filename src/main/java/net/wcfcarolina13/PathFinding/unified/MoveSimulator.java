@@ -229,5 +229,10 @@ public final class MoveSimulator {
         public void placeBlock(int x, int y, int z) {
             overrides.put(CellPos.pack(x, y, z), SCAFFOLD);
         }
+
+        /** Drops every removal and placement: the overlay reads as its base again. */
+        public void clear() {
+            overrides.clear();
+        }
     }
 }

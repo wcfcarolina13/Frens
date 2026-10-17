@@ -29,6 +29,14 @@ public final class UnifiedPathFinder {
     private static final int[][] CARDINALS = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
     private static final int[][] DIAGONALS = {{1, -1}, {1, 1}, {-1, 1}, {-1, -1}};
 
+    /**
+     * Key bit for a node whose path breaks or places anything ({@link SearchBox#key} leaves bit 63 free).
+     * A cell reached both by a pure walk and by a path that changed the terrain is two nodes, so a pure
+     * walk (never refused: it has no mutator chain) is never closed by a cheaper mutated path whose later
+     * moves its own breaks undo. At most twice the states, none extra on terrain nothing is mined in.
+     */
+    static final long MUTATED_LAYER = Long.MIN_VALUE;
+
     private UnifiedPathFinder() {
     }
 
@@ -168,6 +176,9 @@ public final class UnifiedPathFinder {
         int expanded = 0;
         MoveCosts.Refusals refusals = buf.refusals;
         List<PlannedMove> succ = buf.successors;
+        // The terrain as the popped node's own path left it, rebuilt per expansion from its mutator chain.
+        MoveSimulator.Overlay changed = new MoveSimulator.Overlay(t);
+        List<PlannedMove> chain = new ArrayList<>();
 
         while (!buf.open.isEmpty()) {
             if (expanded > 0 && (expanded & (TIME_CHECK_INTERVAL - 1)) == 0) {
@@ -197,17 +208,28 @@ public final class UnifiedPathFinder {
             }
             succ.clear();
             expand(ctx, t, cur.x, cur.y, cur.z, cur.scaffoldLeft, cur.swimRun, refusals, succ);
+            boolean mutated = cur.mutator != null;
+            if (mutated) {
+                fillFromChain(changed, cur.mutator, chain);
+            }
             for (int i = 0; i < succ.size(); i++) {
                 PlannedMove mv = succ.get(i);
                 double c = mv.ticks();
                 if (c >= ActionCosts.COST_INF) {
                     continue;
                 }
+                if (mutated && undoneByOwnPath(ctx, changed, cur, mv)) {
+                    continue;
+                }
                 if (!(c > 0)) {
                     c = MoveCosts.minHorizontal(ctx);
                 }
                 int swim = mv.swimRunAfter();
+                boolean mutates = mutates(mv);
                 long key = box.key(mv.toX(), mv.toY(), mv.toZ(), swim);
+                if (mutated || mutates) {
+                    key |= MUTATED_LAYER;
+                }
                 double ng = cur.g + c;
                 SearchNode n = buf.nodes.get(key);
                 if (n == null) {
@@ -217,6 +239,7 @@ public final class UnifiedPathFinder {
                     n.f = ng + n.h;
                     n.parent = cur;
                     n.move = mv;
+                    n.mutator = mutates ? n : cur.mutator;
                     n.scaffoldLeft = mv.scaffoldLeftAfter();
                     buf.nodes.put(key, n);
                     buf.open.insert(n);
@@ -225,6 +248,7 @@ public final class UnifiedPathFinder {
                     n.f = ng + n.h;
                     n.parent = cur;
                     n.move = mv;
+                    n.mutator = mutates ? n : cur.mutator;
                     n.scaffoldLeft = mv.scaffoldLeftAfter();
                     if (n.isOpen()) {
                         buf.open.decreaseKey(n);
@@ -271,6 +295,46 @@ public final class UnifiedPathFinder {
                     clock.getAsLong() - t0);
         }
         return PathPlan.noPath(ctx.planId(), reason, expanded, clock.getAsLong() - t0);
+    }
+
+    private static boolean mutates(PlannedMove mv) {
+        return mv.toBreak().length > 0 || mv.toPlace().length > 0;
+    }
+
+    /**
+     * Resets {@code overlay} and applies, oldest first, the breaks and places of every move on the
+     * mutator chain from {@code newest}: the terrain as the path to the popped node left it. Walks the
+     * mutating ancestors only, so a pure walk costs nothing.
+     */
+    private static void fillFromChain(MoveSimulator.Overlay overlay, SearchNode newest, List<PlannedMove> chain) {
+        overlay.clear();
+        chain.clear();
+        for (SearchNode m = newest; m != null; m = m.parent == null ? null : m.parent.mutator) {
+            chain.add(m.move);
+        }
+        for (int i = chain.size() - 1; i >= 0; i--) {
+            PlannedMove mv = chain.get(i);
+            for (long cell : mv.toBreak()) {
+                overlay.removeBlock(CellPos.x(cell), CellPos.y(cell), CellPos.z(cell));
+            }
+            for (long cell : mv.toPlace()) {
+                overlay.placeBlock(CellPos.x(cell), CellPos.y(cell), CellPos.z(cell));
+            }
+        }
+    }
+
+    /**
+     * Whether an earlier move on the popped node's path undoes {@code mv} (6ad-6al field bug F): on the
+     * terrain those moves leave it is refused, or it lands elsewhere, the {@link CostVerifier} criteria
+     * {@link #truncateToExecutable} cuts on. Refuse only: a move that passes keeps its raw price, so the
+     * graph stays the one {@link #expand} prices (and the Dijkstra reference searches).
+     */
+    private static boolean undoneByOwnPath(SearchContext ctx, MoveSimulator.Overlay changed, SearchNode cur,
+                                           PlannedMove mv) {
+        PlannedMove now = MoveCosts.evaluate(ctx, changed, cur.x, cur.y, cur.z, mv.kind(), mv.dx(), mv.dz(),
+                cur.scaffoldLeft, cur.swimRun);
+        return now == null || now.ticks() >= ActionCosts.COST_INF
+                || now.toX() != mv.toX() || now.toY() != mv.toY() || now.toZ() != mv.toZ();
     }
 
     /**
@@ -361,10 +425,12 @@ public final class UnifiedPathFinder {
 
     /**
      * Cuts a plan before the first move an earlier move of the same plan undoes (6ad-6al field bug F).
-     * The search prices every move on the unmutated terrain, so it can mine a cell with one move and
+     * The search prices every move on the unmutated terrain, so it could mine a cell with one move and
      * step onto it as solid with a later one (TRAVERSE mines C, TRAVERSE on, ASCEND back onto C);
      * {@link CostVerifier} applies the earlier moves' breaks and places to an overlay and cancels that
-     * move as forbidden, and the replan from the same cell returns the same plan.
+     * move as forbidden. Since 1.1.267 the search itself refuses such a move against the popped node's
+     * mutator chain and routes around it; this stays as the backstop for what that check cannot see
+     * (a node re-parented after its descendants were expanded keeps their stale chains).
      *
      * <p>This is the verifier's own verdict at plan time: {@link CostVerifier#check} from move 0 over the
      * whole plan on an overlay of the planning terrain, with no cost-rise limit, so only a move that is

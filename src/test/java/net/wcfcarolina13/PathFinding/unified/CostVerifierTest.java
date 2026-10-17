@@ -61,10 +61,10 @@ class CostVerifierTest {
 
     /**
      * 6ad-6al field bug F. A 1-wide corridor (z=1) with an unbreakable block over the start, so the bot
-     * cannot jump straight onto the dirt at x=1. The search, pricing every move on unmutated terrain,
-     * mines the dirt (move 0), walks past it (move 1), then jumps back onto it as a step (move 2): the
-     * verifier, which applies move 0's break first, forbids that ASCEND (the field line: "move 3 ASCEND
-     * now forbidden ... planned=5.6 live=1000000.0"), and a replan returns the same plan.
+     * cannot jump straight onto the dirt at x=1. Priced on unmutated terrain, the cheapest plan mines the
+     * dirt (move 0), walks past it (move 1), then jumps back onto it as a step (move 2): the verifier,
+     * which applies move 0's break first, forbids that ASCEND (the field line: "move 3 ASCEND now
+     * forbidden ... planned=5.6 live=1000000.0"). There is no lawful route to the goal.
      */
     private static SearchContext minesItsOwnStep() {
         VoxelGrid g = new VoxelGrid(0, 0, 0, 5, 6, 3, VoxelGrid.ToolTable.HAND);
@@ -75,30 +75,133 @@ class CostVerifierTest {
         return SearchContext.builder(g, 0, 1, 1, 1, 2, 1).allowBreak(true).build();
     }
 
+    /**
+     * The self-conflicting plan the pre-1.1.267 search returned on {@link #minesItsOwnStep}, built from
+     * raw-priced moves (each evaluated on the unmutated terrain, as the search prices them) so the
+     * {@link UnifiedPathFinder#truncateToExecutable} backstop stays covered now that the search refuses it.
+     */
+    private static PathPlan rawSelfConflict(SearchContext ctx) {
+        TerrainView t = ctx.terrain();
+        PlannedMove mine = MoveCosts.evaluate(ctx, t, 0, 1, 1, MoveKind.TRAVERSE, 1, 0, ctx.scaffoldCount(), 0);
+        PlannedMove past = MoveCosts.evaluate(ctx, t, 1, 1, 1, MoveKind.TRAVERSE, 1, 0, mine.scaffoldLeftAfter(),
+                mine.swimRunAfter());
+        PlannedMove back = MoveCosts.evaluate(ctx, t, 2, 1, 1, MoveKind.ASCEND, -1, 0, past.scaffoldLeftAfter(),
+                past.swimRunAfter());
+        List<PlannedMove> moves = List.of(mine, past, back);
+        double ticks = 0;
+        for (PlannedMove m : moves) {
+            ticks += m.ticks();
+        }
+        return new PathPlan(5, PlanStatus.FULL, NoPathReason.NONE, 0, moves, ticks, 3, 1);
+    }
+
     @Test
     void aPlannedBreakUnderALaterAscendCancelsIt() {
         SearchContext ctx = minesItsOwnStep();
-        PathPlan plan = UnifiedPathFinder.search(ctx, () -> 0L);
-        assertEquals(PlanStatus.FULL, plan.status());
+        PathPlan plan = rawSelfConflict(ctx);
         List<PlannedMove> m = plan.moves();
-        assertEquals(3, m.size(), m.toString());
-        assertEquals(MoveKind.TRAVERSE, m.get(0).kind());
         assertEquals(CellPos.pack(1, 1, 1), m.get(0).toBreak()[0]);
-        assertEquals(MoveKind.ASCEND, m.get(2).kind());
+        assertEquals(2, m.get(1).toX());
         assertEquals(0, m.get(2).toBreak().length);
+        assertEquals(1, m.get(2).toX());
+        assertEquals(2, m.get(2).toY());
         CostVerifier.Verdict v = CostVerifier.check(ctx, plan, 0, ctx.terrain());
         assertTrue(v.cancel());
         assertEquals(2, v.moveIndex());
         assertTrue(v.reason().contains("ASCEND now forbidden"), v.reason());
         assertEquals(ActionCosts.COST_INF, v.liveTicks());
-        // Same terrain, same search: the replan is the same plan.
-        assertEquals(m, UnifiedPathFinder.search(ctx, () -> 0L).moves());
+    }
+
+    @Test
+    void theSearchNoLongerReturnsAPlanThatMinesItsOwnStep() {
+        SearchContext ctx = minesItsOwnStep();
+        PathPlan plan = UnifiedPathFinder.search(ctx, () -> 0L);
+        // No lawful route: the goal stands on the dirt and the only way past it mines it.
+        assertEquals(PlanStatus.NO_PATH, plan.status(), plan.moves().toString());
+        assertFalse(UnifiedPathFinder.truncateToExecutable(ctx, plan).truncated());
+    }
+
+    /**
+     * {@link #minesItsOwnStep} with a lawful detour: the corridor runs west to a step at x=0, and from
+     * the step a raised lane (z=2, feet y=3) runs east to above the dirt, where a DESCEND lands on it.
+     * Raw-priced, mining the dirt is cheaper than the detour; the search now refuses the ASCEND back onto
+     * the mined cell and walks the detour, a FULL plan the verifier passes. The mining branch never
+     * reaches the lane (its wall is two high and never broken), so no node it owns blocks the detour.
+     */
+    @Test
+    void theSearchRoutesAroundAMoveItsOwnPathUndoes() {
+        VoxelGrid g = new VoxelGrid(0, 0, 0, 8, 7, 4, VoxelGrid.ToolTable.HAND);
+        g.fill(0, 0, 0, 7, 6, 3, 'n');
+        g.fill(0, 1, 1, 5, 4, 1, '.');
+        g.set(0, 1, 1, 'n');          // the step up to the lane
+        g.set(3, 3, 1, 'n');          // over the start: no jump straight onto the dirt
+        g.set(4, 1, 1, 'd');
+        g.fill(0, 3, 2, 5, 4, 2, '.'); // the raised lane, floor at y=2
+        SearchContext ctx = SearchContext.builder(g, 3, 1, 1, 4, 2, 1).allowBreak(true).build();
+
+        PathPlan plan = UnifiedPathFinder.search(ctx, () -> 0L);
+        assertEquals(PlanStatus.FULL, plan.status(), plan.toString());
+        assertEquals(4, plan.endX());
+        assertEquals(2, plan.endY());
+        assertEquals(1, plan.endZ());
+        for (PlannedMove m : plan.moves()) {
+            assertEquals(0, m.toBreak().length, m.toString());
+        }
+        assertFalse(CostVerifier.check(ctx, plan, 0, ctx.terrain(), plan.moves().size(),
+                Double.POSITIVE_INFINITY).cancel());
+        assertFalse(UnifiedPathFinder.truncateToExecutable(ctx, plan).truncated());
+        assertTrue(MoveSimulator.simulate(ctx, plan).executable());
+
+        // The raw-priced mine-and-step-back plan is the cheaper one: only the refusal chose the detour.
+        TerrainView t = ctx.terrain();
+        PlannedMove mine = MoveCosts.evaluate(ctx, t, 3, 1, 1, MoveKind.TRAVERSE, 1, 0, 0, 0);
+        PlannedMove past = MoveCosts.evaluate(ctx, t, 4, 1, 1, MoveKind.TRAVERSE, 1, 0, 0, 0);
+        PlannedMove back = MoveCosts.evaluate(ctx, t, 5, 1, 1, MoveKind.ASCEND, -1, 0, 0, 0);
+        assertEquals(CellPos.pack(4, 1, 1), mine.toBreak()[0]);
+        assertTrue(mine.ticks() + past.ticks() + back.ticks() < plan.totalTicks(),
+                (mine.ticks() + past.ticks() + back.ticks()) + " vs " + plan.totalTicks());
+    }
+
+    /**
+     * The random terrain of {@link MoveCostsInvariantTest} (seed 140 there once lost a break-free route:
+     * the cell before it was reached cheaper by a path whose own break the next move needed). A route
+     * that breaks and places nothing is never refused, so whenever one exists the search is FULL; and a
+     * FULL plan runs as planned, with nothing for the truncation backstop to cut.
+     */
+    @Test
+    void onRandomTerrainABreakFreeRouteIsNeverLostAndFullPlansNeedNoCut() {
+        int breakFree = 0;
+        int full = 0;
+        for (long seed = 1; seed <= 300; seed++) {
+            java.util.Random rnd = new java.util.Random(seed * 7919);
+            VoxelGrid g = MoveCostsInvariantTest.randomGrid(rnd);
+            int[] s = MoveCostsInvariantTest.randomStanding(g, rnd);
+            int[] t = MoveCostsInvariantTest.randomStanding(g, rnd);
+            if (s == null || t == null) {
+                continue;
+            }
+            SearchContext ctx = SearchContext.builder(g, s[0], s[1], s[2], t[0], t[1], t[2])
+                    .canSprint(rnd.nextBoolean()).allowBreak(true).allowSwim(true).allowDownward(rnd.nextBoolean())
+                    .box(new SearchBox(0, 0, 0, 9, 9, 9)).primaryMs(10_000).failureMs(10_000).nodeCap(1_000_000)
+                    .build();
+            PathPlan plan = UnifiedPathFinder.search(ctx, () -> 0L);
+            if (plan.status() == PlanStatus.FULL) {
+                full++;
+                assertFalse(UnifiedPathFinder.truncateToExecutable(ctx, plan).truncated(), "seed " + seed);
+            }
+            PathPlan walk = UnifiedPathFinder.search(ctx.toBuilder().allowBreak(false).build(), () -> 0L);
+            if (walk.status() == PlanStatus.FULL) {
+                breakFree++;
+                assertEquals(PlanStatus.FULL, plan.status(), "break-free route lost, seed " + seed);
+            }
+        }
+        assertTrue(breakFree > 40 && full > breakFree, breakFree + " break-free, " + full + " full");
     }
 
     @Test
     void truncationKeepsTheMovesBeforeTheConflictAsAPartial() {
         SearchContext ctx = minesItsOwnStep();
-        PathPlan plan = UnifiedPathFinder.search(ctx, () -> 0L);
+        PathPlan plan = rawSelfConflict(ctx);
         UnifiedPathFinder.Truncation cut = UnifiedPathFinder.truncateToExecutable(ctx, plan);
         assertTrue(cut.truncated());
         assertEquals(2, cut.cutAt());
@@ -133,7 +236,7 @@ class CostVerifierTest {
     @Test
     void aPrefixThatTrimsToNothingIsNoPath() {
         SearchContext ctx = minesItsOwnStep();
-        PlannedMove mine = UnifiedPathFinder.search(ctx, () -> 0L).moves().get(0);
+        PlannedMove mine = rawSelfConflict(ctx).moves().get(0);
         // Move 1 jumps east from inside the mined cell onto open air: refused, and the only move left
         // ends right after a break, which a partial never does.
         PlannedMove forged = new PlannedMove(MoveKind.ASCEND, 1, 1, 1, 2, 2, 1, null, null, 5.6, 0, 0);

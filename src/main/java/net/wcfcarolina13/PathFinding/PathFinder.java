@@ -442,7 +442,7 @@ public class PathFinder {
      * a non-empty node list. No log line, no plan ID. A null {@code botUuid} follows the global choice.
      */
     public static boolean canReach(BlockPos start, BlockPos goal, ServerWorld world, UUID botUuid, long timeoutMs) {
-        // Status only: no node conversion, so nothing runs after the search's budget.
+        // Status only: no node conversion; after the budget only the truncation check (one evaluate per move).
         PlanResult result = probe(start, goal, world, botUuid, timeoutMs, false);
         if (result.plan() != null) {
             return result.plan().status() != PlanStatus.NO_PATH;
@@ -484,7 +484,9 @@ public class PathFinder {
             try {
                 SearchContext ctx = unifiedContext(start, goal, world, PlanRequest.probe(timeoutMs),
                         WorldTerrainView.BotSnapshot.NONE, 0L);
-                PathPlan plan = UnifiedPathFinder.search(ctx);
+                // What the walk would run (runUnified truncates the same way). Runs after the search's
+                // budget, bounded at one evaluate per move of the plan.
+                PathPlan plan = UnifiedPathFinder.truncateToExecutable(ctx, UnifiedPathFinder.search(ctx)).plan();
                 List<PathNode> nodes = !withNodes || plan.status() == PlanStatus.NO_PATH
                         ? new ArrayList<>() : new ArrayList<>(PlanAdapter.toPathNodes(plan, ctx));
                 return new PlanResult(PathFinderChoice.UNIFIED, 0L, nodes, plan, ctx, plan.elapsedMs(), false);

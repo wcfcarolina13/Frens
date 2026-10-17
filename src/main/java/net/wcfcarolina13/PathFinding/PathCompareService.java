@@ -147,7 +147,8 @@ public final class PathCompareService {
         long t0 = System.nanoTime();
         if (choice == PathFinderChoice.UNIFIED) {
             SearchContext ctx = PathFinder.unifiedContext(start, target, world, request, snapshot, 0L);
-            PathPlan plan = UnifiedPathFinder.search(ctx);
+            // The plan the walk would run: runUnified truncates the same way (one evaluate per move).
+            PathPlan plan = UnifiedPathFinder.truncateToExecutable(ctx, UnifiedPathFinder.search(ctx)).plan();
             long ms = (System.nanoTime() - t0) / 1_000_000L;
             return unifiedValue(ms, plan, ctx);
         }

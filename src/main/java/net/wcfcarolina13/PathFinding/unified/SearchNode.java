@@ -11,6 +11,12 @@ public final class SearchNode {
     public SearchNode parent;
     /** The move that reached this node on its best known path; null on the start node. */
     public PlannedMove move;
+    /**
+     * The nearest node on this node's best known path (itself included) whose move breaks or places a
+     * block, or null when none does. The search walks this chain to see the terrain its earlier moves
+     * changed (6ad-6al field bug F).
+     */
+    public SearchNode mutator;
     public double g;
     public double h;
     public double f;

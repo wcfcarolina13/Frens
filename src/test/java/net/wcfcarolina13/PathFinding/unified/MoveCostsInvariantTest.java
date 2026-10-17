@@ -83,16 +83,24 @@ class MoveCostsInvariantTest {
                     .canSprint(rnd.nextBoolean()).allowBreak(true).allowSwim(true).allowDownward(rnd.nextBoolean())
                     .box(new SearchBox(0, 0, 0, 9, 9, 9)).primaryMs(10_000).failureMs(10_000).nodeCap(1_000_000)
                     .build();
-            double optimal = DijkstraReference.optimal(ctx);
+            PathPlan reference = DijkstraReference.optimalPlan(ctx);
             PathPlan plan = UnifiedPathFinder.search(ctx, () -> 0L);
-            if (optimal >= ActionCosts.COST_INF) {
+            if (reference == null) {
                 assertTrue(plan.status() != PlanStatus.FULL, "finder found a path Dijkstra did not, seed " + seed);
                 continue;
             }
+            double optimal = reference.totalTicks();
             checked++;
-            assertEquals(PlanStatus.FULL, plan.status(), "seed " + seed);
             double h = MoveCosts.heuristic(ctx, s[0], s[1], s[2], t[0], t[1], t[2]);
             assertTrue(h <= optimal * 1.001 + 1e-6, "h " + h + " > optimal " + optimal + " seed " + seed);
+            if (UnifiedPathFinder.truncateToExecutable(ctx, reference).truncated()) {
+                // The raw optimum mines a cell a later move needs (field bug F): the finder refuses it
+                // since 1.1.267, so it may route dearer or find nothing. It is never cheaper.
+                assertTrue(plan.status() != PlanStatus.FULL || plan.totalTicks() + 1e-6 >= optimal,
+                        "cheaper than optimal, seed " + seed);
+                continue;
+            }
+            assertEquals(PlanStatus.FULL, plan.status(), "seed " + seed);
             assertTrue(plan.totalTicks() <= optimal * 1.01 + 1e-6, "ratio over 1.01, seed " + seed);
             assertTrue(plan.totalTicks() + 1e-6 >= optimal, "cheaper than optimal, seed " + seed);
         }
