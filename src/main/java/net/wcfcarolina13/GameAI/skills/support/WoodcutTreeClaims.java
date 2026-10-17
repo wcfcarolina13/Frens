@@ -63,13 +63,14 @@ public final class WoodcutTreeClaims {
         if (tree == null || bot == null) {
             return false;
         }
-        if (conflictingClaim(tree, topY, bot, nowMs) != null) {
-            return false;
-        }
         Claim existing = claims.get(tree);
         int top = Math.max(tree.y(), topY);
         if (existing != null && bot.equals(existing.owner())) {
             top = Math.max(top, existing.topY());
+        }
+        // The merged top: a refresh checks the whole claimed trunk, not just its base.
+        if (conflictingClaim(tree, top, bot, nowMs) != null) {
+            return false;
         }
         claims.put(tree, new Claim(bot, runToken, nowMs + Math.max(0L, ttlMs), top));
         return true;
@@ -83,8 +84,8 @@ public final class WoodcutTreeClaims {
                 continue;
             }
             TreeKey held = entry.getKey();
-            if (conflicts(held.dimension(), held.x(), held.y(), claim.topY(), held.z(),
-                    tree.dimension(), tree.x(), tree.y(), topY, tree.z())) {
+            if (conflicts(held.dimension(), held.x(), held.y(), held.z(), claim.topY(),
+                    tree.dimension(), tree.x(), tree.y(), tree.z(), topY)) {
                 return entry;
             }
         }
@@ -98,8 +99,8 @@ public final class WoodcutTreeClaims {
      * way. A tree on a terrace above or below the claimed tree's logs is a different tree. A top
      * below its base counts as the base.
      */
-    public static boolean conflicts(String claimDimension, int claimX, int claimBaseY, int claimTopY, int claimZ,
-                                    String dimension, int x, int baseY, int topY, int z) {
+    public static boolean conflicts(String claimDimension, int claimX, int claimBaseY, int claimZ, int claimTopY,
+                                    String dimension, int x, int baseY, int z, int topY) {
         if (claimDimension == null || !claimDimension.equals(dimension)) {
             return false;
         }

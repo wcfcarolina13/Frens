@@ -167,7 +167,7 @@ class WoodcutTreeClaimsTest {
 
     @Test
     void sameColumnOneBlockUpConflicts() {
-        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 70, 20, OVERWORLD, 10, 65, 70, 20));
+        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 20, 70, OVERWORLD, 10, 65, 20, 70));
         WoodcutTreeClaims claims = new WoodcutTreeClaims();
         assertTrue(claims.tryClaim(TREE_A, 70, alex, RUN_1, 0L, TTL));
         TreeKey cutTrunk = new TreeKey(OVERWORLD, 10, 65, 20);
@@ -178,7 +178,7 @@ class WoodcutTreeClaimsTest {
 
     @Test
     void otherColumnOfATwoByTwoTrunkConflicts() {
-        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 80, 20, OVERWORLD, 11, 64, 80, 21));
+        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 20, 80, OVERWORLD, 11, 64, 21, 80));
         WoodcutTreeClaims claims = new WoodcutTreeClaims();
         assertTrue(claims.tryClaim(TREE_A, 80, alex, RUN_1, 0L, TTL));
         assertFalse(claims.tryClaim(new TreeKey(OVERWORLD, 11, 64, 20), 80, bob, RUN_2, 1L, TTL));
@@ -186,9 +186,9 @@ class WoodcutTreeClaimsTest {
 
     @Test
     void separateTreeThreeBlocksAwayIsAllowed() {
-        assertFalse(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 70, 20, OVERWORLD, 13, 64, 70, 20));
+        assertFalse(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 20, 70, OVERWORLD, 13, 64, 20, 70));
         // The gate and the scan's moved-base skip agree on the square boundary.
-        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 70, 20, OVERWORLD, 12, 64, 70, 18));
+        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 20, 70, OVERWORLD, 12, 64, 18, 70));
         assertTrue(WoodcutTreeClaims.isClaimNear(OVERWORLD, 10, 20, OVERWORLD, 12, 18, WoodcutTreeClaims.NEAR_BASE_RADIUS));
         assertFalse(WoodcutTreeClaims.isClaimNear(OVERWORLD, 10, 20, OVERWORLD, 13, 20, WoodcutTreeClaims.NEAR_BASE_RADIUS));
         WoodcutTreeClaims claims = new WoodcutTreeClaims();
@@ -201,16 +201,16 @@ class WoodcutTreeClaimsTest {
     @Test
     void treeOnATerraceAboveOrBelowTheClaimedLogsIsAllowed() {
         // Claimed 64..70, widened to 63..71.
-        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 70, 20, OVERWORLD, 11, 71, 76, 20));
-        assertFalse(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 70, 20, OVERWORLD, 11, 72, 78, 20));
-        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 70, 20, OVERWORLD, 11, 58, 63, 20));
-        assertFalse(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 70, 20, OVERWORLD, 11, 56, 62, 20));
+        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 20, 70, OVERWORLD, 11, 71, 20, 76));
+        assertFalse(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 20, 70, OVERWORLD, 11, 72, 20, 78));
+        assertTrue(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 20, 70, OVERWORLD, 11, 58, 20, 63));
+        assertFalse(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 20, 70, OVERWORLD, 11, 56, 20, 62));
     }
 
     @Test
     void otherDimensionIsAllowed() {
-        assertFalse(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 70, 20, NETHER, 10, 65, 70, 20));
-        assertFalse(WoodcutTreeClaims.conflicts(null, 10, 64, 70, 20, OVERWORLD, 10, 65, 70, 20));
+        assertFalse(WoodcutTreeClaims.conflicts(OVERWORLD, 10, 64, 20, 70, NETHER, 10, 65, 20, 70));
+        assertFalse(WoodcutTreeClaims.conflicts(null, 10, 64, 20, 70, OVERWORLD, 10, 65, 20, 70));
         WoodcutTreeClaims claims = new WoodcutTreeClaims();
         assertTrue(claims.tryClaim(TREE_A, 70, alex, RUN_1, 0L, TTL));
         assertTrue(claims.tryClaim(new TreeKey(NETHER, 10, 65, 20), 70, bob, RUN_2, 1L, TTL));
@@ -237,5 +237,15 @@ class WoodcutTreeClaimsTest {
         assertTrue(claims.tryClaim(TREE_A, alex, RUN_1, 2L, TTL));
         assertFalse(claims.tryClaim(new TreeKey(OVERWORLD, 11, 70, 20), 72, bob, RUN_2, 3L, TTL));
         assertNull(claims.ownerOfNear(TREE_A, 70, alex, 3L));
+    }
+    @Test
+    void refreshChecksTheWholeClaimedTrunkNotJustItsBase() {
+        // Alex's claim lapses mid-tree after cutting 64..67; Bob claims the rest from base 68.
+        WoodcutTreeClaims claims = new WoodcutTreeClaims();
+        assertTrue(claims.tryClaim(TREE_A, 70, alex, RUN_1, 0L, TTL));
+        assertTrue(claims.tryClaim(new TreeKey(OVERWORLD, 10, 68, 20), 70, bob, RUN_2, TTL, TTL));
+        // Alex's top-less refresh uses its stored top 70, meets Bob's claim, and is lost.
+        assertFalse(claims.tryClaim(TREE_A, alex, RUN_1, TTL + 1, TTL));
+        assertEquals(bob, claims.ownerOfNear(TREE_A, 70, alex, TTL + 1));
     }
 }
