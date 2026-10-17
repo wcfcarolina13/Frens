@@ -44,11 +44,11 @@ class SoulSetupScreenPolicyTest {
 
     @Test
     void remoteStatesExplainWhyControlsAreDisabled() {
-        assertEquals("This server's Frens version can't be set up from here — ask the host to update Frens.",
+        assertEquals("This server's Frens version can't be set up from here. Ask the host to update Frens.",
                 SoulSetupScreenPolicy.statusMessage(SoulSetupScreenPolicy.Mode.REMOTE_UNSUPPORTED));
         assertEquals("Asking the server…",
                 SoulSetupScreenPolicy.statusMessage(SoulSetupScreenPolicy.Mode.REMOTE_WAITING));
-        assertEquals("The server didn't answer — try Refresh.",
+        assertEquals("The server didn't answer. Try Refresh.",
                 SoulSetupScreenPolicy.statusMessage(SoulSetupScreenPolicy.Mode.REMOTE_TIMEOUT));
         assertEquals("Only the server operator or host can change this.",
                 SoulSetupScreenPolicy.statusMessage(SoulSetupScreenPolicy.Mode.REMOTE_VIEWER));

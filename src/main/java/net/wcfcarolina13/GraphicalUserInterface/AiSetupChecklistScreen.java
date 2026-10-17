@@ -258,7 +258,7 @@ public class AiSetupChecklistScreen extends Screen {
         }
         boolean waiting = statusAtMs < requestedAtMs;
         if (waiting && now - requestedAtMs > NO_ANSWER_MS) {
-            return "No answer from the server yet — press Refresh.";
+            return "No answer from the server yet. Press Refresh.";
         }
         if (waiting) {
             return status == null ? "Checking the server…" : "Refreshing…";

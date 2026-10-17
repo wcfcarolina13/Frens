@@ -13,9 +13,9 @@ import net.minecraft.client.gui.screen.SleepingChatScreen;
 public final class SleepCommandHintHud {
 
     private static final String HINT =
-            "Your Frens need to sleep too — type zzz in chat to send them to bed.";
+            "Your Frens need to sleep too. Type zzz in chat to send them to bed.";
     // Fallback for very narrow scaled widths where the full sentence would clip.
-    private static final String HINT_COMPACT = "Type zzz in chat — Frens sleep too.";
+    private static final String HINT_COMPACT = "Type zzz in chat. Frens sleep too.";
 
     private SleepCommandHintHud() {
     }

@@ -48,7 +48,7 @@ public class WorldModeSelectionScreen extends Screen {
         headingLines = this.textRenderer.wrapLines(this.title, panelW - 22);
         worldLines = this.textRenderer.wrapLines(Text.literal("World: " + worldLabel), panelW - 22);
         infoLines = this.textRenderer.wrapLines(Text.literal(
-                "Frens works without Ollama or any AI model. AI companion chat is optional (local Ollama); voices are optional too.\n"
+                "Frens works without Ollama or any AI model. AI companion chat is optional (local Ollama), and voices are optional too.\n"
                 + "Questing: Go to a village, interact with villager/bell/bed, then initiate contact to recruit.\n"
                 + "Admin: Use /bot spawn <name> admin to create companions. Each needs a unique name. You can add more anytime."),
                 panelW - 22);

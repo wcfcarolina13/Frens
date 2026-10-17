@@ -301,7 +301,7 @@ public class RecruitmentDialogueScreen extends Screen {
         drawOptions(context, topicsRect, mouseX, mouseY);
 
         // Footer hint
-        String hint = waitingServer ? "Recruiting..." : "Click an option; Esc closes";
+        String hint = waitingServer ? "Recruiting..." : "Click an option, Esc closes";
         int hintW = this.textRenderer.getWidth(hint);
         context.drawText(this.textRenderer, hint, r.x + (r.w - hintW) / 2, r.bottom() - 16, 0xFFB0B0B0, false);
 

@@ -20,9 +20,9 @@ public final class SoulSetupScreenPolicy {
 
     public static String statusMessage(Mode mode) {
         return switch (mode) {
-            case REMOTE_UNSUPPORTED -> "This server's Frens version can't be set up from here — ask the host to update Frens.";
+            case REMOTE_UNSUPPORTED -> "This server's Frens version can't be set up from here. Ask the host to update Frens.";
             case REMOTE_WAITING -> "Asking the server…";
-            case REMOTE_TIMEOUT -> "The server didn't answer — try Refresh.";
+            case REMOTE_TIMEOUT -> "The server didn't answer. Try Refresh.";
             case REMOTE_VIEWER -> "Only the server operator or host can change this.";
             case LOCAL, REMOTE_EDITOR -> "";
         };
