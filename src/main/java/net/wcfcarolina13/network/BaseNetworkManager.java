@@ -63,43 +63,7 @@ public final class BaseNetworkManager {
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
                     if (player == null) return;
-                    ServerWorld world = player.getCommandSource().getWorld();
-                    if (world.getRegistryKey() != World.OVERWORLD) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bases can only be saved in the Overworld.");
-                        return;
-                    }
-                    String label = payload.label();
-                    if (label == null || label.isBlank()) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Enter a base name first.");
-                        return;
-                    }
-                    MinecraftServer server = player.getCommandSource().getServer();
-                    if (labelInUse(server, world, label, null)) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "That name is already used by another base, wall, or village.");
-                        return;
-                    }
-                    BlockPos pos = player.getBlockPos().toImmutable();
-                    String ownerUuid = player.getUuid().toString();
-                    String ownerName = player.getName().getString();
-                    // New bases start at the default protection radius. Check that radius against
-                    // existing other-owner / non-allied bases before committing so we fail fast
-                    // with a clear message instead of silently creating a base that's already
-                    // inside someone else's sphere.
-                    if (!BotAccessGate.isServerAdmin(player)) {
-                        var overlap = BotHomeService.findOverlappingBase(server, world, pos,
-                                BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS, ownerUuid, null);
-                        if (overlap.isPresent()) {
-                            ChatUtils.sendSystemMessage(player.getCommandSource(),
-                                    formatOverlapReject(pos, BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS, overlap.get()));
-                            sendBasesList(player, currentBotAliasContext(player));
-                            return;
-                        }
-                    }
-                    boolean ok = BotHomeService.addBase(server, world, label, pos, ownerUuid, ownerName);
-                    ChatUtils.sendSystemMessage(player.getCommandSource(), ok
-                            ? "Saved base '" + label + "' at " + pos.toShortString() + "."
-                            : "Failed to save base.");
-                    sendBasesList(player, currentBotAliasContext(player));
+                    applyBaseSet(player.getCommandSource(), payload.label());
                 }));
 
         ServerPlayNetworking.registerGlobalReceiver(BaseMapVillagePayload.ID, (payload, context) ->
@@ -147,57 +111,14 @@ public final class BaseNetworkManager {
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
                     if (player == null) return;
-                    ServerWorld world = player.getCommandSource().getWorld();
-                    if (world.getRegistryKey() != World.OVERWORLD) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bases are only managed in the Overworld.");
-                        return;
-                    }
-                    String label = payload.label();
-                    if (label == null || label.isBlank()) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Select a base to remove.");
-                        return;
-                    }
-                    MinecraftServer srv = player.getCommandSource().getServer();
-                    if (!checkAnyEntryEditPermission(player, srv, world, label, "base_remove")) {
-                        sendBasesList(player, currentBotAliasContext(player));
-                        return;
-                    }
-                    boolean removed = removeAnyEntry(srv, world, label);
-                    ChatUtils.sendSystemMessage(player.getCommandSource(), removed
-                            ? "Removed '" + label + "'."
-                            : "No base, wall, or village named '" + label + "' found.");
-                    sendBasesList(player, currentBotAliasContext(player));
+                    applyBaseRemove(player.getCommandSource(), payload.label());
                 }));
 
         ServerPlayNetworking.registerGlobalReceiver(BaseRenamePayload.ID, (payload, context) ->
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
                     if (player == null) return;
-                    ServerWorld world = player.getCommandSource().getWorld();
-                    if (world.getRegistryKey() != World.OVERWORLD) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bases are only managed in the Overworld.");
-                        return;
-                    }
-                    String oldLabel = payload.oldLabel();
-                    String newLabel = payload.newLabel();
-                    if (oldLabel == null || oldLabel.isBlank() || newLabel == null || newLabel.isBlank()) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Select a base and enter a new name.");
-                        return;
-                    }
-                    MinecraftServer srv = player.getCommandSource().getServer();
-                    if (!checkAnyEntryEditPermission(player, srv, world, oldLabel, "base_rename")) {
-                        sendBasesList(player, currentBotAliasContext(player));
-                        return;
-                    }
-                    if (labelInUse(srv, world, newLabel, oldLabel)) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "That name is already used by another base, wall, or village.");
-                        return;
-                    }
-                    boolean ok = renameAnyEntry(srv, world, oldLabel, newLabel);
-                    ChatUtils.sendSystemMessage(player.getCommandSource(), ok
-                            ? "Renamed '" + oldLabel + "' -> '" + newLabel + "'."
-                            : "Rename failed (does it exist? is the new name already used?).");
-                    sendBasesList(player, currentBotAliasContext(player));
+                    applyBaseRename(player.getCommandSource(), payload.oldLabel(), payload.newLabel());
                 }));
 
         ServerPlayNetworking.registerGlobalReceiver(BaseSetRadiusPayload.ID, (payload, context) ->
@@ -633,6 +554,135 @@ public final class BaseNetworkManager {
             sendBasesList(player, currentBotAliasContext(player));
         }
         return ok ? 1 : 0;
+    }
+
+    /**
+     * Saves a base at the source's position. Shared by the {@link BaseSetPayload} receiver and
+     * {@code /bot base set}. Server thread only. Refuses a name already used by a base, wall or
+     * village (no silent overwrite). The owner is the calling player, or the server for the
+     * console. Non-admin players also get the overlap check against other owners' bases; the
+     * console counts as admin ({@link Frens#isServerAdmin}).
+     *
+     * @return 1 when the base was saved, 0 otherwise (Brigadier result)
+     */
+    public static int applyBaseSet(ServerCommandSource source, String label) {
+        if (source == null) return 0;
+        ServerWorld world = source.getWorld();
+        if (world.getRegistryKey() != World.OVERWORLD) {
+            reply(source, "Bases can only be saved in the Overworld.");
+            return 0;
+        }
+        if (label == null || label.isBlank()) {
+            reply(source, "Enter a base name first.");
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        if (labelInUse(server, world, label, null)) {
+            reply(source, "That name is already used by another base, wall, or village.");
+            return 0;
+        }
+        ServerPlayerEntity player = source.getPlayer();
+        BlockPos pos = player != null
+                ? player.getBlockPos().toImmutable()
+                : BlockPos.ofFloored(source.getPosition());
+        BaseOwnerArg.Owner owner = BaseOwnerArg.creator(
+                player != null ? player.getUuid().toString() : null,
+                player != null ? player.getName().getString() : null);
+        // New bases start at the default protection radius. Check that radius against
+        // existing other-owner / non-allied bases before committing so we fail fast
+        // with a clear message instead of silently creating a base that's already
+        // inside someone else's sphere.
+        if (!Frens.isServerAdmin(source)) {
+            var overlap = BotHomeService.findOverlappingBase(server, world, pos,
+                    BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS, owner.uuid(), null);
+            if (overlap.isPresent()) {
+                reply(source, formatOverlapReject(pos, BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS, overlap.get()));
+                refreshBasesList(source);
+                return 0;
+            }
+        }
+        boolean ok = BotHomeService.addBase(server, world, label, pos, owner.uuid(), owner.name());
+        reply(source, ok
+                ? "Saved base '" + label + "' at " + pos.toShortString() + "."
+                : "Failed to save base.");
+        refreshBasesList(source);
+        return ok ? 1 : 0;
+    }
+
+    /**
+     * Removes a base, wall or village by name. Shared by the {@link BaseRemovePayload} receiver and
+     * {@code /bot base remove}. Server thread only. Players go through the screen's edit check
+     * ({@link #checkAnyEntryEditPermission}), the console counts as admin.
+     *
+     * @return 1 when something was removed, 0 otherwise (Brigadier result)
+     */
+    public static int applyBaseRemove(ServerCommandSource source, String label) {
+        if (source == null) return 0;
+        ServerWorld world = source.getWorld();
+        if (world.getRegistryKey() != World.OVERWORLD) {
+            reply(source, "Bases are only managed in the Overworld.");
+            return 0;
+        }
+        if (label == null || label.isBlank()) {
+            reply(source, "Select a base to remove.");
+            return 0;
+        }
+        MinecraftServer srv = source.getServer();
+        ServerPlayerEntity player = source.getPlayer();
+        if (player != null && !checkAnyEntryEditPermission(player, srv, world, label, "base_remove")) {
+            refreshBasesList(source);
+            return 0;
+        }
+        boolean removed = removeAnyEntry(srv, world, label);
+        reply(source, removed
+                ? "Removed '" + label + "'."
+                : "No base, wall, or village named '" + label + "' found.");
+        refreshBasesList(source);
+        return removed ? 1 : 0;
+    }
+
+    /**
+     * Renames a base, wall or village. Shared by the {@link BaseRenamePayload} receiver and
+     * {@code /bot base rename}. Server thread only. Players go through the screen's edit check,
+     * the console counts as admin. The new name must not be used by another base, wall or village.
+     *
+     * @return 1 when the entry was renamed, 0 otherwise (Brigadier result)
+     */
+    public static int applyBaseRename(ServerCommandSource source, String oldLabel, String newLabel) {
+        if (source == null) return 0;
+        ServerWorld world = source.getWorld();
+        if (world.getRegistryKey() != World.OVERWORLD) {
+            reply(source, "Bases are only managed in the Overworld.");
+            return 0;
+        }
+        if (oldLabel == null || oldLabel.isBlank() || newLabel == null || newLabel.isBlank()) {
+            reply(source, "Select a base and enter a new name.");
+            return 0;
+        }
+        MinecraftServer srv = source.getServer();
+        ServerPlayerEntity player = source.getPlayer();
+        if (player != null && !checkAnyEntryEditPermission(player, srv, world, oldLabel, "base_rename")) {
+            refreshBasesList(source);
+            return 0;
+        }
+        if (labelInUse(srv, world, newLabel, oldLabel)) {
+            reply(source, "That name is already used by another base, wall, or village.");
+            return 0;
+        }
+        boolean ok = renameAnyEntry(srv, world, oldLabel, newLabel);
+        reply(source, ok
+                ? "Renamed '" + oldLabel + "' -> '" + newLabel + "'."
+                : "Rename failed (does it exist? is the new name already used?).");
+        refreshBasesList(source);
+        return ok ? 1 : 0;
+    }
+
+    /** Resends the Bases list when the source is a player, so an open screen refreshes. */
+    private static void refreshBasesList(ServerCommandSource source) {
+        ServerPlayerEntity player = source.getPlayer();
+        if (player != null) {
+            sendBasesList(player, currentBotAliasContext(player));
+        }
     }
 
     /** Players get the usual system message, the console (no player) gets command feedback. */

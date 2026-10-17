@@ -35,6 +35,20 @@ public final class BaseOwnerArg {
         };
     }
 
+    /**
+     * Owner stamped on a new base by {@code /bot base set} and the Bases screen: the player who made
+     * it, or the server when there is no player (console or command block).
+     *
+     * @param playerUuid the creating player's UUID string, null for the console
+     * @param playerName the creating player's name
+     */
+    public static Owner creator(String playerUuid, String playerName) {
+        if (blankToNull(playerUuid) == null) {
+            return resolve(Kind.SERVER, null, null);
+        }
+        return normalize(playerUuid, playerName);
+    }
+
     /** Blank strings become null so a cleared owner reads as legacy (the payload path's rule). */
     public static Owner normalize(String uuid, String name) {
         return new Owner(blankToNull(uuid), blankToNull(name));

@@ -124,6 +124,7 @@ import net.wcfcarolina13.GameAI.services.WorldModeChooserPolicy;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.wcfcarolina13.network.RecruitmentPromptPayload;
 import net.wcfcarolina13.network.CompanionQuestStatePayload;
+import net.wcfcarolina13.network.BaseNetworkManager;
 
 public class modCommandRegistry {
 
@@ -7135,24 +7136,8 @@ public class modCommandRegistry {
             throw new SimpleCommandExceptionType(Text.literal("Provide a base label."))
                     .create();
         }
-        ServerCommandSource source = context.getSource();
-        ServerPlayerEntity commander = source.getPlayer();
-        if (commander == null) {
-            throw new SimpleCommandExceptionType(Text.literal("Only players can set a base location."))
-                    .create();
-        }
-        ServerWorld world = source.getWorld();
-        if (world.getRegistryKey() != World.OVERWORLD) {
-            ChatUtils.sendSystemMessage(source, "Bases can only be saved in the Overworld.");
-            return 0;
-        }
-        boolean ok = BotHomeService.addBase(source.getServer(), world, label, commander.getBlockPos().toImmutable());
-        if (ok) {
-            ChatUtils.sendSystemMessage(source, "Saved base '" + label + "' at " + commander.getBlockPos().toShortString() + ".");
-            return 1;
-        }
-        ChatUtils.sendSystemMessage(source, "Failed to save base.");
-        return 0;
+        // Same rules as the Bases screen: owner stamp, no silent overwrite, overlap check.
+        return BaseNetworkManager.applyBaseSet(context.getSource(), label);
     }
 
     static int executeBaseRemove(CommandContext<ServerCommandSource> context, String label) {
@@ -7160,15 +7145,8 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(context.getSource(), "Provide a base label to remove.");
             return 0;
         }
-        ServerCommandSource source = context.getSource();
-        ServerWorld world = source.getWorld();
-        if (world.getRegistryKey() != World.OVERWORLD) {
-            ChatUtils.sendSystemMessage(source, "Bases are only managed in the Overworld.");
-            return 0;
-        }
-        boolean removed = BotHomeService.removeBase(source.getServer(), world, label);
-        ChatUtils.sendSystemMessage(source, removed ? "Removed base '" + label + "'." : "No base named '" + label + "' found.");
-        return removed ? 1 : 0;
+        // Same rules as the Bases screen: owner check for players, acts on walls and villages too.
+        return BaseNetworkManager.applyBaseRemove(context.getSource(), label);
     }
 
     static int executeBaseRename(CommandContext<ServerCommandSource> context, String oldLabel, String newLabel) {
@@ -7176,20 +7154,8 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(context.getSource(), "Usage: /bot base rename <old_label> <new_label>");
             return 0;
         }
-        ServerCommandSource source = context.getSource();
-        ServerWorld world = source.getWorld();
-        if (world.getRegistryKey() != World.OVERWORLD) {
-            ChatUtils.sendSystemMessage(source, "Bases are only managed in the Overworld.");
-            return 0;
-        }
-
-        boolean ok = BotHomeService.renameBase(source.getServer(), world, oldLabel, newLabel);
-        if (ok) {
-            ChatUtils.sendSystemMessage(source, "Renamed base '" + oldLabel + "' -> '" + newLabel + "'.");
-            return 1;
-        }
-        ChatUtils.sendSystemMessage(source, "Rename failed (does the old base exist? is the new name already used?).");
-        return 0;
+        // Same rules as the Bases screen: owner check for players, acts on walls and villages too.
+        return BaseNetworkManager.applyBaseRename(context.getSource(), oldLabel, newLabel);
     }
 
     static int executeBaseList(CommandContext<ServerCommandSource> context) {

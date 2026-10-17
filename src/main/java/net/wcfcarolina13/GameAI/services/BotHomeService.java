@@ -1205,15 +1205,6 @@ public final class BotHomeService {
     }
 
     /**
-     * Legacy four-arg overload. Creates a base with no owner — i.e. treated as server-owned
-     * for permission gating (admin-only edits). Prefer the six-arg overload that stamps the
-     * creating player as owner.
-     */
-    public static boolean addBase(MinecraftServer server, ServerWorld world, String label, BlockPos pos) {
-        return addBase(server, world, label, pos, null, null);
-    }
-
-    /**
      * Creates a base and stamps the given owner. Owner {@code null}/blank is stored as-is and
      * treated as server-owned by {@link #canEditBase}; pass {@link #SERVER_OWNER_UUID} explicitly
      * to mark a permanent server-owned base (e.g. auto-spawn).

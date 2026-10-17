@@ -52,4 +52,19 @@ class BaseOwnerArgTest {
         assertNull(owner.uuid());
         assertNull(owner.name());
     }
+
+    @Test
+    void creatorIsThePlayerWhoSetTheBase() {
+        BaseOwnerArg.Owner owner = BaseOwnerArg.creator(UUID_STR, "Steve");
+        assertEquals(UUID_STR, owner.uuid());
+        assertEquals("Steve", owner.name());
+    }
+
+    @Test
+    void consoleCreatedBaseIsServerOwned() {
+        BaseOwnerArg.Owner owner = BaseOwnerArg.creator(null, null);
+        assertEquals("SERVER", owner.uuid());
+        assertEquals("Server", owner.name());
+        assertEquals(owner, BaseOwnerArg.creator("  ", "ignored"));
+    }
 }
