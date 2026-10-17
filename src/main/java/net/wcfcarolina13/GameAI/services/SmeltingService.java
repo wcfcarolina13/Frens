@@ -476,7 +476,7 @@ public final class SmeltingService {
                         furnace.setStack(2, remaining);
                         ChatUtils.sendSystemMessage(source, "Cleared some furnace output.");
                     } else {
-                        ChatUtils.sendSystemMessage(source, "Inventory full — clear furnace output first.");
+                        ChatUtils.sendSystemMessage(source, "Inventory full. Clear furnace output first.");
                         return;
                     }
                 }
@@ -496,7 +496,7 @@ public final class SmeltingService {
                                 furnace.setStack(0, remaining);
                                 ChatUtils.sendSystemMessage(source, "Cleared some furnace input.");
                             } else {
-                                ChatUtils.sendSystemMessage(source, "Inventory full — clear furnace input first.");
+                                ChatUtils.sendSystemMessage(source, "Inventory full. Clear furnace input first.");
                                 return;
                             }
                         }
@@ -505,9 +505,9 @@ public final class SmeltingService {
                         if (fuelTopped > 0) {
                             ChatUtils.sendSystemMessage(source, "Topped up fuel with " + furnace.getStack(1).getName().getString() + ".");
                         } else if (ensureFuel(liveBot, source, furnace, liveWorld, fuelSpec)) {
-                            ChatUtils.sendSystemMessage(source, "Furnace already loaded; topped up fuel.");
+                            ChatUtils.sendSystemMessage(source, "Furnace already loaded, topped up fuel.");
                         } else if (needsFuel(furnace) && hasFuel(liveBot, liveWorld)) {
-                            ChatUtils.sendSystemMessage(source, "Furnace already loaded; it needs fuel.");
+                            ChatUtils.sendSystemMessage(source, "Furnace already loaded, but it needs fuel.");
                         }
                         int topped = topUpInputMatching(liveBot, furnace, liveWorld, state);
                         if (topped > 0) {

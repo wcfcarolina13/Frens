@@ -383,7 +383,7 @@ public final class BotEmergencyRescueService {
         // leave its mount in whatever danger prompted the rescue.
         if (!TravelMountHandler.coTeleportSavedMount(rescued, targetWorld, anchor.pos())) {
             sendOwnerHud(server, ownerUuid,
-                    "Rescue aborted: no safe spot for " + rescued.getName().getString() + "'s mount at the destination. Reagents not consumed — try a more open anchor.", true);
+                    "Rescue aborted: no safe spot for " + rescued.getName().getString() + "'s mount at the destination. Reagents not consumed. Try a more open anchor.", true);
             return false;
         }
 

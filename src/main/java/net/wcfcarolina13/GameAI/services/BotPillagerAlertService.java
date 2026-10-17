@@ -270,7 +270,7 @@ public final class BotPillagerAlertService {
         bot.getInventory().setSelectedSlot(originalSlot);
 
         CompanionOverheadDialogueService.showOverheadLine(
-                bot, "Patrol spotted \u2014 sounding the horn!",
+                bot, "Patrol spotted, sounding the horn!",
                 3_500, overheadRange, "pillager-alert", "goat-horn");
         return true;
     }
@@ -315,7 +315,7 @@ public final class BotPillagerAlertService {
                 bot, bestFire, 4.0D, 5_000L, 0.22D, "patrol-signal-fire");
 
         CompanionOverheadDialogueService.showOverheadLine(
-                bot, "Patrol nearby \u2014 signaling from the fire!",
+                bot, "Patrol nearby, signaling from the fire!",
                 3_500, SIGNAL_FIRE_OVERHEAD_RANGE, "pillager-alert", "signal-fire");
         return true;
     }
@@ -329,7 +329,7 @@ public final class BotPillagerAlertService {
         if (bot == null || commander == null) return false;
         if (!CompanionCommunicationPolicy.canLongRangeComm(bot, commander)) return false;
         CompanionOverheadDialogueService.showOverheadLine(
-                bot, "I see a patrol \u2014 stay alert.",
+                bot, "I see a patrol. Stay alert.",
                 3_000, DIRECT_MSG_RANGE, "pillager-alert", "direct-message");
         return true;
     }

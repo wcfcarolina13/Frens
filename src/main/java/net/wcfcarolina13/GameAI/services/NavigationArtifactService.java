@@ -992,7 +992,7 @@ public final class NavigationArtifactService {
                     String destLabel = destination.toShortString();
                     notifyOwner(server, ownerUuid,
                             "\u00A7c" + botAlias + " is resting " + timeStr + " before traveling to "
-                            + destLabel + "; I'll keep busy meanwhile.\u00A7r");
+                            + destLabel + ". I'll keep busy meanwhile.\u00A7r");
                     final int retryDelayTicks = delayTicks;
                     // Take the freshly re-resolved bot from the wait service — the original entity
                     // is dead after a respawn and retrying against it is a no-op.
@@ -1602,10 +1602,10 @@ public final class NavigationArtifactService {
                     } else if (arrival == ChestRegistryAccessPolicy.Arrival.TOO_FAR) {
                         reason = "arrived too far from the chest";
                         ownerMsg = ps.botAlias() + " arrived too far from the chest at "
-                                + chestPos.toShortString() + "; nothing collected.";
+                                + chestPos.toShortString() + ", so nothing was collected.";
                     } else {
                         reason = "that chest isn't in its registry";
-                        ownerMsg = ps.botAlias() + " arrived, but that chest isn't in its registry; nothing collected.";
+                        ownerMsg = ps.botAlias() + " arrived, but that chest isn't in its registry, so nothing was collected.";
                     }
                     LOGGER.info("Post-arrival: {} withdraw refused at {}: {}",
                             ps.botAlias(), chestPos.toShortString(), reason);

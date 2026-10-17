@@ -109,7 +109,7 @@ public final class SleepService {
         // bed in inventory, commander in bed, bot never attempts placement and just logs off).
         if (SleepBedCandidatePolicy.waitOutNearbySleeper(
                 canSleepNow, isAnyPlayerSleepingNearby(bot, world, 32), hasOwnBed)) {
-            ChatUtils.sendSystemMessage(source, "Someone's already sleeping — I'll wait it out.");
+            ChatUtils.sendSystemMessage(source, "Someone's already sleeping. I'll wait it out.");
             return false;
         }
 
@@ -118,7 +118,7 @@ public final class SleepService {
         } else if (nearbyBeds.isEmpty() && canSleepNow && hasOwnBed) {
             // No unoccupied bed anywhere in range (none placed, or all occupied) and we carry
             // our own — explicit handoff message before the placement branch.
-            ChatUtils.sendSystemMessage(source, "No free bed nearby — setting up my own.");
+            ChatUtils.sendSystemMessage(source, "No free bed nearby, setting up my own.");
         }
 
         // If we can't sleep right now, avoid crafting/placing beds.
@@ -242,7 +242,7 @@ public final class SleepService {
                 if (!quietFailures) {
                     ChatUtils.sendSystemMessage(source,
                             bot.getName().getString() + " can't use the bed at "
-                                    + bed.foot.toShortString() + " — " + reasonLabel + ".");
+                                    + bed.foot.toShortString() + ": " + reasonLabel + ".");
                 }
                 return BedUseResult.FAIL_OTHER;
             }
@@ -251,7 +251,7 @@ public final class SleepService {
                 boolean onBed = waitForPlayerAtBed(bot, bed, 900);
                 if (!onBed) {
                     LOGGER.warn("Bot appears sleeping but not located at bed {} (pos={}); skipping last-sleep record.", bed.foot.toShortString(), bot.getBlockPos());
-                    ChatUtils.sendSystemMessage(source, "I appear to be sleeping but not actually on the bed; aborting record to avoid mis-reservation.");
+                    ChatUtils.sendSystemMessage(source, "I appear to be sleeping but not actually on the bed. Aborting record to avoid mis-reservation.");
                     // Do not record last-sleep if the player isn't physically at the bed; treat as failure so caller can retry.
                     return BedUseResult.FAIL_OTHER;
                 }
