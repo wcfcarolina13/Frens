@@ -282,8 +282,18 @@ public final class DeathRetrievalService {
                     "§e" + DeathRetrievalPolicy.stayingOffline(botAlias) + "§r");
             return;
         }
-        BlockPos home = sender.getBlockPos();
-        RegistryKey<World> homeDim = sender.getEntityWorld().getRegistryKey();
+        // Land on a safe standing spot near the sender, never at their live position (a flying or
+        // spectating sender would drop the bot from the air).
+        ServerWorld homeWorld = (ServerWorld) sender.getEntityWorld();
+        BlockPos home = findReturnPoint(homeWorld, sender.getBlockPos());
+        RegistryKey<World> homeDim = homeWorld.getRegistryKey();
+        if (home == null) {
+            LOGGER.info("[Retrieve] {} stays: no safe landing spot near {} at {}",
+                    botAlias, sender.getName().getString(), sender.getBlockPos().toShortString());
+            NavigationArtifactService.notifyPlayer(server, recipient,
+                    "§e" + DeathRetrievalPolicy.stayingNoLandingSpot(botAlias) + "§r");
+            return;
+        }
         int delay = NavigationArtifactService.beginErrandReturnTravel(server, bot, botAlias, home, homeDim, recipient);
         if (delay < 0) {
             LOGGER.info("[Retrieve] {} stays: return travel did not start", botAlias);
@@ -330,6 +340,32 @@ public final class DeathRetrievalService {
     }
 
     /** Server thread: loads the death chunk if needed (one-off, like a teleport). */
+    /**
+     * A safe standing spot near the sender: the stand-point grid around them, else the first
+     * standable cell straight down from them (a sender flying or spectating high up). Null when
+     * neither has one. Server thread.
+     */
+    private static BlockPos findReturnPoint(ServerWorld world, BlockPos senderPos) {
+        BlockPos near = findStandPoint(world, senderPos);
+        if (near != null) {
+            return near;
+        }
+        boolean[] column = new boolean[DeathRetrievalPolicy.RETURN_SCAN_DEPTH];
+        for (int i = 0; i < column.length; i++) {
+            BlockPos p = senderPos.down(i);
+            if (world.isOutOfHeightLimit(p) || world.isOutOfHeightLimit(p.up())) break;
+            column[i] = isSafeStand(world, p);
+        }
+        int i = DeathRetrievalPolicy.firstStandableBelow(column);
+        return i < 0 ? null : senderPos.down(i);
+    }
+
+    private static boolean isSafeStand(ServerWorld world, BlockPos p) {
+        return SafePositionService.isSpawnable(world, p)
+                && !BotHazardService.isDeadlyBlock(world.getBlockState(p.down()))
+                && !BotHazardService.isDeadlyBlock(world.getBlockState(p));
+    }
+
     private static BlockPos findStandPoint(ServerWorld world, BlockPos death) {
         int r = DeathRetrievalPolicy.STAND_RADIUS;
         int dyMin = DeathRetrievalPolicy.STAND_DY_MIN;
@@ -340,10 +376,7 @@ public final class DeathRetrievalService {
                 for (int dz = -r; dz <= r; dz++) {
                     BlockPos p = death.add(dx, dy, dz);
                     if (world.isOutOfHeightLimit(p) || world.isOutOfHeightLimit(p.up())) continue;
-                    safe[DeathRetrievalPolicy.gridIndex(dx, dy, dz, r, dyMin)] =
-                            SafePositionService.isSpawnable(world, p)
-                            && !BotHazardService.isDeadlyBlock(world.getBlockState(p.down()))
-                            && !BotHazardService.isDeadlyBlock(world.getBlockState(p));
+                    safe[DeathRetrievalPolicy.gridIndex(dx, dy, dz, r, dyMin)] = isSafeStand(world, p);
                 }
             }
         }

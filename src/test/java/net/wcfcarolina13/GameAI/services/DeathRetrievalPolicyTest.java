@@ -156,6 +156,27 @@ class DeathRetrievalPolicyTest {
         assertNull(DeathRetrievalPolicy.chooseStandPoint(null, R, LO, HI));
     }
 
+    @Test
+    void returnScanTakesTheFirstStandableCellGoingDown() {
+        assertEquals(0, DeathRetrievalPolicy.firstStandableBelow(new boolean[] {true, false, true}));
+        assertEquals(15, DeathRetrievalPolicy.firstStandableBelow(column(40, 15, 30)));
+        assertEquals(-1, DeathRetrievalPolicy.firstStandableBelow(new boolean[DeathRetrievalPolicy.RETURN_SCAN_DEPTH]));
+        assertEquals(-1, DeathRetrievalPolicy.firstStandableBelow(null));
+    }
+
+    private static boolean[] column(int depth, int... standable) {
+        boolean[] c = new boolean[depth];
+        for (int i : standable) c[i] = true;
+        return c;
+    }
+
+    @Test
+    void noLandingSpotLine() {
+        assertEquals("Bob is staying at the death spot because it can't find a safe place to land near you.",
+                DeathRetrievalPolicy.stayingNoLandingSpot("Bob"));
+        assertFalse(DeathRetrievalPolicy.stayingNoLandingSpot("Bob").contains(";"));
+    }
+
     // ── Action parsing ──────────────────────────────────────────────────────
 
     @Test
@@ -200,7 +221,7 @@ class DeathRetrievalPolicyTest {
     void keyLinesReadPlainly() {
         assertEquals("No point going: your death was in lava, so the items burned up.",
                 DeathRetrievalPolicy.refusal(Verdict.REFUSE_LAVA, "your"));
-        assertEquals("Nothing to fetch: keepInventory is on, so nothing dropped.",
+        assertEquals("Nothing to fetch: the keep inventory game rule is on, so nothing dropped.",
                 DeathRetrievalPolicy.refusal(Verdict.REFUSE_KEEP_INVENTORY, "Jake's"));
         assertEquals("That death was 25 minutes ago, the items may be gone.",
                 DeathRetrievalPolicy.warningLine(Warning.OLD, "Bob", null, 25L * 60_000L));

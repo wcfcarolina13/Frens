@@ -1041,9 +1041,9 @@ public final class BotGuideScreen extends Screen {
                         List.of(
                             "The bot fast travels to a safe spot next to the death position, even in another dimension. The travel rest time does not apply, but it still needs food for the trip.",
                             "It picks up everything within 8 blocks, tells you how many items it got, and fast travels back to you. If its inventory fills up it stops and says so. It never stores items in chests there.",
-                            "If you are offline, it can't travel back, or the sweep fails twice, it stays at the death spot and tells you.",
+                            "It lands on a safe spot near you. If you are offline, it can't travel back, it finds no safe spot near you, or the sweep fails twice, it stays at the death spot and tells you.",
                             "Items on the ground last about 5 minutes while the area is loaded. For a death older than 20 minutes, or one whose time is unknown, it still goes but warns that the items may be gone.",
-                            "Deaths in lava or the void are refused because the items are gone, and so is any death while keepInventory is on. A death to a mob or in fire is allowed, with a warning.",
+                            "Deaths in lava or the void are refused because the items are gone, and so is any death while the keep inventory game rule is on. A death to a mob or in fire is allowed, with a warning.",
                             "Only the bot's owner can send it, and only for their own death or one of their own bots."
                         ),
                         "bot retrieve " + target + " [me|<dead bot>]",

@@ -28,6 +28,9 @@ public final class DeathRetrievalPolicy {
     public static final int STAND_DY_MIN = -2;
     public static final int STAND_DY_MAX = 2;
 
+    /** How far straight down from the sender the return leg looks for ground. */
+    public static final int RETURN_SCAN_DEPTH = 96;
+
     public static final String ACTION_PREFIX = "retrieve:";
     /** The {@code who} word for the sender's own death. */
     public static final String ME = "me";
@@ -144,6 +147,15 @@ public final class DeathRetrievalPolicy {
         return best;
     }
 
+    /** Index of the first standable cell in a column scanned downward (0 = start), or -1. */
+    public static int firstStandableBelow(boolean[] column) {
+        if (column == null) return -1;
+        for (int i = 0; i < column.length; i++) {
+            if (column[i]) return i;
+        }
+        return -1;
+    }
+
     // ── Post-arrival action ─────────────────────────────────────────────────
 
     /** Where the bot goes after the sweep. */
@@ -225,7 +237,7 @@ public final class DeathRetrievalPolicy {
 
     public static String refusal(Verdict verdict, String whose) {
         return switch (verdict) {
-            case REFUSE_KEEP_INVENTORY -> "Nothing to fetch: keepInventory is on, so nothing dropped.";
+            case REFUSE_KEEP_INVENTORY -> "Nothing to fetch: the keep inventory game rule is on, so nothing dropped.";
             case REFUSE_LAVA -> "No point going: " + whose + " death was in lava, so the items burned up.";
             case REFUSE_VOID -> "No point going: " + whose + " death was in the void, so the items are gone.";
             case GO -> "";
@@ -306,6 +318,10 @@ public final class DeathRetrievalPolicy {
 
     public static String stayingCannotTravel(String bot) {
         return bot + " is staying at the death spot because it can't travel back right now.";
+    }
+
+    public static String stayingNoLandingSpot(String bot) {
+        return bot + " is staying at the death spot because it can't find a safe place to land near you.";
     }
 
     public static String stayingSentFromConsole(String bot) {
