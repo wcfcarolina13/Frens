@@ -238,4 +238,38 @@ class ConfigJsonUtilRoundTripTest {
         assertEquals("baritone", target.getPathfinder());
         assertTrue(target.isBaritonePathfinderEnabled());
     }
+
+    @Test
+    void captureOfTheDefaultCarriesAnExplicitUnified() throws Exception {
+        ManualConfig source = newRealConfig(); // pathfinder null = the default
+        assertEquals("unified", net.wcfcarolina13.FilingSystem.SharedConfig.capture(source).pathfinder);
+        assertTrue(ConfigJsonUtil.configToJson(source).contains("\"pathfinder\": \"unified\"")
+                || ConfigJsonUtil.configToJson(source).contains("\"pathfinder\":\"unified\""));
+
+        // A client holding a stale baritone pick takes the server's default.
+        ManualConfig client = newRealConfig();
+        client.setPathfinder("baritone");
+        assertTrue(ConfigJsonUtil.applyConfigJson(ConfigJsonUtil.configToJson(source), client));
+        assertEquals(net.wcfcarolina13.PathFinding.PathFinderChoice.UNIFIED, client.getPathfinderChoice());
+    }
+
+    @Test
+    void preSyncSnapshotRestoresTheLocalChoice() throws Exception {
+        for (String local : new String[] {null, "unified", "baritone", "classic"}) {
+            ManualConfig cfg = newRealConfig();
+            cfg.setPathfinder(local);
+            net.wcfcarolina13.PathFinding.PathFinderChoice before = cfg.getPathfinderChoice();
+            net.wcfcarolina13.FilingSystem.SharedConfig snapshot = net.wcfcarolina13.FilingSystem.SharedConfig.capture(cfg);
+
+            ManualConfig server = newRealConfig();
+            server.setPathfinder(local == null || "unified".equals(local) ? "classic" : "unified");
+            assertTrue(ConfigJsonUtil.applyConfigJson(ConfigJsonUtil.configToJson(server), cfg));
+            assertEquals(server.getPathfinderChoice(), cfg.getPathfinderChoice());
+
+            snapshot.applyTo(cfg); // leaveRemoteConfig
+            assertEquals(before, cfg.getPathfinderChoice());
+            // A null local default comes back as an explicit "unified" (same finder).
+            assertEquals(local == null ? "unified" : local, cfg.getPathfinder());
+        }
+    }
 }

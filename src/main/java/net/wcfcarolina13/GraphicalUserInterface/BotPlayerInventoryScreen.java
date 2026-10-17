@@ -6570,9 +6570,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 Frens.CONFIG.getPathfinderChoice() == net.wcfcarolina13.PathFinding.PathFinderChoice.UNIFIED
                         ? net.wcfcarolina13.PathFinding.PathFinderChoice.BARITONE
                         : net.wcfcarolina13.PathFinding.PathFinderChoice.UNIFIED;
-        // Saved as an explicit string (never null) so a shared-settings save carries it to the server.
         Frens.CONFIG.setPathfinderChoice(next);
         Frens.CONFIG.save();
+        if (Frens.CONFIG.isRemoteAuthoritative()) {
+            // save() is skipped while connected to a server, so push the change there instead.
+            net.wcfcarolina13.network.configNetworkManager.sendSaveConfigPacket(
+                    net.wcfcarolina13.network.ConfigJsonUtil.configToJson());
+        }
         net.wcfcarolina13.PathFinding.PathFinder.ACTIVE =
                 net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.fromSaved(Frens.CONFIG.getPathfinder());
     }
