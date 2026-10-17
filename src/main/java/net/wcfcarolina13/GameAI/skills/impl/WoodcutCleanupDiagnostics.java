@@ -76,6 +76,31 @@ final class WoodcutCleanupDiagnostics {
     }
 
     /**
+     * Time one background region scan may take before it returns what it has. Two empty merges
+     * ({@link #EMPTY_MERGE_STOP_STREAK}) then end an empty run in about 2 x 5 s instead of the whole
+     * skill duration: a scan given the skill deadline outlived the loop and never merged.
+     */
+    static final long ASYNC_SCAN_BUDGET_MS = 5_000L;
+
+    /** Time the post-loop fallback sweep (scan plus any mining it finds) may take. */
+    static final long FALLBACK_SWEEP_BUDGET_MS = 3_000L;
+
+    /** Time the end-of-run leftover count may take. */
+    static final long FINAL_SCAN_BUDGET_MS = 2_000L;
+
+    /**
+     * Deadline for one bounded scan: {@code budgetMs} from {@code nowMs}, but never past the skill
+     * deadline. A skill deadline already in the past is returned unchanged.
+     */
+    static long boundedScanDeadline(long nowMs, long skillDeadlineMs, long budgetMs) {
+        long budgeted = budgetMs <= 0L ? nowMs : nowMs + budgetMs;
+        if (budgeted < nowMs) {
+            budgeted = Long.MAX_VALUE; // overflow
+        }
+        return Math.min(skillDeadlineMs, budgeted);
+    }
+
+    /**
      * Whether the run left nothing behind: no remembered, overhead or visible leftover logs, and
      * when nothing was even attempted, no floater it was blocked from touching. Live full trees and
      * grounded logs the scan rejected are not leftovers.

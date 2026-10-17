@@ -149,7 +149,10 @@ public final class WoodcutCleanupSkill implements Skill {
     private record MineAttemptResult(boolean mined, boolean visibilityChanged, String failureReason) {
     }
 
-    private record CleanupTargetCollection(List<CleanupTarget> targets, WoodcutCleanupDiagnostics.CleanupScanStats stats) {
+    /** {@code complete} is false when the region scan stopped at its deadline (or an abort) before the last block. */
+    private record CleanupTargetCollection(List<CleanupTarget> targets,
+                                           WoodcutCleanupDiagnostics.CleanupScanStats stats,
+                                           boolean complete) {
     }
 
     private final class CleanupScanAccumulator {
@@ -177,6 +180,10 @@ public final class WoodcutCleanupSkill implements Skill {
         }
 
         CleanupTargetCollection build(ServerPlayerEntity bot) {
+            return build(bot, true);
+        }
+
+        CleanupTargetCollection build(ServerPlayerEntity bot, boolean complete) {
             List<CleanupTarget> targets = new ArrayList<>(orderedTargets.values());
             targets.sort(Comparator.<CleanupTarget>comparingInt(t -> priorityFor(t.kind()))
                     .thenComparingInt(t -> hasLineOfSight(bot, Vec3d.ofCenter(t.pos())) ? 0 : 1)
@@ -207,7 +214,8 @@ public final class WoodcutCleanupSkill implements Skill {
                             blockedHuman,
                             rejectedFullTree,
                             rejectedGrounded,
-                            summarizeReasons(protectedReasons)));
+                            summarizeReasons(protectedReasons)),
+                    complete);
         }
 
         private String summarizeReasons(Map<String, Integer> reasons) {
@@ -359,8 +367,9 @@ public final class WoodcutCleanupSkill implements Skill {
                                 added++;
                             }
                         }
-                        LOGGER.info("woodcut_cleanup async scan merged: {} new targets, {} total",
-                                added, cachedTargets.size());
+                        LOGGER.info("woodcut_cleanup async scan merged: {} new targets, {} total, complete={} budgetMs={}",
+                                added, cachedTargets.size(), fullScan.complete(),
+                                WoodcutCleanupDiagnostics.ASYNC_SCAN_BUDGET_MS);
                         consecutiveEmptyMerges = (added == 0 && cachedTargets.isEmpty())
                                 ? consecutiveEmptyMerges + 1
                                 : 0;
@@ -394,7 +403,10 @@ public final class WoodcutCleanupSkill implements Skill {
                         final Map<Long, Long> cooldownSnapshot = new HashMap<>(failedLogCooldowns);
                         final BlockPos asyncScanMin = scanMin;
                         final BlockPos asyncScanMax = scanMax;
-                        final long asyncDeadline = deadline;
+                        // Bounded so a slow forest scan returns and merges well before the skill
+                        // deadline; otherwise the empty-merge stop never gets a merge to count.
+                        final long asyncDeadline = WoodcutCleanupDiagnostics.boundedScanDeadline(
+                                System.currentTimeMillis(), deadline, WoodcutCleanupDiagnostics.ASYNC_SCAN_BUDGET_MS);
                         final boolean asyncFloatingOnly = floatingLogsOnly;
                         asyncScan = CompletableFuture.supplyAsync(() ->
                                 collectCleanupTargets(world, bot, asyncScanMin, asyncScanMax,
@@ -656,13 +668,17 @@ public final class WoodcutCleanupSkill implements Skill {
         }
 
         // Fallback permissive sweep: small, dense local pass to catch missed logs or scaffold
-        if ((logsMined < maxLogs || scaffoldMined < maxScaffold) && System.currentTimeMillis() < deadline && !SkillManager.shouldAbortSkill(bot)) {
+        // Its own budget: after an early exit it must not inherit the rest of the skill deadline.
+        // Each block it removes renews the budget, so only an idle sweep is cut short.
+        long fallbackDeadline = WoodcutCleanupDiagnostics.boundedScanDeadline(
+                System.currentTimeMillis(), deadline, WoodcutCleanupDiagnostics.FALLBACK_SWEEP_BUDGET_MS);
+        if ((logsMined < maxLogs || scaffoldMined < maxScaffold) && System.currentTimeMillis() < fallbackDeadline && !SkillManager.shouldAbortSkill(bot)) {
             int fallbackRadius = Math.min(8, Math.max(6, radius / 3));
             BlockPos fMin = origin.add(-fallbackRadius, -1, -fallbackRadius);
             BlockPos fMax = origin.add(fallbackRadius, verticalRange, fallbackRadius);
             int fallbackRemoved = 0;
             for (BlockPos pos : BlockPos.iterate(fMin, fMax)) {
-                if (System.currentTimeMillis() >= deadline) break;
+                if (System.currentTimeMillis() >= fallbackDeadline) break;
                 if (SkillManager.shouldAbortSkill(bot)) break;
                 BlockPos botPos = bot.getBlockPos();
                 sweepMinX = Math.min(sweepMinX, botPos.getX());
@@ -689,6 +705,9 @@ public final class WoodcutCleanupSkill implements Skill {
                     if (mineResult.mined()) {
                         logsMined++;
                         fallbackRemoved++;
+                        // Productive sweep: give it another budget from now (still capped by the skill deadline).
+                        fallbackDeadline = WoodcutCleanupDiagnostics.boundedScanDeadline(
+                                System.currentTimeMillis(), deadline, WoodcutCleanupDiagnostics.FALLBACK_SWEEP_BUDGET_MS);
                         if (floaterMemory != null) {
                             floaterMemory.remove(pos.asLong());
                         }
@@ -711,6 +730,9 @@ public final class WoodcutCleanupSkill implements Skill {
                         if (mineResult.mined()) {
                             scaffoldMined++;
                             fallbackRemoved++;
+                            // Productive sweep: give it another budget from now (still capped by the skill deadline).
+                            fallbackDeadline = WoodcutCleanupDiagnostics.boundedScanDeadline(
+                                    System.currentTimeMillis(), deadline, WoodcutCleanupDiagnostics.FALLBACK_SWEEP_BUDGET_MS);
                             if (scaffoldMemory != null) {
                                 scaffoldMemory.remove(pos.asLong());
                             }
@@ -747,7 +769,9 @@ public final class WoodcutCleanupSkill implements Skill {
                 bot,
                 scanMin,
                 scanMax,
-                Math.max(System.currentTimeMillis() + 250L, deadline),
+                // A fixed short budget from now: never the rest of the skill deadline (~100 s after an
+                // early exit), and still a real count when the loop already used the whole deadline.
+                System.currentTimeMillis() + WoodcutCleanupDiagnostics.FINAL_SCAN_BUDGET_MS,
                 floatingLogsOnly,
                 new HashMap<>(),
                 floaterMemory,
@@ -777,8 +801,9 @@ public final class WoodcutCleanupSkill implements Skill {
                 remainingVisibleLogs.size(),
                 remainingStats
         );
-        LOGGER.info("woodcut_cleanup completed: {} [{} remainingRemembered={} remainingOverhead={}]",
-                summary, remainingStats.formatCounts(), remainingRemembered, remainingOverhead);
+        LOGGER.info("woodcut_cleanup completed: {} [{} remainingRemembered={} remainingOverhead={} finalScanComplete={}]",
+                summary, remainingStats.formatCounts(), remainingRemembered, remainingOverhead,
+                remainingCollection.complete());
         boolean blockedOnlyByProtection = WoodcutCleanupDiagnostics.isBlockedOnlyByProtection(
                 success, remainingRemembered, remainingOverhead, remainingVisibleLogs.size(), remainingStats);
         String playerLine = WoodcutCleanupDiagnostics.playerLine(success, logsMined, scaffoldMined, blockedOnlyByProtection);
@@ -918,13 +943,16 @@ public final class WoodcutCleanupSkill implements Skill {
         collectImmediateOverheadCleanupTargets(world, bot, min, max, failedCooldowns, accumulator);
 
         int scanned = 0;
+        boolean complete = true;
         for (BlockPos pos : BlockPos.iterate(min, max)) {
             scanned++;
             if ((scanned & 0x7F) == 0) {
                 if (System.currentTimeMillis() >= deadline) {
+                    complete = false;
                     break;
                 }
                 if (SkillManager.shouldAbortSkill(bot)) {
+                    complete = false;
                     break;
                 }
             }
@@ -952,7 +980,7 @@ public final class WoodcutCleanupSkill implements Skill {
             }
             accumulator.record(pos, target, disposition);
         }
-        return accumulator.build(bot);
+        return accumulator.build(bot, complete);
     }
 
     private void collectRememberedCleanupTargets(ServerWorld world,

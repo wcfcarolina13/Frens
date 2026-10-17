@@ -195,4 +195,34 @@ class WoodcutCleanupSkillTest {
         }
         throw new java.io.IOException(relative + " not found above " + dir);
     }
+    @Test
+    void boundedScanDeadlineUsesBudgetWhenShorterThanSkillDeadline() {
+        assertEquals(15_000L, WoodcutCleanupDiagnostics.boundedScanDeadline(10_000L, 130_000L, 5_000L));
+    }
+
+    @Test
+    void boundedScanDeadlineNeverPassesSkillDeadline() {
+        assertEquals(12_000L, WoodcutCleanupDiagnostics.boundedScanDeadline(10_000L, 12_000L, 5_000L));
+    }
+
+    @Test
+    void boundedScanDeadlineKeepsAPastSkillDeadline() {
+        assertEquals(9_000L, WoodcutCleanupDiagnostics.boundedScanDeadline(10_000L, 9_000L, 5_000L));
+    }
+
+    @Test
+    void boundedScanDeadlineSurvivesOverflowAndNonPositiveBudget() {
+        assertEquals(Long.MAX_VALUE - 1,
+                WoodcutCleanupDiagnostics.boundedScanDeadline(Long.MAX_VALUE - 10, Long.MAX_VALUE - 1, 1_000L));
+        assertEquals(10_000L, WoodcutCleanupDiagnostics.boundedScanDeadline(10_000L, 130_000L, 0L));
+    }
+
+    @Test
+    void emptyRunStopsWellUnderTwentySecondsOnBudgets() {
+        long emptyStop = WoodcutCleanupDiagnostics.EMPTY_MERGE_STOP_STREAK
+                * WoodcutCleanupDiagnostics.ASYNC_SCAN_BUDGET_MS;
+        long worstTail = WoodcutCleanupDiagnostics.FALLBACK_SWEEP_BUDGET_MS
+                + WoodcutCleanupDiagnostics.FINAL_SCAN_BUDGET_MS;
+        assertTrue(emptyStop + worstTail < 20_000L);
+    }
 }
