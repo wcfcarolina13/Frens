@@ -52,7 +52,7 @@ public final class BurrowBuilder {
         if (phase == PHASE_DESCENT_1) {
             int torches = countTorches(bot);
             if (torches < 2) {
-                String msg = "Burrow needs at least 2 torches; provide some and rerun.";
+                String msg = "Burrow needs at least 2 torches. Provide some and rerun.";
                 ChatUtils.sendSystemMessage(source, msg);
                 LOGGER.warn("Burrow aborted: {}", msg);
                 return SkillExecutionResult.failure(msg);

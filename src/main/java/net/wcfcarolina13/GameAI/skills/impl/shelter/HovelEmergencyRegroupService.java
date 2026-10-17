@@ -108,7 +108,7 @@ final class HovelEmergencyRegroupService {
         TaskService.requestPause(id, reason);
         if (stageMessageSource != null) {
             ChatUtils.sendSystemMessage(stageMessageSource,
-                    "Hovel: I fell deep underground and can't find daylight (" + where + "). I'm pausing — please help me out, then run /bot resume.");
+                    "Hovel: I fell deep underground and can't find daylight (" + where + "). I'm pausing. Please help me out, then run /bot resume.");
         }
 
         if (logger != null) {
@@ -211,7 +211,7 @@ final class HovelEmergencyRegroupService {
             TaskService.requestPause(id, "§cHovel paused: I'm stuck inside blocks and couldn't find a safe spot.");
             if (stageMessageSource != null) {
                 ChatUtils.sendSystemMessage(stageMessageSource,
-                        "Hovel: I'm stuck inside blocks and couldn't find a safe spot (" + where + "). I'm pausing — please help me out, then run /bot resume.");
+                        "Hovel: I'm stuck inside blocks and couldn't find a safe spot (" + where + "). I'm pausing. Please help me out, then run /bot resume.");
             }
             return true;
         }

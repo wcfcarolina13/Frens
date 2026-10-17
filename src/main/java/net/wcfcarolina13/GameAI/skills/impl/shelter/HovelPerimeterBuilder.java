@@ -776,7 +776,7 @@ public final class HovelPerimeterBuilder {
         }
         if (stageMessageSource != null && lastTarget != null) {
             ChatUtils.sendSystemMessage(stageMessageSource,
-                    "Hovel: foundation beams timed out; continuing (last corner " + lastTarget + ")");
+                    "Hovel: foundation beams timed out, continuing (last corner " + lastTarget + ")");
         }
         if (lastTarget != null) {
             logStageWarn("foundation", "timeout after " + attempts + " attempts; lastCorner=" + lastTarget);

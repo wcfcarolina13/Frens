@@ -151,7 +151,7 @@ public final class FallingBlockStabilizer {
 
         if (sendChat) {
             sendMessage(player, source,
-                    "Falling blocks are still settling here; I'll pause so I don't get buried. Use /bot resume.");
+                    "Falling blocks are still settling here. I'll pause so I don't get buried. Use /bot resume.");
         }
         return false;
     }

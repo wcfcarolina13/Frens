@@ -168,7 +168,7 @@ public final class ShelterSkill implements Skill {
         }
         surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
         if (!hasExplicitTarget && !world.isSkyVisible(origin.up()) && !underArtificialRoof && bot.getBlockY() < surfaceY - 2) {
-            return SkillExecutionResult.failure("I can't build a surface shelter while underground; I couldn't reach the surface.");
+            return SkillExecutionResult.failure("I can't build a surface shelter while underground. I couldn't reach the surface.");
         }
 
         // If we're near a cave mouth / low overhang, the footprint can include tight headroom that causes
@@ -347,7 +347,7 @@ public final class ShelterSkill implements Skill {
         }
 
         TaskService.forceAbort(bot.getUuid(), "§cEmergency regroup: fell deep underground.");
-        ChatUtils.sendSystemMessage(botSource, "Shelter: fell deep underground; regrouping...");
+        ChatUtils.sendSystemMessage(botSource, "Shelter: fell deep underground, regrouping...");
 
         boolean teleportAllowed = SkillPreferences.teleportDuringSkills(bot);
         if (!teleportAllowed) {
