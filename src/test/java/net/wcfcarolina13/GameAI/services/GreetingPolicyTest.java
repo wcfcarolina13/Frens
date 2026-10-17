@@ -51,10 +51,10 @@ class GreetingPolicyTest {
 
     @Test
     void stringsStayByteIdenticalForVoiceMapping() {
-        // Must match the greeting templates in ChatUtils/DialogueTextMapper (dash normalized there).
+        // Must match the greeting templates in ChatUtils/DialogueTextMapper.
         assertEquals(List.of(
                 "Hey, Roti.",
-                "Oh—Roti, there you are.",
+                "Oh, Roti, there you are.",
                 "Good to see you again, Roti.",
                 "Welcome back, Roti."
         ), GreetingPolicy.lines(GreetingPolicy.Pool.REUNION, "Roti"));

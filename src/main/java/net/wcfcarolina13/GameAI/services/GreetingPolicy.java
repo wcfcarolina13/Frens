@@ -10,8 +10,8 @@ import java.util.List;
  * sighting of each player draws from the neutral lines only. Every other greeting draws from
  * the full reunion pool.
  *
- * <p>The strings are byte-identical to the original pool: {@code DialogueTextMapper} maps
- * them to voice clips by exact text (after its dash normalization).
+ * <p>The strings are byte-identical to the {@code DialogueTextMapper} keys, which map them
+ * to voice clips by exact text.
  */
 public final class GreetingPolicy {
 
@@ -41,13 +41,13 @@ public final class GreetingPolicy {
             return List.of();
         }
         return switch (pool) {
-            // Only the dash-free line. REUNION keeps its four strings byte-identical to the voice mappings.
+            // Only the neutral line. REUNION keeps its four strings byte-identical to the voice mappings.
             case FIRST_MEETING -> List.of(
                     "Hey, " + name + "."
             );
             case REUNION -> List.of(
                     "Hey, " + name + ".",
-                    "Oh—" + name + ", there you are.",
+                    "Oh, " + name + ", there you are.",
                     "Good to see you again, " + name + ".",
                     "Welcome back, " + name + "."
             );

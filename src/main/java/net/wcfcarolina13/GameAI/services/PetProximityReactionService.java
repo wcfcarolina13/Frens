@@ -144,7 +144,7 @@ public final class PetProximityReactionService {
     private static final WeightedLine[] WOLF_OBSERVATION_LINES = new WeightedLine[] {
             new WeightedLine("wolf_good_dog", "Good dog!", BotDialogueSounds.LINE_WOLF_NEARBY_GOOD_DOG, WEIGHT_UNCOMMON),
             new WeightedLine("wolf_love_dogs", "I love dogs.", BotDialogueSounds.LINE_WOLF_NEARBY_LOVE_DOGS, WEIGHT_UNCOMMON),
-            new WeightedLine("wolf_skinwalker", "Wait — that's not a dog.", BotDialogueSounds.LINE_WOLF_NEARBY_SKINWALKER, WEIGHT_UNCOMMON)
+            new WeightedLine("wolf_skinwalker", "Wait, that's not a dog.", BotDialogueSounds.LINE_WOLF_NEARBY_SKINWALKER, WEIGHT_UNCOMMON)
     };
 
     private PetProximityReactionService() {

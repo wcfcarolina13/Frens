@@ -136,7 +136,7 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Sun has set. Stopping fishing.", BotDialogueSounds.LINE_SKILL_FISH_SUNSET);
 
         // ============ SKILL: WOODCUTTING ============
-        EXACT_MAP.put("Careful-falling logs. I've got this.", BotDialogueSounds.LINE_SKILL_WOODCUT_CAREFUL);
+        EXACT_MAP.put("Careful, falling logs. I've got this.", BotDialogueSounds.LINE_SKILL_WOODCUT_CAREFUL);
         EXACT_MAP.put("Just tidying up the tree line.", BotDialogueSounds.LINE_SKILL_WOODCUT_TIDYING);
         EXACT_MAP.put("A few more swings and this one's down.", BotDialogueSounds.LINE_SKILL_WOODCUT_FEW_MORE);
 
@@ -150,7 +150,7 @@ public final class DialogueTextMapper {
 
         // ============ SKILL: SLEEP ============
         EXACT_MAP.put("I'm trying to get some sleep.", BotDialogueSounds.LINE_SKILL_SLEEP_TRYING);
-        EXACT_MAP.put("Give me a second-finding a bed.", BotDialogueSounds.LINE_SKILL_SLEEP_FINDING_BED);
+        EXACT_MAP.put("Give me a second, finding a bed.", BotDialogueSounds.LINE_SKILL_SLEEP_FINDING_BED);
         EXACT_MAP.put("Long day. Time to sleep.", BotDialogueSounds.LINE_SKILL_SLEEP_LONG_DAY);
 
         // ============ WAKE-UP (after sleeping near player) ============
@@ -226,13 +226,13 @@ public final class DialogueTextMapper {
 
         // ============ MODE: IDLE ============
         EXACT_MAP.put("Just taking it easy.", BotDialogueSounds.LINE_IDLE_TAKING_IT_EASY);
-        EXACT_MAP.put("Nothing urgent-I'm here if you need me.", BotDialogueSounds.LINE_IDLE_HERE_IF_NEEDED);
+        EXACT_MAP.put("Nothing urgent. I'm here if you need me.", BotDialogueSounds.LINE_IDLE_HERE_IF_NEEDED);
         EXACT_MAP.put("I'm here if you need me.", BotDialogueSounds.LINE_IDLE_HERE_IF_NEEDED);
         EXACT_MAP.put("Enjoying the calm.", BotDialogueSounds.LINE_IDLE_ENJOYING_CALM);
 
         // ============ GREETINGS ============
         PATTERN_MAP.put(patternWithName("Hey, {name}."), BotDialogueSounds.LINE_GREETING_HEY);
-        PATTERN_MAP.put(patternWithName("Oh-{name}, there you are."), BotDialogueSounds.LINE_GREETING_THERE_YOU_ARE);
+        PATTERN_MAP.put(patternWithName("Oh, {name}, there you are."), BotDialogueSounds.LINE_GREETING_THERE_YOU_ARE);
         PATTERN_MAP.put(patternWithName("Good to see you again, {name}."), BotDialogueSounds.LINE_GREETING_GOOD_TO_SEE);
         PATTERN_MAP.put(patternWithName("Welcome back, {name}."), BotDialogueSounds.LINE_GREETING_WELCOME_BACK);
 

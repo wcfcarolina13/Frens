@@ -70,7 +70,7 @@ public final class BotTouchChatService {
         }
         if (task.startsWith("skill:woodcut")) {
             return choose(
-                    "Careful—falling logs. I’ve got this.",
+                    "Careful, falling logs. I’ve got this.",
                     "Just tidying up the tree line.",
                     "A few more swings and this one’s down."
             );
@@ -85,7 +85,7 @@ public final class BotTouchChatService {
         if (task.startsWith("skill:sleep")) {
             return choose(
                     "I’m trying to get some sleep.",
-                    "Give me a second—finding a bed.",
+                    "Give me a second, finding a bed.",
                     "Long day. Time to sleep."
             );
         }
@@ -134,11 +134,11 @@ public final class BotTouchChatService {
             );
             case IDLE -> choose(
                     "Just taking it easy.",
-                    "Nothing urgent—I'm here if you need me.",
+                    "Nothing urgent. I'm here if you need me.",
                     "Enjoying the calm."
             );
             case TRAVELING -> choose(
-                    "On the move — I'll catch up.",
+                    "On the move. I'll catch up.",
                     "Traveling. Back soon.",
                     "Heading somewhere. What's up?"
             );
@@ -184,7 +184,7 @@ public final class BotTouchChatService {
         return switch (mood) {
             case STRESSED -> choose(
                     "Still a bit on edge after that fight, " + name + ".",
-                    "Give me a second—still catching my breath.",
+                    "Give me a second, still catching my breath.",
                     "That was close. I'm alright though.",
                     "Heart's still pounding from that scuffle."
             );
@@ -274,7 +274,7 @@ public final class BotTouchChatService {
             "We’re at " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ".",
             "Just taking it easy.",
             "Enjoying the calm.",
-            "Nothing urgent—I'm here if you need me.",
+            "Nothing urgent. I'm here if you need me.",
             "If you need me, I’m listening."
         );
         }

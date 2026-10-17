@@ -191,7 +191,7 @@ public final class BotAmbientSocialChatService {
                 "It’s " + time + "… sky’s " + weather + ".",
                 "Just taking it easy.",
                 "Enjoying the calm.",
-                "Nothing urgent—I'm here if you need me.",
+                "Nothing urgent. I'm here if you need me.",
                 "If you need me, I'm listening.",
                 "We’re at " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + "."
         );
