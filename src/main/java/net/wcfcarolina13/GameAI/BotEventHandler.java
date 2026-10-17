@@ -245,7 +245,6 @@ public class BotEventHandler {
     /** Minimum squared distance between ticks to consider as an external teleport. 16 blocks = 256. */
     private static final double EXTERNAL_TELEPORT_THRESHOLD_SQ = 256.0;
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
-    private static volatile boolean externalOverrideActive = false;
     // Stage-2 refactor: lifecycle respawn flag moved to BotLifecycleService.
     public enum CombatStyle {
         AGGRESSIVE,
@@ -509,22 +508,6 @@ public class BotEventHandler {
                 primary.shieldDecisionTick = tick;
             }
         }
-    }
-
-    public static void setExternalOverrideActive(boolean active) {
-        if (externalOverrideActive == active) {
-            return;
-        }
-        externalOverrideActive = active;
-        if (active) {
-            LOGGER.info("External override activated; pausing training loop.");
-        } else {
-            LOGGER.info("External override cleared; training loop may resume.");
-        }
-    }
-
-    public static boolean isExternalOverrideActive() {
-        return externalOverrideActive;
     }
 
     public static void rememberSpawn(ServerWorld world, Vec3d pos, float yaw, float pitch) {
@@ -1096,7 +1079,6 @@ public class BotEventHandler {
 
         BotStuckService.setLastSafePosition(bot.getUuid(), target);
         TaskService.forceAbort(bot.getUuid(), "§cTask aborted due to bot respawn.");
-        setExternalOverrideActive(false);
         setMode(bot, Mode.IDLE);
         setAssistAllies(bot, true);
         if (destinationWorld != null) {
@@ -2924,9 +2906,7 @@ public class BotEventHandler {
         DropSweepService.collectNearbyDrops(
                 bot,
                 radius,
-                commandDrivenSweep,
-                BotEventHandler::isExternalOverrideActive,
-                BotEventHandler::setExternalOverrideActive
+                commandDrivenSweep
         );
     }
 
@@ -7254,7 +7234,6 @@ public class BotEventHandler {
                 TELEPORT_GRACE_UNTIL_TICK.clear();
                 STOP_COMMAND_GRACE_UNTIL_TICK.clear();
 
-            externalOverrideActive = false;
             botSpawnCount = 0;
 
 		            lastRespawnHandledTick = -1;

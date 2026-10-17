@@ -22,8 +22,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 
 /**
  * Stage-2 refactor: coordination/state for opportunistic item drop sweeping.
@@ -144,9 +142,7 @@ public final class DropSweepService {
 
     public static void collectNearbyDrops(ServerPlayerEntity bot,
                                           double radius,
-                                          boolean commandDrivenSweep,
-                                          BooleanSupplier isExternalOverrideActive,
-                                          Consumer<Boolean> setExternalOverrideActive) {
+                                          boolean commandDrivenSweep) {
         if (bot == null) {
             return;
         }
@@ -243,13 +239,6 @@ public final class DropSweepService {
         dropSweepOwner = bot.getUuid();
         dropSweepCancelRequested.set(false);
         dropSweepCancelReason = null;
-        boolean needOverride = isExternalOverrideActive != null
-                && setExternalOverrideActive != null
-                && !isExternalOverrideActive.getAsBoolean();
-        if (needOverride) {
-            setExternalOverrideActive.accept(true);
-        }
-        final boolean activatedOverride = needOverride;
 
         CompletableFuture<Void> sweepFuture = CompletableFuture.runAsync(() -> {
             try {
@@ -279,9 +268,6 @@ public final class DropSweepService {
             dropSweepCancelRequested.set(false);
             dropSweepOwner = null;
             dropSweepCancelReason = null;
-            if (activatedOverride) {
-                setExternalOverrideActive.accept(false);
-            }
         }));
     }
 }
