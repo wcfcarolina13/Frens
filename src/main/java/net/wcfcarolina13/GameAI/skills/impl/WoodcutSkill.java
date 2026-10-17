@@ -49,6 +49,7 @@ import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.FallingBlockStabilizer;
 import net.wcfcarolina13.GameAI.skills.support.MiningWaitOutcome;
+import net.wcfcarolina13.GameAI.skills.support.RelocationWalkPolicy;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
@@ -4889,49 +4890,60 @@ public final class WoodcutSkill implements Skill {
         if (!isWithinRequestedBounds(bot, target)) {
             return false;
         }
-        MovementService.MovementPlan plan = MovementService.planLootApproach(
-                        bot,
-                        target,
-                        WOODCUT_MOVEMENT_OPTIONS)
-                .orElseGet(() -> new MovementService.MovementPlan(
-                        MovementService.Mode.DIRECT,
-                        target,
-                        target,
-                        null,
-                        null,
-                        bot.getHorizontalFacing()
-                ));
-        BlockPos approach = plan.approachDestination() != null ? plan.approachDestination() : plan.finalDestination();
-        if (!isWithinRequestedBounds(bot, approach) || !isUsableWoodcutStand(world, approach)) {
-            LOGGER.info("Woodcut relocation: rejected target {} via {} (reason=no-dry-stand)",
-                    target.toShortString(), approach.toShortString());
-            return false;
-        }
-        LOGGER.info("Woodcut relocation: movement plan mode={} final={} approach={}",
-                plan.mode(),
-                plan.finalDestination().toShortString(),
-                plan.approachDestination() != null ? plan.approachDestination().toShortString() : "null");
-        MovementService.MovementResult res = executeMovementPlan(source, bot, plan, "relocation");
-        boolean success = res.success();
-        if (success) {
-            double postDistSq = bot.getBlockPos().getSquaredDistance(target);
-            // Relocation doesn't need pinpoint accuracy — within 5 blocks is fine
-            success = postDistSq <= 25.0;
-        }
-        if (!success) {
-            // Even if movement reported failure, check if we got close enough
+        // One walk call can end on its deadline mid-trip (field bug D); while it closed real distance,
+        // keep walking toward the same target, replanning from where the bot now stands.
+        double prevDist = Math.sqrt(bot.getBlockPos().getSquaredDistance(target));
+        MovementService.MovementResult res = null;
+        for (int hop = 0; ; hop++) {
+            if (hop > 0 && isAbortRequested(bot)) {
+                LOGGER.info("Woodcut relocation: walk to {} stopped (abort requested after {} hop(s))",
+                        target.toShortString(), hop);
+                return false;
+            }
+            MovementService.MovementPlan plan = MovementService.planLootApproach(
+                            bot,
+                            target,
+                            WOODCUT_MOVEMENT_OPTIONS)
+                    .orElseGet(() -> new MovementService.MovementPlan(
+                            MovementService.Mode.DIRECT,
+                            target,
+                            target,
+                            null,
+                            null,
+                            bot.getHorizontalFacing()
+                    ));
+            BlockPos approach = plan.approachDestination() != null ? plan.approachDestination() : plan.finalDestination();
+            if (!isWithinRequestedBounds(bot, approach) || !isUsableWoodcutStand(world, approach)) {
+                LOGGER.info("Woodcut relocation: rejected target {} via {} (reason=no-dry-stand)",
+                        target.toShortString(), approach.toShortString());
+                return false;
+            }
+            LOGGER.info("Woodcut relocation: movement plan mode={} final={} approach={}",
+                    plan.mode(),
+                    plan.finalDestination().toShortString(),
+                    plan.approachDestination() != null ? plan.approachDestination().toShortString() : "null");
+            res = executeMovementPlan(source, bot, plan, "relocation");
+            // Relocation doesn't need pinpoint accuracy: within 5 blocks is arrival, whatever the
+            // movement reported.
             double postDistSq = bot.getBlockPos().getSquaredDistance(target);
             if (postDistSq <= 25.0) {
-                success = true;
+                LOGGER.info("Woodcut relocation: arrived near {} (now at {})",
+                        target.toShortString(), bot.getBlockPos().toShortString());
+                return true;
             }
+            double nowDist = Math.sqrt(postDistSq);
+            if (!RelocationWalkPolicy.continueToward(prevDist, nowDist, hop)) {
+                break;
+            }
+            LOGGER.info("Woodcut relocation: continuing toward {} (dist {} -> {}, hop {})",
+                    target.toShortString(),
+                    String.format("%.1f", prevDist),
+                    String.format("%.1f", nowDist),
+                    hop + 1);
+            prevDist = nowDist;
         }
-        if (success) {
-            LOGGER.info("Woodcut relocation: arrived near {} (now at {})",
-                    target.toShortString(), bot.getBlockPos().toShortString());
-        } else {
-            LOGGER.info("Woodcut relocation: walk to {} failed: {}", target.toShortString(), res.detail());
-        }
-        return success;
+        LOGGER.info("Woodcut relocation: walk to {} failed: {}", target.toShortString(), res.detail());
+        return false;
     }
 
     private boolean tryPlaceScaffold(ServerPlayerEntity bot,

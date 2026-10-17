@@ -86,4 +86,26 @@ class UnifiedWalkPolicyTest {
         assertEquals(1, UnifiedWalkPolicy.skipForwardIndex(origins, 1, 99L));   // off plan: the unit decides
         assertEquals(0, UnifiedWalkPolicy.skipForwardIndex(null, 0, 10L));
     }
+    @Test
+    void walkDeadlineKeepsTheBaseForShortMovesAndScalesLongTrips() {
+        assertEquals(5_000L, UnifiedWalkPolicy.walkDeadlineMs(true, 10));
+        assertEquals(20_000L, UnifiedWalkPolicy.walkDeadlineMs(false, 10));
+        // Field bug D: the 96-block relocation now gets 28.8 s, either caller kind.
+        assertEquals(28_800L, UnifiedWalkPolicy.walkDeadlineMs(true, 96));
+        assertEquals(28_800L, UnifiedWalkPolicy.walkDeadlineMs(false, 96));
+        // Growth starts past ~17 blocks (fast) and ~67 blocks (slow).
+        assertEquals(5_100L, UnifiedWalkPolicy.walkDeadlineMs(true, 17));
+        assertEquals(20_000L, UnifiedWalkPolicy.walkDeadlineMs(false, 66));
+        assertEquals(20_100L, UnifiedWalkPolicy.walkDeadlineMs(false, 67));
+    }
+
+    @Test
+    void walkDeadlineIsCappedAndBadDistancesGetTheBase() {
+        assertEquals(40_000L, UnifiedWalkPolicy.walkDeadlineMs(true, 200));
+        assertEquals(40_000L, UnifiedWalkPolicy.walkDeadlineMs(false, 1.0e12));
+        assertEquals(40_000L, UnifiedWalkPolicy.walkDeadlineMs(true, Double.POSITIVE_INFINITY));
+        assertEquals(5_000L, UnifiedWalkPolicy.walkDeadlineMs(true, 0));
+        assertEquals(5_000L, UnifiedWalkPolicy.walkDeadlineMs(true, -1));
+        assertEquals(20_000L, UnifiedWalkPolicy.walkDeadlineMs(false, Double.NaN));
+    }
 }

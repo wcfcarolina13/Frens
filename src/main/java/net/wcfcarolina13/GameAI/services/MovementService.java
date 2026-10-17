@@ -931,7 +931,8 @@ public final class MovementService {
             }
         }
 
-        long deadline = System.currentTimeMillis() + (fastReplan ? TimeUnit.SECONDS.toMillis(5) : TimeUnit.SECONDS.toMillis(20));
+        long deadline = System.currentTimeMillis() + UnifiedWalkPolicy.walkDeadlineMs(fastReplan,
+                Math.sqrt(player.getBlockPos().getSquaredDistance(destination)));
         BlockPos lastReached = player.getBlockPos();
         boolean replanned = false;
         boolean boxedInTried = false;

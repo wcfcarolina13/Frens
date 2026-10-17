@@ -15,6 +15,15 @@ public final class UnifiedWalkPolicy {
     /** walkTo's legacy loop has two attempts, so one replan after a failed or cancelled unit. */
     public static final int MAX_FAILURE_REPLANS = 1;
 
+    /** walkTo's deadline floor for a fastReplan caller (the old fixed budget). */
+    public static final long FAST_REPLAN_BASE_DEADLINE_MS = 5_000L;
+    /** walkTo's deadline floor for every other caller (the old fixed budget). */
+    public static final long BASE_DEADLINE_MS = 20_000L;
+    /** A long trip earns this much time per straight-line block to its destination. */
+    public static final long DEADLINE_MS_PER_BLOCK = 300L;
+    /** No single walkTo call gets more than this, however far the destination. */
+    public static final long MAX_DEADLINE_MS = 40_000L;
+
     public enum NoPathStep { TERRAIN_MOVE, FAIL }
 
     public enum AfterPlan { ARRIVED, NEXT_LEG, STOP }
@@ -33,6 +42,22 @@ public final class UnifiedWalkPolicy {
             return NoPathStep.TERRAIN_MOVE;
         }
         return NoPathStep.FAIL;
+    }
+
+    /**
+     * walkTo's time budget, set before planning (6ad-6al field bug D: a 96-block relocation died after
+     * ~28 blocks on the fixed 5 s fastReplan deadline). The fixed base for short moves; a long trip
+     * gets {@link #DEADLINE_MS_PER_BLOCK} per straight-line block up to {@link #MAX_DEADLINE_MS}, so
+     * it grows past the base from ~17 blocks (fastReplan) or ~67 blocks (other callers). A negative
+     * or NaN distance gets the base.
+     */
+    public static long walkDeadlineMs(boolean fastReplan, double distBlocks) {
+        long base = fastReplan ? FAST_REPLAN_BASE_DEADLINE_MS : BASE_DEADLINE_MS;
+        if (!(distBlocks > 0.0D)) {
+            return base;
+        }
+        long scaled = Math.min(MAX_DEADLINE_MS, Math.round(Math.min(distBlocks, 1.0e9D) * DEADLINE_MS_PER_BLOCK));
+        return Math.max(base, scaled);
     }
 
     public static boolean replanAfterFailure(int failureReplansUsed) {
