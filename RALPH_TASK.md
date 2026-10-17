@@ -3,7 +3,18 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-16 (1.1.254) — next session starts here
+## Session Handoff 2026-10-16 (1.1.255) — next session starts here
+
+**State:** main = origin/main @ 1.1.255. Suite 2597 green. `docs/testing/BACKLOG_SPEC_2026-10-16.md` is fully shipped
+(1.1.252 leash and base commands, 1.1.253 shelters, 1.1.254 config, 1.1.255 death retrieval), every build reviewed by Fable
+and sandbox-tested (`tools/sandbox/smoke.sh`, `sheltertest.py`, `rettest.py`). Field items: Phases 6an-6aw pending.
+**Follow-ups:** dig-down's dawn exit leaves a short scaffold pillar (teardown "out of reach") and waits ~60 s; a cliff seal can
+drop a sand or gravel head block into its own entrance; a reload mid-retrieval strands the bot without the sweep; spawn
+`_legacy` retirement; an item-thrower filter for retrieval.
+**Needs Bradley:** apply `CLAUDE.md.patch` (in the suspicious-shamir worktree root) to the main checkout's CLAUDE.md.
+Builds need JDK 21. In 1.21.11 game rules are snake_case (`/gamerule keep_inventory`).
+
+## Session Handoff 2026-10-16 (1.1.254) — superseded
 
 **State:** main = origin/main @ 1.1.254. Suite 2573 green. Backlog spec items 9-10 shipped (global bot controls retired,
 remote-server Bot Controls fixed, mount `_legacy` promotion removed). Field items: Phase 6av.
