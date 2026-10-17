@@ -240,7 +240,7 @@ def iter_records(path: Path) -> Iterator[Record]:
 
 
 KEEP_MARKER_RE = re.compile(
-    r"ai-player|aiplayer|config/ai-player|fakeplayer|spawnBot|\bBERT\b|\bCART\b|OpenNLP|LIDSNet|NLP|ollama|LLM|Q-table|qtable|sqlite-vec|sqlite-vss|skill:|Task '\w+|External override|pursuit failed|Drop sweep|block ID map entry|PlayerManager#",
+    r"ai-player|aiplayer|config/ai-player|fakeplayer|spawnBot|\bBERT\b|\bCART\b|OpenNLP|LIDSNet|NLP|ollama|LLM|Q-table|qtable|sqlite-vec|sqlite-vss|skill:|Task '\w+|pursuit failed|Drop sweep|block ID map entry|PlayerManager#",
     re.IGNORECASE,
 )
 
