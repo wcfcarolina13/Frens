@@ -1016,115 +1016,157 @@ public final class BotFleeService {
         BlockPos digSpot = bot.getBlockPos();
         LOGGER.info("Bot {} trying emergency dig-down at {}",
                 bot.getName().getString(), digSpot.toShortString());
-        emergencyDigDown(bot, digSpot, gen);
+        emergencyDigDown(bot, gen);
     }
 
+    /** Per-bot no-dig-down marks left by an uncapped dig, kept until the next dawn. */
+    private static final ConcurrentHashMap<UUID, List<DigDownPolicy.Mark>> NO_DIG_DOWN_MARKS = new ConcurrentHashMap<>();
+    /** Timeout for each bounded server-thread hop of the dig-down step. */
+    private static final long DIG_DOWN_HOP_TIMEOUT_MS = 500L;
+
+    /** The preflight hop's answer: where the column starts and why it may not be dug (null = dig). */
+    private record DigDownPreflight(BlockPos origin, String dimension, long day, String skipReason) {}
+
+    /** One cap attempt: where the cap went (null when none) and every candidate's refusal. */
+    private record DigDownCap(BlockPos capPos, BlockPos feet, String reasons) {}
+
     /**
-     * Emergency dig-down: mine 3 blocks straight down at current position,
-     * then cap the hole with a block for overhead protection.
+     * Emergency dig-down: mine the 3 cells under the bot, then cap the hole with a seal block.
+     * Preflights the column in one server hop and stays on the surface when it cannot finish a
+     * bunker. Counts real removals. A real dig that ends uncapped climbs back out (refilling the pit
+     * with a pillar) and marks the column so the chain does not dig there again before dawn.
      */
-    private static void emergencyDigDown(ServerPlayerEntity bot, BlockPos digPos, long gen) {
+    private static void emergencyDigDown(ServerPlayerEntity bot, long gen) {
+        String name = bot.getName().getString();
         try {
             if (isStaleShelter(bot, gen)) return;
-            // Stop moving before digging.
-            bot.getCommandSource().getServer().execute(() -> {
+            MinecraftServer server = bot.getCommandSource().getServer();
+            if (server == null || !(bot.getEntityWorld() instanceof ServerWorld world)) return;
+            // Same stale-latch rule as wall-off: a latched /bot stop from before turns every
+            // mineBlock into a no-op, and the cap then ran with the bot still on the surface.
+            boolean latched = TaskService.isAbortRequested(bot.getUuid()) && !TaskService.isServerStopping();
+            if (WallOffPolicy.clearStaleLatchAtStart(latched, TaskService.hasActiveTask(bot.getUuid()))) {
+                String latchReason = TaskService.getCancelReason(bot.getUuid()).orElse("");
+                TaskService.clearAbortLatch(bot.getUuid());
+                LOGGER.info("Bot {} dig-down: cleared a stale abort latch (reason={})", name, latchReason);
+            }
+
+            DigDownPreflight pre = callOnServer(server, () -> {
                 bot.setSprinting(false);
                 bot.setVelocity(0, bot.getVelocity().y, 0);
                 bot.velocityDirty = true;
-            });
+                return digDownPreflight(bot, world);
+            }, DIG_DOWN_HOP_TIMEOUT_MS, null);
+            if (pre == null) {
+                LOGGER.info("Bot {} dig-down skipped reason=preflight-timeout", name);
+                return;
+            }
+            if (pre.skipReason() != null) {
+                LOGGER.info("Bot {} dig-down skipped reason={} at {}", name, pre.skipReason(), pre.origin().toShortString());
+                return;
+            }
+            BlockPos digPos = pre.origin();
             Thread.sleep(300);
 
-            // Mine 3 blocks straight down.
-            int blocksMined = 0;
-            for (int depth = 0; depth < 3; depth++) {
-                if (isStaleShelter(bot, gen)) return;
-                BlockPos below = digPos.down(depth + 1);
-                if (bot.getEntityWorld().getBlockState(below).isAir()) continue;
-                MiningTool.mineBlock(bot, below, false).join();
-                blocksMined++;
+            // Mine the column, counting cells that really opened.
+            int realRemovals = 0;
+            for (int depth = 0; depth < DigDownPolicy.DEPTH; depth++) {
+                if (isStaleShelter(bot, gen)) {
+                    abandonStaleDigDown(bot, server, world, pre, realRemovals);
+                    return;
+                }
+                BlockPos cell = digPos.down(depth + 1).toImmutable();
+                MiningTool.mineBlock(bot, cell, false).join();
                 Thread.sleep(200);
+                boolean opened = Boolean.TRUE.equals(callOnServer(server,
+                        () -> !world.getBlockState(cell).blocksMovement(), DIG_DOWN_HOP_TIMEOUT_MS, Boolean.FALSE));
+                if (opened) {
+                    realRemovals++;
+                }
+                DigDownPolicy.Step step = DigDownPolicy.afterMine(depth, opened);
+                if (step == DigDownPolicy.Step.STOP_NOTHING_DUG) {
+                    LOGGER.info("Bot {} dig-down: first cell {} did not open — staying on the surface",
+                            name, cell.toShortString());
+                    return;
+                }
+                if (step == DigDownPolicy.Step.STOP_PARTIAL) {
+                    LOGGER.info("Bot {} dig-down: cell {} did not open — stopping at depth {}",
+                            name, cell.toShortString(), realRemovals);
+                    break;
+                }
             }
 
-            if (blocksMined == 0) {
-                LOGGER.info("Bot {} dig-down: nothing to mine at {}", bot.getName().getString(),
-                        digPos.toShortString());
+            // Fall into the hole and pick up the drops (the cap may need them).
+            Thread.sleep(1500);
+            if (isStaleShelter(bot, gen)) {
+                abandonStaleDigDown(bot, server, world, pre, realRemovals);
                 return;
             }
 
-            if (isStaleShelter(bot, gen)) return;
-
-            // Wait to fall into the hole and auto-collect mined block drops.
-            // Block drops appear at the mined block's position and take a moment to
-            // settle and be picked up. Longer wait = more reliable collection.
-            Thread.sleep(1500);
-
-            if (isStaleShelter(bot, gen)) return;
-
-            // Cap the hole at the original ground level (digPos).
-            // The bot has fallen into the hole, so digPos is now above.
-            // Try digPos first, then lower positions closer to the bot.
-            BlockPos[] capPlacedAt = {null};
-            MinecraftServer server = bot.getCommandSource().getServer();
-            final List<Item> seals = sealBlocksFor(bot);
-            server.execute(() -> {
-                // Try just above the bot's head first: that is the cell the shelter validator
-                // (hasOverheadCover, stand + 2) reads as cover. Capping higher left stand + 2 as
-                // the mined air gap, so the bunker never registered (no_overhead_cover).
-                // Then fall back toward the original ground level.
-                BlockPos feetNow = bot.getBlockPos();
-                BlockPos[] candidates = {
-                    feetNow.up(2),       // just above bot's head (validator's cover cell)
-                    digPos.down(),       // one below ground
-                    digPos               // original ground
-                };
-                for (BlockPos cap : candidates) {
-                    if (bot.getEntityWorld().getBlockState(cap).isAir()) {
-                        if (BotActions.tryPlaceBlockAt(bot, cap, Direction.UP, seals, false).success()) {
-                            capPlacedAt[0] = cap.toImmutable();
-                            LOGGER.info("Bot {} dig-down cap placed at {} (feet {}, covers={})",
-                                    bot.getName().getString(), cap.toShortString(), feetNow.toShortString(),
-                                    UndergroundLingerPolicy.bunkerCapCovers(feetNow.getY(), cap.getY()));
-                            break;
-                        }
-                    }
+            List<Item> seals = sealBlocksFor(bot);
+            DigDownCap cap = tryCapDigDown(bot, server, world, digPos, seals);
+            if (cap.capPos() == null) {
+                LOGGER.info("Bot {} dig-down cap failed (feet {}): {} — retrying once",
+                        name, cap.feet() != null ? cap.feet().toShortString() : "?", cap.reasons());
+                Thread.sleep(300);
+                if (isStaleShelter(bot, gen)) {
+                    abandonStaleDigDown(bot, server, world, pre, realRemovals);
+                    return;
                 }
-            });
-            Thread.sleep(300);
-
-            // Mark shelter active only if the bunker validates as survivable.
-            if (isStaleShelter(bot, gen)) return;
-            if (capPlacedAt[0] != null) {
-                ShelterAssessment assessment = assessShelterAt(
-                        bot,
-                        (ServerWorld) bot.getEntityWorld(),
-                        bot.getBlockPos(),
-                        ShelterType.DIG_DOWN,
-                        capPlacedAt[0],
-                        null);
-                if (assessment.valid()) {
-                    SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
-                            server.getTicks(),
-                            ShelterType.DIG_DOWN,
-                            capPlacedAt[0],
-                            null,
-                            assessment.standPos(),
-                            server.getTicks(),
-                            ShelterInvalidReason.VALID));
-                } else {
-                    LOGGER.info("Bot {} dig-down bunker rejected reason={}",
-                            bot.getName().getString(),
-                            assessment.reason().name().toLowerCase());
+                cap = tryCapDigDown(bot, server, world, digPos, seals);
+                if (cap.capPos() == null) {
+                    LOGGER.info("Bot {} dig-down cap failed again (feet {}): {}",
+                            name, cap.feet() != null ? cap.feet().toShortString() : "?", cap.reasons());
                 }
-            } else {
-                LOGGER.info("Bot {} dig-down bunker uncapped — not marking as shelter",
-                        bot.getName().getString());
             }
+            final BlockPos capPos = cap.capPos();
+            if (capPos != null) {
+                LOGGER.info("Bot {} dig-down cap placed at {} (feet {}, covers={})",
+                        name, capPos.toShortString(), cap.feet().toShortString(),
+                        UndergroundLingerPolicy.bunkerCapCovers(cap.feet().getY(), capPos.getY()));
+            }
+            Thread.sleep(300);
+            if (isStaleShelter(bot, gen)) {
+                if (capPos == null) {
+                    abandonStaleDigDown(bot, server, world, pre, realRemovals);
+                }
+                return;
+            }
+
+            DigDownPolicy.Outcome outcome = DigDownPolicy.afterCap(realRemovals, capPos != null);
+            if (outcome == DigDownPolicy.Outcome.CLIMB_OUT) {
+                LOGGER.info("Bot {} dig-down bunker uncapped after digging {} — climbing out", name, realRemovals);
+                climbOutOfDigDownPit(bot, server, world, digPos, realRemovals);
+                markNoDigDown(bot, pre.dimension(), digPos, pre.day());
+                return;
+            }
+            if (outcome != DigDownPolicy.Outcome.SHELTER) {
+                return;
+            }
+
+            // Mark shelter active only if the bunker validates as survivable (read on the server thread).
+            ShelterAssessment assessment = callOnServer(server,
+                    () -> assessShelterAt(bot, world, bot.getBlockPos(), ShelterType.DIG_DOWN, capPos, null),
+                    DIG_DOWN_HOP_TIMEOUT_MS, null);
+            if (assessment == null || !assessment.valid()) {
+                LOGGER.info("Bot {} dig-down bunker rejected reason={}", name,
+                        assessment != null ? assessment.reason().name().toLowerCase() : "assess-timeout");
+                return;
+            }
+            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                    server.getTicks(),
+                    ShelterType.DIG_DOWN,
+                    capPos,
+                    null,
+                    assessment.standPos(),
+                    server.getTicks(),
+                    ShelterInvalidReason.VALID));
 
             // Wait for bot to settle inside the bunker before placing torch
             Thread.sleep(500);
 
-            // Place a torch inside the bunker (at deepest mined level, not bot.getBlockPos())
-            final BlockPos torchTarget = digPos.down(3); // bottom of 3-deep hole
+            // Place a torch at the bottom of the dug column.
+            final BlockPos torchTarget = digPos.down(realRemovals);
             server.execute(() -> {
                 for (int i = 0; i < bot.getInventory().size(); i++) {
                     if (bot.getInventory().getStack(i).isOf(Items.TORCH)) {
@@ -1136,23 +1178,21 @@ public final class BotFleeService {
                         bot.getInventory().setSelectedSlot((i < 9) ? i : 0);
                         boolean placed = BotActions.placeBlockAt(bot, torchTarget);
                         LOGGER.info("Bot {} torch at {} (inside bunker): {}",
-                                bot.getName().getString(), torchTarget.toShortString(),
-                                placed ? "placed" : "failed");
+                                name, torchTarget.toShortString(), placed ? "placed" : "failed");
                         break;
                     }
                 }
             });
             Thread.sleep(200);
 
-            LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced={})",
-                    bot.getName().getString(), digPos.toShortString(), blocksMined, capPlacedAt[0] != null);
+            LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced=true)",
+                    name, digPos.toShortString(), realRemovals);
 
             // Eat inside the shelter while waiting to heal
             int shelterBites = HealingService.stabilizeEat(bot, 5);
             if (shelterBites > 0) {
                 LOGGER.info("Bot {} ate {} items inside shelter (hp={})",
-                        bot.getName().getString(), shelterBites,
-                        String.format("%.1f", bot.getHealth()));
+                        name, shelterBites, String.format("%.1f", bot.getHealth()));
             }
             // If still hurt and couldn't eat enough, wait for natural regen
             if (bot.getHealth() < bot.getMaxHealth() * 0.8f) {
@@ -1161,8 +1201,162 @@ public final class BotFleeService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            LOGGER.warn("Emergency dig-down failed for {}: {}", bot.getName().getString(), e.getMessage());
+            LOGGER.warn("Emergency dig-down failed for {}: {}", name, e.getMessage());
         }
+    }
+
+    /** Server thread only: one read of the column under the bot, its seal blocks and its marks. */
+    private static DigDownPreflight digDownPreflight(ServerPlayerEntity bot, ServerWorld world) {
+        BlockPos origin = bot.getBlockPos().toImmutable();
+        String dimension = world.getRegistryKey().getValue().toString();
+        long day = DigDownPolicy.gameDay(world.getTimeOfDay());
+        boolean marked = DigDownPolicy.isMarked(NO_DIG_DOWN_MARKS.get(bot.getUuid()),
+                dimension, origin.getX(), origin.getZ(), day);
+        List<DigDownPolicy.Cell> cells = new ArrayList<>(DigDownPolicy.DEPTH);
+        for (int depth = 1; depth <= DigDownPolicy.DEPTH; depth++) {
+            cells.add(classifyDigDownCell(bot, world, origin.down(depth)));
+        }
+        BlockState floor = world.getBlockState(origin.down(DigDownPolicy.DEPTH + 1));
+        boolean floorSolid = floor.blocksMovement() && floor.getFluidState().isEmpty();
+        int seals = 0;
+        var inventory = bot.getInventory();
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (!stack.isEmpty() && SEAL_IDS.contains(Registries.ITEM.getId(stack.getItem()).toString())) {
+                seals += stack.getCount();
+            }
+        }
+        String topId = Registries.BLOCK.getId(world.getBlockState(origin.down()).getBlock()).toString();
+        String reason = DigDownPolicy.preflight(marked, cells, floorSolid, seals, topId);
+        return new DigDownPreflight(origin, dimension, day, reason);
+    }
+
+    private static DigDownPolicy.Cell classifyDigDownCell(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (!state.getFluidState().isEmpty()) {
+            return DigDownPolicy.Cell.FLUID;
+        }
+        if (state.isAir() || state.getCollisionShape(world, pos).isEmpty()) {
+            return DigDownPolicy.Cell.AIR;
+        }
+        if (state.getHardness(world, pos) < 0.0F) {
+            return DigDownPolicy.Cell.UNBREAKABLE;
+        }
+        if (ProtectedStructureBlockHelper.isNeverBreakBlock(state)
+                || net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.isHarvestProtectedOre(state)
+                || MappedVillageService.isInsideMappedVillage(world, pos)
+                || !BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos).allowed()) {
+            return DigDownPolicy.Cell.PROTECTED;
+        }
+        return DigDownPolicy.Cell.DIGGABLE;
+    }
+
+    /**
+     * One server hop: place a seal block on the validator's cover cell (just above the head), and
+     * only when that cell is at or below the original ground: a cap above an air gap, or above a
+     * 1-deep hole with the head at ground level, is not a bunker.
+     */
+    private static DigDownCap tryCapDigDown(ServerPlayerEntity bot, MinecraftServer server, ServerWorld world,
+                                            BlockPos digPos, List<Item> seals) {
+        DigDownCap cap = callOnServer(server, () -> {
+            BlockPos feetNow = bot.getBlockPos().toImmutable();
+            BlockPos c = feetNow.up(2).toImmutable();
+            if (!DigDownPolicy.capAllowed(feetNow.getX(), feetNow.getY(), feetNow.getZ(),
+                    digPos.getX(), digPos.getY(), digPos.getZ())) {
+                return new DigDownCap(null, feetNow, c.toShortString() + "=not-in-pit");
+            }
+            if (!world.getBlockState(c).isAir()) {
+                return new DigDownCap(null, feetNow, c.toShortString() + "=occupied");
+            }
+            BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, c, Direction.UP, seals, false);
+            if (result != null && result.success()) {
+                return new DigDownCap(c, feetNow, "");
+            }
+            return new DigDownCap(null, feetNow, c.toShortString() + "=" + (result != null ? result.reason() : "null"));
+        }, DIG_DOWN_HOP_TIMEOUT_MS, null);
+        return cap != null ? cap : new DigDownCap(null, null, "timeout");
+    }
+
+    /**
+     * Leaves an uncapped pit. The linger tree suppresses every surface recovery entry point at night
+     * (SUPPRESS_NIGHT), and the pillar recovery tears its pillar down again, so this pillars up
+     * inside the 1x1 shaft with the mined blocks and leaves the pillar in place: the pit ends up
+     * filled. Falls back to the dedicated surface recovery (no linger gate) when the pillar falls short.
+     */
+    private static void climbOutOfDigDownPit(ServerPlayerEntity bot,
+                                             MinecraftServer server,
+                                             ServerWorld world,
+                                             BlockPos digPos,
+                                             int depth) throws InterruptedException {
+        String name = bot.getName().getString();
+        ensureScaffoldReachable(bot, depth);
+        Integer scaffold = callOnServer(server, () -> countScaffoldBlocks(bot), DIG_DOWN_HOP_TIMEOUT_MS, 0);
+        int scaffoldCount = scaffold != null ? scaffold : 0;
+        int steps = DigDownPolicy.climbSteps(depth, scaffoldCount);
+        int placed = 0;
+        String pillarReason = "no-scaffold";
+        if (steps > 0) {
+            ScaffoldService.PillarResult pillar = ScaffoldService.pillarUpDetailed(bot, steps);
+            placed = pillar.placed().size();
+            pillarReason = pillar.reason() == null || pillar.reason().isEmpty() ? "ok" : pillar.reason();
+        }
+        LOGGER.info("Bot {} dig-down climb-out: pillared {}/{} (scaffold={} reason={})",
+                name, placed, depth, scaffoldCount, pillarReason);
+        if (shouldAbortSurvival(bot)) {
+            return;
+        }
+        // Step onto the rim (from a full refill the bot already stands at ground level).
+        BlockPos rim = callOnServer(server, () -> {
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos side = digPos.offset(dir);
+                if (VoxelJunctionService.isStandable(world, side)) {
+                    return side.toImmutable();
+                }
+            }
+            return null;
+        }, DIG_DOWN_HOP_TIMEOUT_MS, null);
+        if (rim != null) {
+            MovementService.MovementPlan rimPlan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT, rim, rim, null, null, null);
+            MovementService.execute(bot.getCommandSource(), bot, rimPlan, Boolean.FALSE, true);
+            Thread.sleep(400L);
+        }
+        Integer feetY = callOnServer(server, () -> bot.getBlockY(), DIG_DOWN_HOP_TIMEOUT_MS, Integer.MIN_VALUE);
+        boolean out = feetY != null && DigDownPolicy.climbedOut(feetY, digPos.getY());
+        if (!out && !shouldAbortSurvival(bot)) {
+            LOGGER.info("Bot {} dig-down climb-out: still in the pit (feetY={}) — running surface recovery", name, feetY);
+            net.wcfcarolina13.GameAI.skills.SkillExecutionResult result = SurfaceRecoveryService.runSurfaceRecovery(bot, world);
+            feetY = callOnServer(server, () -> bot.getBlockY(), DIG_DOWN_HOP_TIMEOUT_MS, Integer.MIN_VALUE);
+            out = feetY != null && DigDownPolicy.climbedOut(feetY, digPos.getY());
+            LOGGER.info("Bot {} dig-down climb-out: surface recovery success={} message={}",
+                    name, result != null && result.success(), result != null ? result.message() : "null");
+        }
+        LOGGER.info("Bot {} dig-down climb-out: {} at {} (rim={})",
+                name, out ? "out" : "still in the pit",
+                bot.getBlockPos().toShortString(), rim != null ? rim.toShortString() : "none");
+    }
+
+    /**
+     * A generation bump (respawn, mode change, combat reset) mid-dig must not leave a live bot in an
+     * uncapped pit: climb out and mark the column, as the uncapped path does. Wall-off precedent:
+     * {@link #abandonStaleWallOff}.
+     */
+    private static void abandonStaleDigDown(ServerPlayerEntity bot, MinecraftServer server, ServerWorld world,
+                                            DigDownPreflight pre, int realRemovals) throws InterruptedException {
+        if (realRemovals <= 0 || !bot.isAlive() || bot.isRemoved()) {
+            return;
+        }
+        LOGGER.info("Bot {} dig-down: stale mid-dig after digging {} — climbing out", bot.getName().getString(), realRemovals);
+        climbOutOfDigDownPit(bot, server, world, pre.origin(), realRemovals);
+        markNoDigDown(bot, pre.dimension(), pre.origin(), pre.day());
+    }
+
+    /** No dig-down in this column (and {@link DigDownPolicy#MARK_RADIUS} around it) until the next dawn. */
+    private static void markNoDigDown(ServerPlayerEntity bot, String dimension, BlockPos digPos, long day) {
+        DigDownPolicy.Mark mark = new DigDownPolicy.Mark(dimension, digPos.getX(), digPos.getZ(), day);
+        NO_DIG_DOWN_MARKS.compute(bot.getUuid(), (id, marks) -> DigDownPolicy.withMark(marks, mark, day));
+        LOGGER.info("Bot {} dig-down: column {} marked no-dig-down (±{}) until dawn",
+                bot.getName().getString(), digPos.toShortString(), DigDownPolicy.MARK_RADIUS);
     }
 
     /** Check if the bot has at least N placeable blocks in inventory. */
