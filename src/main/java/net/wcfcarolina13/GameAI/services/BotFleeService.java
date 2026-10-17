@@ -1583,28 +1583,29 @@ public final class BotFleeService {
     }
 
     /**
-     * Leaves a dig-down pit. The linger tree suppresses every surface recovery entry point at night
+     * Leaves a dig-down pit and returns true when it ran the surface recovery itself (the pillar fell
+     * short), so a caller does not run a second one. The linger tree suppresses every surface recovery entry point at night
      * (SUPPRESS_NIGHT), and the pillar recovery tears its pillar down again, so this pillars up
      * inside the 1x1 shaft and leaves the pillar in place: the pit ends up filled. The pillar places
      * {@link ScaffoldService#SCAFFOLD_BLOCKS} only, so "pillar with the mined blocks" works for a dirt
      * or grass column, or a stone column mined with a pickaxe (cobblestone drops). Sand, gravel or
      * stone mined by hand gives no scaffold: then the dedicated surface recovery (no linger gate) runs.
      */
-    private static void climbOutOfDigDownPit(ServerPlayerEntity bot,
-                                             MinecraftServer server,
-                                             ServerWorld world,
-                                             BlockPos digPos) throws InterruptedException {
+    private static boolean climbOutOfDigDownPit(ServerPlayerEntity bot,
+                                                MinecraftServer server,
+                                                ServerWorld world,
+                                                BlockPos digPos) throws InterruptedException {
         String name = bot.getName().getString();
         Integer startY = callOnServer(server, () -> bot.getBlockY(), DIG_DOWN_HOP_TIMEOUT_MS, null);
         if (startY == null) {
             LOGGER.info("Bot {} dig-down climb-out: position read timed out — not climbing", name);
-            return;
+            return false;
         }
         int depth = DigDownPolicy.pitDepth(startY, digPos.getY());
         if (depth <= 0) {
             LOGGER.info("Bot {} dig-down climb-out: not in the pit (feetY={} ground={}) — nothing to climb",
                     name, startY, digPos.getY());
-            return;
+            return false;
         }
         // A /bot stop or forceAbort that came with the stale generation latches TaskService, and the
         // pillar aborts at step 0 on a latch. Clear it unless a running task owns it.
@@ -1618,7 +1619,7 @@ public final class BotFleeService {
         } else if (latch == DigDownPolicy.Latch.BLOCKED) {
             LOGGER.info("Bot {} dig-down climb-out: abort latch owned by a running task (reason={}) — left in the pit at {}",
                     name, TaskService.getCancelReason(bot.getUuid()).orElse(""), bot.getBlockPos().toShortString());
-            return;
+            return false;
         }
         ensureScaffoldReachable(bot, depth);
         Integer scaffold = callOnServer(server, () -> countScaffoldBlocks(bot), DIG_DOWN_HOP_TIMEOUT_MS, 0);
@@ -1634,7 +1635,7 @@ public final class BotFleeService {
         LOGGER.info("Bot {} dig-down climb-out: pillared {}/{} (scaffold={} reason={})",
                 name, placed, depth, scaffoldCount, pillarReason);
         if (shouldAbortSurvival(bot)) {
-            return;
+            return false;
         }
         // Step onto the rim (from a full refill the bot already stands at ground level).
         BlockPos rim = callOnServer(server, () -> {
@@ -1654,7 +1655,9 @@ public final class BotFleeService {
         }
         Integer feetY = callOnServer(server, () -> bot.getBlockY(), DIG_DOWN_HOP_TIMEOUT_MS, Integer.MIN_VALUE);
         boolean out = feetY != null && DigDownPolicy.climbedOut(feetY, digPos.getY());
+        boolean ranRecovery = false;
         if (!out && !shouldAbortSurvival(bot)) {
+            ranRecovery = true;
             LOGGER.info("Bot {} dig-down climb-out: still in the pit (feetY={}) — running surface recovery", name, feetY);
             net.wcfcarolina13.GameAI.skills.SkillExecutionResult result = SurfaceRecoveryService.runSurfaceRecovery(bot, world);
             feetY = callOnServer(server, () -> bot.getBlockY(), DIG_DOWN_HOP_TIMEOUT_MS, Integer.MIN_VALUE);
@@ -1665,6 +1668,7 @@ public final class BotFleeService {
         LOGGER.info("Bot {} dig-down climb-out: {} at {} (rim={})",
                 name, out ? "out" : "still in the pit",
                 bot.getBlockPos().toShortString(), rim != null ? rim.toShortString() : "none");
+        return ranRecovery;
     }
 
     /** Marks the column first (so a failed or aborted climb still blocks a second dig), then climbs out. */
@@ -2861,17 +2865,33 @@ public final class BotFleeService {
         long tod = world.getTimeOfDay() % 24000L;
         if (tod < 1000 || tod >= 12000) return false;
 
+        // Hold the shelter lock for the whole exit, like the command break-frees: isBreakingFree()
+        // keeps the idle tick and the underground survival check from starting a second surface
+        // recovery while the dig-down climb-out runs. Busy lock: the shelter stays, retry next tick.
+        AtomicBoolean lock = SHELTER_LOCK.computeIfAbsent(bot.getUuid(), k -> new AtomicBoolean(false));
+        if (!lock.compareAndSet(false, true)) {
+            return false;
+        }
         SHELTER_ACTIVE.remove(bot.getUuid());
         LOGGER.info("Bot {} breaking free from tactical shelter (daylight, tod={})",
                 bot.getName().getString(), tod);
 
         Thread t = new Thread(() -> {
-            breakFreeFromShelter(bot, info);
+            try {
+                breakFreeFromShelter(bot, info);
+            } finally {
+                lock.set(false);
+            }
             // After breaking free, try to resume the interrupted task (e.g., woodcut stopped at sunset).
             SkillResumeService.requestAutoResume(bot);
         }, "shelter-breakfree-" + bot.getName().getString());
         t.setDaemon(true);
-        t.start();
+        try {
+            t.start();
+        } catch (RuntimeException | Error startError) {
+            lock.set(false);
+            throw startError;
+        }
         return true;
     }
 
@@ -2966,10 +2986,11 @@ public final class BotFleeService {
             }
 
             // 2. Type-specific exit
+            boolean recoveryRan = false;
             if (info != null && info.type() == ShelterType.CLIFF && info.capPos() != null) {
                 breakFreeCliff(bot, world, info);
             } else if (info != null && (info.type() == ShelterType.DIG_DOWN || info.type() == ShelterType.JOIN_ENCLOSED) && info.capPos() != null) {
-                breakFreeDugDown(bot, world, info);
+                recoveryRan = breakFreeDugDown(bot, world, info);
             } else if (info != null && info.type() == ShelterType.VILLAGE_HOUSE && info.capPos() != null) {
                 breakFreeVillageHouse(bot, world, info);
             } else if (info != null && info.type() == ShelterType.WALL_OFF && info.capPos() != null) {
@@ -2981,8 +3002,11 @@ public final class BotFleeService {
                 return;
             }
 
-            // 3. Surface escape — if still underground after breaking seal, pillar up
-            escapeToSurface(bot, world);
+            // 3. Surface escape — if still underground after breaking seal, pillar up. Not again
+            // when the dig-down climb-out already ran its own surface recovery.
+            if (!recoveryRan) {
+                escapeToSurface(bot, world);
+            }
 
             // Record shelter exit so the underground linger system doesn't immediately
             // re-trigger surface recovery after a shelter breakfree. Noted after the escape: noted
@@ -3048,8 +3072,10 @@ public final class BotFleeService {
      * Break free from a dig-down shelter: mine the cap block, then pillar up. A dig-down that kept
      * its dig origin climbs out of the pit right away; a join-enclosed shelter or an older record
      * leaves the climb to {@link #escapeToSurface}.
+     *
+     * @return true when the climb-out already ran the surface recovery (no second one needed)
      */
-    private static void breakFreeDugDown(ServerPlayerEntity bot, ServerWorld world, ShelterInfo info)
+    private static boolean breakFreeDugDown(ServerPlayerEntity bot, ServerWorld world, ShelterInfo info)
             throws InterruptedException {
         BlockPos capPos = info.capPos();
         // Mine the cap block
@@ -3065,9 +3091,10 @@ public final class BotFleeService {
         if (climb == DigDownPolicy.BreakFreeClimb.CLIMB_OUT_PIT && server != null && !shouldAbortSurvival(bot)) {
             LOGGER.info("Bot {} dig-down dawn exit: climbing out to {}", bot.getName().getString(),
                     origin.toShortString());
-            climbOutOfDigDownPit(bot, server, world, origin);
+            return climbOutOfDigDownPit(bot, server, world, origin);
         }
-        // Otherwise (and if the climb fell short) escapeToSurface() pillars up.
+        // Otherwise (and if the pillar fell short without a recovery) escapeToSurface() pillars up.
+        return false;
     }
 
     /**
@@ -4263,6 +4290,8 @@ public final class BotFleeService {
         FLEE_STATES.remove(botId);
         SHELTER_ACTIVE.remove(botId);
         SHELTER_COOLDOWN.remove(botId);
+        LOGGED_SKIP_REASONS.remove(botId);
+        LOGGED_MARK_SKIPS.remove(botId);
         AtomicBoolean lock = SHELTER_LOCK.get(botId);
         if (lock != null) lock.set(false);
         incrementGeneration(botId);
