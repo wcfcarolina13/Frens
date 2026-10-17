@@ -20,6 +20,7 @@ import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.MovementService;
+import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -127,24 +128,36 @@ public final class LeashToFenceSkill implements Skill {
             }
         }
 
-        // Hold a lead when interacting (vanilla reliably transfers leads to the fence when a lead is in-hand).
-        // If we don't have one, fall back to an empty/non-placeable slot to avoid accidental block placement.
-        selectLeadOrSafeHand(bot);
-        boolean interacted = attachLeadsToFence(bot, world, fencePos);
+        // One server-thread hop: hold a lead (vanilla reliably transfers leads to the fence when a
+        // lead is in hand, else an empty or non-placeable slot so nothing gets placed), use the
+        // fence, count what moved. Vanilla attaches synchronously, so the count is final in-hop.
+        final BlockPos tieAt = fencePos;
+        TieOutcome outcome = SupplyServerHop.call(source.getServer(), () -> {
+            selectLeadOrSafeHand(bot);
+            boolean used = attachLeadsToFence(bot, world, tieAt);
+            int tied = 0;
+            int held = 0;
+            for (MobEntity animal : leashedAnimals) {
+                if (animal == null || !animal.isAlive()) {
+                    continue;
+                }
+                if (animal.isLeashed() && animal.getLeashHolder() == bot) {
+                    held++;
+                } else {
+                    tied++;
+                }
+            }
+            return new TieOutcome(used, tied, held);
+        }, TIE_HOP_MS, null);
         sleepQuiet(150);
-
-        int tiedNow = 0;
-        int stillHeld = 0;
-        for (MobEntity animal : leashedAnimals) {
-            if (animal == null || !animal.isAlive()) {
-                continue;
-            }
-            if (animal.isLeashed() && animal.getLeashHolder() == bot) {
-                stillHeld++;
-            } else {
-                tiedNow++;
-            }
+        if (outcome == null) {
+            LOGGER.warn("Leash skill: fence tie hop did not finish (fence={})", fencePos.toShortString());
+            ChatUtils.sendChatMessages(source, "I couldn't tie the leads just now. Try again.");
+            return SkillExecutionResult.failure("Fence tie did not run.");
         }
+        boolean interacted = outcome.interacted();
+        int tiedNow = outcome.tiedNow();
+        int stillHeld = outcome.stillHeld();
 
         if (tiedNow > 0) {
             ChatUtils.sendChatMessages(source, "Tied " + tiedNow + " animal(s) to fence at " + fencePos.toShortString() + ".");
@@ -155,6 +168,12 @@ public final class LeashToFenceSkill implements Skill {
 
         LOGGER.warn("Leash skill: fence interaction did not transfer any leads (stillHeld={} fence={} interacted={})", stillHeld, fencePos.toShortString(), interacted);
         return SkillExecutionResult.failure("Couldn't attach the leads to the fence. Make sure the animals are still leashed and the fence is reachable.");
+    }
+
+    private static final long TIE_HOP_MS = 1000L;
+
+    /** What the fence-tie hop did: the fence use was accepted, animals tied, animals still on the bot's lead. */
+    private record TieOutcome(boolean interacted, int tiedNow, int stillHeld) {
     }
 
     /**
@@ -248,8 +267,10 @@ public final class LeashToFenceSkill implements Skill {
             return null;
         }
 
-        // Switch to fence item
-        if (!BotActions.ensureHotbarItem(bot, fenceItem)) {
+        // Switch to fence item (inventory mutation: server thread)
+        final Item fence = fenceItem;
+        if (!SupplyServerHop.call(bot.getCommandSource().getServer(),
+                () -> BotActions.ensureHotbarItem(bot, fence), TIE_HOP_MS, false)) {
             return null;
         }
 
@@ -298,9 +319,8 @@ public final class LeashToFenceSkill implements Skill {
      * Attach the lead to a fence post.
      */
     private boolean attachLeadsToFence(ServerPlayerEntity bot, ServerWorld world, BlockPos fencePos) {
-        // Look at the fence
+        // Look at the fence (server thread, inside the tie hop: no sleep here)
         LookController.faceBlock(bot, fencePos);
-        sleepQuiet(50);
 
         // Use the fence to attach the lead
         Vec3d hitVec = Vec3d.ofCenter(fencePos);

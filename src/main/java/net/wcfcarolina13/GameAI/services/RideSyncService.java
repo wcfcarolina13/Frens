@@ -37,6 +37,7 @@ import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Frens;
 import org.slf4j.Logger;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
+import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -3578,8 +3579,31 @@ public final class RideSyncService {
             return SecureResult.NOT_APPLICABLE;
         }
         if (!ToolProvisionService.ensureLead(bot, bot.getCommandSource(), resolveCommander(world.getServer(), bot), 1)) {
-            maybeAnnounceLeashIssue(bot, pickRandom("I don't have a lead to secure this horse.", "I'm missing a lead for the horse."));
+            announceNoLeadToSecure(bot);
             return SecureResult.CANNOT_SECURE;
+        }
+        return secureWithLeadInInventory(bot, vehicle, true);
+    }
+
+    private static void announceNoLeadToSecure(ServerPlayerEntity bot) {
+        maybeAnnounceLeashIssue(bot, pickRandom("I don't have a lead to secure this horse.", "I'm missing a lead for the horse."));
+    }
+
+    /**
+     * The part of {@link #secureMountIfPossible} after the lead is in the inventory: lead in hand,
+     * leash the mob, tie it to a reachable fence (or one placed from the inventory, fetched or
+     * crafted first only when {@code provisionFence}), else hold the lead. With
+     * {@code provisionFence=false} it never walks or crafts, so it fits one short server-thread hop.
+     */
+    private static SecureResult secureWithLeadInInventory(ServerPlayerEntity bot, Entity vehicle, boolean provisionFence) {
+        if (bot == null || vehicle == null) {
+            return SecureResult.CANNOT_SECURE;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return SecureResult.CANNOT_SECURE;
+        }
+        if (!(vehicle instanceof MobEntity mob) || !mob.canBeLeashed()) {
+            return SecureResult.NOT_APPLICABLE;
         }
         if (!BotActions.ensureHotbarItem(bot, Items.LEAD)) {
             maybeAnnounceLeashIssue(bot, pickRandom("I can't grab a lead to secure this horse.", "I couldn't get the lead.", "My lead isn't accessible right now."));
@@ -3600,7 +3624,7 @@ public final class RideSyncService {
         // as "the bot tried to tie the horse but just kept the lead."
         BlockPos fencePos = findReachableFence(world, bot, mob);
         if (fencePos == null) {
-            fencePos = tryPlaceFenceNear(bot, vehicle.getBlockPos());
+            fencePos = tryPlaceFenceNear(bot, vehicle.getBlockPos(), provisionFence);
         }
         if (fencePos == null) {
             maybeAnnounceLeashIssue(bot, pickRandom("I don't have a fence to tie this horse to yet. I'll keep it on a lead.", "No fence nearby to tie it off.", "I'll hold the lead until I can tie it off."));
@@ -3696,6 +3720,11 @@ public final class RideSyncService {
      * RideSync tick doesn't immediately re-mount the bot on the same horse
      * just because the commander is still riding a horse of the same category.
      *
+     * <p>Threads: called from the skill worker. {@code ensureLead}/{@code ensureFence} (may walk and
+     * craft) run here, then one short read hop looks for a fence in reach, then ONE bounded server
+     * hop ({@link SupplyServerHop}, about 2 s) secures, dismounts, clears the ride maps and saves
+     * the record. If that hop does not finish the reply says to try again.
+     *
      * @return a user-facing sentence describing what happened, or null if the
      *         bot wasn't actually mounted on anything.
      */
@@ -3705,36 +3734,75 @@ public final class RideSyncService {
         }
         Entity vehicle = bot.getVehicle();
         String botName = bot.getName().getString();
-
-        SecureResult result = SecureResult.NOT_APPLICABLE;
-        if (vehicle instanceof MobEntity mob && mob.canBeLeashed()) {
-            result = secureMountIfPossible(bot, vehicle);
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null) {
+            return null;
         }
 
-        bot.stopRiding();
-
-        // Prevent RideSync's very next tick from re-mounting the bot just
-        // because the commander happens to be riding a same-category vehicle.
-        SYNC_COMMANDER.remove(bot.getUuid());
-        SYNC_VEHICLE.remove(bot.getUuid());
-        clearRideStuck(bot);
-
-        if (vehicle != null) {
-            MountPersistenceService.recordMount(bot, vehicle, false);
+        // Worker: the slow parts (ensureLead and ensureFence may walk to a chest and craft).
+        boolean leashable = vehicle instanceof MobEntity mob && mob.canBeLeashed();
+        boolean hasLead = leashable
+                && ToolProvisionService.ensureLead(bot, bot.getCommandSource(), resolveCommander(server, bot), 1);
+        boolean fenceInReach = false;
+        if (ForceDismountPlan.needsFenceLookup(leashable, hasLead)) {
+            fenceInReach = SupplyServerHop.call(server, () -> {
+                Entity current = bot.getVehicle();
+                return current instanceof MobEntity mob && bot.getEntityWorld() instanceof ServerWorld world
+                        && findReachableFence(world, bot, mob) != null;
+            }, FORCE_DISMOUNT_READ_HOP_MS, false);
+        }
+        if (ForceDismountPlan.needsFenceProvision(leashable, hasLead, fenceInReach)) {
+            ToolProvisionService.ensureFence(bot, bot.getCommandSource(), resolveCommander(server, bot), 1);
         }
 
-        LOGGER.info("forceDismountAndSecure: bot={} vehicle={} result={}",
-                botName,
-                vehicle != null ? vehicle.getType().toString() : "<null>",
-                result);
+        // Server thread: secure, dismount, clear the ride maps and save the record, in one hop.
+        final boolean leadReady = hasLead;
+        String message = SupplyServerHop.call(server, () -> {
+            Entity current = bot.getVehicle();
+            if (current == null) {
+                return ""; // dismounted meanwhile: nothing to do here
+            }
+            SecureResult result = SecureResult.NOT_APPLICABLE;
+            if (current instanceof MobEntity mob && mob.canBeLeashed()) {
+                if (leadReady) {
+                    result = secureWithLeadInInventory(bot, current, false);
+                } else {
+                    announceNoLeadToSecure(bot);
+                    result = SecureResult.CANNOT_SECURE;
+                }
+            }
 
-        return switch (result) {
-            case TETHERED_TO_FENCE -> botName + " dismounted and tied the horse to a fence.";
-            case HELD_BY_BOT       -> botName + " dismounted and is holding the lead on the horse.";
-            case NOT_APPLICABLE    -> botName + " dismounted.";
-            case CANNOT_SECURE     -> botName + " dismounted (no lead available to tether the horse).";
-        };
+            bot.stopRiding();
+
+            // Prevent RideSync's very next tick from re-mounting the bot just
+            // because the commander happens to be riding a same-category vehicle.
+            SYNC_COMMANDER.remove(bot.getUuid());
+            SYNC_VEHICLE.remove(bot.getUuid());
+            clearRideStuck(bot);
+
+            MountPersistenceService.recordMount(bot, current, false);
+
+            LOGGER.info("forceDismountAndSecure: bot={} vehicle={} result={}",
+                    botName, current.getType().toString(), result);
+
+            return switch (result) {
+                case TETHERED_TO_FENCE -> botName + " dismounted and tied the horse to a fence.";
+                case HELD_BY_BOT       -> botName + " dismounted and is holding the lead on the horse.";
+                case NOT_APPLICABLE    -> botName + " dismounted.";
+                case CANNOT_SECURE     -> botName + " dismounted (no lead available to tether the horse).";
+            };
+        }, FORCE_DISMOUNT_HOP_MS, null);
+
+        if (message == null) {
+            LOGGER.warn("forceDismountAndSecure: bot={} server hop did not finish, still mounted={}",
+                    botName, bot.hasVehicle());
+            return ForceDismountPlan.fallbackMessage(botName);
+        }
+        return message.isEmpty() ? null : message;
     }
+
+    private static final long FORCE_DISMOUNT_READ_HOP_MS = 500L;
+    private static final long FORCE_DISMOUNT_HOP_MS = 2000L;
 
     private static BlockPos findNearbyFence(ServerWorld world, BlockPos origin, int radius) {
         if (world == null || origin == null) {
@@ -3756,10 +3824,17 @@ public final class RideSyncService {
     }
 
     private static BlockPos tryPlaceFenceNear(ServerPlayerEntity bot, BlockPos origin) {
+        return tryPlaceFenceNear(bot, origin, true);
+    }
+
+    /** @param provisionFence fetch or craft a fence first (may walk and sleep: worker only) */
+    private static BlockPos tryPlaceFenceNear(ServerPlayerEntity bot, BlockPos origin, boolean provisionFence) {
         if (bot == null || origin == null) {
             return null;
         }
-        ToolProvisionService.ensureFence(bot, bot.getCommandSource(), resolveCommander(bot.getCommandSource().getServer(), bot), 1);
+        if (provisionFence) {
+            ToolProvisionService.ensureFence(bot, bot.getCommandSource(), resolveCommander(bot.getCommandSource().getServer(), bot), 1);
+        }
         for (Item fence : FENCE_ITEMS) {
             if (BotActions.ensureHotbarItem(bot, fence)) {
                 break;
