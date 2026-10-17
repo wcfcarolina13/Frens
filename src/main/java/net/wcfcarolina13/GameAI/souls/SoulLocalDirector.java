@@ -471,9 +471,9 @@ public final class SoulLocalDirector {
         long remainingS = Math.max(0L, (nextAt - now) / 1000L);
         ReplyWindow window = replyWindows.get(playerId);
         boolean windowOpen = window != null && !window.used() && now < window.expiresAtMs();
-        return "last verdict: " + verdict + "; last score: " + score + "; cooldown: "
+        return "last verdict: " + verdict + ", last score: " + score + ", cooldown: "
                 + (remainingS == 0 ? "elapsed" : remainingS + "s remaining")
-                + "; reply window: " + (windowOpen ? "open" : "closed");
+                + ", reply window: " + (windowOpen ? "open" : "closed");
     }
 
     private void recordVerdict(UUID playerId, String verdict) {

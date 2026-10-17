@@ -2340,7 +2340,7 @@ public class modCommandRegistry {
             if (existingBot != null) {
                 if (!(existingBot instanceof createFakePlayer)) {
                     ChatUtils.sendSystemMessage(serverSource,
-                            "Error: A real player named '" + botName + "' is online; cannot spawn a bot with that name.");
+                            "Error: A real player named '" + botName + "' is online. Cannot spawn a bot with that name.");
                     return SpawnOutcome.REFUSED;
                 }
                 // A bot with this alias is already active — reject the duplicate.
@@ -3596,7 +3596,7 @@ public class modCommandRegistry {
         }
 
         if (!failures.isEmpty()) {
-            String fail = "§cFollowCheck assert failed: " + String.join("; ", failures);
+            String fail = "§cFollowCheck assert failed: " + String.join(", ", failures);
             LOGGER.info("[FollowAssert] assert-fail bot={} expected={} mode={} target={} fixedGoal={} reasons={}",
                     bot.getName().getString(),
                     String.join("+", tokens),
@@ -3720,7 +3720,7 @@ public class modCommandRegistry {
         }
 
         if (!failures.isEmpty()) {
-            String fail = "§cChatCheck assert failed: " + String.join("; ", failures);
+            String fail = "§cChatCheck assert failed: " + String.join(", ", failures);
             LOGGER.info("[ChatAssert] assert-fail expected={} reasons={}", String.join("+", tokens), String.join("|", failures));
             ChatUtils.sendSystemMessage(context.getSource(), fail);
             return 0;
@@ -4926,11 +4926,11 @@ public class modCommandRegistry {
         // Immersive summon message based on which tool qualified
         String summonMsg;
         if (hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4)) {
-            summonMsg = "A flash of arcane energy — " + alias + " materializes beside you.";
+            summonMsg = "A flash of arcane energy. " + alias + " materializes beside you.";
         } else if (hasEyeOfEnderToken(commander) || hasEnderPearlToken(commander)) {
             summonMsg = "The ender energy warps space. " + alias + " appears in a shimmer of violet particles.";
         } else if (hasSpellbookToken(bot) || hasEyeOfEnderToken(bot) || hasEnderPearlToken(bot)) {
-            summonMsg = alias + "'s arcane focus flares — they vanish and reappear at your side.";
+            summonMsg = alias + "'s arcane focus flares. They vanish and reappear at your side.";
         } else {
             summonMsg = "Summoned " + alias + " to your location.";
         }
@@ -5740,7 +5740,7 @@ public class modCommandRegistry {
         executeTestGear(context.getSource().getServer(), bot, commander);
         ChatUtils.sendSystemMessage(context.getSource(),
                 "Gave durability test gear to " + bot.getName().getString()
-                        + " (preserved: diamond pick/sword/full armor at 2%, enchanted iron pick 5%; "
+                        + " (preserved: diamond pick/sword/full armor at 2%, enchanted iron pick 5%, "
                         + "alternatives: iron pick/sword/full armor at 80%).");
         return 1;
     }
@@ -5767,7 +5767,7 @@ public class modCommandRegistry {
         if (remembered != null) {
             ChatUtils.sendSystemMessage(context.getSource(), "Selected bot: " + remembered);
         } else {
-            ChatUtils.sendSystemMessage(context.getSource(), "Selected bot: (none) — target one by name or use 'all'.");
+            ChatUtils.sendSystemMessage(context.getSource(), "Selected bot: (none). Target one by name or use 'all'.");
         }
         return 1;
     }
@@ -6866,7 +6866,7 @@ public class modCommandRegistry {
             String summary = formatBotList(bots, isAll);
             if (isAll || bots.size() > 1) {
                 ChatUtils.sendSystemMessage(source,
-                        summary + " idle hobbies enabled for " + enabledCount + "/" + bots.size() + "; idling now for " + idled + "/" + bots.size() + ".");
+                        summary + " idle hobbies enabled for " + enabledCount + "/" + bots.size() + ", idling now for " + idled + "/" + bots.size() + ".");
             } else if (bots.size() == 1) {
                 boolean on = BotHomeService.isIdleHobbiesEnabled(bots.getFirst());
                 ChatUtils.sendSystemMessage(source,
@@ -6967,7 +6967,7 @@ public class modCommandRegistry {
                     if (bots.size() == 1) {
                         ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is busy.");
                     } else {
-                        ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is busy; skipping.");
+                        ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is busy, skipping.");
                     }
                     continue;
                 }
@@ -7532,7 +7532,7 @@ public class modCommandRegistry {
 
         MinecraftServer server = source.getServer();
         if (server == null) {
-            throw new SimpleCommandExceptionType(Text.literal("Server context unavailable; cannot resolve follow target.")).create();
+            throw new SimpleCommandExceptionType(Text.literal("Server context unavailable. Cannot resolve follow target.")).create();
         }
 
         ServerPlayerEntity direct = server.getPlayerManager().getPlayer(normalized);
@@ -7833,7 +7833,7 @@ public class modCommandRegistry {
                     + skillName + " bot=" + bot.getGameProfile().name()
                     + " err=" + e.getClass().getSimpleName());
             ChatUtils.sendSystemMessage(source,
-                    "§cSkill executor unavailable — please fully restart Minecraft. (Skill commands break after exit-to-title + reload in the same session.)");
+                    "§cSkill executor unavailable. Please fully restart Minecraft. (Skill commands break after exit-to-title + reload in the same session.)");
         }
 
         return 1;
@@ -8098,7 +8098,7 @@ public class modCommandRegistry {
             case ALREADY_BONDED -> ChatUtils.sendSystemMessage(context.getSource(),
                     "You're already allied with " + targetName + ".");
             case ALREADY_INVITED -> ChatUtils.sendSystemMessage(context.getSource(),
-                    "You've already invited " + targetName + "; awaiting their response.");
+                    "You've already invited " + targetName + ", awaiting their response.");
             case SELF -> ChatUtils.sendSystemMessage(context.getSource(), "You can't ally with yourself.");
             case INVALID -> ChatUtils.sendSystemMessage(context.getSource(), "Couldn't resolve the target player.");
         }

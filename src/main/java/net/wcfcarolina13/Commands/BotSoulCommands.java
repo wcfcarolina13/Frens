@@ -334,7 +334,7 @@ final class BotSoulCommands {
         maybeRuntime.get().reloadSettings(Frens.CONFIG).whenComplete((v, err) -> server.execute(() -> {
             if (err != null) {
                 LOGGER.warn("[souls] reloadSettings failed after config change: {}", err.toString());
-                ChatUtils.sendSystemMessage(source, successMessage + " Reload reported an error; check server log.");
+                ChatUtils.sendSystemMessage(source, successMessage + " Reload reported an error. Check the server log.");
             } else {
                 ChatUtils.sendSystemMessage(source, successMessage);
             }
@@ -426,7 +426,7 @@ final class BotSoulCommands {
         if (profile.isPresent()) {
             return profile.get();
         }
-        source.sendError(Text.literal("No bot or soul profile named '" + s + "'. Bots must be spawned; profiles: "
+        source.sendError(Text.literal("No bot or soul profile named '" + s + "'. Bots must be spawned. Profiles: "
                 + String.join(", ", net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.registeredIds())));
         return null;
     }
@@ -473,7 +473,7 @@ final class BotSoulCommands {
         if (SoulVoiceSettings.ENGINE_POCKET.equals(engine)) {
             StringBuilder catalogue = new StringBuilder("Pocket TTS voices (all available, no download needed):");
             for (VoiceCatalog.Entry entry : VoiceCatalog.forEngine(engine)) {
-                catalogue.append("\n  ").append(entry.name()).append(" — ").append(entry.description());
+                catalogue.append("\n  ").append(entry.name()).append(": ").append(entry.description());
             }
             ChatUtils.sendSystemMessage(source, catalogue.toString());
         } else if (SoulVoiceSettings.ENGINE_DREAMSLEEVE.equals(engine)) {
@@ -486,7 +486,7 @@ final class BotSoulCommands {
                     + (installed.isEmpty() ? "none" : String.join(", ", installed)));
             StringBuilder catalogue = new StringBuilder("Catalogue (/bot soul voice install <name>):");
             for (VoiceCatalog.Entry entry : VoiceCatalog.forEngine(SoulVoiceSettings.ENGINE_PIPER)) {
-                catalogue.append("\n  ").append(entry.name()).append(" — ").append(entry.description())
+                catalogue.append("\n  ").append(entry.name()).append(": ").append(entry.description())
                         .append(installed.contains(entry.name()) ? " [installed]" : "");
             }
             ChatUtils.sendSystemMessage(source, catalogue.toString());
@@ -519,7 +519,7 @@ final class BotSoulCommands {
         }
         String engine = Frens.CONFIG.getSoulVoiceEngine();
         if (!VoiceCatalog.needsDownload(engine)) {
-            ChatUtils.sendSystemMessage(source, "No download needed — " + engine
+            ChatUtils.sendSystemMessage(source, "No download needed. " + engine
                     + " voices are ready. /bot soul voice assign <bot> <name>.");
             return 1;
         }
@@ -641,7 +641,7 @@ final class BotSoulCommands {
                 refAudio, refText));
         cfg.save();
         ChatUtils.sendSystemMessage(source, profileId + " → clone " + Path.of(refAudio).getFileName()
-                + (refText.isEmpty() ? " (no transcript — cloning quality is better with one)" : "")
+                + (refText.isEmpty() ? " (no transcript, cloning quality is better with one)" : "")
                 + ". Takes effect on the next spoken line.");
         return 1;
     }
@@ -669,7 +669,7 @@ final class BotSoulCommands {
         ServerPlayerEntity bot = explicitBot != null ? explicitBot : resolveDefaultBot(server, runtime, actor);
         if (bot == null) {
             ChatUtils.sendSystemMessage(source,
-                    "No soul-bound bot found for you; specify one: /bot soul status <bot>.");
+                    "No soul-bound bot found for you. Specify one: /bot soul status <bot>.");
             return 0;
         }
         if (!CompanionCommunicationPolicy.isPrivateSoulAuthorized(actor, bot)) {
@@ -861,7 +861,7 @@ final class BotSoulCommands {
                 ChatUtils.sendSystemMessage(source, "Failed to reset your conversation with " + botName + ".");
             } else {
                 ChatUtils.sendSystemMessage(source,
-                        "Archived your conversation with " + botName + "; new epoch " + newEpoch + ".");
+                        "Archived your conversation with " + botName + ", new epoch " + newEpoch + ".");
             }
         }));
         return 1;
@@ -1009,7 +1009,7 @@ final class BotSoulCommands {
         boolean enabled = config != null && config.isSoulStructuredOutputEnabled();
         ChatUtils.sendSystemMessage(source, "Structured output is " + (enabled ? "ON" : "OFF")
                 + ". Lets a scene end with an optional ##FRENS JSON line carrying peer stance"
-                + " nudges and inferred relation facts; the line is never spoken.");
+                + " nudges and inferred relation facts. The line is never spoken.");
         if (config != null && !config.isSoulRelationsEnabled()) {
             ChatUtils.sendSystemMessage(source,
                     "Note: facts are parsed but not stored until /bot soul relations on.");
@@ -1115,11 +1115,11 @@ final class BotSoulCommands {
         }
         if (banter) {
             runtime.get().primeBanter(actor.getUuid());
-            ChatUtils.sendSystemMessage(source, "Banter cooldown cleared — if things are calm"
+            ChatUtils.sendSystemMessage(source, "Banter cooldown cleared. If things are calm"
                     + " and quiet, expect a scene within ~10 seconds.");
         } else {
             runtime.get().primeLocal(actor.getUuid());
-            ChatUtils.sendSystemMessage(source, "Local-chat cooldown cleared — your next"
+            ChatUtils.sendSystemMessage(source, "Local-chat cooldown cleared. Your next"
                     + " substantive unaddressed line may draw a reaction.");
         }
         return 1;
@@ -1133,7 +1133,7 @@ final class BotSoulCommands {
     private static String replyRoutingNote() {
         ManualConfig config = Frens.CONFIG;
         if (config != null && !config.isSoulLocalChatEnabled()) {
-            return " Note: Local chat is OFF, so you can't answer companion remarks —"
+            return " Note: Local chat is OFF, so you can't answer companion remarks."
                     + " /bot soul local on enables replies.";
         }
         return "";
@@ -1241,7 +1241,7 @@ final class BotSoulCommands {
                 ChatUtils.sendSystemMessage(source, "Failed to reset your group conversation.");
             } else {
                 ChatUtils.sendSystemMessage(source,
-                        "Archived your group conversation; new epoch " + newEpoch + ".");
+                        "Archived your group conversation, new epoch " + newEpoch + ".");
             }
         }));
         return 1;

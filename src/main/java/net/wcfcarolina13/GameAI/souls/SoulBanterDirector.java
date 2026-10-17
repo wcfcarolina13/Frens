@@ -469,8 +469,8 @@ public final class SoulBanterDirector {
     /** For {@code /bot soul banter status}: last verdict + time to next eligibility. */
     public String statusFor(UUID playerId) {
         long now = clock.getAsLong();
-        return "idle — " + laneStatus(playerId, now, lastVerdict, nextEligibleAtMs)
-                + "; active — " + laneStatus(playerId, now, lastActiveVerdict, nextActiveAtMs);
+        return "Idle: " + laneStatus(playerId, now, lastVerdict, nextEligibleAtMs)
+                + ". Active: " + laneStatus(playerId, now, lastActiveVerdict, nextActiveAtMs);
     }
 
     private static String laneStatus(UUID playerId, long now, Map<UUID, String> verdicts,
@@ -478,7 +478,7 @@ public final class SoulBanterDirector {
         long nextAt = cooldowns.getOrDefault(playerId, 0L);
         String verdict = verdicts.getOrDefault(playerId, "no evaluation yet");
         long remainingS = Math.max(0L, (nextAt - now) / 1000L);
-        return "last verdict: " + verdict + "; cooldown: "
+        return "last verdict: " + verdict + ", cooldown: "
                 + (remainingS == 0 ? "elapsed" : remainingS + "s remaining");
     }
 
