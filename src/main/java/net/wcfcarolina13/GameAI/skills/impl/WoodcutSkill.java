@@ -48,6 +48,7 @@ import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.FallingBlockStabilizer;
+import net.wcfcarolina13.GameAI.skills.support.MiningWaitOutcome;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
@@ -1130,7 +1131,10 @@ public final class WoodcutSkill implements Skill {
                     }
                     totalFailures++;
                     consecutiveFailures++;
-                    pathFailures++;
+                    // A stop or pause mid-approach cancels the mine: not a path failure.
+                    if (!isAbortRequested(bot)) {
+                        pathFailures++;
+                    }
                     failedBases.add(target.base().toImmutable());
                     failedBaseReasons.put(target.base().toImmutable(), "approach-failed");
                     trunkMineStarts += reachSession.trunkMineAttemptsStarted;
@@ -1199,7 +1203,11 @@ public final class WoodcutSkill implements Skill {
                     if (harvest.failureReason() == WoodcutFailureReason.PROTECTED_AT_MINING) {
                         miningProtectedFailures++;
                     } else if (harvest.failureReason() == WoodcutFailureReason.PATH_OR_REACH_FAILURE) {
-                        pathFailures++;
+                        // A stop mid-tree reports cluster-logs-remained once a log is cut, so the
+                        // abort check covers what the detail alone misses.
+                        if (!MiningWaitOutcome.isCancelledDetail(harvest.detail()) && !isAbortRequested(bot)) {
+                            pathFailures++;
+                        }
                         // Recover to surface before trying the next tree — bot likely fell
                         // into a hole during the failed harvest attempt.
                         if (bot.getEntityWorld() instanceof ServerWorld recoveryWorld) {
@@ -5119,7 +5127,12 @@ public final class WoodcutSkill implements Skill {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            LOGGER.warn("Adaptive mining failed at {}: {}", pos.toShortString(), e.getMessage());
+            if (MiningWaitOutcome.isCancellation(e)) {
+                LOGGER.info("Woodcut: adaptive mining {} cancelled ({})", pos.toShortString(),
+                        TaskService.getCancelReason(bot.getUuid()).orElse("interrupted"));
+                return false;
+            }
+            LOGGER.warn("Adaptive mining failed at {}: {}", pos.toShortString(), e.toString());
             return false;
         }
     }
@@ -5255,11 +5268,17 @@ public final class WoodcutSkill implements Skill {
             miningFuture.cancel(true);
             return new MineAttemptResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE, "timeout");
         } catch (Exception e) {
-            LOGGER.error("Failed to mine {}: {}", pos.toShortString(), e.getMessage());
             miningFuture.cancel(true);
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
+            if (MiningWaitOutcome.isCancellation(e)) {
+                LOGGER.info("Woodcut: mining {} cancelled ({})", pos.toShortString(),
+                        TaskService.getCancelReason(bot.getUuid()).orElse("interrupted"));
+                return new MineAttemptResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE,
+                        MiningWaitOutcome.CANCELLED_DETAIL);
+            }
+            LOGGER.error("Failed to mine {}: {}", pos.toShortString(), e.toString(), e);
             return new MineAttemptResult(false, WoodcutFailureReason.PATH_OR_REACH_FAILURE, "exception");
         }
     }
