@@ -1382,6 +1382,7 @@ public final class BotGuideScreen extends Screen {
                                 "Sleep -> (hold \\ then 5) -> bot sleep <bot>",
                                 "Stop -> \\ -> bot stop <bot>",
                                 "Leash / tether helper -> ' -> leash action when available",
+                                "Let go of leads -> Release Leads in the bot menu -> bot leash release <bot>",
                                 "Resume -> (bind key.frens.resume) -> bot resume <bot>",
                                 "Open Spells -> (bind key.frens.open_spells) -> opens spells menu when unlocked",
                                 "Recruit Contact -> (optional bind key.frens.recruit_contact) -> opens recruitment contact flow",

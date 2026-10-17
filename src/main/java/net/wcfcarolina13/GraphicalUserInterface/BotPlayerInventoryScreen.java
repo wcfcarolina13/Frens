@@ -526,6 +526,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         BARITONE_PATHFINDER,
         UNLEASH_TETHERED,
         LEASH_ON_DISMOUNT,
+        LEASH_RELEASE,
         DROP_SWEEP,
         BASES,
         CRAFTING,
@@ -646,6 +647,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Attack Named Mobs", TopicAction.ATTACK_NAMED_MOBS, true, 1),
             TopicEntry.skill("Unleash Tethered", TopicAction.UNLEASH_TETHERED, true, 0),
             TopicEntry.skill("Leash on Dismount", TopicAction.LEASH_ON_DISMOUNT, true, 0),
+            TopicEntry.skill("Release Leads", TopicAction.LEASH_RELEASE, false, 1),
 
             TopicEntry.skillHeader("Utilities"),
             TopicEntry.skill("Cleanup", TopicAction.DROP_SWEEP, false, 0),
@@ -3820,6 +3822,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_HUNT_STARVING -> "⚔";
             case UNLEASH_TETHERED -> "✂";
             case LEASH_ON_DISMOUNT -> "⌁";
+            case LEASH_RELEASE -> "↺";
             case DROP_SWEEP -> "🧹";
             case BASES -> "⌂";
             case OPEN_SPELLS -> "✦";
@@ -4381,6 +4384,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case LEASH_ON_DISMOUNT -> java.util.List.of(
                 "Leash on Dismount",
                 "Reattaches a lead after getting off a mount so the bot stays tethered."
+            );
+            case LEASH_RELEASE -> java.util.List.of(
+                "Release Leads",
+                "The bot lets go of every animal it holds on a lead, no fence needed.",
+                "The leads go back into its inventory. Same as /bot leash release."
             );
             case DROP_SWEEP -> java.util.List.of(
                 "Cleanup",
@@ -5139,6 +5147,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case BARITONE_PATHFINDER -> toggleBaritonePathfinder();
             case UNLEASH_TETHERED -> toggleUnleashTethered();
             case LEASH_ON_DISMOUNT -> toggleLeashOnDismount();
+            case LEASH_RELEASE -> runLeashReleaseCommand();
             case DROP_SWEEP -> runSkillCommand("drop_sweep", null);
             case BASES -> openBasesManager();
             case CRAFTING -> openCraftingHistory();
@@ -5780,6 +5789,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String arg = fishTargetCount > 0 ? Integer.toString(fishTargetCount) : null;
         runSkillCommand("fish", arg, BotActionPolicy.Action.SKILL_FISH,
                 arg != null ? List.of(arg) : List.of());
+    }
+
+    private void runLeashReleaseCommand() {
+        BotActionClientSender.send(BotActionPolicy.Action.LEASH, botAlias, List.of("release"),
+                "bot leash release " + formatBotTarget());
+        this.close();
     }
 
     private void runFishForgetCommand() {

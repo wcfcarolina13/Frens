@@ -109,7 +109,7 @@ public final class LeashToFenceSkill implements Skill {
             fencePos = tryPlaceFence(bot, world, bot.getBlockPos());
         }
         if (fencePos == null) {
-            ChatUtils.sendChatMessages(source, "I can't find a fence within reach, and I can't place one nearby.");
+            ChatUtils.sendChatMessages(source, "I can't find a fence within reach, and I can't place one nearby. Use /bot leash release to let go of the leads.");
             return SkillExecutionResult.failure("No reachable fence found or placeable.");
         }
         if (!isWithinReach(bot, fencePos)) {
