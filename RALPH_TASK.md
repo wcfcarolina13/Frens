@@ -3,7 +3,14 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-16 (1.1.252) — next session starts here
+## Session Handoff 2026-10-16 (1.1.253) — next session starts here
+
+**State:** main = origin/main @ 1.1.253. Suite 2561 green. Backlog spec items 6-8 shipped (seal order, shelter persistence,
+dig-down never leaves a pit), sandbox-tested with `tools/sandbox/sheltertest.py`. Field items: Phase 6au.
+**Next:** 1.1.254 config cleanups (items 9-10, reviewed merge-ready), 1.1.255 death retrieval (item 11, built, in review).
+Everything in the 1.1.252 block below still applies.
+
+## Session Handoff 2026-10-16 (1.1.252) — superseded
 
 **State:** main = origin/main @ 1.1.252. Suite 2518 green. Working through `docs/testing/BACKLOG_SPEC_2026-10-16.md` (the
 contract, with Bradley's 2026-10-16 decisions). 1.1.252 = items 1-5 (leash release, leash threading and records, base
