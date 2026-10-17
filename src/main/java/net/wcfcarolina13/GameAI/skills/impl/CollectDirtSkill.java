@@ -345,7 +345,7 @@ public class CollectDirtSkill implements Skill {
                     net.wcfcarolina13.GameAI.services.SkillResumeService.flagManualResume(loopPlayer);
                     net.wcfcarolina13.ChatUtils.ChatUtils.sendChatMessages(
                             loopPlayer.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                            "I'm starving and out of food. Paused — feed me, then /bot resume.");
+                            "I'm starving and out of food. Paused. Feed me, then /bot resume.");
                     outcome = SkillExecutionResult.failure(skillName + " paused: starving with no food.");
                     break;
                 }
@@ -436,7 +436,7 @@ public class CollectDirtSkill implements Skill {
                 }
 
                 if (collected < targetCount && shouldForcePauseForFullInventory(loopPlayer, source)) {
-                    outcome = SkillExecutionResult.failure("Inventory full — collected " + collected + " out of " + targetCount + ". Clear space and run /bot resume " + loopPlayer.getName().getString() + ".");
+                    outcome = SkillExecutionResult.failure("Inventory full. Collected " + collected + " out of " + targetCount + ". Clear space and run /bot resume " + loopPlayer.getName().getString() + ".");
                     break;
                 }
 
@@ -1016,7 +1016,7 @@ public class CollectDirtSkill implements Skill {
         LAST_ESCAPE_ATTEMPT.put(player.getUuid(), System.currentTimeMillis());
 
         ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                "I'm stuck down here — attempting a ladder or stair escape...");
+                "I'm stuck down here, attempting a ladder or stair escape...");
 
         boolean ladderAttempted = ensureLadders(source, player, 6);
         if (ladderAttempted) {
@@ -2016,7 +2016,7 @@ public class CollectDirtSkill implements Skill {
         SkillResumeService.flagManualResume(player);
         String alias = player.getName().getString();
         ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                "Water flooded the dig site — pausing. Use /bot resume " + alias + " when it's clear.");
+                "Water flooded the dig site, pausing. Use /bot resume " + alias + " when it's clear.");
         BotActions.moveBackward(player);
         if (player.isOnGround()) {
             BotActions.jump(player);
@@ -2073,7 +2073,7 @@ public class CollectDirtSkill implements Skill {
             if (shouldSendMessage) {
                 SkillResumeService.flagManualResume(player);
                 ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                        "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
+                        "Inventory full, pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
                 BotActions.stop(player);
                 LAST_INVENTORY_FULL_MESSAGE.put(player.getUuid(), now);
             }
@@ -2098,7 +2098,7 @@ public class CollectDirtSkill implements Skill {
         }
         SkillResumeService.flagManualResume(player);
         ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
+                "Inventory full, pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
         BotActions.stop(player);
         return true;
     }

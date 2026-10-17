@@ -183,7 +183,7 @@ public final class HangoutSkill implements Skill {
             if (stopAtSunset && bot.getEntityWorld() instanceof ServerWorld world) {
                 int tod = (int) (world.getTimeOfDay() % 24_000L);
                 if (tod >= SUNSET_TIME_OF_DAY && tod < 23_000) {
-                    ChatUtils.sendSystemMessage(source, "It's getting late; heading home.");
+                    ChatUtils.sendSystemMessage(source, "It's getting late, heading home.");
                     break;
                 }
             }

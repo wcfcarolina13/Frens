@@ -396,12 +396,12 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("I'm suffocating!", BotDialogueSounds.LINE_WARNING_SUFFOCATING);
         EXACT_MAP.put("There's a drop ahead.", BotDialogueSounds.LINE_WARNING_DROP_AHEAD);
         EXACT_MAP.put("That's a big drop.", BotDialogueSounds.LINE_WARNING_DROP_AHEAD);
-        EXACT_MAP.put("I'm stuck down here - attempting a ladder or stair escape...", BotDialogueSounds.LINE_WARNING_STUCK);
+        EXACT_MAP.put("I'm stuck down here, attempting a ladder or stair escape...", BotDialogueSounds.LINE_WARNING_STUCK);
         // Additional warning variations
         EXACT_MAP.put("I'm stuck!", BotDialogueSounds.LINE_WARNING_STUCK);
 
         // ============ OTHER STATUS ============
-        EXACT_MAP.put("It's getting late; heading home.", BotDialogueSounds.LINE_STATUS_LATE_HEADING_HOME);
+        EXACT_MAP.put("It's getting late, heading home.", BotDialogueSounds.LINE_STATUS_LATE_HEADING_HOME);
         EXACT_MAP.put("It's getting late-heading home.", BotDialogueSounds.LINE_STATUS_LATE_HEADING_HOME);
         // Return/base arrival messages - reuse mode_return sounds
         EXACT_MAP.put("Arrived at base.", BotDialogueSounds.LINE_MODE_RETURN_RETURNING);

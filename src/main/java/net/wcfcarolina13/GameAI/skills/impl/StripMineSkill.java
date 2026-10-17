@@ -98,7 +98,7 @@ public final class StripMineSkill implements Skill {
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                        "I'm starving and out of food. Stripmine paused — feed me, then /bot resume.");
+                        "I'm starving and out of food. Stripmine paused. Feed me, then /bot resume.");
                 return SkillExecutionResult.failure("Stripmine paused: starving with no food.");
             }
 

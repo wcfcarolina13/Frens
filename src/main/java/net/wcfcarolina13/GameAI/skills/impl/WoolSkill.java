@@ -103,7 +103,7 @@ public class WoolSkill implements Skill {
         long startedAt = System.currentTimeMillis();
         int timeOfDay = (int) (world.getTimeOfDay() % 24000L);
         if (timeOfDay >= SUNSET_TIME_OF_DAY) {
-            ChatUtils.sendSystemMessage(source, "It's getting late; I'll collect wool tomorrow.");
+            ChatUtils.sendSystemMessage(source, "It's getting late. I'll collect wool tomorrow.");
             return SkillExecutionResult.failure("Too late to start wool run.");
         }
 
@@ -130,7 +130,7 @@ public class WoolSkill implements Skill {
             }
             int now = (int) (world.getTimeOfDay() % 24000L);
             if (now >= SUNSET_TIME_OF_DAY) {
-                ChatUtils.sendSystemMessage(source, "It's getting late; I'm heading back.");
+                ChatUtils.sendSystemMessage(source, "It's getting late, I'm heading back.");
                 returnFromWool(bot, source, startPos, followTargetUuid);
                 break;
             }
@@ -216,7 +216,7 @@ public class WoolSkill implements Skill {
 
             int collected = countWoolItems(bot.getInventory()) - woolAtStart;
             if (collected >= minWoolToCollect) {
-                ChatUtils.sendSystemMessage(source, "Collected at least " + minWoolToCollect + " wool; heading back.");
+                ChatUtils.sendSystemMessage(source, "Collected at least " + minWoolToCollect + " wool, heading back.");
                 DropSweeper.sweep(source, 14.0, 6.0, 12, 7000L);
                 returnFromWool(bot, source, startPos, followTargetUuid);
                 return SkillExecutionResult.success("Collected " + collected + " wool and sheared " + sheared + " sheep.");
@@ -514,7 +514,7 @@ public class WoolSkill implements Skill {
         }
 
         if (candidates.isEmpty()) {
-            ChatUtils.sendSystemMessage(source, "All nearby areas explored recently; sheep may need time to regrow wool.");
+            ChatUtils.sendSystemMessage(source, "All nearby areas explored recently. Sheep may need time to regrow wool.");
             return false;
         }
 
@@ -591,7 +591,7 @@ public class WoolSkill implements Skill {
         }
         BlockPos chestPos = findNearbyChest(world, bot.getBlockPos(), CHEST_SEARCH_RADIUS);
         if (chestPos == null) {
-            ChatUtils.sendSystemMessage(source, "Inventory is tight and no chest nearby; proceeding anyway.");
+            ChatUtils.sendSystemMessage(source, "Inventory is tight and no chest nearby, proceeding anyway.");
             return;
         }
         boolean reached = moveNextTo(bot, source, chestPos);
@@ -608,7 +608,7 @@ public class WoolSkill implements Skill {
         if (moved == null) {
             return;
         }
-        ChatUtils.sendSystemMessage(source, moved > 0 ? "Stored " + moved + " items to free space." : "Chest is full; continuing.");
+        ChatUtils.sendSystemMessage(source, moved > 0 ? "Stored " + moved + " items to free space." : "Chest is full, continuing.");
     }
 
     private static <T> T callOnServer(ServerWorld world, java.util.function.Supplier<T> task) {
