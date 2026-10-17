@@ -59,11 +59,8 @@ public final class BotIdentityService {
         if (config != null && config.getBotSpawnPointsByWorld() != null) {
             spawnKeySet.addAll(config.getBotSpawnPointsByWorld().keySet());
         }
-        Map<String, ManualConfig.BotControlSettings> controlMap = config != null && config.getBotControls() != null
-                ? config.getBotControls()
-                : Collections.emptyMap();
-        // Also include aliases from per-world control data
-        Set<String> controlKeySet = new java.util.LinkedHashSet<>(controlMap.keySet());
+        // Bot controls live only in the per-world map (the global map is migrated away on load).
+        Set<String> controlKeySet = new java.util.LinkedHashSet<>();
         if (config != null && config.getBotControlsByWorld() != null) {
             controlKeySet.addAll(config.getBotControlsByWorld().keySet());
         }

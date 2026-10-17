@@ -87,7 +87,9 @@ public class ManualConfig {
     // profile JSON's own "voice" block; absent/blank = the global soul voice settings.
     private Map<String, SoulVoiceAssignment> soulProfileVoices = new HashMap<>();
     private Map<String, BotSkinSelection> botSkinSelections = new HashMap<>();
-    private Map<String, BotControlSettings> botControls = new HashMap<>();
+    // Old global bot controls (alias → settings). Read only by migrateLegacyToPerWorld, then set
+    // to null so the key leaves settings.json5 (Gson skips nulls).
+    private Map<String, BotControlSettings> botControls = null;
     // Per-world bot control settings: alias → worldKey → BotControlSettings.
     private Map<String, Map<String, BotControlSettings>> botControlsByWorld = new HashMap<>();
     // Seed-agnostic, bot-persistent quest continuity (non-power progression).
@@ -243,9 +245,6 @@ public class ManualConfig {
             Gson gson = new Gson();
             Type type = new TypeToken<ManualConfig>(){}.getType();
             ManualConfig loadedConfig = gson.fromJson(reader, type);
-            if (loadedConfig.botControls == null) {
-                loadedConfig.botControls = new HashMap<>();
-            }
             if (loadedConfig.botQuestMemory == null) {
                 loadedConfig.botQuestMemory = new HashMap<>();
             }
@@ -544,19 +543,16 @@ public class ManualConfig {
                     .computeIfAbsent(key, ignored -> new HashMap<>());
             BotControlSettings settings = worldMap.get(worldKey);
             if (settings != null) return settings;
-            // Migrate legacy entry.
-            BotControlSettings legacy = worldMap.remove("_legacy");
-            if (legacy != null) {
-                worldMap.put(worldKey, legacy);
-                return legacy;
-            }
+            // First world to ask takes a migrated global entry.
+            BotControlSettings legacy = LegacyBotControlMigrationPolicy.claimLegacy(worldMap, worldKey);
+            if (legacy != null) return legacy;
             // Create new entry for this world.
             BotControlSettings created = new BotControlSettings();
             worldMap.put(worldKey, created);
             return created;
         }
-        // No worldKey — fall back to old global accessor.
-        return getOrCreateBotControl(alias);
+        // No world key: defaults that are never stored, so an edit without a world is not kept.
+        return new BotControlSettings();
     }
 
     /**
@@ -568,12 +564,8 @@ public class ManualConfig {
             if (worldMap != null) {
                 BotControlSettings specific = worldMap.get(worldKey);
                 if (specific != null) return specific;
-                // Check legacy
-                BotControlSettings legacy = worldMap.remove("_legacy");
-                if (legacy != null) {
-                    worldMap.put(worldKey, legacy);
-                    return legacy;
-                }
+                BotControlSettings legacy = LegacyBotControlMigrationPolicy.claimLegacy(worldMap, worldKey);
+                if (legacy != null) return legacy;
             }
         }
         // Fall back to "default" alias
@@ -584,8 +576,8 @@ public class ManualConfig {
                 if (d != null) return d;
             }
         }
-        // Final fallback: old global lookup.
-        return getEffectiveBotControl(alias);
+        // No settings for this bot in this world. Every caller treats null as "use defaults".
+        return null;
     }
 
     /**
@@ -599,7 +591,6 @@ public class ManualConfig {
         if (botControlsByWorld != null) aliases.addAll(botControlsByWorld.keySet());
         // From legacy maps (in case migration hasn't happened yet)
         if (botSpawnPoints != null) aliases.addAll(botSpawnPoints.keySet());
-        if (botControls != null) aliases.addAll(botControls.keySet());
         // From identity maps
         if (botGameProfile != null) aliases.addAll(botGameProfile.keySet());
         aliases.remove("default");
@@ -853,15 +844,6 @@ public class ManualConfig {
     public float getSoulVoiceRadioGain() { return Math.max(0.0f, Math.min(1.0f, soulVoiceRadioGain)); }
     public void setSoulVoiceRadioGain(float v) { this.soulVoiceRadioGain = v; }
 
-    /** @deprecated Legacy accessor. Use {@link #getBotControlsByWorld()} or {@link #getAllBotAliases()} instead. */
-    @Deprecated
-    public Map<String, BotControlSettings> getBotControls() {
-        if (botControls == null) {
-            botControls = new HashMap<>();
-        }
-        return botControls;
-    }
-
     public Map<String, BotQuestMemory> getBotQuestMemory() {
         if (botQuestMemory == null) {
             botQuestMemory = new HashMap<>();
@@ -929,34 +911,6 @@ public class ManualConfig {
         return botQuestMemory.computeIfAbsent(key, ignored -> new BotQuestMemory());
     }
 
-    /** @deprecated Legacy global accessor. Use {@link #getOrCreateBotControl(String, String)} with worldKey. */
-    @Deprecated
-    public BotControlSettings getOrCreateBotControl(String alias) {
-        if (alias == null || alias.isBlank()) {
-            alias = "default";
-        }
-        String key = resolveAliasKey(getBotControls(), alias);
-        if (key == null) {
-            key = alias.trim();
-        }
-        botControls = getBotControls();
-        return botControls.computeIfAbsent(key, ignored -> new BotControlSettings());
-    }
-
-    /** @deprecated Legacy global accessor. Use {@link #getEffectiveBotControl(String, String)} with worldKey. */
-    @Deprecated
-    public BotControlSettings getEffectiveBotControl(String alias) {
-        if (alias != null) {
-            String key = resolveAliasKey(getBotControls(), alias);
-            BotControlSettings specific = key != null ? getBotControls().get(key) : null;
-            if (specific != null) {
-                return specific;
-            }
-        }
-        String defaultKey = resolveAliasKey(getBotControls(), "default");
-        return defaultKey != null ? getBotControls().get(defaultKey) : null;
-    }
-
     public void ensureOwner(String alias, UUID ownerUuid, String ownerName) {
         if (alias == null || ownerUuid == null) {
             return;
@@ -977,7 +931,6 @@ public class ManualConfig {
         removeAliasVariants(botGameProfile, alias);
         removeAliasVariants(botOwnership, alias);
         removeAliasVariants(botSpawnPoints, alias);
-        removeAliasVariants(botControls, alias);
         removeAliasVariants(botQuestMemory, alias);
         removeAliasVariants(botSkinSelections, alias);
         removeNestedAliasVariants(botSpawnPointsByWorld, alias);
@@ -988,7 +941,6 @@ public class ManualConfig {
         botGameProfile = normalizeAliasMap(botGameProfile);
         botOwnership = normalizeAliasMap(botOwnership);
         botSpawnPoints = normalizeAliasMap(botSpawnPoints);
-        botControls = normalizeAliasMap(botControls);
         botQuestMemory = normalizeAliasMap(botQuestMemory);
         botSkinSelections = normalizeAliasMap(botSkinSelections);
     }
@@ -1128,20 +1080,17 @@ public class ManualConfig {
         // Migrate botControls → botControlsByWorld
         if (botControls != null && !botControls.isEmpty()) {
             if (botControlsByWorld == null) botControlsByWorld = new HashMap<>();
-            for (Map.Entry<String, BotControlSettings> entry : botControls.entrySet()) {
-                String alias = entry.getKey();
-                BotControlSettings settings = entry.getValue();
-                if (alias == null || alias.isBlank() || settings == null) continue;
-                Map<String, BotControlSettings> existing = resolveNestedAliasEntry(botControlsByWorld, alias);
-                if (existing == null || existing.isEmpty()) {
-                    Map<String, BotControlSettings> worldMap = new HashMap<>();
-                    worldMap.put("_legacy", settings);
-                    botControlsByWorld.put(alias.trim(), worldMap);
-                }
+            LegacyBotControlMigrationPolicy.Result result =
+                    LegacyBotControlMigrationPolicy.migrate(botControls, botControlsByWorld);
+            if (!result.migrated().isEmpty()) {
+                LOGGER.info("[Frens] Migrated global bot controls to per-world format for {}.", result.migrated());
             }
-            botControls = new HashMap<>(); // clear legacy
-            LOGGER.info("[Frens] Migrated {} legacy BotControlSettings entries to per-world format.", botControlsByWorld.size());
+            if (!result.dropped().isEmpty()) {
+                LOGGER.info("[Frens] Dropped global bot controls for {}: per-world settings already exist.", result.dropped());
+            }
         }
+        // Always null (even when it loaded as an empty map) so the key leaves the saved file.
+        botControls = null;
     }
 
     public static class BotOwnership {
