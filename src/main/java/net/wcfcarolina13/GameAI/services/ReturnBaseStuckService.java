@@ -1071,7 +1071,11 @@ public final class ReturnBaseStuckService {
             BlockPos sameY = origin.add(off[0], 0, off[1]);
             BlockPos candidate = sameY;
             boolean drop = false;
-            if (!isPassable(world, sameY)) {
+            boolean sameYPassable = isPassable(world, sameY);
+            if (sameYPassable && isHazardOrLavaCell(world, sameY)) {
+                continue;
+            }
+            if (!sameYPassable) {
                 // Second pass (1.1.262): on a 1-high ledge every same-Y cell lacks footing,
                 // so try the cell one block down, gated by StuckCellPolicy.dropOneAllowed.
                 BlockPos lower = sameY.down();
@@ -1221,6 +1225,18 @@ public final class ReturnBaseStuckService {
      * after the drop). The head cell is the same-Y cell the bot crosses, and the row above
      * it is the bot's upper body during the crossing. See {@link StuckCellPolicy#dropOneAllowed}.
      */
+    /** Same-Y candidate rejection matching isDropOneLanding: deadly block or non-water fluid in feet or head. */
+    private static boolean isHazardOrLavaCell(ServerWorld world, BlockPos feet) {
+        BlockPos head = feet.up();
+        BlockState feetState = world.getBlockState(feet);
+        BlockState headState = world.getBlockState(head);
+        var feetFluid = world.getFluidState(feet);
+        var headFluid = world.getFluidState(head);
+        return BotHazardService.isDeadlyBlock(feetState) || BotHazardService.isDeadlyBlock(headState)
+                || (!feetFluid.isEmpty() && !feetFluid.isIn(FluidTags.WATER))
+                || (!headFluid.isEmpty() && !headFluid.isIn(FluidTags.WATER));
+    }
+
     private static boolean isDropOneLanding(ServerWorld world, BlockPos landing) {
         BlockPos head = landing.up();
         BlockPos transit = head.up();
@@ -1650,9 +1666,12 @@ public final class ReturnBaseStuckService {
     /**
      * Does this cell stop the bot crossing it horizontally? Collision-shape based
      * ({@link StuckCellPolicy#blocksHorizontalCell}): at feet anything taller than the step
-     * height blocks (fences, walls, glass, panes, leaves, stairs), at head anything
-     * thicker than a thin partial blocks (a slab at head height). Doors and trapdoors the
-     * bot can pass follow the pathfinder rule. Before 1.1.262 this was
+     * height blocks (fences, walls, glass, panes, leaves) unless the bot can stand IN the
+     * cell (stairs, slabs, snow, farmland, dirt path, mud, soul sand: isStandable), at
+     * head anything thicker than a thin partial blocks (a slab at head height). Doors and
+     * trapdoors use the pathfinder door rule. Unlike the pathfinders, an OPEN fence gate
+     * passes here (empty collision): this is a 1-cell nudge, not route planning through
+     * pens. Before 1.1.262 this was
      * {@code isSolidBlock}, which let fences, walls, slabs, stairs, glass and panes through.
      */
     private static boolean isBlockBlocking(ServerWorld world, BlockPos pos, BlockState state, boolean isHead) {
@@ -1662,7 +1681,9 @@ public final class ReturnBaseStuckService {
         VoxelShape shape = state.getCollisionShape(world, pos);
         boolean empty = shape.isEmpty();
         double maxY = empty ? 0.0D : shape.getMax(Direction.Axis.Y);
-        boolean blocks = StuckCellPolicy.blocksHorizontalCell(isPassableDoorOrTrapdoor(world, pos, state), empty, maxY, isHead);
+        boolean standable = !isHead && WalkablePartialBlocks.isStandable(state, world, pos);
+        boolean blocks = StuckCellPolicy.blocksHorizontalCell(isPassableDoorOrTrapdoor(world, pos, state), standable,
+                empty, maxY, isHead);
         // isSolidBlock is only evaluated on the blocked branch, to keep the common path cheap.
         if (blocks && (state.isReplaceable() || !state.isSolidBlock(world, pos))) {
             noteCollisionShapeReject(isHead ? "head" : "feet", state, pos);
@@ -1670,7 +1691,12 @@ public final class ReturnBaseStuckService {
         return blocks;
     }
 
-    /** Mirrors the unified pathfinder: wooden doors and trapdoors pass, iron ones only when open, locked ones never. */
+    /**
+     * Door and trapdoor part of the unified pathfinder rule: wooden doors and trapdoors
+     * pass, iron ones only when open, locked ones never. Fence gates are not handled here
+     * (the pathfinders refuse them for pens): the stuck nudge lets the collision shape
+     * decide, so an open gate passes and a closed one blocks.
+     */
     private static boolean isPassableDoorOrTrapdoor(ServerWorld world, BlockPos pos, BlockState state) {
         if (state.getBlock() instanceof DoorBlock) {
             if (LockableBlockService.isLocked(world, pos)) {

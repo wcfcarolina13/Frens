@@ -136,10 +136,29 @@ class StuckCellPolicyTest {
     @Test
     void passableDoorNeverBlocksButClosedIronDoorDoes() {
         // A door panel reports max Y 1.0: it would block on shape alone.
-        assertFalse(StuckCellPolicy.blocksHorizontalCell(true, false, FULL, false));
-        assertFalse(StuckCellPolicy.blocksHorizontalCell(true, false, FULL, true));
-        assertTrue(StuckCellPolicy.blocksHorizontalCell(false, false, FULL, false));
-        assertTrue(StuckCellPolicy.blocksHorizontalCell(false, false, FENCE, true));
+        assertFalse(StuckCellPolicy.blocksHorizontalCell(true, false, false, FULL, false));
+        assertFalse(StuckCellPolicy.blocksHorizontalCell(true, false, false, FULL, true));
+        assertTrue(StuckCellPolicy.blocksHorizontalCell(false, false, false, FULL, false));
+        assertTrue(StuckCellPolicy.blocksHorizontalCell(false, false, false, FENCE, true));
+    }
+
+    @Test
+    void standableCellsAtFeetDoNotBlock() {
+        double stair = 1.0, farmland = 0.9375, snow8 = 0.875;
+        assertFalse(StuckCellPolicy.blocksHorizontalCell(false, true, false, stair, false));
+        assertFalse(StuckCellPolicy.blocksHorizontalCell(false, true, false, farmland, false)); // also dirt path
+        assertFalse(StuckCellPolicy.blocksHorizontalCell(false, true, false, snow8, false));
+    }
+
+    @Test
+    void standableIsIgnoredAtHead() {
+        assertTrue(StuckCellPolicy.blocksHorizontalCell(false, true, false, 1.0, true));
+        assertTrue(StuckCellPolicy.blocksHorizontalCell(false, true, false, 0.9375, true));
+    }
+
+    @Test
+    void fenceAtFeetStillBlocksWhenNotStandable() {
+        assertTrue(StuckCellPolicy.blocksHorizontalCell(false, false, false, FENCE, false));
     }
 
     // --- dropOneAllowed ---------------------------------------------------------

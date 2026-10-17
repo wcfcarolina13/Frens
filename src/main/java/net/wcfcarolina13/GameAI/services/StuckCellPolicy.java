@@ -73,13 +73,19 @@ public final class StuckCellPolicy {
     }
 
     /**
-     * {@link #blocksHorizontal} with the door exception the pathfinders use: a door or
-     * trapdoor the bot can pass (wooden, or iron and already open) never blocks, even
-     * though its panel reports a full-height collision box.
+     * {@link #blocksHorizontal} with two exceptions. A door or trapdoor the bot can pass
+     * (wooden, or iron and already open) never blocks, even though its panel reports a
+     * full-height collision box. In the FEET row a standable cell (stairs, slabs, snow
+     * layers, farmland, dirt path, mud, soul sand, honey: {@code WalkablePartialBlocks
+     * .isStandable}) never blocks, because the bot stands IN that cell. {@code standable}
+     * is ignored for the head row.
      */
-    public static boolean blocksHorizontalCell(boolean passableDoorOrTrapdoor, boolean collisionEmpty,
-                                               double collisionMaxY, boolean isHead) {
-        return !passableDoorOrTrapdoor && blocksHorizontal(collisionEmpty, collisionMaxY, isHead);
+    public static boolean blocksHorizontalCell(boolean passableDoorOrTrapdoor, boolean standable,
+                                               boolean collisionEmpty, double collisionMaxY, boolean isHead) {
+        if (passableDoorOrTrapdoor || (standable && !isHead)) {
+            return false;
+        }
+        return blocksHorizontal(collisionEmpty, collisionMaxY, isHead);
     }
 
     /**

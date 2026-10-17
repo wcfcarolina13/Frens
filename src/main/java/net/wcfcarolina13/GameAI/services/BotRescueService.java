@@ -469,8 +469,10 @@ public final class BotRescueService {
             BlockPos targetPos = feet.offset(escapeDirection);
             BlockState targetState = world.getBlockState(targetPos);
 
-            // The 1-out cell is already enterable (short grass, snow layer, carpet):
-            // push toward it instead of mining it (1.1.262).
+            // The 1-out cell is already enterable (short grass, snow layer, carpet): never
+            // mine it (1.1.262). The push itself already ran in the earlier
+            // !fullyEncased attemptEscapeMovement call (same predicate, same cell), so in
+            // practice this branch is a no-mine guard during ESCAPE_NUDGE_COOLDOWN_MS.
             if (isSideCellEnterable(world, targetPos)) {
                 return attemptEscapeMovement(bot, world, feet, head);
             }
