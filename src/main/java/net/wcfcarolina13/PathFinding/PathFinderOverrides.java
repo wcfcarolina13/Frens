@@ -16,12 +16,12 @@ public final class PathFinderOverrides {
     private PathFinderOverrides() {
     }
 
-    /** Precedence: a per-bot override, else the global choice, else BARITONE (the default). */
+    /** Precedence: a per-bot override, else the global choice, else {@link PathFinderChoice#DEFAULT} (UNIFIED). */
     public static PathFinderChoice resolve(PathFinderChoice override, PathFinderChoice active) {
         if (override != null) {
             return override;
         }
-        return active != null ? active : PathFinderChoice.BARITONE;
+        return active != null ? active : PathFinderChoice.DEFAULT;
     }
 
     /** The finder this bot plans with right now; a null bot follows the global choice. */

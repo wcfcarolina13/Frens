@@ -22,7 +22,10 @@ public class SharedConfig {
     public List<String> mutedTextCategories;
     public Boolean gameplayTipsEnabled;
     public Boolean idleHobbiesAnywhereEnabled;
+    /** Legacy flag, still sent for older peers. Applying ignores it: the finder follows {@link #pathfinder}. */
     public Boolean baritonePathfinderEnabled;
+    /** Saved finder choice since 1.1.261: "unified", "baritone", "classic", or null for the default. */
+    public String pathfinder;
     public Boolean fortifyForcePlaceEnabled;
     /** Tri-state: {@code null} means "no global override". */
     public Boolean globalTeleportDuringSkills;
@@ -68,6 +71,7 @@ public class SharedConfig {
         snapshot.gameplayTipsEnabled = config.isGameplayTipsEnabled();
         snapshot.idleHobbiesAnywhereEnabled = config.isIdleHobbiesAnywhereEnabled();
         snapshot.baritonePathfinderEnabled = config.isBaritonePathfinderEnabled();
+        snapshot.pathfinder = config.getPathfinder();
         snapshot.fortifyForcePlaceEnabled = config.isFortifyForcePlaceEnabled();
         snapshot.globalTeleportDuringSkills = config.getGlobalTeleportDuringSkills();
         snapshot.fortBufferRadius = config.getFortBufferRadius();
@@ -115,7 +119,9 @@ public class SharedConfig {
         }
         if (gameplayTipsEnabled != null) config.setGameplayTipsEnabled(gameplayTipsEnabled);
         if (idleHobbiesAnywhereEnabled != null) config.setIdleHobbiesAnywhereEnabled(idleHobbiesAnywhereEnabled);
-        if (baritonePathfinderEnabled != null) config.setBaritonePathfinderEnabled(baritonePathfinderEnabled);
+        // The legacy boolean is not applied: an older peer resends it with every save, and it
+        // cannot say "unified". A null string (absent, or the default on the sender) leaves ours.
+        if (pathfinder != null) config.setPathfinder(pathfinder);
         if (fortifyForcePlaceEnabled != null) config.setFortifyForcePlaceEnabled(fortifyForcePlaceEnabled);
         // Tri-state: only overwritten when the sender actually carried a value.
         if (globalTeleportDuringSkills != null) config.setGlobalTeleportDuringSkills(globalTeleportDuringSkills);

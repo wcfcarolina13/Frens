@@ -37,12 +37,12 @@ public class PathFinder {
     private static final int MAX_SEGMENT_MANHATTAN_SPAN = 6;
 
     /**
-     * Which finder {@link #calculatePath} and {@link #plan} use when a bot has no override. The
-     * Baritone-style finder is the default; Frens.java, the shared-config save and the GUI copy the
-     * persisted boolean in through {@link PathFinderChoice#fromLegacyFlag} (true is BARITONE, false is
-     * BIDIR). UNIFIED is opt-in and in memory only ({@code /bot config pathfinder unified [bot]}).
+     * Which finder {@link #calculatePath} and {@link #plan} use when a bot has no override. UNIFIED
+     * is the default since 1.1.261; Frens.java, the shared-config save, the GUI toggle and
+     * {@code /bot config pathfinder} copy the saved choice in through
+     * {@link PathFinderDefaultPolicy#fromSaved} (null is UNIFIED, "baritone" and "classic" are opt-in).
      */
-    public static volatile PathFinderChoice ACTIVE = PathFinderChoice.BARITONE;
+    public static volatile PathFinderChoice ACTIVE = PathFinderChoice.DEFAULT;
 
     public static class PathNode {
         public final BlockPos pos;

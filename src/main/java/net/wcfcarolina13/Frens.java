@@ -847,8 +847,8 @@ public class Frens implements ModInitializer {
             }
 
             net.wcfcarolina13.GameAI.services.BotControlApplier.applyPersistentSettings(server);
-            net.wcfcarolina13.PathFinding.PathFinder.ACTIVE = net.wcfcarolina13.PathFinding.PathFinderChoice.fromLegacyFlag(
-                    CONFIG != null && CONFIG.isBaritonePathfinderEnabled());
+            net.wcfcarolina13.PathFinding.PathFinder.ACTIVE = net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.fromSaved(
+                    CONFIG != null ? CONFIG.getPathfinder() : null);
 
             if (CONFIG != null) {
                 net.wcfcarolina13.GameAI.services.CompanionSafeZoneService.setFortBufferRadius(

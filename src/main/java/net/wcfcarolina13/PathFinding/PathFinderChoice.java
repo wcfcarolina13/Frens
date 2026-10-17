@@ -5,13 +5,17 @@ import java.util.List;
 
 /**
  * The finders {@link PathFinder} can dispatch to. {@link #label()} is the token the logs use.
- * BARITONE is the default; UNIFIED is the 1.1.242 merged finder, opt-in after the 1.1.242 A/B (it
- * reached 46% of walks against the old finders' 61.5%); BIDIR is the classic finder.
+ * UNIFIED (the 1.1.242 merged finder) is the default since 1.1.261, after the swapped A/B of
+ * 2026-10-17 (docs/testing/PATHFINDER_AB_2026-10-17.md); BARITONE is the opt-in fallback; BIDIR is
+ * the classic finder, still selectable.
  */
 public enum PathFinderChoice {
     BIDIR("bidir"),
     BARITONE("baritone"),
     UNIFIED("unified");
+
+    /** The finder used when nothing is saved and no bot override applies (1.1.261). */
+    public static final PathFinderChoice DEFAULT = UNIFIED;
 
     private final String label;
 
@@ -32,15 +36,6 @@ public enum PathFinderChoice {
             }
         }
         return out;
-    }
-
-    /**
-     * Mapping of the persisted boolean {@code baritonePathfinderEnabled}: true (the 1.1.240 migrated
-     * default) is BARITONE, false is BIDIR. UNIFIED as a primary is opt-in and in memory only, through
-     * {@code /bot config pathfinder unified [bot]} (1.1.242 A/B ruling).
-     */
-    public static PathFinderChoice fromLegacyFlag(boolean baritonePathfinderEnabled) {
-        return baritonePathfinderEnabled ? BARITONE : BIDIR;
     }
 
     /** Parses a command token: unified, baritone, classic/bidir. Anything else (including "default") is null. */

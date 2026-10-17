@@ -27,19 +27,21 @@ class PathFinderOverridesTest {
         for (PathFinderChoice active : PathFinderChoice.values()) {
             assertEquals(active, PathFinderOverrides.resolve(null, active));
         }
-        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolve(null, null));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolve(null, null));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderChoice.DEFAULT);
     }
 
     @Test
-    void legacyFlagMapsToBaritoneOrClassic() {
-        // 1.1.242 A/B ruling: true (the migrated default) is BARITONE, false BIDIR; unified is opt-in.
-        assertEquals(PathFinderChoice.BARITONE, PathFinderChoice.fromLegacyFlag(true));
-        assertEquals(PathFinderChoice.BIDIR, PathFinderChoice.fromLegacyFlag(false));
-        // Through the dispatch precedence: a per-bot override still beats the mapped global.
+    void savedChoiceMapsThroughTheDefaultPolicy() {
+        // 1.1.261: a null saved choice is UNIFIED, explicit picks map to their finder.
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderDefaultPolicy.fromSaved(null));
+        assertEquals(PathFinderChoice.BARITONE, PathFinderDefaultPolicy.fromSaved("baritone"));
+        assertEquals(PathFinderChoice.BIDIR, PathFinderDefaultPolicy.fromSaved("classic"));
+        // Through the dispatch precedence: a per-bot override still beats the saved global.
         UUID bot = UUID.randomUUID();
-        PathFinderOverrides.set(bot, PathFinderChoice.UNIFIED);
-        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(bot, PathFinderChoice.fromLegacyFlag(true)));
-        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolveFor(UUID.randomUUID(), PathFinderChoice.fromLegacyFlag(true)));
+        PathFinderOverrides.set(bot, PathFinderChoice.BARITONE);
+        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolveFor(bot, PathFinderDefaultPolicy.fromSaved(null)));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(UUID.randomUUID(), PathFinderDefaultPolicy.fromSaved(null)));
     }
 
     @Test

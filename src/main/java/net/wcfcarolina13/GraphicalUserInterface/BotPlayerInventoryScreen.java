@@ -523,7 +523,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         AUTO_HUNT_STARVING,
         GAMEPLAY_TIPS,
         IDLE_HOBBIES_ANYWHERE,
-        BARITONE_PATHFINDER,
+        UNIFIED_PATHFINDER,
         UNLEASH_TETHERED,
         LEASH_ON_DISMOUNT,
         LEASH_RELEASE,
@@ -742,7 +742,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 TopicEntry.adminHeader("⚙ Behavior"),
                 new TopicEntry("Gameplay Tips (Hints)", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
-                new TopicEntry("Baritone Pathfinder", TopicCategory.ADMIN, TopicAction.BARITONE_PATHFINDER, true, 0, null),
+                new TopicEntry("Unified Pathfinder", TopicCategory.ADMIN, TopicAction.UNIFIED_PATHFINDER, true, 0, null),
                 new TopicEntry("Allow Autonomous Rescues", TopicCategory.ADMIN, TopicAction.AUTONOMOUS_RESCUES, true, 0, null),
                 new TopicEntry("Owned Sunset SS", TopicCategory.ADMIN, TopicAction.OWNED_SUNSET_SS, true, 0, null),
                 new TopicEntry("Lock Blocks Mode", TopicCategory.ADMIN, TopicAction.LOCK_BLOCKS_MODE, true, 0, null),
@@ -5153,7 +5153,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_HUNT_STARVING -> toggleAutoHuntStarving();
             case GAMEPLAY_TIPS -> toggleGameplayTips();
             case IDLE_HOBBIES_ANYWHERE -> toggleIdleHobbiesAnywhere();
-            case BARITONE_PATHFINDER -> toggleBaritonePathfinder();
+            case UNIFIED_PATHFINDER -> toggleUnifiedPathfinder();
             case UNLEASH_TETHERED -> toggleUnleashTethered();
             case LEASH_ON_DISMOUNT -> toggleLeashOnDismount();
             case LEASH_RELEASE -> runLeashReleaseCommand();
@@ -5586,7 +5586,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_HUNT_STARVING -> isAutoHuntStarvingActive();
             case GAMEPLAY_TIPS -> isGameplayTipsActive();
             case IDLE_HOBBIES_ANYWHERE -> isIdleHobbiesAnywhereActive();
-            case BARITONE_PATHFINDER -> isBaritonePathfinderActive();
+            case UNIFIED_PATHFINDER -> isUnifiedPathfinderActive();
             case ADMIN_PREVIEW_NON_ADMIN -> adminPreviewAsNonAdmin;
             case AUTONOMOUS_RESCUES -> isAutonomousRescuesActive();
             case OWNED_SUNSET_SS -> ownedSunsetSelfSufficientAggregateState() == 1;
@@ -5964,7 +5964,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 case OPEN_SKIN_CHOOSER -> "open_skin_chooser";
                 case GAMEPLAY_TIPS -> "gameplay_tips";
                 case IDLE_HOBBIES_ANYWHERE -> "idle_hobbies_anywhere";
-                case BARITONE_PATHFINDER -> "baritone_pathfinder";
+                case UNIFIED_PATHFINDER -> "baritone_pathfinder"; // permission key kept from 1.1.240
                 case AUTONOMOUS_RESCUES -> "rescue_manage";
                 case OWNED_SUNSET_SS -> "recruit_manage";
                 case LOCK_BLOCKS_MODE -> "lock_blocks_mode";
@@ -6557,16 +6557,24 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         Frens.CONFIG.save();
     }
 
-    private boolean isBaritonePathfinderActive() {
-        return Frens.CONFIG != null && Frens.CONFIG.isBaritonePathfinderEnabled();
+    /** ON = unified (the 1.1.261 default), OFF = Baritone. A saved classic pick shows OFF. */
+    private boolean isUnifiedPathfinderActive() {
+        return Frens.CONFIG == null
+                || Frens.CONFIG.getPathfinderChoice() == net.wcfcarolina13.PathFinding.PathFinderChoice.UNIFIED;
     }
 
-    private void toggleBaritonePathfinder() {
+    /** Unified goes to Baritone, Baritone or classic goes to unified. Classic only through the command. */
+    private void toggleUnifiedPathfinder() {
         if (Frens.CONFIG == null) return;
-        boolean newValue = !Frens.CONFIG.isBaritonePathfinderEnabled();
-        Frens.CONFIG.setBaritonePathfinderEnabled(newValue);
+        net.wcfcarolina13.PathFinding.PathFinderChoice next =
+                Frens.CONFIG.getPathfinderChoice() == net.wcfcarolina13.PathFinding.PathFinderChoice.UNIFIED
+                        ? net.wcfcarolina13.PathFinding.PathFinderChoice.BARITONE
+                        : net.wcfcarolina13.PathFinding.PathFinderChoice.UNIFIED;
+        // Saved as an explicit string (never null) so a shared-settings save carries it to the server.
+        Frens.CONFIG.setPathfinderChoice(next);
         Frens.CONFIG.save();
-        net.wcfcarolina13.PathFinding.PathFinder.ACTIVE = net.wcfcarolina13.PathFinding.PathFinderChoice.fromLegacyFlag(newValue);
+        net.wcfcarolina13.PathFinding.PathFinder.ACTIVE =
+                net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.fromSaved(Frens.CONFIG.getPathfinder());
     }
 
     private boolean isLockBlocksModeActive() {

@@ -35,7 +35,7 @@ class ConfigJsonUtilRoundTripTest {
         cfg.setTextCategoryMuted("combat", true);
         cfg.setGameplayTipsEnabled(false);
         cfg.setIdleHobbiesAnywhereEnabled(true);
-        cfg.setBaritonePathfinderEnabled(false);
+        cfg.setPathfinder("classic"); // syncs the legacy flag to false
         cfg.setFortifyForcePlaceEnabled(true);
         cfg.setGlobalTeleportDuringSkills(Boolean.TRUE);
         cfg.setFortBufferRadius(17);
@@ -66,6 +66,7 @@ class ConfigJsonUtilRoundTripTest {
         assertEquals(expected.isGameplayTipsEnabled(), actual.isGameplayTipsEnabled());
         assertEquals(expected.isIdleHobbiesAnywhereEnabled(), actual.isIdleHobbiesAnywhereEnabled());
         assertEquals(expected.isBaritonePathfinderEnabled(), actual.isBaritonePathfinderEnabled());
+        assertEquals(expected.getPathfinder(), actual.getPathfinder());
         assertEquals(expected.isFortifyForcePlaceEnabled(), actual.isFortifyForcePlaceEnabled());
         assertEquals(expected.getGlobalTeleportDuringSkills(), actual.getGlobalTeleportDuringSkills());
         assertEquals(expected.getFortBufferRadius(), actual.getFortBufferRadius());
@@ -223,5 +224,18 @@ class ConfigJsonUtilRoundTripTest {
         assertFalse(ConfigJsonUtil.isValidJson("{not json"));
         assertFalse(ConfigJsonUtil.isValidJson(null));
         assertFalse(ConfigJsonUtil.isValidJson("  "));
+    }
+
+    @Test
+    void olderPeerLegacyFlagDoesNotChangeTheFinder() throws Exception {
+        ManualConfig target = newRealConfig();
+        target.setPathfinder("unified");
+
+        assertTrue(ConfigJsonUtil.applyConfigJson("{\"baritonePathfinderEnabled\":false}", target));
+        assertEquals("unified", target.getPathfinder());
+
+        assertTrue(ConfigJsonUtil.applyConfigJson("{\"pathfinder\":\"baritone\"}", target));
+        assertEquals("baritone", target.getPathfinder());
+        assertTrue(target.isBaritonePathfinderEnabled());
     }
 }

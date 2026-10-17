@@ -198,12 +198,12 @@ public class modCommandRegistry {
 
     private static String describePathFinder(net.wcfcarolina13.PathFinding.PathFinderChoice choice) {
         if (choice == null) {
-            return "baritone";
+            return "unified (default)";
         }
         return switch (choice) {
-            case UNIFIED -> "unified (1.1.242, opt-in)";
-            case BARITONE -> "baritone (default)";
-            case BIDIR -> "classic (bidirectional A*)";
+            case UNIFIED -> "unified (default)";
+            case BARITONE -> "baritone (opt-in fallback)";
+            case BIDIR -> "classic (old)";
         };
     }
 
@@ -703,8 +703,8 @@ public class modCommandRegistry {
                                                             return 1;
                                                         }))
                                                 .executes(context -> {
-                                                    // 1.1.242 A/B ruling: baritone (default) and classic are saved through the
-                                                    // old boolean (true = baritone, false = classic); unified is opt-in, in memory only.
+                                                    // 1.1.261: all three are saved as an explicit pick (unified is the default,
+                                                    // baritone the opt-in fallback, classic still selectable).
                                                     String mode = StringArgumentType.getString(context, "mode").toLowerCase();
                                                     net.wcfcarolina13.PathFinding.PathFinderChoice choice =
                                                             net.wcfcarolina13.PathFinding.PathFinderChoice.parse(mode);
@@ -714,14 +714,13 @@ public class modCommandRegistry {
                                                         return 0;
                                                     }
                                                     net.wcfcarolina13.PathFinding.PathFinder.ACTIVE = choice;
-                                                    boolean saved = choice != net.wcfcarolina13.PathFinding.PathFinderChoice.UNIFIED;
-                                                    if (saved && Frens.CONFIG != null) {
-                                                        Frens.CONFIG.setBaritonePathfinderEnabled(
-                                                                choice == net.wcfcarolina13.PathFinding.PathFinderChoice.BARITONE);
+                                                    boolean saved = Frens.CONFIG != null;
+                                                    if (saved) {
+                                                        Frens.CONFIG.setPathfinderChoice(choice);
                                                         Frens.CONFIG.save();
                                                     }
                                                     LOGGER.info("[PathFinder] global finder={} saved={}", choice.label(), saved);
-                                                    String name = describePathFinder(choice) + (saved ? "" : " (debug, not saved)");
+                                                    String name = describePathFinder(choice);
                                                     context.getSource().sendFeedback(
                                                             () -> Text.literal("Pathfinder switched to: " + name), true);
                                                     return 1;

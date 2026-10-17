@@ -72,12 +72,21 @@ public class ManualConfig {
     private List<String> mutedTextCategories = new ArrayList<>();
     private boolean gameplayTipsEnabled = true;
     private boolean idleHobbiesAnywhereEnabled = false;
-    // Baritone-style finder is the default since 1.1.240 (Bradley, 2026-10-14).
+    // Legacy finder flag (1.1.240 to 1.1.260: true = baritone, false = classic). Since 1.1.261 the
+    // decision follows `pathfinder`; this is kept so old JSON parses and older clients see a
+    // value, re-synced on every write (true iff the effective choice is BARITONE). Only the
+    // 1.1.261 migration reads it.
     private boolean baritonePathfinderEnabled = true;
     // One-time 1.1.240 migration marker: configs written before 1.1.240 persisted the old
     // default (false). Must initialise to false — Gson keeps the initializer for fields the
     // file lacks, so an old file reads as "not migrated yet". New files are stamped true.
     private boolean baritoneDefaultMigrated = false;
+    // Saved finder choice since 1.1.261: null = the default (unified), else "unified",
+    // "baritone" or "classic" (an explicit pick, never touched by a migration).
+    private String pathfinder = null;
+    // One-time 1.1.261 migration marker (unified becomes the default). Same rules as
+    // baritoneDefaultMigrated: false initializer so an older file reads as "not migrated yet".
+    private boolean unifiedDefaultMigrated = false;
     private boolean fortifyForcePlaceEnabled = false;
     private boolean verboseDiagnostics = false;
     /** Global override for teleportDuringSkills. When non-null, overrides all per-bot settings. */
@@ -241,6 +250,7 @@ public class ManualConfig {
             LOGGER.debug("[config] save skipped — config is remote-authoritative while connected to a server");
             return;
         }
+        syncLegacyPathfinderFlag();
         synchronized (SAVE_LOCK) {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             try (FileWriter writer = new FileWriter(filePath())) {
@@ -268,6 +278,7 @@ public class ManualConfig {
             LOGGER.info("Config file not found. Creating a new one.");
             ManualConfig defaultConfig = new ManualConfig();
             defaultConfig.baritoneDefaultMigrated = true; // fresh file already has the new default
+            defaultConfig.unifiedDefaultMigrated = true; // pathfinder null = unified, the 1.1.261 default
             defaultConfig.save(); // Save the new config to create the file
             return defaultConfig;
         }
@@ -301,7 +312,11 @@ public class ManualConfig {
             // Old configs stored one BotSpawn per alias; migrate it under its level name.
             loadedConfig.migrateLegacyToPerWorld();
             loadedConfig.normalizeAliasBackedMaps();
-            if (loadedConfig.applyBaritoneDefaultMigration()) {
+            // Order matters: the 1.1.240 step moves a pre-1.1.240 default false to true first, so
+            // the 1.1.261 step reads false only as an explicit classic pick.
+            boolean migrated = loadedConfig.applyBaritoneDefaultMigration();
+            migrated |= loadedConfig.applyUnifiedDefaultMigration();
+            if (migrated) {
                 loadedConfig.save();
             }
             return loadedConfig;
@@ -309,6 +324,8 @@ public class ManualConfig {
             LOGGER.error("Failed to load config file. Using default config.", e);
             ManualConfig fallback = new ManualConfig();
             fallback.baritoneDefaultMigrated = true; // already on the new default; never flip a later classic pick
+            fallback.unifiedDefaultMigrated = true;
+            fallback.syncLegacyPathfinderFlag();
             return fallback;
         }
     }
@@ -689,9 +706,61 @@ public class ManualConfig {
         this.idleHobbiesAnywhereEnabled = idleHobbiesAnywhereEnabled;
     }
 
+    /** Legacy flag, kept for older clients and the migrations. The finder follows {@link #getPathfinderChoice()}. */
     public boolean isBaritonePathfinderEnabled() { return baritonePathfinderEnabled; }
+    /** Raw legacy write (migration tests). Does not change the finder, and the next save re-syncs it. */
     public void setBaritonePathfinderEnabled(boolean v) { this.baritonePathfinderEnabled = v; }
     public boolean isBaritoneDefaultMigrated() { return baritoneDefaultMigrated; }
+    public boolean isUnifiedDefaultMigrated() { return unifiedDefaultMigrated; }
+
+    /** The saved finder string: null is the default (unified), else "unified", "baritone" or "classic". */
+    public String getPathfinder() { return pathfinder; }
+
+    /** Stores an explicit pick (or null for the default) and re-syncs the legacy flag. */
+    public void setPathfinder(String value) {
+        this.pathfinder = (value == null || value.isBlank()) ? null : value.trim().toLowerCase(Locale.ROOT);
+        syncLegacyPathfinderFlag();
+    }
+
+    /** Stores an explicit pick as its saved token ("unified", "baritone", "classic"). */
+    public void setPathfinderChoice(net.wcfcarolina13.PathFinding.PathFinderChoice choice) {
+        setPathfinder(net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.toSaved(choice));
+    }
+
+    /** The finder the saved choice selects (null or unknown is UNIFIED). */
+    public net.wcfcarolina13.PathFinding.PathFinderChoice getPathfinderChoice() {
+        return net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.fromSaved(pathfinder);
+    }
+
+    private void syncLegacyPathfinderFlag() {
+        baritonePathfinderEnabled = getPathfinderChoice() == net.wcfcarolina13.PathFinding.PathFinderChoice.BARITONE;
+    }
+
+    /**
+     * One-time 1.1.261 migration (unified becomes the default). Runs after
+     * {@link #applyBaritoneDefaultMigration()}: legacy false is an explicit classic pick and is kept
+     * as "classic", legacy true (the Baritone default) moves to null (unified). An explicit string is
+     * never touched. No I/O here; {@link #load()} saves when this returns true.
+     *
+     * @return true when the config changed and should be saved
+     */
+    public boolean applyUnifiedDefaultMigration() {
+        net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.MigrationResult result =
+                net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.migrate(
+                        pathfinder, baritonePathfinderEnabled, unifiedDefaultMigrated);
+        if (!result.needsSave()) {
+            return false;
+        }
+        boolean wasBaritone = baritonePathfinderEnabled && pathfinder == null;
+        unifiedDefaultMigrated = true;
+        pathfinder = result.pathfinder();
+        syncLegacyPathfinderFlag();
+        if (wasBaritone && pathfinder == null) {
+            LOGGER.info("[Frens] 1.1.261 config migration: pathfinder switched to unified (the new default), "
+                    + "use /bot config pathfinder baritone to go back.");
+        }
+        return true;
+    }
 
     /**
      * One-time 1.1.240 migration: a config written before Baritone became the default holds
