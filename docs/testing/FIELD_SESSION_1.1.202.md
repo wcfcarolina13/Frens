@@ -1388,41 +1388,52 @@ Run the first item single-player BEFORE anything else in this session: every but
 
 Run after Phase 6ac's first item. Items 1 and 6-7 are single-player; 2-5 need a dedicated server op client or a LAN guest.
 
-- [ ] **Host with cheats off passes admin gates (1.1.232)**
+- [x] **Host with cheats off passes admin gates (1.1.232)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: single-player world with cheats OFF. Resize the Spawn base in the Base screen, use the zone wand and the zone screen, toggle lock mode on a door, run `/bot soul status` and `/bot learn status`, change a bot skin, right-click a bot to open it.
   - Pass when: each works with no "operator" refusal. The Guide now shows the admin topics (world mode reset, modes).
 - [ ] **Ops see the Admin tab on a server (1.1.232)**
+  - Sandbox 2026-10-17: NOT TESTABLE in the sandbox (needs a server op or LAN guest), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: as an op on a dedicated server or as an op LAN guest, open a bot's inventory.
   - Pass when: the Admin tab is visible and works. A non-op guest does NOT see it.
 - [ ] **Companion owner after a recruitment reset (1.1.232)**
+  - Sandbox 2026-10-17: NOT TESTABLE in the sandbox (needs a guest and a Questing world), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: in recruitment mode, as the guest who owns the recruited companion, after a recruitment reset, press Companion come and home.
   - Pass when: both work. A different non-op player is still refused.
 - [ ] **Wall grantees fortify (1.1.232)**
+  - Sandbox 2026-10-17: NOT TESTABLE in the sandbox (needs a guest), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: host grants the guest access to the host's wall, then the guest runs fortify Patch and Resume on it, then Expand, then tries to remove or rename it in the Base screen.
   - Pass when: Patch and Resume run, Expand gives "You cannot work on that wall.", remove and rename are refused. On a wall with no owner the guest gets "That wall has no owner. Claim it in the Base screen first."
 - [ ] **Skins are owner-checked (1.1.232)**
+  - Sandbox 2026-10-17: NOT TESTABLE in the sandbox (needs a guest), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: as the guest, pick a preset skin for their own bot, then try the host's bot (Admin "allow everyone" ON and OFF).
   - Pass when: own bot changes in both cases, the host's bot gives "You can only change the skin of your own bot." in both cases.
-- [ ] **Throttle notice (1.1.232)**
+- [x] **Throttle notice (1.1.232)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: click one bot button about 30 times fast.
   - Pass when: one "Slow down, that click was ignored." line, not a flood.
-- [ ] **No bot-slot mismatch warnings (1.1.232)**
+- [x] **No bot-slot mismatch warnings (1.1.232)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Claude watches for: `[bot-access] bot-slot mismatch` across the whole session (every button in 6ac and 6ad).
   - Pass when: none. Any hit names the action; report it so 1.1.233 can switch the check to refuse.
 
 ## Phase 6ae — Cleanup: unowned bots, skin toggle, tool picks (1.1.233)
 
 - [ ] **Unowned bots refuse Set Home / Go To for non-admins (1.1.233)**
+  - Sandbox 2026-10-17: NOT TESTABLE in the sandbox (needs a guest), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: as a LAN guest, pick an unowned bot (console-spawned, no owner) in the Base screen and press Set Home, then Go To. Repeat as the host.
   - Claude watches for: `[bot-access] denied` with action `base_set_home` / `base_go_to` for the guest only.
   - Pass when: the guest is refused, the host and the bot's owner succeed.
 - [ ] **Skin toggle gone (1.1.233)**
+  - Sandbox 2026-10-17: PARTIAL: toggle gone from Admin tab and Player Permissions; guest half not testable, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: open the Admin tab and the per-player admin settings.
   - Pass when: no "allow everyone to change skins" toggle anywhere, and a guest reskinning the host's bot still gets "You can only change the skin of your own bot." (also when the host's bot is offline).
 - [ ] **Leaves drop saplings, teardown uses hands (1.1.233)**
+  - Sandbox 2026-10-17: FAIL: shears still mine leaves during felling and pillarUp (bug A); stone scaffold pass, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: give a bot shears and a pickaxe in the hotbar, run woodcut on a tree that needs scaffold, then watch the cleanup and a fortify/shelter scaffold teardown.
   - Pass when: leaves cleared during cleanup drop saplings/sticks (not leaf blocks), dirt/plank scaffold comes down without the pickaxe losing durability, stone scaffold is mined with the pickaxe and drops.
-- [ ] **Crafting table line (1.1.233)**
+- [x] **Crafting table line (1.1.233)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: order a craft that needs a crafting table when the bot has none.
   - Pass when: chat says "Crafted 1 crafting table(s)." with no "run /bot place" hint, and the bot places it.
 
@@ -1430,57 +1441,72 @@ Run after Phase 6ac's first item. Items 1 and 6-7 are single-player; 2-5 need a 
 
 Run FIRST in a session: open **Nirn** first after deploying (item 1), then a brand-new commands-off Survival world for the rest.
 
-- [ ] **Nirn keeps its zones and locked doors (1.1.234)**
+- [x] **Nirn keeps its zones and locked doors (1.1.234)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: open Nirn before any other world. Look at a protected zone and a locked door near home.
   - Claude watches for: the zone and lock load lines at SERVER_STARTED with Nirn's counts (4 zones incl. home/deep dark 1/tower dungeon jungle, 3 locked blocks), adoption outcome ADOPT_LEGACY.
   - Pass when: Nirn's zones and locks are all there. A `claimed_by_world.txt` appears in `bot_zones/minecraft_overworld__41d0e9b1/`.
-- [ ] **A new world starts clean (1.1.234)**
+- [x] **A new world starts clean (1.1.234)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: create a new Survival world (commands off), named the same as an old save if possible.
   - Claude watches for: no Nirn zones/locks loaded, its own Spawn base registered at the real spawn, no stale `base:*` auto-zone.
   - Pass when: the World Mode chooser opens before the first companion.
-- [ ] **First axe on the ground (1.1.234)**
+- [x] **First axe on the ground (1.1.234)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: spawn a bot with an empty inventory and start woodcut next to trees.
   - Claude watches for: `Woodcut axe bootstrap`, a crafting table placed on the ground, a wooden_axe crafted, no `Pillar stock: crafted … planks` before the axe, a few dirt-family blocks gathered.
   - Pass when: the bot never pillars or crafts on a pillar before it has an axe, and at most one table line shows in chat if placement fails.
-- [ ] **Scaffold breaks at survival speed (1.1.234)**
+- [x] **Scaffold breaks at survival speed (1.1.234)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: watch the bot take down a plank or dirt pillar, then stop it mid-teardown and run woodcut cleanup.
   - Claude watches for: `Mining … (delta=…, ticks=…)` lines for each teardown block (planks ~60 ticks by hand), no `surface-pillar: remove` burst under a second.
   - Pass when: each block takes visible time, and after the stop the cleanup still finds and removes the leftover scaffold.
-- [ ] **No canopy pillar at cleanup start (1.1.234)**
+- [x] **No canopy pillar at cleanup start (1.1.234)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Pass when: starting woodcut cleanup under leaves logs no `ensureAtSurface: … pillar recovery`.
 - [ ] **Cleanup finishes and says one sentence (1.1.234)**
+  - Sandbox 2026-10-17: FAIL: right sentence, 1 s on bare ground but 127 s in forest (bug B), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Pass when: with nothing to clean, woodcut cleanup ends within a few seconds with "Nothing left to clean up here." (no `minedLogs=` stats in chat).
 - [ ] **Drop sweep, return and craft feedback (1.1.234)**
+  - Sandbox 2026-10-17: FAIL: no-wood craft answers with two lines (bug C); sweep counts stacks, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: drop a few items, run a drop sweep. Then `/bot craft` an axe with no wood anywhere.
   - Pass when: the sweep says "Picked up N items." with the right N, no fast-travel error and no return trip after it, and the craft answers with exactly one line.
 
 ## Phase 6ag — Sandbox fixes and Questing flag (1.1.235)
 
-- [ ] **Table placement never blocks itself (1.1.235)**
+- [x] **Table placement never blocks itself (1.1.235)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): fresh bot with no axe, woodcut next to a small tree on flat ground.
   - Claude watches for: `Utility placement summary [crafting_table]` with `outcome=ready`, then `Placed crafting table`, no `bot-intersects-target`.
   - Pass when: the bot places its table and crafts a wooden axe on the ground.
-- [ ] **Bootstrap gather outside the Spawn base (1.1.235)**
+- [x] **Bootstrap gather outside the Spawn base (1.1.235)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Pass when: woodcut started at spawn logs skipped protected cells (no "Cannot mine: protected claim") and a regather at the tree's stand.
-- [ ] **Plain tree lines (1.1.235)**
+- [x] **Plain tree lines (1.1.235)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Pass when: each tree ends with one line like "Got 3 logs from that tree." (no "Woodcut target cleared (…)").
 - [ ] **Questing hidden (1.1.235)**
+  - Sandbox 2026-10-17: PARTIAL: new-world line, no chooser, recruit refusal pass; existing Questing world not testable, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: create a new world with default config.
   - Pass when: no World Mode chooser, one line "Frens is in Admin mode: open the roster with [-] to bring in a companion.", the roster opens. `/bot recruit enable` answers "Questing mode is turned off on this server." An existing Questing world still recruits.
-- [ ] **Craft names (1.1.235)**
+- [x] **Craft names (1.1.235)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Pass when: `/bot craft wooden_axe` answers "Crafted 1 Wooden Axe."
 
 ## Phase 6ah — Shelter-hole climb-out and per-world roster (1.1.236)
 
-- [ ] **Climb out of a shallow open-sky hole by day (1.1.236)**
+- [x] **Climb out of a shallow open-sky hole by day (1.1.236)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): load the sandbox "New World" by day, where Jake sits 3 down at 41,62,25.
   - Claude watches for: `linger: allow — shallow open-sky hole by day, climbing out (depth=3 scaffold=N)`, then `pillar recovery`, and no more `no tools, deep underground`.
   - Pass when: Jake is standing on the surface within a minute.
-- [ ] **Night bunker registers and holds (1.1.236)**
+- [x] **Night bunker registers and holds (1.1.236)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: let a bot with no tools face dusk away from base.
   - Claude watches for: the dig-down cap line with `covers=true`, no `rejected reason=no_overhead_cover`, then `linger: suppressed — inside own shelter` or `nighttime, waiting it out` (no pillar through the cap).
   - Pass when: the bot stays in its bunker until morning, then leaves.
-- [ ] **Roster shows this world only (1.1.236)**
+- [x] **Roster shows this world only (1.1.236)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: in a world with one companion, open the roster.
   - Claude watches for: no `roster world scope not ready` line (or a later `arrived late, refreshing`).
   - Pass when: only this world's companion is listed. "Other worlds (N)" lists the rest. A new world says "No companions in this world yet." Bringing one in spawns it here with empty pockets. Typing an other-world name greys Create with the tooltip.
@@ -1488,52 +1514,64 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 ## Phase 6ai — Spawn-base trees protected, admin toggle (1.1.238)
 
 - [ ] **Fresh world: bot walks out of the Spawn base (1.1.238)**
+  - Sandbox 2026-10-17: FAIL: spawn line once, but relocation walks hit their deadline and it got no logs (bug D), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): new default world, a companion with no axe, `/bot skill woodcut <name>` at spawn.
   - Claude watches for: `Woodcut detect` with `protectedFail>0`, then the chat line "The trees around spawn are protected, so I'm heading out to find others.", relocation, logs mined outside the zone. `logscan.sh` shows no repeated `Cannot mine: protected claim` (at most one per block).
   - Pass when: the bot gets logs from a tree outside the Spawn base and says the spawn line once.
 - [ ] **Admin toggle lets bots cut Spawn trees (1.1.238)**
+  - Sandbox 2026-10-17: FAIL: logs are cut but every one reports a protected-claim refusal afterwards (bug E), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: Admin, World Settings, "Cut trees in the Spawn base: On", then woodcut at spawn.
   - Pass when: the bot fells a Spawn-base tree without refusals. Dirt in the Spawn base is still refused. A non-admin gets a refusal in chat.
 - [ ] **Own base over spawn still works (1.1.238)**
+  - Sandbox 2026-10-17: PARTIAL: host bot mines inside its own base over spawn; torches not placeable by command, Nirn half not testable, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: host makes a base overlapping spawn, has his bot plant or place torches there.
   - Pass when: no `protected-zone` refusal for the host's bot inside his base. Nirn's home base trees stay protected with the toggle on.
 
 ## Phase 6aj — No bare-hand stone, unreachable trees skipped, stuck bots back off, hunger in chat (1.1.239)
 
-- [ ] **Approach never hand-mines stone (1.1.239)**
+- [x] **Approach never hand-mines stone (1.1.239)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): woodcut with a companion that has no pickaxe in hilly or cave-cut forest.
   - Claude watches for: `movement obstruction mine refused [...]: … too slow by hand (N ground ticks > 100, held=…)` instead of `Mining … stone … with bare-hands`. No burst of identical `Mining complete` lines on one tick.
   - Pass when: no stone or deepslate is mined bare-handed by movement, and dirt, sand and snow still clear.
-- [ ] **Woodcut gives up on trees it can't reach from a pocket (1.1.239)**
+- [x] **Woodcut gives up on trees it can't reach from a pocket (1.1.239)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: woodcut with a no-axe, no-blocks bot standing in a roofed hole or cave (the sandbox "New World (1)" pocket at 20,62,172 works).
   - Claude watches for: `Woodcut approach: abandoning dry reposition … after 4 failed stands on any side`, feasibility lines with the streak, then chat "I'm stuck down here and can't reach any trees."
   - Pass when: the run ends within about 2 targets instead of 10 minutes of retries, and the task slot frees (underground survival starts).
-- [ ] **Stuck bot with nothing to build with backs off (1.1.239)**
+- [x] **Stuck bot with nothing to build with backs off (1.1.239)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: leave a no-block bot in a covered stone pocket by day.
   - Claude watches for: `Vertical ascent step: no climb (landed at Y=…, nothing placed)` (never a false "climbed"), `Stuck-escape backoff: … pausing retries for 30 s` then 60 s, 120 s …, at most 10 min. After `/bot stop`: `holding still after a stop command until the next command` and no more staging walks.
   - Pass when: chat says "I'm stuck in a hole with nothing to build with." once (also after you respawn from a death), and the log has no once-a-second loop.
-- [ ] **Hunger said in chat, pause on time (1.1.239)**
+- [x] **Hunger said in chat, pause on time (1.1.239)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: woodcut with a companion that has no food, far from you (more than 32 blocks), until food drops.
   - Claude watches for: chat "I'm getting hungry and I have no food." once at food 10 or below, then at food 5 or below "I'm starving and out of food, so I stopped cutting. Feed me, then /bot resume." within one approach step.
   - Pass when: both lines reach chat at distance and the pause comes within seconds of food 5, not minutes.
-- [ ] **Roster empty state and voice stubs (1.1.239)**
+- [x] **Roster empty state and voice stubs (1.1.239)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: open the roster in a world with no companions here but some in other worlds.
   - Pass when: the title and the list placeholder say different things. Claude: `grep -c "Missing sound for event"` on a fresh launch is 0.
 
 ## Phase 6ak — Multi-step navigation (1.1.240)
 
 - [ ] **Bots walk around, break soft blocks or place a dirt step (1.1.240)**
+  - Sandbox 2026-10-17: PARTIAL: walk-arounds ok, no timeouts, no BREAK or PLACE success seen, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): woodcut with a no-tools companion in rough terrain (ravines, sand banks, stepped hills), outside the Spawn base.
   - Claude watches for: `terrain move: WALK_AROUND|BREAK|PLACE cost=…` then `terrain move result: … ok=true … displaced=true`, no `Refusing path … not a standing cell`, no `A* pathfinding timed out`. `frens_log_report.py` section 3: Baritone p90 under 500 ms.
   - Pass when: the bot reaches trees it used to slam against, and any dirt step it leaves is a single plain dirt block.
-- [ ] **Wading through shallow water (1.1.240)**
+- [x] **Wading through shallow water (1.1.240)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: a target across a 1-deep stream or pond edge.
   - Claude watches for: `Path wades N of M cells`.
   - Pass when: the bot wades across instead of walking around a long way, and never dives into 2-deep water.
 - [ ] **Baritone default migrated once (1.1.240)**
+  - Sandbox 2026-10-17: SUPERSEDED by 1.1.261 (Phase 6ba); classic still survives a restart, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Claude watches for: `1.1.240 config migration: pathfinder switched to baritone` on the first Nirn launch only. `/bot config pathfinder` says baritone.
   - Pass when: the line appears once and a later `classic` choice survives a restart.
-- [ ] **Escape after a fight underground (1.1.240)**
+- [x] **Escape after a fight underground (1.1.240)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: let a companion die or abort to a mob while in a cave or pit with no task.
   - Claude watches for: `cleared a stale abort latch … so escape can run`, never `holding still after a stop command` unless you typed /bot stop.
   - Pass when: the bot climbs out on its own after a fight, and stays put after a real /bot stop.
@@ -1541,13 +1579,16 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 ## Phase 6al — Tree claims, creeper line, walk outcomes (1.1.241)
 
 - [ ] **Several bots spread across one forest (1.1.241)**
+  - Sandbox 2026-10-17: FAIL: claims keyed on the base block, a second bot takes the same tree after its bottom log is cut (bug G), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): `/bot skill woodcut` on three companions in the same forest.
   - Claude watches for: `Woodcut: tree <base> is claimed by <bot>, picking another`, no single-file queue (`walk blocked near` on each other), at most one `sharing it (no free tree after waiting)` near the end.
   - Pass when: the bots work different trees and none cuts logs from a tree another is felling.
-- [ ] **Creeper backoff line (1.1.241)**
+- [x] **Creeper backoff line (1.1.241)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Claude watches for: chat "A creeper! I dropped what I was doing to get clear." once per bot, never `creeper-fuse`.
   - Pass when: the line appears once and the bot is not auto-resumed (by design).
-- [ ] **Quiet torch-hold log (1.1.241)**
+- [x] **Quiet torch-hold log (1.1.241)**
+  - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Claude: `frens_log_report.py` spam section has no `[torch-hold]` pattern above 60/min during woodcut.
   - Pass when: torch-hold lines appear only when the gate or verdict changes.
 

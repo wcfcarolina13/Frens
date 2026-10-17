@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Older field phases 6ad-6al run in the sandbox: 25 pass, 6 fail (2026-10-17, no build)
+
+Claude played the 41 checks of Phases 6ad-6al (builds 1.1.232-1.1.241) in `mcp-sandbox` on 1.1.261 over the MCP API, in three saves (commands off, then two commands-on copies). Nirn was read only (logs and config). Results and bug notes: `docs/testing/FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
+
+- **Pass (ticked):** host admin gates with cheats off, the throttle notice (only past 20 fast clicks), no bot-slot mismatches, Nirn's adopted zones and locks, new-world start, first axe on the ground, survival-speed teardown, no canopy pillar, plain tree and craft lines, shelter climb-out and night bunkers, per-world roster, no bare-hand stone, pocket give-up, stuck backoff, hunger lines, wading, escape after a fight, creeper line, quiet torch-hold.
+- **Fail, for a later build:** shears still cut leaves during felling and pillarUp (A); empty cleanup takes about 2 minutes in forest (B); a failed craft answers in two lines (C); relocation walks hit their deadline so spawn-protected bots get no logs on a sparse map (D); with the Spawn-tree toggle on, `MiningTool` reports "protected claim" after the log has broken because the per-tick check reads the air left behind (E); tree claims are keyed on the base block, so a second bot takes the same tree once its bottom log is gone (G). Side finding F: unified plans an ASCEND it cannot do with zero blocks and replans the same path.
+- **Not testable in a one-client sandbox:** the guest and server-op items (6ad-2..5, 6ae-1, guest halves). 6ak-3 is superseded by the 1.1.261 migration; classic still survives a restart.
+- **Tools:** `tools/sandbox/ft.py` (chat, raw MCP, log marks and grep), `pad.py` (flat pad with a tree on solid stone), `worldcopy.py` (copy a save, set allowCommands). A copied save is a new world to Frens, which gives new-world checks without the title screen.
+
 ## Unified pathfinder is the default, Baritone the opt-in fallback; 1.1.261 (2026-10-17)
 
 The decision from the swapped A/B (`docs/testing/PATHFINDER_AB_2026-10-17.md`: unified 274 logs vs 257, walk reach 66.7% vs 51.4%, no Baritone 500 ms timeouts).

@@ -12,7 +12,10 @@ three choices. The decision rests on the swapped A/B (`docs/testing/PATHFINDER_A
 **Next:**
 - Field time on the new default.
 - Slice D (remove the legacy boolean and bidir) once the default has held.
-- Older field phases 6ad-6al in the sandbox.
+- Older field phases 6ad-6al: DONE in the sandbox 2026-10-17 (`docs/testing/FIELD_6AD_6AL_SANDBOX_2026-10-17.md`): 25 pass,
+  6 fail (bugs A-G there: shears on leaves, slow empty cleanup in forest, two-line craft reply, relocation deadline,
+  Spawn-tree toggle false refusal in MiningTool, tree claims keyed on the base block; side finding F unified ASCEND
+  with no blocks). Scope them as the next build. Guest and server-op items still need a LAN guest or a dedicated server.
 - Audio for "Hey, incoming!".
 - Extend the punctuation guard to the JSON resources.
 - Scope findings worth a look: escape checks that accept only `isAir` in BotRescueService, no drop-1 in ReturnBaseStuck
