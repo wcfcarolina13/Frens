@@ -39,8 +39,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * any of the four methods while naming the service (reflection); nothing anywhere may hold a field,
  * variable, parameter, return type, type argument, cast or array of type {@code SupplyRequestService}
  * (a static called through an instance, {@code svc.request(...)}, would escape the qualified-name
- * scan); the facade's public static methods are exactly {@code withdraw} and
- * {@code grantableEstimate}, so no pass-through can be added beside them; and
+ * scan); the facade's public static methods are exactly {@code withdraw}, {@code grantableEstimate}
+ * and {@code grantablePreview} (which calls neither entry point), so no pass-through can be added
+ * beside them; and
  * {@code SupplyServerHop}, the shared hop the sites use, never names the service. {@code SupplyCommands}
  * only answers and revokes. The scan fails loudly when the source tree cannot be found, so it can
  * never pass by reading nothing.
@@ -55,7 +56,7 @@ class SupplyEntryPointTest {
     /** The only files that may name request/transferNow. */
     private static final Set<String> ENTRY_POINT_FILES = Set.of(SUPPLY_DIR + SERVICE, SUPPLY_DIR + FACADE);
     /** The facade's whole public static surface. */
-    private static final Set<String> FACADE_PUBLIC_STATICS = Set.of("withdraw", "grantableEstimate");
+    private static final Set<String> FACADE_PUBLIC_STATICS = Set.of("withdraw", "grantableEstimate", "grantablePreview");
     private static final String ROUTED =
             "supplies Phase 3 routes automatic withdrawals through SupplyWithdrawals: ";
 
@@ -183,11 +184,19 @@ class SupplyEntryPointTest {
     }
 
     @Test
-    void theFacadesPublicStaticsAreExactlyWithdrawAndTheEstimate() {
+    void theFacadesPublicStaticsAreExactlyWithdrawTheEstimateAndThePreview() {
         String facade = sources.get(SUPPLY_DIR + FACADE);
         assertNotNull(facade);
         assertEquals(FACADE_PUBLIC_STATICS, publicStaticMethods(facade),
-                ROUTED + "a public static beside withdraw/grantableEstimate could pass request(/transferNow( through");
+                ROUTED + "a public static beside withdraw/grantableEstimate/grantablePreview could pass request(/transferNow( through");
+        // The preview is advisory: it reaches neither entry point.
+        int at = facade.indexOf("public static int grantablePreview(");
+        assertTrue(at >= 0, "grantablePreview not found in the facade");
+        int end = facade.indexOf("\n    }\n", at);
+        assertTrue(end > at, "grantablePreview's body not found");
+        String preview = facade.substring(at, end);
+        assertFalse(BARE_REQUEST_CALL.matcher(preview).find() || QUALIFIED_REQUEST_CALL.matcher(preview).find()
+                || TRANSFER_NOW_CALL.matcher(preview).find(), "grantablePreview must not ask or move: " + ROUTED);
     }
 
     @Test

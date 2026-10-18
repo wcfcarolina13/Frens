@@ -71,7 +71,9 @@ import java.util.function.Supplier;
  * until the owner is back in prompt range, whichever comes first. Neither logs at INFO.
  *
  * <p>{@link #grantableEstimate} lets a caller count, before asking, how much of a chest's stock
- * the policy could ever grant (allowlist and reserve only; advisory).
+ * the policy could ever grant (allowlist and reserve only; advisory). {@link #grantablePreview}
+ * adds what this bot's request at this chest would be refused for before the owner could answer
+ * (no owner, no chest key, owner out of prompt range with no standing permission); still advisory.
  *
  * <p><b>Threading.</b> Any thread. On the server thread a call runs one non-blocking step, and
  * {@link WaitMode#UNTIL_ANSWERED} is treated as {@link WaitMode#NONE} (with one WARN per run of
@@ -229,6 +231,42 @@ public final class SupplyWithdrawals {
         }
         return SupplyWithdrawalPolicy.grantableEstimate(SupplyRequestService.itemKeyOf(world, stack), config,
                 countInThisChest);
+    }
+
+    /**
+     * {@link #grantableEstimate} for {@code bot} at the chest at {@code chestPos}, or 0 when a
+     * request from this bot for this chest would be refused before the owner could answer: the
+     * bot has no owner, the item fails the pre-filter, the chest has no readable key, or neither a
+     * standing permission covers the chest nor is the owner in prompt range (which covers a bot
+     * noted away; {@link SupplyWithdrawalPolicy#previewAllows}). Advisory, like the estimate:
+     * nothing is asked, logged or moved, no ticket, grant or owner-away note is read or changed,
+     * so an unspent grant can still make a take possible where this says 0, and the owner can
+     * still say no where it does not.
+     *
+     * <p>Server thread only; 0 on any other thread (one WARN per run, shared with the estimate),
+     * when the service is not running, or when an argument is missing.
+     */
+    public static int grantablePreview(ServerPlayerEntity bot, BlockPos chestPos, ItemStack sample,
+                                       int countInThisChest) {
+        if (bot == null || bot.isRemoved() || chestPos == null || !SupplyRequestService.isRunning()) {
+            return 0;
+        }
+        ServerWorld world = bot.getEntityWorld();
+        int estimate = grantableEstimate(world, sample, countInThisChest);
+        if (estimate <= 0) {
+            return 0;
+        }
+        SupplyRequestPolicy.Config config = SupplyRequestService.config();
+        if (config == null) {
+            return 0;
+        }
+        UUID owner = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
+        Verdict verdict = SupplyRequestPolicy.classify(SupplyRequestService.itemKeyOf(world, sample), config);
+        ChestKey chestKey = owner == null ? null : SupplyRequestService.chestKeyAt(world, chestPos);
+        boolean always = chestKey != null && SupplyRequestService.hasAlways(owner, chestKey);
+        boolean inRange = chestKey != null && !always && SupplyRequestService.isOwnerInPromptRange(bot, owner);
+        return SupplyWithdrawalPolicy.previewAllows(owner != null, verdict, chestKey != null, always, inRange)
+                ? estimate : 0;
     }
 
     // ── One step (server thread) ─────────────────────────────────────────────────────────────

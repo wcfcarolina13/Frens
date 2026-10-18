@@ -233,8 +233,11 @@ public final class BotEmergencyRescueService {
         boolean noHardBlockTool = !hasUsablePickaxe(bot);
         boolean noScaffoldBlocks = countScaffoldBlocks(bot) < MIN_SCAFFOLD_FOR_ESCAPE;
         boolean hasEdibleFood = hasAnyEdibleFood(bot);
-        // Only chest food the owner's supply rules would grant (reserve, allowlist, reach, chests only): the real take's own rule.
-        boolean hasChestFood = !hasEdibleFood && BotMutualAidService.hasGrantableChestFood(bot, world);
+        // Only chest food the owner's supply rules would grant (reserve, allowlist, reach, chests only, owner
+        // reachable, no refusal hold): the real take's own rule. Only a starving, trapped bot can be dire, so
+        // only it pays for the chest scan; for any other bot the answer changes nothing but the unread reason.
+        boolean hasChestFood = starving && trapped && !hasEdibleFood
+                && BotMutualAidService.hasGrantableChestFood(bot, world);
         boolean hasFoodPath = hasEdibleFood
                 || hasChestFood
                 || hasNearbyAllyFood(bot, world.getServer());

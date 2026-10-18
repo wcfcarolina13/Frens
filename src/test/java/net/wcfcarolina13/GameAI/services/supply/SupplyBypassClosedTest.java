@@ -39,7 +39,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  *   inventory everywhere, so a blanket regex on them could not tell a bypass from a craft.</li>
  *   <li><b>Choke points name the facade.</b> Each method the Phase 3 sites now funnel through
  *   calls {@code SupplyWithdrawals.withdraw(} (or {@code grantableEstimate(} for an availability
- *   estimate) and, like the listings that feed them, holds no raw item move.</li>
+ *   estimate, or {@code grantablePreview(}, which itself counts by {@code grantableEstimate(}) and,
+ *   like the listings that feed them, holds no raw item move.</li>
  *   <li><b>Deleted pulls stay deleted.</b> The raw container pulls removed from HuntSkill,
  *   ToolProvisionService and CraftingHelper are not back, and ToolProvisionService's chest listing
  *   keeps no chest handle to move items through.</li>
@@ -64,7 +65,7 @@ class SupplyBypassClosedTest {
     private static final String HUNT = SKILLS + "impl/HuntSkill.java";
 
     private static final String ROUTED = "automatic chest→bot moves must go through SupplyWithdrawals.withdraw(...) "
-            + "(SupplyWithdrawals.grantableEstimate(...) for an availability estimate)";
+            + "(SupplyWithdrawals.grantableEstimate(...) or grantablePreview(...) for an availability estimate)";
 
     /** How many container-access sites a file may hold, and why it may hold them. */
     private record Allowed(int sites, String reason) {
@@ -142,6 +143,10 @@ class SupplyBypassClosedTest {
     private static final Pattern WITHDRAW_CALL = Pattern.compile("\\bSupplyWithdrawals\\s*\\.\\s*withdraw\\s*\\(");
     private static final Pattern GRANTABLE_CALL =
             Pattern.compile("\\bSupplyWithdrawals\\s*\\.\\s*grantableEstimate\\s*\\(");
+    private static final Pattern PREVIEW_CALL =
+            Pattern.compile("\\bSupplyWithdrawals\\s*\\.\\s*grantablePreview\\s*\\(");
+    /** An unqualified call, as the facade makes to its own estimate. */
+    private static final Pattern OWN_GRANTABLE_CALL = Pattern.compile("(?<![\\w.])grantableEstimate\\s*\\(");
     private static final Pattern ASK_FOR_FOOD_CALL = Pattern.compile("(?<![\\w.])askForFood\\s*\\(");
     /** A raw item move on some inventory: what a choke point must leave to the facade. */
     private static final Pattern RAW_MOVE = Pattern.compile(
@@ -259,7 +264,11 @@ class SupplyBypassClosedTest {
         assertCalls(MUTUAL_AID, "askForFood", WITHDRAW_CALL);
         assertCalls(MUTUAL_AID, "takeFoodFromChest", GRANTABLE_CALL);
         assertCalls(MUTUAL_AID, "takeFoodFromChest", ASK_FOR_FOOD_CALL);
-        assertCalls(MUTUAL_AID, "hasGrantableChestFood", GRANTABLE_CALL);
+        // The rescue's advisory count goes through the facade's preview, which counts by the estimate.
+        assertCalls(MUTUAL_AID, "hasGrantableChestFood",
+                Pattern.compile("(?<![\\w.])scanForGrantableChestFood\\s*\\("));
+        assertCalls(MUTUAL_AID, "scanForGrantableChestFood", PREVIEW_CALL);
+        assertCalls(SUPPLY + "SupplyWithdrawals.java", "grantablePreview", OWN_GRANTABLE_CALL);
         assertCalls(CRAFTING, "withdrawFromNearbyChests", WITHDRAW_CALL);
         assertCalls(CRAFTING, "countItemsInInventoryAndNearbyChests", GRANTABLE_CALL);
     }
@@ -270,7 +279,7 @@ class SupplyBypassClosedTest {
         methods.put(TPS, List.of("pullFromReachableChests", "grantableChestCount", "scanContainers"));
         methods.put(CSS, List.of("askBeforeWalking", "withdrawMatchingWalkOnly"));
         methods.put(MUTUAL_AID, List.of("tryTakeFoodFromSharedChest", "takeFoodFromChest", "askForFood", "listChestFood",
-                "hasGrantableChestFood", "mergedChestAt"));
+                "hasGrantableChestFood", "scanForGrantableChestFood", "mergedChestAt"));
         methods.put(CRAFTING, List.of("withdrawFromNearbyChests", "countItemsInInventoryAndNearbyChests",
                 "findPullCandidates"));
         List<String> offenders = new ArrayList<>();
@@ -353,6 +362,11 @@ class SupplyBypassClosedTest {
         assertFalse(WITHDRAW_CALL.matcher("SupplyWithdrawals.withdrawn(); SupplyWithdrawals.Result r;").find());
         assertTrue(GRANTABLE_CALL.matcher("int g = SupplyWithdrawals.grantableEstimate(world, sample, 5);").find());
         assertFalse(GRANTABLE_CALL.matcher("SupplyWithdrawals.withdraw(a); grantableEstimate(w, s, 1);").find());
+        assertTrue(PREVIEW_CALL.matcher("if (SupplyWithdrawals.grantablePreview(bot, pos, s, 3) > 0)").find());
+        assertFalse(PREVIEW_CALL.matcher("SupplyWithdrawals.grantableEstimate(w, s, 1); grantablePreview(b, p, s, 1);")
+                .find());
+        assertTrue(OWN_GRANTABLE_CALL.matcher("int estimate = grantableEstimate(world, sample, n);").find());
+        assertFalse(OWN_GRANTABLE_CALL.matcher("x.grantableEstimate(w, s, 1); grantableEstimates(a);").find());
         assertTrue(ASK_FOR_FOOD_CALL.matcher("result = askForFood(bot, chestPos, food.sample(), pieces);").find());
         assertFalse(ASK_FOR_FOOD_CALL.matcher("x.askForFood(a); askForFoodLater(b);").find());
 

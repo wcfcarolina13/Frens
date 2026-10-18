@@ -333,8 +333,70 @@ class MutualAidChestFoodPolicyTest {
                 "a failure should hold off only its own kind");
     }
 
+    @Test
+    void onlyTheOwnersDecisionOrAbsenceWithholdsChestFood() {
+        Set<Next> withholding = EnumSet.noneOf(Next.class);
+        for (Next next : Next.values()) {
+            if (MutualAidChestFoodPolicy.withholdsChestFood(next)) {
+                withholding.add(next);
+            }
+        }
+        assertEquals(EnumSet.of(Next.PAUSE, Next.DEFER), withholding);
+        assertFalse(MutualAidChestFoodPolicy.withholdsChestFood(null));
+        // A withholding end is always one of the long holds, never the plain throttle.
+        for (Next next : withholding) {
+            assertTrue(MutualAidChestFoodPolicy.probeDelayTicks(next) > MutualAidChestFoodPolicy.THROTTLE_TICKS, next.name());
+        }
+    }
+
+    @Test
+    void aChestFoodAnswerIsFreshForUnderTwentyTicksAtTheSameBlockAndStarvingFlag() {
+        long ttl = MutualAidChestFoodPolicy.CHEST_FOOD_MEMO_TICKS;
+        assertEquals(20L, ttl);
+        assertTrue(MutualAidChestFoodPolicy.isFresh(100, 100, 7L, 7L, true, true), "same tick");
+        assertTrue(MutualAidChestFoodPolicy.isFresh(100, 100 + ttl - 1, 7L, 7L, true, true), "19 ticks old");
+        assertFalse(MutualAidChestFoodPolicy.isFresh(100, 100 + ttl, 7L, 7L, true, true), "20 ticks old");
+        assertFalse(MutualAidChestFoodPolicy.isFresh(100, 99, 7L, 7L, true, true), "from the future (tick reset)");
+        assertFalse(MutualAidChestFoodPolicy.isFresh(100, 105, 7L, 8L, true, true), "the bot moved a block");
+        assertFalse(MutualAidChestFoodPolicy.isFresh(100, 105, 7L, 7L, true, false), "no longer starving");
+        assertFalse(MutualAidChestFoodPolicy.isFresh(100, 105, 7L, 7L, false, true), "now starving");
+    }
+
+    @Test
+    void theRescuesChestFoodCountReadsTheHoldBeforeTheMemoAndAHoldClearsIt() throws IOException {
+        String source = mutualAidSource();
+        String has = bodyOf(source, "public static boolean hasGrantableChestFood(");
+        int hold = has.indexOf("CHEST_FOOD_WITHHELD_UNTIL");
+        int memo = has.indexOf("MutualAidChestFoodPolicy.isFresh(");
+        assertTrue(hold >= 0 && memo > hold, "a refusal hold must be read before any remembered answer");
+        assertTrue(has.indexOf("server.isOnThread()") >= 0 && has.indexOf("server.isOnThread()") < hold,
+                "off the server thread nothing is read or remembered");
+        String holdOff = bodyOf(source, "void holdOffChestFood(");
+        assertTrue(holdOff.contains("MutualAidChestFoodPolicy.withholdsChestFood(next)"), "the hold decides by the policy");
+        assertTrue(holdOff.contains("CHEST_FOOD_WITHHELD_UNTIL.merge("), "the hold is never shortened");
+        assertTrue(holdOff.contains("CHEST_FOOD_MEMO.remove("), "a hold drops the remembered answer");
+        String take = bodyOf(source, "boolean tryTakeFoodFromSharedChest(");
+        assertTrue(take.contains("CHEST_FOOD_MEMO.remove(botId)") && take.contains("CHEST_FOOD_WITHHELD_UNTIL.remove(botId)"),
+                "a take clears the hold and the remembered answer");
+        assertTrue(source.contains("pruneMap(CHEST_FOOD_WITHHELD_UNTIL, knownBots);")
+                && source.contains("pruneMap(CHEST_FOOD_MEMO, knownBots);"), "both maps are pruned");
+    }
+
+    @Test
+    void theRescueScansChestsOnlyForAStarvingTrappedBot() throws IOException {
+        String assess = bodyOf(serviceSource("BotEmergencyRescueService.java"),
+                "public static DireStraitsAssessment assessDireStraits(");
+        int call = assess.indexOf("BotMutualAidService.hasGrantableChestFood(");
+        int gate = assess.indexOf("starving && trapped && !hasEdibleFood");
+        assertTrue(gate >= 0 && call > gate, "only a bot that can be dire pays for the chest scan");
+    }
+
     private static String mutualAidSource() throws IOException {
-        String relative = "src/main/java/net/wcfcarolina13/GameAI/services/BotMutualAidService.java";
+        return serviceSource("BotMutualAidService.java");
+    }
+
+    private static String serviceSource(String file) throws IOException {
+        String relative = "src/main/java/net/wcfcarolina13/GameAI/services/" + file;
         Path dir = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
         for (Path at = dir; at != null; at = at.getParent()) {
             Path candidate = at.resolve(relative);

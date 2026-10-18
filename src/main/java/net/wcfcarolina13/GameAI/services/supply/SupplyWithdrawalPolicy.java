@@ -479,6 +479,32 @@ public final class SupplyWithdrawalPolicy {
         return ownerInRange ? OwnerAwayStep.FORGET_AND_ASK : OwnerAwayStep.REFUSE_QUIETLY;
     }
 
+    // ── Advisory preview ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Whether a request for an item judged {@code verdict} at a chest could get anywhere now, for
+     * {@link SupplyWithdrawals#grantablePreview}: the bot has an owner, the item passes the
+     * pre-filter, the chest has a key, and either a standing permission covers the chest or the
+     * owner is in prompt range. A bot noted away ({@link #ownerAwayStep} would refuse quietly)
+     * falls under the last clause: that refusal needs no "always" and the owner out of range, so it
+     * is never allowed here. An owner out of range without a note is not allowed either: the
+     * request would come back {@code OWNER_NOT_NEARBY}. Advisory: tickets and grants are not seen,
+     * so an unspent grant the owner gave before leaving reads as not allowed.
+     *
+     * @param hasOwner      the bot resolves to an owner
+     * @param verdict       the item's {@link SupplyRequestPolicy#classify} verdict
+     * @param chestKeyKnown the chest's canonical key could be read
+     * @param alwaysCovers  the owner has a standing permission for this chest
+     * @param ownerInRange  the owner is online, in the bot's world and within prompt range now
+     */
+    public static boolean previewAllows(boolean hasOwner, Verdict verdict, boolean chestKeyKnown,
+                                        boolean alwaysCovers, boolean ownerInRange) {
+        if (!hasOwner || !passesPreFilter(verdict) || !chestKeyKnown) {
+            return false;
+        }
+        return alwaysCovers || ownerInRange;
+    }
+
     // ── Request outcome ──────────────────────────────────────────────────────────────────────
 
     /** What the facade does after a request. */

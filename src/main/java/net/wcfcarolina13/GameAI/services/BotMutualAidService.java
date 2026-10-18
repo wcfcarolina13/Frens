@@ -91,6 +91,13 @@ public final class BotMutualAidService {
     private static final Map<UUID, Long> NEXT_CHEST_TICK = new ConcurrentHashMap<>();
     /** The chest whose owner a bot asked for food and has not heard back from; asked first next time. Server thread. */
     private static final Map<UUID, BlockPos> ASKED_FOOD_CHEST = new ConcurrentHashMap<>();
+    /**
+     * Until this tick a bot counts on no shared-chest food: its last attempt ended in the owner's
+     * decision or the owner away ({@link MutualAidChestFoodPolicy#withholdsChestFood}). Server thread.
+     */
+    private static final Map<UUID, Long> CHEST_FOOD_WITHHELD_UNTIL = new ConcurrentHashMap<>();
+    /** The last {@link #hasGrantableChestFood} answer per bot, reused while {@link MutualAidChestFoodPolicy#isFresh}. Server thread. */
+    private static final Map<UUID, ChestFoodMemo> CHEST_FOOD_MEMO = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> NEXT_SHARE_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> NEXT_SEEK_AID_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> NEXT_REGROUP_TICK = new ConcurrentHashMap<>();
@@ -313,6 +320,8 @@ public final class BotMutualAidService {
         }
         pruneMap(NEXT_CHEST_TICK, knownBots);
         pruneMap(ASKED_FOOD_CHEST, knownBots);
+        pruneMap(CHEST_FOOD_WITHHELD_UNTIL, knownBots);
+        pruneMap(CHEST_FOOD_MEMO, knownBots);
         pruneMap(NEXT_SHARE_TICK, knownBots);
         pruneMap(NEXT_SEEK_AID_TICK, knownBots);
         pruneMap(NEXT_REGROUP_TICK, knownBots);
@@ -654,6 +663,9 @@ public final class BotMutualAidService {
                 ASKED_FOOD_CHEST.remove(botId);
             }
             if (next == Next.TAKEN) {
+                // A take proves the chests serve this bot again; the rescue's next look recounts.
+                CHEST_FOOD_WITHHELD_UNTIL.remove(botId);
+                CHEST_FOOD_MEMO.remove(botId);
                 HealingService.autoEat(bot);
                 return true;
             }
@@ -671,13 +683,22 @@ public final class BotMutualAidService {
         return false;
     }
 
+    /** One {@link #hasGrantableChestFood} answer: when, where (packed block), for which starving flag. */
+    private record ChestFoodMemo(long tick, long posKey, boolean starving, boolean result) {
+    }
+
     /**
      * Whether a shared chest in reach holds food the supply rules would grant this bot: the same
-     * chests, reach, merged double chests and per-food {@link SupplyWithdrawals#grantableEstimate}
-     * (allowlist, food reserve) the take in {@link #tryTakeFoodFromSharedChest} uses. Advisory: no
-     * owner is asked and nothing moves, so the owner's answer or absence can still refuse. False
-     * off the server thread (chest contents are not readable there) and for a bot with no owner,
-     * whom nobody may approve a take for.
+     * chests, reach and merged double chests the take in {@link #tryTakeFoodFromSharedChest} uses,
+     * each food counted by {@link SupplyWithdrawals#grantablePreview} (allowlist, food reserve, an
+     * owner with a standing permission for the chest or in prompt range). False while the bot's
+     * last attempt left chest food withheld (the owner said no, or was away), off the server thread
+     * (chest contents are not readable there), and for a bot with no owner, whom nobody may approve
+     * a take for. Advisory: no owner is asked and nothing moves, so the owner can still refuse.
+     *
+     * <p>An answer is reused for {@link MutualAidChestFoodPolicy#CHEST_FOOD_MEMO_TICKS} at the same
+     * block and starving flag, so a starving bot's per-tick rescue check does not rescan chests every
+     * tick. A hold is read before the memo and clears it, so a refusal counts at once.
      */
     public static boolean hasGrantableChestFood(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null || bot.isRemoved()) {
@@ -690,7 +711,24 @@ public final class BotMutualAidService {
         if (CompanionCommunicationPolicy.resolveOwnerUuid(bot) == null) {
             return false;
         }
+        UUID botId = bot.getUuid();
+        long nowTick = server.getTicks();
+        if (nowTick < CHEST_FOOD_WITHHELD_UNTIL.getOrDefault(botId, Long.MIN_VALUE)) {
+            return false;
+        }
         boolean starving = bot.getHungerManager().getFoodLevel() <= STARVING_THRESHOLD;
+        long posKey = bot.getBlockPos().asLong();
+        ChestFoodMemo memo = CHEST_FOOD_MEMO.get(botId);
+        if (memo != null && MutualAidChestFoodPolicy.isFresh(memo.tick(), nowTick, memo.posKey(), posKey,
+                memo.starving(), starving)) {
+            return memo.result();
+        }
+        boolean result = scanForGrantableChestFood(bot, world, starving);
+        CHEST_FOOD_MEMO.put(botId, new ChestFoodMemo(nowTick, posKey, starving, result));
+        return result;
+    }
+
+    private static boolean scanForGrantableChestFood(ServerPlayerEntity bot, ServerWorld world, boolean starving) {
         for (BlockPos chestPos : collectCandidateFoodChests(bot, world)) {
             if (!BlockInteractionService.canInteract(bot, chestPos)) {
                 continue;
@@ -700,7 +738,7 @@ public final class BotMutualAidService {
                 continue;
             }
             for (ChestFood food : listChestFood(chest, starving)) {
-                if (SupplyWithdrawals.grantableEstimate(world, food.sample(), food.count()) > 0) {
+                if (SupplyWithdrawals.grantablePreview(bot, chestPos, food.sample(), food.count()) > 0) {
                     return true;
                 }
             }
@@ -727,7 +765,13 @@ public final class BotMutualAidService {
      */
     private static void holdOffChestFood(ServerPlayerEntity bot, ServerWorld world, Next next) {
         long delay = MutualAidChestFoodPolicy.probeDelayTicks(next);
-        NEXT_CHEST_TICK.merge(bot.getUuid(), world.getServer().getTicks() + delay, Math::max);
+        long until = world.getServer().getTicks() + delay;
+        NEXT_CHEST_TICK.merge(bot.getUuid(), until, Math::max);
+        if (MutualAidChestFoodPolicy.withholdsChestFood(next)) {
+            // The rescue stops counting chest food now, not when its memo runs out.
+            CHEST_FOOD_WITHHELD_UNTIL.merge(bot.getUuid(), until, Math::max);
+            CHEST_FOOD_MEMO.remove(bot.getUuid());
+        }
         if (delay > MutualAidChestFoodPolicy.THROTTLE_TICKS) {
             LOGGER.debug("Mutual aid: {} leaves shared chests alone for {} s ({})",
                     bot.getName().getString(), delay / 20L, next);

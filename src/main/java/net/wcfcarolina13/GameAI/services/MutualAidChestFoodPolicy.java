@@ -38,6 +38,9 @@ public final class MutualAidChestFoodPolicy {
     /** After an attempt that found the owner away and got nothing else: no chest is asked for a flat 60 s. */
     public static final long OWNER_AWAY_DEFER_TICKS = 20L * 60L;
 
+    /** How long, in server ticks, an answer to "is there chest food this bot could be granted" is reused (1 s). */
+    public static final long CHEST_FOOD_MEMO_TICKS = 20L;
+
     private MutualAidChestFoodPolicy() {
     }
 
@@ -181,6 +184,36 @@ public final class MutualAidChestFoodPolicy {
      */
     public static Next endOfAttempt(boolean ownerAwaySeen) {
         return ownerAwaySeen ? Next.DEFER : Next.STOP;
+    }
+
+    /**
+     * Whether an attempt that ended in {@code next} means the bot cannot count on shared-chest food
+     * until the hold ends: the owner's decision ({@link Next#PAUSE}) or the owner away at every
+     * chest that had any ({@link Next#DEFER}). The plain throttle after anything else says nothing
+     * about the chests, so it withholds nothing.
+     */
+    public static boolean withholdsChestFood(Next next) {
+        return next == Next.PAUSE || next == Next.DEFER;
+    }
+
+    /**
+     * Whether a remembered answer to "is there grantable chest food" still holds: taken less than
+     * {@link #CHEST_FOOD_MEMO_TICKS} ago (and not in the future, as after a server tick reset), at
+     * the same block, with the same starving flag (which decides whether rotten food counts).
+     *
+     * @param memoTick     server tick the answer was computed at
+     * @param nowTick      server tick now
+     * @param memoPosKey   the bot's block then, packed ({@code BlockPos.asLong()})
+     * @param nowPosKey    the bot's block now, packed the same way
+     * @param memoStarving whether the bot counted as starving then
+     * @param nowStarving  whether it does now
+     */
+    public static boolean isFresh(long memoTick, long nowTick, long memoPosKey, long nowPosKey,
+                                  boolean memoStarving, boolean nowStarving) {
+        long age = nowTick - memoTick;
+        return age >= 0 && age < CHEST_FOOD_MEMO_TICKS
+                && memoPosKey == nowPosKey
+                && memoStarving == nowStarving;
     }
 
     /** How long, in server ticks, before this bot asks a chest for food again after an attempt ended in {@code next}. */

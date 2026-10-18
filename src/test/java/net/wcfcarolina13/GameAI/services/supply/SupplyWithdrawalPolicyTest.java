@@ -102,8 +102,41 @@ class SupplyWithdrawalPolicyTest {
     }
 
     @Test
+    void previewAllowsOnlyAnOwnedEligibleReadableChestWithAlwaysOrTheOwnerInRange() {
+        assertTrue(SupplyWithdrawalPolicy.previewAllows(true, Verdict.ELIGIBLE, true, true, false), "always covers");
+        assertTrue(SupplyWithdrawalPolicy.previewAllows(true, Verdict.ELIGIBLE, true, false, true), "owner in range");
+        assertTrue(SupplyWithdrawalPolicy.previewAllows(true, Verdict.ELIGIBLE, true, true, true));
+        assertFalse(SupplyWithdrawalPolicy.previewAllows(true, Verdict.ELIGIBLE, true, false, false),
+                "no always and the owner out of range: the request would find the owner away");
+        assertFalse(SupplyWithdrawalPolicy.previewAllows(false, Verdict.ELIGIBLE, true, true, true), "no owner");
+        assertFalse(SupplyWithdrawalPolicy.previewAllows(true, Verdict.ELIGIBLE, false, true, true), "no chest key");
+        assertFalse(SupplyWithdrawalPolicy.previewAllows(true, null, true, true, true), "no verdict fails closed");
+        for (Verdict verdict : Verdict.values()) {
+            assertEquals(SupplyWithdrawalPolicy.passesPreFilter(verdict),
+                    SupplyWithdrawalPolicy.previewAllows(true, verdict, true, true, true),
+                    "the preview refuses exactly what the pre-filter refuses: " + verdict);
+        }
+    }
+
+    @Test
+    void previewNeverAllowsWhatTheOwnerAwayStepRefusesQuietly() {
+        for (boolean noted : new boolean[]{false, true}) {
+            for (boolean always : new boolean[]{false, true}) {
+                for (boolean inRange : new boolean[]{false, true}) {
+                    boolean allowed = SupplyWithdrawalPolicy.previewAllows(true, Verdict.ELIGIBLE, true, always, inRange);
+                    if (SupplyWithdrawalPolicy.ownerAwayStep(noted, always, inRange)
+                            == SupplyWithdrawalPolicy.OwnerAwayStep.REFUSE_QUIETLY) {
+                        assertFalse(allowed, "noted=" + noted + " always=" + always + " inRange=" + inRange);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void chestFoodCountsForEmergencyRescueOnlyAboveTheReserveAndOnTheAllowlist() {
-        // BotEmergencyRescueService asks BotMutualAidService.hasGrantableChestFood, which counts by this estimate.
+        // BotEmergencyRescueService asks BotMutualAidService.hasGrantableChestFood, which counts by
+        // SupplyWithdrawals.grantablePreview: this estimate, gated by previewAllows.
         Config cfg = Config.defaults();
         assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(BREAD, cfg, 5), "5 bread is under the reserve of 8");
         assertEquals(1, SupplyWithdrawalPolicy.grantableEstimate(BREAD, cfg, 9), "9 bread spares one");
