@@ -89,6 +89,10 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "the per-hobby backoff state is written for hunt and collect_dirt but read only by woodcut — ready if a later item gates `pickHobby` on tool availability." (1.1.216 handoff, 2026-09-07)
 - [ ] "Farm manual placement still has multiple `Heightmap.Type.WORLD_SURFACE` / `findSurfaceY` call sites outside `assessFarmSite`." ("If they misbehave in forests, apply the same walkable-ground-Y treatment"; Farm Pipeline next-session notes, 2026-04-08)
 - [ ] (uncertain) "PvE only. ... Alliances feature is the planned PvP gate, not yet built." (Tamed-animal defense notes, 2026-04-11)
+- [ ] Field check (from .ralph/progress.md, 2026-03-27, never moved to a field phase; re-check against current hunger/cooking code first): spawn bot, give sword, set hunger to 3, verify it hunts and doesn't stop until 4+ food items (.ralph/progress.md, now in docs/handoffs/ARCHIVE_2026.md)
+- [ ] Field check (same source): after a hunt, the bot walks to a furnace and cooks all raw food types in turn (.ralph/progress.md)
+- [ ] Field check (same source): give the bot raw chicken + raw porkchop, verify the idle hobby picks "cook" (.ralph/progress.md)
+- [ ] Field check (same source): bot at food=8 with zero inventory food, verify auto-hunt still triggers (.ralph/progress.md)
 
 ### Multiplayer, ownership and permissions
 - [ ] "join-check commander radius" (48; 1.1.236 handoff, 2026-10-14)
@@ -171,7 +175,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 
 ## Backlog Lineup 2026-09-03
 
-**Where things stand:** main at 1.1.199, deployed to all three Prism instances, 240 commits
+**Where things stood on 2026-09-03 (historical lineup, kept for its open lines; current state is the handoff at the top):** main at 1.1.199, deployed to all three Prism instances, 240 commits
 unpushed to origin (Bradley must say push). Everything 1.1.185→1.1.199 shipped 2026-08-29/30 and
 has only had a four-minute smoke run (1.21.11 `latest.log`, 01:13–01:17 on 08-30), so the soul
 track is validation-bound before anything new starts. Suite 621 green.
@@ -238,7 +242,7 @@ track is validation-bound before anything new starts. Suite 621 green.
 
 # Backlog
 
-Future work items, organized by priority. Not active Ralph criteria — these are candidates for future RALPH_TASK.md iterations.
+Future work items, organized by priority. Candidates for future builds through the frens-release-loop skill.
 
 ## P1 — High
 

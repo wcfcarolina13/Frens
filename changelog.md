@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Ralph loop retired (2026-10-17, no build)
+
+Bradley asked whether the project's Ralph system was redundant next to the release-loop skill, the changelog and auto-memory. Fable's verdict: retire the loop, keep the live artifacts, rename nothing. Done in phases with a retention audit first, so no rule or deferred item was lost.
+- **Guardrails tracked** (`b047c235`, `41b504f5`): `docs/GUARDRAILS.md`, readable from worktrees. Two Signs that later fixes made wrong were corrected (MiningTool does check line of sight, the inventory snapshot is the only truth). 14 Signs already stated in CLAUDE.md or memory moved to an index naming where they live. The door known-good list and test procedure came over from old session notes.
+- **RALPH_TASK.md trimmed** (`217c76c4`, 213 KB to 73 KB): 120 deferred items that only old handoffs remembered are now open lines under "Recovered deferrals (2026-10-17)". Stale checkboxes fixed. The top handoff stands alone. Superseded handoffs, session notes, Ralph Instructions and `.ralph/progress.md` are in `docs/handoffs/ARCHIVE_2026.md`.
+- **Loop removed** (this commit): `scripts/init-ralph.sh`, `ralph-common.sh`, `ralph-loop.sh`, `ralph-once.sh` (no consumer since 2026-03) and the untracked `.ralph/` state. CLAUDE.md's Ralph section is now "Task Discipline" (wrong-criterion stop, 3-strike stop, commit cadence). Four food and hunting field checks that lived only in `progress.md` are backlog lines.
+- The frens-release-loop skill reads `docs/GUARDRAILS.md` and gained a red flag: read and test a stalled implementer's diff before re-dispatching.
+
 ## Unified search routes around its own breaks, faster empty cleanup, craft and leaf follow-ups; 1.1.267 (2026-10-17)
 
 The 1.1.266 handoff items (F route fix and four minors), plus one finding from today's sandbox recheck of 1.1.266 (B still took about 2 minutes, see the 1.1.266 entry). Each item was scoped read-only first. All four minors were true as written.
