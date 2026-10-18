@@ -92,12 +92,12 @@ class SupplyBypassClosedTest {
                 "findPullCandidates' read-only listing for the facade (1.1.245: dead stash/offload deposit chain and "
                         + "private placeChestNearBot overload deleted, 3 -> 1)");
         allow(MUTUAL_AID, 1,
-                "merged chest read-only listing; every take goes through askForFood (facade)");
+                "merged chest read-only listing (mergedChestAt, shared by the take and hasGrantableChestFood); "
+                        + "every take goes through askForFood (facade)");
         allow(SERVICES + "NavigationArtifactService.java", 2,
                 "storage-screen Collect after fast travel: owner-initiated, exempt per DESIGN; since 1.1.220 "
                         + "owner-gated, and the arrival take checks ChestBlockEntity then binds it (two sites, one take)");
         allow(SERVICES + "BotChestRegistryService.java", 1, "read-only contents snapshot (refreshAllSnapshots)");
-        allow(SERVICES + "BotEmergencyRescueService.java", 1, "read-only availability probe: is there chest food nearby");
         allow(SERVICES + "SmeltingService.java", 10,
                 "furnace input/output (not a chest; out of scope per DESIGN) + deposits of furnace output into chests");
         allow(SERVICES + "FurnaceOffloadService.java", 2, "furnace fuel slot: read + deposit only (not a chest)");
@@ -259,6 +259,7 @@ class SupplyBypassClosedTest {
         assertCalls(MUTUAL_AID, "askForFood", WITHDRAW_CALL);
         assertCalls(MUTUAL_AID, "takeFoodFromChest", GRANTABLE_CALL);
         assertCalls(MUTUAL_AID, "takeFoodFromChest", ASK_FOR_FOOD_CALL);
+        assertCalls(MUTUAL_AID, "hasGrantableChestFood", GRANTABLE_CALL);
         assertCalls(CRAFTING, "withdrawFromNearbyChests", WITHDRAW_CALL);
         assertCalls(CRAFTING, "countItemsInInventoryAndNearbyChests", GRANTABLE_CALL);
     }
@@ -268,7 +269,8 @@ class SupplyBypassClosedTest {
         Map<String, List<String>> methods = new LinkedHashMap<>();
         methods.put(TPS, List.of("pullFromReachableChests", "grantableChestCount", "scanContainers"));
         methods.put(CSS, List.of("askBeforeWalking", "withdrawMatchingWalkOnly"));
-        methods.put(MUTUAL_AID, List.of("tryTakeFoodFromSharedChest", "takeFoodFromChest", "askForFood", "listChestFood"));
+        methods.put(MUTUAL_AID, List.of("tryTakeFoodFromSharedChest", "takeFoodFromChest", "askForFood", "listChestFood",
+                "hasGrantableChestFood", "mergedChestAt"));
         methods.put(CRAFTING, List.of("withdrawFromNearbyChests", "countItemsInInventoryAndNearbyChests",
                 "findPullCandidates"));
         List<String> offenders = new ArrayList<>();

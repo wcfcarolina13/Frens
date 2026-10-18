@@ -102,6 +102,16 @@ class SupplyWithdrawalPolicyTest {
     }
 
     @Test
+    void chestFoodCountsForEmergencyRescueOnlyAboveTheReserveAndOnTheAllowlist() {
+        // BotEmergencyRescueService asks BotMutualAidService.hasGrantableChestFood, which counts by this estimate.
+        Config cfg = Config.defaults();
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(BREAD, cfg, 5), "5 bread is under the reserve of 8");
+        assertEquals(1, SupplyWithdrawalPolicy.grantableEstimate(BREAD, cfg, 9), "9 bread spares one");
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(ItemKey.plain("minecraft:rotten_flesh"), cfg, 64),
+                "rotten flesh is not allowlisted");
+    }
+
+    @Test
     void theEstimateIsZeroForAnythingThePreFilterRefuses() {
         Config cfg = Config.defaults();
         assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(ItemKey.plain("minecraft:diamond"), cfg, 64),

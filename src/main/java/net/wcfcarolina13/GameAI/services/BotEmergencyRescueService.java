@@ -57,7 +57,6 @@ public final class BotEmergencyRescueService {
     private static final double HELPER_BED_RANGE_SQ = 24.0D * 24.0D;
     private static final double HELPER_CHEST_RANGE_SQ = 16.0D * 16.0D;
     private static final double HELPER_SAFE_RADIUS = 4.0D;
-    private static final double CHEST_FOOD_SCAN_RADIUS = 12.0D;
     private static final double ALLY_FOOD_RADIUS = 10.0D;
     public record DireStraitsAssessment(boolean dire,
                                         boolean trapped,
@@ -233,12 +232,15 @@ public final class BotEmergencyRescueService {
                 bot.getUuid(), nowTick, SURFACE_FAILURE_WINDOW_TICKS);
         boolean noHardBlockTool = !hasUsablePickaxe(bot);
         boolean noScaffoldBlocks = countScaffoldBlocks(bot) < MIN_SCAFFOLD_FOR_ESCAPE;
-        boolean hasFoodPath = hasAnyEdibleFood(bot)
-                || hasNearbyStorageFood(bot, world)
+        boolean hasEdibleFood = hasAnyEdibleFood(bot);
+        // Only chest food the owner's supply rules would grant (reserve, allowlist, reach, chests only): the real take's own rule.
+        boolean hasChestFood = !hasEdibleFood && BotMutualAidService.hasGrantableChestFood(bot, world);
+        boolean hasFoodPath = hasEdibleFood
+                || hasChestFood
                 || hasNearbyAllyFood(bot, world.getServer());
 
         BlockPos validatedShelter = BotFleeService.getValidatedShelterStandPos(bot);
-        if (validatedShelter != null && (hasAnyEdibleFood(bot) || hasNearbyStorageFood(bot, world))) {
+        if (validatedShelter != null && (hasEdibleFood || hasChestFood)) {
             return new DireStraitsAssessment(false, trapped, starving, false, noHardBlockTool,
                     noScaffoldBlocks, recentRecoveryFailure, "sheltered_with_food");
         }
@@ -889,38 +891,6 @@ public final class BotEmergencyRescueService {
         return world.getBlockState(pos).isOf(Blocks.CHEST)
                 || world.getBlockState(pos).isOf(Blocks.TRAPPED_CHEST)
                 || world.getBlockState(pos).isOf(Blocks.BARREL);
-    }
-
-    private static boolean hasNearbyStorageFood(ServerPlayerEntity bot, ServerWorld world) {
-        if (bot == null || world == null) {
-            return false;
-        }
-        BlockPos origin = bot.getBlockPos();
-        int radius = (int) Math.round(CHEST_FOOD_SCAN_RADIUS);
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dy = -4; dy <= 4; dy++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    BlockPos pos = origin.add(dx, dy, dz);
-                    if (origin.getSquaredDistance(pos) > CHEST_FOOD_SCAN_RADIUS * CHEST_FOOD_SCAN_RADIUS) {
-                        continue;
-                    }
-                    if (!isStorageBlock(world, pos)) {
-                        continue;
-                    }
-                    var be = world.getBlockEntity(pos);
-                    if (!(be instanceof net.minecraft.inventory.Inventory inv)) {
-                        continue;
-                    }
-                    for (int slot = 0; slot < inv.size(); slot++) {
-                        ItemStack stack = inv.getStack(slot);
-                        if (isEdibleStack(stack)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
     }
 
     private static boolean hasNearbyAllyFood(ServerPlayerEntity bot, MinecraftServer server) {

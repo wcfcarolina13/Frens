@@ -636,11 +636,7 @@ public final class BotMutualAidService {
                 continue;
             }
             BlockState state = world.getBlockState(chestPos);
-            if (!(state.getBlock() instanceof ChestBlock chestBlock)) {
-                continue;
-            }
-            // Both halves, as the supply policy counts them. Null when the lid is blocked, which it would refuse.
-            Inventory chest = ChestBlock.getInventory(chestBlock, state, world, chestPos, false);
+            Inventory chest = mergedChestAt(world, chestPos, state);
             if (chest == null) {
                 continue;
             }
@@ -673,6 +669,55 @@ public final class BotMutualAidService {
         }
         holdOffChestFood(bot, world, MutualAidChestFoodPolicy.endOfAttempt(ownerAwaySeen));
         return false;
+    }
+
+    /**
+     * Whether a shared chest in reach holds food the supply rules would grant this bot: the same
+     * chests, reach, merged double chests and per-food {@link SupplyWithdrawals#grantableEstimate}
+     * (allowlist, food reserve) the take in {@link #tryTakeFoodFromSharedChest} uses. Advisory: no
+     * owner is asked and nothing moves, so the owner's answer or absence can still refuse. False
+     * off the server thread (chest contents are not readable there) and for a bot with no owner,
+     * whom nobody may approve a take for.
+     */
+    public static boolean hasGrantableChestFood(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null || bot.isRemoved()) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null || !server.isOnThread()) {
+            return false;
+        }
+        if (CompanionCommunicationPolicy.resolveOwnerUuid(bot) == null) {
+            return false;
+        }
+        boolean starving = bot.getHungerManager().getFoodLevel() <= STARVING_THRESHOLD;
+        for (BlockPos chestPos : collectCandidateFoodChests(bot, world)) {
+            if (!BlockInteractionService.canInteract(bot, chestPos)) {
+                continue;
+            }
+            Inventory chest = mergedChestAt(world, chestPos, world.getBlockState(chestPos));
+            if (chest == null) {
+                continue;
+            }
+            for (ChestFood food : listChestFood(chest, starving)) {
+                if (SupplyWithdrawals.grantableEstimate(world, food.sample(), food.count()) > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The chest at {@code pos} with both halves, as the supply policy counts them; null when the
+     * block is not a {@link ChestBlock} or its lid is blocked (which the policy would refuse).
+     * Server thread.
+     */
+    private static Inventory mergedChestAt(ServerWorld world, BlockPos pos, BlockState state) {
+        if (!(state.getBlock() instanceof ChestBlock chestBlock)) {
+            return null;
+        }
+        return ChestBlock.getInventory(chestBlock, state, world, pos, false);
     }
 
     /**
