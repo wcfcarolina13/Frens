@@ -291,10 +291,15 @@ class Analyzer(object):
                 if thread.endswith("-" + b):
                     self.explicit = True
                     return b
-            if named:
+            bound = self.thread_bot.get(thread)
+            # A worker thread stays with its bot until a line binds it to another ("... for bot X", a skill start).
+            # A plain mention ("tree ... is claimed by Ash") on Birch's thread must not move the thread to Ash.
+            if named and (bound is None or named == bound or ("for bot " + named) in msg):
                 self.thread_bot[thread] = named
                 return named
-            return self.thread_bot.get(thread)
+            if named and bound is not None:
+                self.explicit = False
+            return bound
         return named
 
     def feed(self, line):

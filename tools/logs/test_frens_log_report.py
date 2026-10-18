@@ -468,5 +468,19 @@ class PruneTest(unittest.TestCase):
         self.assertIn("dry-run: archive 1 logs", buf.getvalue())
 
 
+
+class ThreadAttributionTest(unittest.TestCase):
+    def test_mention_of_another_bot_keeps_the_worker_thread(self):
+        rep = run_lines("""
+[00:13:28] [mod-command-skill-1/INFO]: Skill 'woodcut' starting for bot Ash on thread mod-command-skill-1
+[00:13:30] [mod-command-skill-2/INFO]: Skill 'woodcut' starting for bot Birch on thread mod-command-skill-2
+[00:13:46] [mod-command-skill-1/INFO]: Woodcut: selected tree target base=15, 77, -107 top=15, 81, -107 height=5
+[00:13:48] [mod-command-skill-2/INFO]: Woodcut: tree 15, 77, -107 is claimed by Ash, picking another
+[00:13:58] [mod-command-skill-2/INFO]: Woodcut: selected tree target base=17, 75, -114 top=17, 80, -114 height=6
+""")
+        trees = {name: [e["text"] for e in b["timeline"] if e["kind"] == "TREE"] for name, b in rep["bots"].items()}
+        self.assertTrue(any("17,75,-114" in t for t in trees.get("Birch", [])), trees)
+        self.assertFalse(any("17,75,-114" in t for t in trees.get("Ash", [])), trees)
+
 if __name__ == "__main__":
     unittest.main()
