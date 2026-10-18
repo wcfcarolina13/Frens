@@ -58,6 +58,10 @@ Fork: `~/dev/minecraft-mod-mcp-hardened`, branch `hardened`. Build `cd packages/
 | `keybind` id, action tap/hold/release, ms, force | yes | Presses an in-world key binding (mod or vanilla movement). Refused with a screen open unless `force=true`. Holding attack does not mine in control mode. |
 | `look` yaw, pitch | yes | Sets the player's rotation (aim a movement hold). |
 | `scroll` x, y, amount | yes | Mouse wheel on the open screen at screenshot pixels (negative = down). |
+| `window_shot` | no | Whole window as presented, including Flashback's ImGui editor (window pixels, not GUI-scaled). |
+| `raw_mouse` x, y, action move/click/down/up/scroll | yes | GLFW-level mouse at window pixels; reaches Flashback's ImGui (redirected polls while in control mode). |
+| `raw_key` key / `raw_text` text | yes | GLFW-level key and characters (Flashback's `I`/`O` In/Out keys, ImGui text fields). |
+| `flashback_save_path` path | yes | One-shot answer for Flashback's native save dialog (Start Export). Empty path clears; no path = status. |
 
 Repo helpers: `tools/sandbox/ft.py shot <name> [bot]` saves a 1200-px-wide screenshot (or bot view) to `$FT_DIR` and `ft.py clickr x y` / `ft.py scroll x y n` act in that image's pixels, for custom-drawn Frens screens that `screen_buttons` cannot see (Bot Controls, the bot inventory overlay). `tools/sandbox/forest.py X Y Z MIN BOT[:kit]...` runs a multi-bot woodcut with the world kept unpaused. `tools/sandbox/sb.sh`: `sb_lock`/`sb_unlock` (`.superpowers/SANDBOX.lock` in the base checkout), `sb_up <save>`, `sb_down` (self-kill-safe patterns). Scratch helpers (session scratchpad, not in the repo): `mc.sh shot|click|cmd|buttons|press|type|key|health`, `logscan.sh [HH:MM:SS]` (WARN/ERROR grouped, numbers masked, most frequent first).
 
@@ -70,6 +74,8 @@ Repo helpers: `tools/sandbox/ft.py shot <name> [bot]` saves a 1200-px-wide scree
 - 1.21.x renamed "Allow Cheats" to **Allow Commands** (Create World → Game tab). It's OFF by default in Survival.
 
 ## Log
+
+- **2026-10-18: Flashback clip export, unattended.** A replay opens from the title screen (Open Replays). The camera is the `Replay Viewer` player: `/tp @s x y z yaw pitch` places it, `/spectate <bot>` rides along first person, `/hide <player>` hides the recording player. Visuals > Render Nametags off. File > Export Video takes resolution (1080x1350 for 4:5), Start/end tick (20 per replay second), No GUI, Record Audio; Flashback keeps the settings. Replay time = wall time minus the moment Start Recording was clicked. `tools/sandbox/fbexport.py open|clip` does it end to end.
 
 - **2026-10-18: field sweep 6aj-6bg (1.1.267).** The MCP gained in-world key bindings, `look`, `scroll` and screen typing (fork `71efa71`). Learned: `screen_buttons` sees nothing in Frens' own custom-drawn screens (Bot Controls rows, the bot inventory overlay), so drive them by screenshot pixels. A bot keeps its health across `/bot despawn` and `/bot spawn`, so heal it before a combat check or it flees. `/summon ... {leash:{UUID:[I;...]}}` to a fake-player bot does not attach in 1.21.11. The 1.1.261 pathfinder migration keeps an explicit `"pathfinder"` string by design: to replay it, remove the key and set `baritonePathfinderEnabled: true`.
 

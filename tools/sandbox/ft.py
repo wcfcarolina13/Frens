@@ -1,4 +1,4 @@
-"""Field-test helper for the mcp-sandbox (game loaded). Marks and evidence go to $FT_DIR (default: the system temp dir).
+"""Field-test helper for the mcp-sandbox (game loaded). Marks, evidence and shots go to $FT_DIR (default ~/Library/Caches/frens-ft).
 
   ft.py chat "/cmd" ...          send chat lines or commands, 2 s apart
   ft.py cmd <name> k=v ...       raw MCP command (screen_info, screen_buttons, click_button label=..., bot_state name=...)
@@ -7,6 +7,9 @@
   ft.py shot <name> [bot]        screenshot (or bot_view of <bot>) to $FT_DIR/<name>.png, resized to 1200 px wide
   ft.py clickr <x> <y>           click at pixel x,y of the last 1200-wide shot (custom-drawn screens screen_buttons can't see)
   ft.py scroll <x> <y> <amount>  mouse wheel at shot pixels (needs the fork's scroll command)
+  ft.py wshot <name>             whole-window PNG incl. Flashback's ImGui editor (fork window_shot), 1200 px wide
+  ft.py wclick <x> <y> [action]  raw GLFW-level mouse at pixels of the last wshot (click|down|up|move), reaches ImGui
+  ft.py wkey <key> [action]      raw GLFW key (space, escape, f1, e...), ft.py wtext <text> types into an ImGui field
 Stream panel (~/dev/frens-stream/director.py reads these from $FRENS_STREAM_STATE):
   ft.py item <id> <title...>     current checklist item        ft.py say <text...>         one-line narration
   ft.py verdict PASS|FAIL|PARTIAL|SKIP|NOTE <text...>          ft.py idle on|off|auto      force or release the idle card
@@ -17,7 +20,7 @@ Stream panel (~/dev/frens-stream/director.py reads these from $FRENS_STREAM_STAT
 import json, re, sys, time, urllib.request, os
 API = "http://127.0.0.1:9876/api/cmd"
 LOG = "/Users/roti/Library/Application Support/PrismLauncher/instances/mcp-sandbox/minecraft/logs/latest.log"
-SP = os.environ.get("FT_DIR", __import__("tempfile").gettempdir())
+SP = os.environ.get("FT_DIR", os.path.expanduser("~/Library/Caches/frens-ft")); os.makedirs(SP, exist_ok=True)
 STREAM = os.environ.get("FRENS_STREAM_STATE", os.path.expanduser("~/Library/Caches/frens-stream/state.jsonl"))
 def stream(kind, **kw):
     os.makedirs(os.path.dirname(STREAM), exist_ok=True)
@@ -66,6 +69,20 @@ elif a == "clickr":   # clickr x y in the last shot's pixels -> framebuffer pixe
 elif a == "scroll":
     k = float(open(f"{SP}/shot_scale").read())
     print(cmd(cmd="scroll", x=int(float(sys.argv[2]) * k), y=int(float(sys.argv[3]) * k), amount=sys.argv[4]))
+elif a == "wshot":
+    import base64, subprocess
+    r = json.loads(cmd(cmd="window_shot"))
+    out = f"{SP}/{sys.argv[2]}.png"
+    open(out, "wb").write(base64.b64decode(r["image"].split(",", 1)[1]))
+    subprocess.run(["sips", "-Z", "1200", out], capture_output=True)
+    open(f"{SP}/wshot_scale", "w").write(str(r["width"] / 1200)); print(out, "scale", round(r["width"] / 1200, 4), "window", r["width"], r["height"])
+elif a == "wclick":
+    k = float(open(f"{SP}/wshot_scale").read())
+    print(cmd(cmd="raw_mouse", x=int(float(sys.argv[2]) * k), y=int(float(sys.argv[3]) * k), action=sys.argv[4] if len(sys.argv) > 4 else "click"))
+elif a == "wkey":
+    print(cmd(cmd="raw_key", key=sys.argv[2], action=sys.argv[3] if len(sys.argv) > 3 else "tap"))
+elif a == "wtext":
+    print(cmd(cmd="raw_text", text=" ".join(sys.argv[2:])))
 elif a == "item": stream("item", id=sys.argv[2], title=" ".join(sys.argv[3:]))
 elif a == "say": stream("say", text=" ".join(sys.argv[2:]))
 elif a == "verdict":
