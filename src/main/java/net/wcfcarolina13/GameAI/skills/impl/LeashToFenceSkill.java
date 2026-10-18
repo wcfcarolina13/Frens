@@ -83,10 +83,10 @@ public final class LeashToFenceSkill implements Skill {
         // regardless of whether securing succeeded. The user's explicit
         // command overrides the stay-mounted safety net: they may be inside
         // a fenced pen, without a lead, and don't care about wandering.
+        // Every outcome below is one line: the result, which the command echoes. No chat copy.
         if (bot.hasVehicle()) {
             String message = net.wcfcarolina13.GameAI.services.RideSyncService.forceDismountAndSecure(bot);
             if (message != null) {
-                ChatUtils.sendChatMessages(source, message);
                 return SkillExecutionResult.success(message);
             }
         }
@@ -95,7 +95,6 @@ public final class LeashToFenceSkill implements Skill {
         List<MobEntity> leashedAnimals = findLeashedAnimals(bot, world);
         
         if (leashedAnimals.isEmpty()) {
-            ChatUtils.sendChatMessages(source, "I'm not holding any animals on a lead.");
             return SkillExecutionResult.failure("No leashed animals found.");
         }
 
@@ -110,7 +109,6 @@ public final class LeashToFenceSkill implements Skill {
             fencePos = tryPlaceFence(bot, world, bot.getBlockPos());
         }
         if (fencePos == null) {
-            ChatUtils.sendChatMessages(source, "I can't find a fence within reach, and I can't place one nearby. Use /bot leash release to let go of the leads.");
             return SkillExecutionResult.failure("No reachable fence found or placeable.");
         }
         if (!isWithinReach(bot, fencePos)) {
@@ -123,7 +121,6 @@ public final class LeashToFenceSkill implements Skill {
                     return SkillExecutionResult.failure("Couldn't reach the fence.");
                 }
             } else {
-                ChatUtils.sendChatMessages(source, "I need a fence closer to tie these leads without snapping them.");
                 return SkillExecutionResult.failure("Fence not within safe reach.");
             }
         }
@@ -152,7 +149,6 @@ public final class LeashToFenceSkill implements Skill {
         sleepQuiet(150);
         if (outcome == null) {
             LOGGER.warn("Leash skill: fence tie hop did not finish (fence={})", fencePos.toShortString());
-            ChatUtils.sendChatMessages(source, "I couldn't tie the leads just now. Try again.");
             return SkillExecutionResult.failure("Fence tie did not run.");
         }
         boolean interacted = outcome.interacted();
@@ -160,7 +156,6 @@ public final class LeashToFenceSkill implements Skill {
         int stillHeld = outcome.stillHeld();
 
         if (tiedNow > 0) {
-            ChatUtils.sendChatMessages(source, "Tied " + tiedNow + " animal(s) to fence at " + fencePos.toShortString() + ".");
             LOGGER.info("Leash skill: tiedNow={} stillHeld={} fence={} interacted={}", tiedNow, stillHeld, fencePos.toShortString(), interacted);
             forgetLeashTargetIfLetGo(bot, world);
             return SkillExecutionResult.success("Tied " + tiedNow + " animal(s) to a fence.");
