@@ -1,62 +1,19 @@
-# Ralph Guardrails (Signs)
+# Frens Guardrails (Signs)
 
 > Lessons learned from past failures. READ THESE BEFORE ACTING.
 
-## Core Signs
-
-### Sign: Read Before Writing
-- **Trigger**: Before modifying any file
-- **Instruction**: Always read the existing file first to understand context
-- **Added after**: Core principle
-
-### Sign: Test After Changes
-- **Trigger**: After any code change
-- **Instruction**: Run `./gradlew build -x test` to verify compilation
-- **Added after**: Core principle
-
-### Sign: Commit Checkpoints
-- **Trigger**: Before risky changes
-- **Instruction**: Commit current working state first
-- **Added after**: Core principle
-
-### Sign: One Task Focus
-- **Trigger**: When context grows large
-- **Instruction**: Focus on single criterion, complete it, commit, move on
-- **Added after**: Core principle
-
-### Sign: Update Progress
-- **Trigger**: After completing any criterion
-- **Instruction**: Update .ralph/progress.md AND check off the criterion in RALPH_TASK.md
-- **Added after**: Core principle
+Moved here from the untracked `.ralph/guardrails.md` on 2026-10-17 when the Ralph loop was retired. Project rules that
+are already stated elsewhere are listed in the index at the bottom with where they now live, so none is lost. Two Signs that later fixes
+made wrong were corrected in place (line-of-sight, inventory snapshot).
 
 ---
 
 ## Project-Specific Signs
 
-### Sign: Threading Boundary
-- **Trigger**: Any code that touches world state, inventory, or entity state
-- **Instruction**: World/inventory/entity mutations MUST run on the server thread. Use `server.execute(...)` or `callOnServer(...)` from worker threads. Never `Thread.sleep()` on the server thread.
-- **Added after**: Initialization — most common bug source in this project
-
-### Sign: Large File Awareness
-- **Trigger**: Reading BotEventHandler.java (~199KB), FarmSkill (~151KB), CollectDirtSkill (~115KB), BotActions (~70KB)
-- **Instruction**: Use offset/limit when reading. Use Grep to find specific sections. Never try to read the whole file at once.
-- **Added after**: Initialization — these files exceed Read tool limits
-
-### Sign: MiningTool Has No Line-of-Sight
+### Sign: MiningTool Checks Line-of-Sight, Skills Still Own Reach
 - **Trigger**: Any code that calls MiningTool.mineBlock() or similar mining primitives
-- **Instruction**: MiningTool checks distance only (squaredDistanceTo <= 4.5^2), NOT line-of-sight. Bot can mine through walls. Must add reach/visibility checks at the skill level.
-- **Added after**: Initialization — confirmed bug in existing code
-
-### Sign: Movement Method Selection
-- **Trigger**: Writing code that needs to move the bot
-- **Instruction**: Use `MovementService.execute(DIRECT)` for reliable movement (~85% success). Avoid `walkTowardBlock()` for long/complex moves (no pathfinding). A* pathfinding for 100+ blocks takes 20-30+ seconds — bot appears frozen.
-- **Added after**: Initialization — proven pattern from testing
-
-### Sign: AutoFaceEntity Task Flag
-- **Trigger**: Running skills that need stable bot facing
-- **Instruction**: Set `AutoFaceEntity.setBotExecutingTask(true)` before skill execution and `false` after, to suppress idle head swivel. SkillManager already does this around `skill.execute()`.
-- **Added after**: Initialization — prevents visual glitches during skill execution
+- **Instruction**: MiningTool raycasts from the bot's eye and rejects a target when the ray hits a different block first (`PlayerUtils/MiningTool.java`, `losWorld.raycast`). It does not plan a stance: choosing a position from which the target is reachable and visible is still the skill's job.
+- **Added after**: Initialization. **Corrected 2026-10-17**: the original Sign said MiningTool had no line-of-sight check, which stopped being true when the raycast landed (memory patterns.md).
 
 ### Sign: Construction Protection Blocks Scaffold Stances
 - **Trigger**: Adding protection/stance checks that reject positions overlapping planned build targets
@@ -76,27 +33,12 @@
 
 ### Sign: Study FortifyVillageSkill Before Adding Construction Features
 - **Trigger**: Adding reach/scaffold/movement/recovery logic to the generic construction system
-- **Instruction**: FortifyVillageSkill has battle-tested implementations for elevated block placement (L8813-8926 ensureCanReachBlockWithEffort), batch scaffold escalation (L3366-3630 attemptScaffoldEscalation), and scaffold cleanup. Always read these first and port the proven patterns rather than designing from scratch. Key pattern: scaffold directly below the target column (same XZ), pillar to target.Y - 1, place at eye level.
-- **Added after**: 2026-03-07 — user explicitly requested this after 3 iterations of incremental patches failed
-
-### Sign: Furnace Mutations via server.execute() + CompletableFuture
-- **Trigger**: Any code that reads/writes furnace block entity slots from a worker thread
-- **Instruction**: Furnace slots (input[0], fuel[1], output[2]) are world state — must be read and written on the server thread. Use `server.execute(() -> { ... future.complete(result); })` with `future.get(timeout)` from the worker thread. See `SmeltingService.cookAllFoodSync()` for the canonical pattern (poll loop with 2s intervals, 3min/batch and 10min total timeouts).
-- **Added after**: 2026-03-27 — cookAllFoodSync implementation for post-hunt multi-batch cooking
-
-### Sign: Auto-Stop Checks Should Include Inventory State
-- **Trigger**: Any auto-stop or "is the bot fed enough" check that only reads the food bar
-- **Instruction**: The food bar can be temporarily inflated by a gifted item. For self-sufficiency decisions, also check `HuntSkill.countFoodItems(bot)` to ensure the bot has backup food ITEMS (not just a temporarily full food bar). The auto-hunt trigger at food 11-14 also checks inventory food count.
-- **Added after**: 2026-03-27 — bot stopped hunting at food=8 from a gifted steak with zero backup food items
+- **Instruction**: FortifyVillageSkill has battle-tested implementations for elevated block placement (`ensureCanReachBlockWithEffort`, also on `FortifySkillOps`), batch scaffold escalation (`attemptScaffoldEscalation`), and scaffold cleanup. Always read these first and port the proven patterns rather than designing from scratch. Key pattern: scaffold directly below the target column (same XZ), pillar to target.Y - 1, place at eye level.
+- **Added after**: 2026-03-07 — user explicitly requested this after 3 iterations of incremental patches failed. Line ranges replaced by method names 2026-10-17 (the file shrank after the 1.1.209-1.1.210 extraction).
 
 ---
 
 ## Learned Signs
-
-### Sign: Verify JAR Path Before Copying
-- **Trigger**: Copying built JAR to mods folder
-- **Instruction**: JAR name includes version and Minecraft target (e.g. `frens-1.0.6-release+1.21.11.jar`). Use `Glob build/libs/*.jar` to find the actual filename rather than guessing `frens-1.0.0.jar`.
-- **Added after**: Copy failed with "No such file or directory" due to wrong JAR name
 
 ### Sign: Gate Routing Y — Use Bot's Actual Y
 - **Trigger**: Any code computing gate routing waypoint positions
@@ -134,10 +76,10 @@
 - **Instruction**: Reserve a fixed notice region in layout before placing controls. Do not rely on overlay text near titles; use wrapped lines with bounded height so feature growth doesn’t cause clipping/crowding.
 - **Added after**: Skin chooser policy notice overlap/crowding fix
 
-### Sign: Don’t Let Stale Snapshots Override Vanilla Restore
-- **Trigger**: Join-time restore path that combines PlayerManager load with custom inventory snapshots
-- **Instruction**: If vanilla player `.dat` restore succeeded, compare file mtimes before applying custom snapshot. Skip custom restore when snapshot is older than vanilla data (with small grace). Never blindly load custom snapshot after manager restore.
-- **Added after**: Inventory persistence failsafe pass (stale custom snapshot overwrite risk)
+### Sign: The Frens Snapshot Is the Only Truth for Bot Inventories
+- **Trigger**: Join-time restore path that combines PlayerManager load with the custom inventory snapshot
+- **Instruction**: Fake-player items live only in `frens/inventories/*.nbt`. The vanilla `.dat` is always newer and item-less, so never gate the snapshot on file size or mtime. A restore-pending flag guards against saving an empty inventory over it (`BotInventoryStorageService.shouldRestoreOnJoin`).
+- **Added after**: Inventory persistence failsafe pass. **Reversed 1.1.187** (changelog: "snapshot is the only truth"): the old Sign said to skip the snapshot when older than the vanilla `.dat`, which caused the Bob axe and lead wipe. See memory feedback_bot_snapshot_vs_vanilla_dat.md.
 
 ### Sign: World Keys Must Include Save-Root Identity
 - **Trigger**: Persisting per-world bot state in global config files
@@ -154,11 +96,6 @@
 - **Instruction**: Save panel geometry preferences and include a one-click reset to defaults. Clamp saved values to viewport bounds on open to survive resolution changes.
 - **Added after**: Base Manager resizable panel implementation
 
-### Sign: Heightmap Lies About Ground Under Trees
-- **Trigger**: Any code that determines "surface level" or "ground Y" or checks if the bot is underground
-- **Instruction**: NEVER use raw `world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z)` for ground detection. The heightmap counts log blocks (only excludes `instanceof LeavesBlock`). A tree trunk at Y=70 over ground at Y=64 returns Y=71. Use `SafePositionService.getWalkableGroundY(world, x, z)` which scans downward from the heightmap ceiling, skipping logs/leaves, to find actual solid ground. Median sampling of heightmap values is NOT a sufficient workaround — fix the root cause.
-- **Added after**: 2026-03-25 — scaffold scanner found 130 underground stone false positives, bot rejected valid surface positions under canopy, hole recovery overreacted to trunk-biased Y values. Confirmed from Minecraft source (Heightmap.java predicate).
-
 ### Sign: Scaffold Detection Must Require Exposed Faces
 - **Trigger**: Adding blocks to PILLAR_BLOCKS or modifying `findSuspiciousScaffold` heuristics
 - **Instruction**: Hard block scaffold detection (cobblestone, stone, etc.) must require `floating || isolated` — at least one exposed air/leaves face. Without this, underground natural stone/gravel formations register as scaffold candidates (130+ false positives in a 36×42×36 scan). Dirt-like scaffold must only count column height UPWARD (not downward into terrain). GRASS_BLOCK must NOT be in PILLAR_BLOCKS or DIRT_LIKE_SCAFFOLD — it destroys natural terrain.
@@ -167,7 +104,53 @@
 <!-- Add new signs below as you learn from failures -->
 
 
-### Sign: Running-Game Check Must Match Prism
-- **Trigger**: Before copying a JAR into any Prism `mods/` directory
-- **Instruction**: Use `pgrep -f "PrismLauncher/instances/.*/natives"`. `pgrep -f "net.minecraft.client.main.Main"` returns nothing for a Prism/Fabric launch (main class is fed via stdin), so it approved deploys while the game was open.
-- **Added after**: 2026-08-29 — caught while watching the live log during a field test
+
+---
+
+## Door passage: known-good fixes and test procedure (from RALPH_TASK.md session notes, 1.1.5-1.1.16)
+
+Known-good, do not revert:
+
+- **1.1.5** `BotActions.hasMovementClearance` — replaced `blocksMovement()` feet/head check with stateful `isPassableForMovement`. Open doors/gates/trapdoors with `Properties.OPEN == true` are now passable. Same bug-pattern fix pattern as commit 29a5de8 (ReturnBaseStuckService, 2026-04-08).
+- **1.1.6** `FollowMovementService.hasTwoHighClearance` — same fix applied to the follow-movement passability helper used by narrow-passage align, chokepoint, dropoff guard, local-obstacle nudge.
+- **1.1.7** Door-plan refactor in [BotEventHandler.java](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java): (a) deleted the `door-recovery` retreat (was retreating bot 2-3 blocks away from door when stuck → primary oscillation source); (b) gated `door-corner` plan rebuild with wrong-side check; (c) `isDirectRouteBlocked` now skips hits on open openables. This change intentionally breaks the old shelter-escape "trapped in corner, needs door as exit" behavior — documented as acceptable trade-off at the time, re-address later.
+- **1.1.8** Extracted `isDoorPlanWrongSide(approach, step, goal)` helper and applied it at **all four** door-plan creation sites (`door-corner`, `door-adjacent`, `door-escape`, `door-ray`). Previously only `door-corner` had the check.
+- **1.1.9** In `tickFollowDoorPlan`: when `plan.stepping() && doorOpen && onGround`, force `BotActions.jump(bot)` each tick instead of deferring to `autoJumpIfNeeded` (which explicitly skips door cells).
+- **1.1.10** Extracted `isBoxClearIgnoringWalkablePartials` helper in `BotActions`. When `world.isSpaceEmpty` rejects due to a walkable partial's thin collision overlapping the bot's bounding box at the Y boundary (strict-less-than `Box#intersects`), second pass skips cells whose state passes `isPassableForMovement`. Covered plates, carpets, rails, thin partials, open door strips.
+- **1.1.11** **Diagnostic-only build** — added `door-step-diag` (tickFollowDoorPlan) and `applyMovementInput-reject` (BotActions) log channels. Evidence caught that pressure plates failed `hasClearance=false`.
+- **1.1.12** **THE FIX** — `isPassableForMovement` now consults [WalkablePartialBlocks.isPathable](src/main/java/net/wcfcarolina13/GameAI/services/WalkablePartialBlocks.java) as a third gate. In 1.21.11 `state.blocksMovement()` **returns `true` for pressure plates** (contrary to my assumption), so the previous two gates rejected. `WalkablePartialBlocks.isPathable` correctly handles plates via `AbstractPressurePlateBlock`, plus carpets, rails, tripwire, lily pad, collision max Y ≤ 0.125 fallback. Signature changed to `(state, world, pos)`. Applied symmetrically in `FollowMovementService`.
+- **1.1.13** Tick-persistent door-open retry (was only firing in `!plan.stepping()` phase) + stepping-flip only commits when `doorOpen` is confirmed from world state (not trusting `tryOpenDoorAt`'s return).
+- **1.1.14** Stuck-near-doorway auto-jump — generalized 1.1.9. When door plan stuck counter ≥ 8 ticks and bot on ground, force jump regardless of stepping phase. Generalizes the user's "jump a couple times to unstick" reflex.
+- **1.1.16** = 1.1.14 (1.1.15 reverted, see below).
+
+
+### Door test procedure
+
+When testing door passage:
+1. Spawn bot **OUTSIDE** the tower (sky visible) to avoid triggering shelter-breakfree. This isolates the door-passage issue.
+2. Have bot follow; walk through each door in both directions; observe whether stall occurs and at which cell.
+3. If stall happens and cause isn't obvious from log, **re-enable the 1.1.11-style diagnostic first** rather than guessing. The diagnostic caught the pressure plate root cause in one test run.
+
+## Rulings recorded only in old handoffs
+
+- Never `git add -A` in this repo (untracked `logs/`, `voices/ab-test/`, `.superpowers/`). The vault git-guard hook blocks any `git add/commit` text while the shell cwd is inside `~/pontus/vault`, so `cd` out in a separate call. (RALPH_TASK.md 2026-09 handoff)
+- Nothing goes to Modrinth until the live playthroughs settle (Bradley, 2026-10-14).
+
+---
+
+## Index: Signs that now live elsewhere
+
+- **Read Before Writing** → ~/.claude/CLAUDE.md §6 Edit Safety ("re-read before EVERY edit")
+- **Test After Changes** → CLAUDE.md Agent Workflow step 4 (`./gradlew build -x test`)
+- **Commit Checkpoints** → CLAUDE.md Git Protocol ("before any risky refactor (checkpoint)"); ~/.claude/CLAUDE.md §3
+- **One Task Focus** → CLAUDE.md Agent Workflow step 3
+- **Update Progress** → retired with the Ralph loop: progress is changelog.md, checkboxes are a release step (frens-release-loop release.md)
+- **Threading Boundary** → CLAUDE.md "Threading Rules"
+- **Large File Awareness** → CLAUDE.md Code Editing Guidelines ("use offset/limit")
+- **Movement Method Selection** → auto-memory MEMORY.md "Movement" short-form facts (A* timing note was pre-unified-finder, dropped)
+- **AutoFaceEntity Task Flag** → auto-memory MEMORY.md "Bot behavior" short-form facts
+- **Furnace Mutations via server.execute() + CompletableFuture** → auto-memory project_food_self_sufficiency.md (canonical pattern `SmeltingService.cookAllFoodSync()`)
+- **Auto-Stop Checks Should Include Inventory State** → auto-memory project_food_self_sufficiency.md
+- **Verify JAR Path Before Copying** → CLAUDE.md deploy pattern (JAR name built from `mod_version`); memory feedback_verify_deployed_jar.md
+- **Heightmap Lies About Ground Under Trees** → auto-memory feedback_surface_detection.md
+- **Running-Game Check Must Match Prism** → CLAUDE.md "Required pre-deploy check"; memory feedback_prism_running_check.md
