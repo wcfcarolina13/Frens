@@ -4,7 +4,18 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-18 (1.1.268) — next session starts here
+## Session Handoff 2026-10-18 (1.1.269) — next session starts here
+
+**State:** main = origin/main @ 1.1.269. Suite 2843 green. Deployed to Nirn and the mcp-sandbox instance.
+**1.1.269** (changelog entry has the details): honey_collect packs, unpacks and equips inside `SupplyServerHop` (was the worker), "Got N logs" counts only the felled tree's logs (`WoodcutTreeOwnershipPolicy`, as the leftover list), emergency rescue counts only chest food the supply rules would grant (`BotMutualAidService.hasGrantableChestFood`, reserve 8, allowlist, reach, chests only). Fable review merge-ready, no fix wave.
+**Field Phase 6bh done:** the three open items passed in the sandbox on 1.1.268 (save "Sweep Spawn"): stop mid-fell `removed 3/3 own scaffold block(s) (abort=true)`, leftover after a quit cleared, axeless bot cut 3 reachable logs and placed nothing. Replays `frens_1_1_268_6bh_*.zip` in the sandbox. **Phase 6bi** (one item): the starving trapped bot beside 5 chest bread gets rescued. Checklist now 278 open items.
+**Next:**
+- **Modrinth:** the 1.1.268 notes draft (`.superpowers/sdd/modrinth/MODRINTH_NOTES_1.1.268_DRAFT.md`, untracked) still waits for Bradley's OK. Untouched this session. If he wants 1.1.269 shipped instead, the draft needs these three fixes added.
+- Deferred, new: `depositHoneyItems` passes the bot's own position as the chest, so the offload after packing is a silent `chest-missing` no-op (needs a nearest-chest lookup, behaviour change, field check); a stopped Spawn-base fell leaves the upper trunk and canopy standing (later detects reject it as a failed base); rescue check runs every tick for a starving, not-dire bot (a 20-tick memo would be cheap) and does not see refused foods, the chest hold or an absent owner; HoneyCollectSkill's private 500 ms `callOnServer` could move to `SupplyServerHop`; the rescue's other worker-thread mutations from auto-hunt.
+- Still deferred from 1.1.268: ascent bridge probe bridges toward any log within 6, raised-base neighbour trunks lend logs, abort-safe scaffold cleanup outside bases, finding 2 (ranged pause).
+- PlayerMemory vs relations: Bradley's decision is due (see the 1.1.268 handoff below). The 1.1.267 Next list still stands.
+
+## Session Handoff 2026-10-18 (1.1.268) — superseded
 
 **State:** main = origin/main @ 1.1.268. Suite 2842 green. Deployed to Nirn and the mcp-sandbox instance.
 **Field sweep done:** phases 6aj-6bg in the sandbox on 1.1.267 (`docs/testing/FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`): 58 items got a verdict, 49 pass, 4 superseded, 2 partial (6ak-1 no PLACE move seen, 6ap-2 Bases screen and non-op half), 1 fail (6am-2 audit fixes, fixed in 1.1.268), 2 need Bradley (6ao-1 Nirn skins and mounts, 6av-2 remote server). **No high-severity failure**, so by Bradley's 2026-10-18 rule 1.1.268 is the next Modrinth release.
