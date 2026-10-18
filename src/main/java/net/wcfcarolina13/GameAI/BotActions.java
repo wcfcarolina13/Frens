@@ -52,6 +52,9 @@ import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
 import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
+import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldOwnershipPolicy;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.FoodConsumptionConfirmationService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
@@ -972,6 +975,19 @@ public final class BotActions {
     }
 
     public static PlaceResult tryPlaceBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks, boolean allowIntersecting) {
+        return tryPlaceBlockAt(bot, target, face, prioritizedBlocks, allowIntersecting, false);
+    }
+
+    /**
+     * @param ownScaffold explicit own-scaffold flag (1.1.268): set only by woodcut's climb pillars.
+     *                    When the plain claim check refuses the cell, the placement may still go
+     *                    ahead inside a SERVER-owned base (the Spawn base) with the admin toggle on,
+     *                    for a scaffold-material block into an empty (air) cell, with no clutter
+     *                    clearing. Such a placement is registered in {@link OwnedScaffoldRegistry}
+     *                    on success so this bot (and only this bot) may remove it again.
+     */
+    public static PlaceResult tryPlaceBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks,
+                                              boolean allowIntersecting, boolean ownScaffold) {
         PlaceResult fallback = new PlaceResult(false, "timeout-or-thread-error");
         return callOnServerThread(bot, () -> {
             ServerWorld world = bot.getCommandSource().getWorld();
@@ -980,13 +996,23 @@ public final class BotActions {
             }
 
             var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target);
+            // Own scaffold: a refused cell gets a second, kind-aware check once the item is known.
+            boolean ownScaffoldExemption = false;
             if (!auth.allowed()) {
-                return new PlaceResult(false, "claim-denied " + auth.reason());
+                if (!ownScaffold) {
+                    return new PlaceResult(false, "claim-denied " + auth.reason());
+                }
+                ownScaffoldExemption = true;
             }
 
             double distSq = bot.squaredDistanceTo(target.getX() + 0.5, target.getY() + 0.5, target.getZ() + 0.5);
             if (distSq > SURVIVAL_REACH_SQ) {
                 return new PlaceResult(false, "out-of-reach distSq=" + String.format(Locale.ROOT, "%.2f", distSq));
+            }
+
+            if (ownScaffoldExemption && !world.getBlockState(target).isAir()) {
+                // The exemption places into air only: no clutter clearing, no replacing fluids.
+                return new PlaceResult(false, "claim-denied " + auth.reason());
             }
 
             if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
@@ -1046,6 +1072,15 @@ public final class BotActions {
             if (!(stack.getItem() instanceof BlockItem blockItem)) {
                 return new PlaceResult(false, "selected-item-not-block");
             }
+            if (ownScaffoldExemption) {
+                boolean material = ScaffoldOwnershipPolicy.isScaffoldMaterial(
+                        net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).toString());
+                var scaffoldAuth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target,
+                        WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_PLACE, material);
+                if (!scaffoldAuth.allowed()) {
+                    return new PlaceResult(false, "claim-denied " + scaffoldAuth.reason());
+                }
+            }
             selectHotbarSlot(bot, slot);
 
             Support support = null;
@@ -1079,6 +1114,9 @@ public final class BotActions {
                 if (stack.isEmpty()) {
                     inventory.setStack(slot, ItemStack.EMPTY);
                 }
+                if (ownScaffoldExemption) {
+                    registerOwnScaffold(bot, world, target, placementContext.getBlockPos());
+                }
                 return new PlaceResult(true, null);
             }
             // Include context in the reason string so scaffold/tower logs show useful diagnostics
@@ -1092,6 +1130,24 @@ public final class BotActions {
             PlaceResult fail = new PlaceResult(false, reason);
             return fail;
         }, 3500L, fallback);
+    }
+
+    /**
+     * Registers a successful own-scaffold placement that needed the Spawn-base exemption. Only the
+     * targeted cell, and only when the live block there is now a scaffold material.
+     * Server thread (called from the placement callable).
+     */
+    private static void registerOwnScaffold(ServerPlayerEntity bot, ServerWorld world, BlockPos target, BlockPos placedAt) {
+        if (!ScaffoldOwnershipPolicy.mayRegister(null, true) || placedAt == null || !placedAt.equals(target)) {
+            LOGGER.info("[spawn-scaffold] {} placement landed at {} instead of {}; not registered as own scaffold",
+                    bot.getName().getString(), placedAt == null ? "?" : placedAt.toShortString(), target.toShortString());
+            return;
+        }
+        if (!OwnedScaffoldRegistry.isScaffoldMaterial(world.getBlockState(target))) {
+            return;
+        }
+        OwnedScaffoldRegistry.register(bot, world, target.toImmutable());
+        LOGGER.info("[spawn-scaffold] {} placed own scaffold at {}", bot.getName().getString(), target.toShortString());
     }
 
     /**

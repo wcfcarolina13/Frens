@@ -7,6 +7,7 @@ import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
+import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 
@@ -47,18 +48,57 @@ public final class BotTerritoryAuthorizationService {
      */
     public static AuthorizationResult authorizeBlockMutation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
                                                              boolean treeBlock) {
+        return authorizeBlockMutation(bot, world, pos,
+                treeBlock ? WoodcutBaseAccessPolicy.MutationKind.TREE_BLOCK : WoodcutBaseAccessPolicy.MutationKind.OTHER,
+                false);
+    }
+
+    /** {@link #authorizeBlockMutation(ServerPlayerEntity, ServerWorld, BlockPos, WoodcutBaseAccessPolicy.MutationKind, boolean)} for a break. */
+    public static AuthorizationResult authorizeBlockMutation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                                                             WoodcutBaseAccessPolicy.MutationKind kind) {
+        return authorizeBlockMutation(bot, world, pos, kind, false);
+    }
+
+    /**
+     * Claim gate with the Spawn-base mutation kind ({@link WoodcutBaseAccessPolicy#mutationExempt}).
+     * Only a SERVER-owned base zone can be exempted, and never for {@code OTHER}.
+     *
+     * <p>{@code OWN_SCAFFOLD_BREAK} is not trusted from the caller: ownership is re-read from this
+     * bot's {@link OwnedScaffoldRegistry} entry and the live block must still be a scaffold
+     * material, so passing the kind can never open a block the bot did not place.
+     *
+     * @param placeMaterialIsScaffold read only for {@code OWN_SCAFFOLD_PLACE}: the block about to
+     *                                be placed is a scaffold material
+     */
+    public static AuthorizationResult authorizeBlockMutation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                                                             WoodcutBaseAccessPolicy.MutationKind kind,
+                                                             boolean placeMaterialIsScaffold) {
         if (bot == null || world == null || pos == null) {
             return ALLOW;
+        }
+        if (kind == null) {
+            kind = WoodcutBaseAccessPolicy.MutationKind.OTHER;
         }
 
         UUID botOwner = resolveBotOwnerUuid(bot);
         MinecraftServer server = world.getServer();
-        boolean spawnBaseWoodcutAllowed = treeBlock && BotHomeService.isSpawnBaseWoodcutAllowed(server);
+        boolean needsToggle = kind == WoodcutBaseAccessPolicy.MutationKind.TREE_BLOCK
+                || kind == WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_PLACE;
+        boolean spawnBaseWoodcutAllowed = needsToggle && BotHomeService.isSpawnBaseWoodcutAllowed(server);
+        boolean ownedByThisBot = false;
+        boolean scaffoldMaterial = false;
+        if (kind == WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_BREAK) {
+            ownedByThisBot = OwnedScaffoldRegistry.isOwned(bot, world, pos);
+            scaffoldMaterial = ownedByThisBot && OwnedScaffoldRegistry.isScaffoldMaterial(world.getBlockState(pos));
+        } else if (kind == WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_PLACE) {
+            scaffoldMaterial = placeMaterialIsScaffold;
+        }
 
         // Protected-zone ownership (cubic claim). Every containing zone is asked (ZoneOverlapPolicy):
         // any refusing zone refuses, except a SERVER-owned base zone (the Spawn base) yields to an
         // overlapping player zone that explicitly grants the bot's owner, so a host's base drawn over
-        // Spawn keeps working. The Spawn toggle only ever opens logs/leaves.
+        // Spawn keeps working. The Spawn toggle only ever opens logs/leaves and (1.1.268) the bot's
+        // own flagged woodcut scaffold; removing owned scaffold needs no toggle.
         List<ProtectedZoneService.ProtectedZone> containing = new ArrayList<>();
         List<ZoneOverlapPolicy.ZoneVerdict> verdicts = new ArrayList<>();
         for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
@@ -70,7 +110,8 @@ public final class BotTerritoryAuthorizationService {
             // Only zones without a player owner can be server bases; skip the base lookup otherwise.
             boolean serverOwned = zone.getOwnerUuid() == null
                     && BotHomeService.isServerOwnedBaseZone(server, world, zone);
-            if (refuses && WoodcutBaseAccessPolicy.miningExempt(serverOwned, treeBlock, spawnBaseWoodcutAllowed)) {
+            if (refuses && WoodcutBaseAccessPolicy.mutationExempt(serverOwned, kind, ownedByThisBot,
+                    scaffoldMaterial, spawnBaseWoodcutAllowed)) {
                 refuses = false;
             }
             containing.add(zone);

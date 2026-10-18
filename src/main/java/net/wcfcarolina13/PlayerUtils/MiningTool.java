@@ -19,6 +19,10 @@ import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
+import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldOwnershipPolicy;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 import net.wcfcarolina13.GameAI.services.MappedVillageService;
 import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
@@ -85,6 +89,22 @@ public class MiningTool {
                                                       BlockPos targetBlockPos,
                                                       boolean preserveSelectedHotbarItem,
                                                       boolean enforceVillageProtection) {
+        return mineBlock(bot, targetBlockPos, preserveSelectedHotbarItem, enforceVillageProtection, false);
+    }
+
+    /**
+     * @param ownScaffoldTeardown 1.1.268 abort-safe teardown of the bot's own Spawn-base scaffold:
+     *                            when set AND the target is this bot's registered own scaffold
+     *                            still holding scaffold material, the skill abort latch does not
+     *                            stop the swing (a server stop still does). Every other check
+     *                            (reach, line of sight, claim gate, never-mine blocks) is unchanged,
+     *                            and for any other block the flag has no effect.
+     */
+    public static CompletableFuture<String> mineBlock(ServerPlayerEntity bot,
+                                                      BlockPos targetBlockPos,
+                                                      boolean preserveSelectedHotbarItem,
+                                                      boolean enforceVillageProtection,
+                                                      boolean ownScaffoldTeardown) {
         CompletableFuture<String> miningResult = new CompletableFuture<>();
         if (bot == null || targetBlockPos == null) {
             miningResult.complete("⚠️ Cannot mine: invalid target.");
@@ -130,14 +150,18 @@ public class MiningTool {
             }
         }
 
+        boolean ignoreAbortLatch = false;
         if (bot.getEntityWorld() instanceof ServerWorld serverWorld) {
-            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos,
-                    isTreeBlock(serverWorld.getBlockState(targetBlockPos)));
+            WoodcutBaseAccessPolicy.MutationKind kind = breakKind(bot, serverWorld, targetBlockPos,
+                    serverWorld.getBlockState(targetBlockPos));
+            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos, kind);
             if (!auth.allowed()) {
                 miningResult.complete("⚠️ Cannot mine: protected claim.");
                 return miningResult;
             }
+            ignoreAbortLatch = ownScaffoldTeardown && kind == WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_BREAK;
         }
+        final boolean abortLatchIgnored = ignoreAbortLatch;
 
         AtomicBoolean canceled = new AtomicBoolean(false);
 
@@ -231,8 +255,8 @@ public class MiningTool {
                     return;
                 }
                 
-                // Check if skill was aborted
-                if (SkillManager.shouldAbortSkill(bot)) {
+                // Check if skill was aborted (an own-scaffold teardown only stops for a server stop)
+                if (abortLatchIgnored ? TaskService.isServerStopping() : SkillManager.shouldAbortSkill(bot)) {
                     if (bot.getEntityWorld() instanceof ServerWorld sw)
                         sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, -1);
                     LOGGER.info("Mining aborted for {} at {}", bot.getName().getString(), targetBlockPos);
@@ -256,12 +280,14 @@ public class MiningTool {
                     boolean claimAllowed = blockGone
                             || !(bot.getEntityWorld() instanceof ServerWorld serverWorld)
                             || BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld,
-                                    targetBlockPos, isTreeBlock(currentState)).allowed();
+                                    targetBlockPos, breakKind(bot, serverWorld, targetBlockPos, currentState)).allowed();
                     switch (MiningTickPolicy.verdict(blockGone, claimAllowed)) {
                         case COMPLETE -> {
                             // Clear break animation
                             if (bot.getEntityWorld() instanceof ServerWorld sw) {
                                 sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, -1);
+                                // Own scaffold leaves the registry once mined (no-op when not owned).
+                                OwnedScaffoldRegistry.forget(bot, sw, targetBlockPos);
                             }
                             LOGGER.info("Mining complete at {}", targetBlockPos);
                             miningResult.complete("Mining complete!");
@@ -361,6 +387,28 @@ public class MiningTool {
         });
 
         return miningResult;
+    }
+
+    /**
+     * Claim-gate kind for breaking {@code state} at {@code pos}: a log or leaves is TREE_BLOCK; this
+     * bot's registered own scaffold still holding scaffold material is OWN_SCAFFOLD_BREAK (the gate
+     * re-checks both itself); else OTHER. An owned position whose block is no longer a scaffold
+     * material is forgotten here, never broken (someone else changed it).
+     */
+    private static WoodcutBaseAccessPolicy.MutationKind breakKind(ServerPlayerEntity bot, ServerWorld world,
+                                                                  BlockPos pos, BlockState state) {
+        boolean tree = isTreeBlock(state);
+        boolean owned = !tree && OwnedScaffoldRegistry.isOwned(bot, world, pos);
+        boolean material = owned && OwnedScaffoldRegistry.isScaffoldMaterial(state);
+        boolean gone = state == null || state.isAir();
+        if (ScaffoldOwnershipPolicy.shouldForget(owned, gone, material)) {
+            OwnedScaffoldRegistry.forget(bot, world, pos);
+            if (!gone) {
+                LOGGER.info("[spawn-scaffold] {} own scaffold at {} is now {}; forgotten, not broken",
+                        bot.getName().getString(), pos.toShortString(), state.getBlock().getName().getString());
+            }
+        }
+        return ScaffoldOwnershipPolicy.breakKind(tree, owned, material);
     }
 
     /** Logs and leaves: the only blocks the Spawn-base woodcut toggle can open to mining. */
