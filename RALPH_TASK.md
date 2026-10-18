@@ -527,6 +527,16 @@ Bradley wants a live feed of the bots living their lives, with cinematic camera 
   probably off-laptop hosting (server + Ollama + TTS + MC render + OBS encode overloads one M2 Pro). Twitch-chat
   interaction later only, behind prompt-injection safeguards.
 
+## Showcase videos from replays (Backlogged 2026-10-18)
+
+Bradley, 2026-10-18: Flashback replays rendered unattended in the sandbox (`tools/sandbox/fbexport.py`, MCP fork `5013f8c`
+and `3c548bd`) plus the motion-studio skill make a pipeline for showcase content, not just progress clips.
+- [ ] **Refresh the Modrinth page videos** with what Frens can do in general (woodcut on its own scaffold, shelters at
+  night, death retrieval, leads and mounts, souls talking, several bots sharing work). Plan the shots per feature in a
+  sandbox world, record with Flashback, export 4:5 or 16:9 clips with `fbexport.py`, cut with motion-studio. First
+  reference: the "Leave No Trace" film (`~/pontus/experiments/frens-leave-no-trace`). Bradley approves every video and
+  uploads himself; nothing is posted by Claude.
+
 ## Installer portability (Backlogged 2026-09-04 — only ever tested on the M2 Pro Mac)
 
 Bradley asked whether the installers cater to the user's machine. They detect **platform**, not specs:
