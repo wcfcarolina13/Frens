@@ -565,6 +565,9 @@ public final class ScaffoldService {
                     boolean isScaffoldType = SCAFFOLD_BLOCKS.stream()
                             .anyMatch(item -> state.getBlock().asItem().equals(item));
                     if (!isScaffoldType) {
+                        // An owned cell now holding a non-scaffold block is forgotten by the verdict
+                        // (FORGET_CHANGED); the caller still sees NOT_SCAFFOLD.
+                        OwnedScaffoldRegistry.verdict(bot, world, pos, state);
                         precheck.complete(ScaffoldTeardownPolicy.Precheck.NOT_SCAFFOLD);
                         return;
                     }

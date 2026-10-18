@@ -288,7 +288,7 @@ public final class TreeDetector {
         private final BaseVerdictMemo<Optional<TreeTarget>> strict = new BaseVerdictMemo<>();
         private final BaseVerdictMemo<Optional<TreeTarget>> loose = new BaseVerdictMemo<>();
 
-        /** Distinct trunk bases the strict detect built. */
+        /** Distinct trunk bases the strict detect resolved (empty verdicts included). */
         public int strictBases() {
             return strict.misses();
         }

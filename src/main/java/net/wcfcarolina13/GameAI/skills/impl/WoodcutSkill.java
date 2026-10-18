@@ -340,8 +340,9 @@ public final class WoodcutSkill implements Skill {
             Map<String, Integer> protectedReasonCounts,
             List<String> rejectSamples,
             boolean allLocalLogsProtectedOrHuman,
-            // bases = distinct trunk bases the strict detect built; memoHits = detect calls (strict
-            // and loose) answered from the scan's memo (1.1.268 finding 4).
+            // bases = distinct trunk bases the strict detect resolved (empty verdicts included);
+            // memoHits = detect calls (strict and loose) answered from the scan's memo (1.1.268
+            // finding 4).
             int detectBases,
             int detectMemoHits) {
     }

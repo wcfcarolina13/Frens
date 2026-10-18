@@ -1912,8 +1912,7 @@ public final class BotHomeService {
      * This save's remembered own Spawn-base scaffold (1.1.268), bot UUID -> packed position -> the
      * placed block id and placement time, from the Overworld's per-save data. Unparseable bot keys
      * and records are skipped; expiry is applied by the caller ({@code OwnedScaffoldLedger.replaceAll}).
-     * Entries in the pre-release {@code ownedSpawnScaffold} format (positions without a block id)
-     * can never prove which block was placed, so they are dropped here. Never null.
+     * Never null.
      */
     public static Map<UUID, Map<Long, OwnedScaffoldLedger.Owned>> loadOwnedSpawnScaffold(MinecraftServer server) {
         Map<UUID, Map<Long, OwnedScaffoldLedger.Owned>> out = new HashMap<>();
@@ -1921,14 +1920,7 @@ public final class BotHomeService {
             return out;
         }
         WorldData wd = worldData(server, server.getOverworld());
-        boolean droppedLegacy = false;
         synchronized (LOCK) {
-            if (wd.ownedSpawnScaffold != null && !wd.ownedSpawnScaffold.isEmpty()) {
-                LOGGER.info("[spawn-scaffold] dropping {} bot entr(ies) of own scaffold saved without block ids",
-                        wd.ownedSpawnScaffold.size());
-                wd.ownedSpawnScaffold = new HashMap<>();
-                droppedLegacy = true;
-            }
             if (wd.ownedSpawnScaffoldBlocks != null) {
                 for (Map.Entry<String, List<SavedOwnedScaffold>> e : wd.ownedSpawnScaffoldBlocks.entrySet()) {
                     if (e.getKey() == null || e.getValue() == null || e.getValue().isEmpty()) continue;
@@ -1949,9 +1941,6 @@ public final class BotHomeService {
                     }
                 }
             }
-        }
-        if (droppedLegacy) {
-            flush();
         }
         return out;
     }
@@ -2053,9 +2042,6 @@ public final class BotHomeService {
         int maxBaseRadius; // 0 = use DEFAULT_MAX_BASE_RADIUS; Gson defaults missing field to 0
         boolean spawnBaseInitialized; // seeded by initializeSpawnBaseIfNeeded; sticky across restarts
         boolean spawnBaseWoodcutAllowed; // admin toggle; Gson defaults a missing field to false
-        // Pre-release 1.1.268 format (bot UUID -> packed BlockPos longs, no block id). Kept with its
-        // old type only so such a file still parses; its entries are dropped on load.
-        Map<String, List<Long>> ownedSpawnScaffold = new HashMap<>();
         // 1.1.268: own woodcut scaffold each bot placed in the Spawn base, bot UUID -> records with
         // the placed block id and placement time (Overworld entry only). Missing on older saves:
         // kept as this empty default.
