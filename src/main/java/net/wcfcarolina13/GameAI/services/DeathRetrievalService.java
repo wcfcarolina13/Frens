@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -54,6 +55,12 @@ public final class DeathRetrievalService {
         t.setDaemon(true);
         return t;
     });
+
+    /**
+     * Inventory count when the retrieval trip set off, by lowercase alias. Server thread writes and
+     * reads. Not persisted: after a reload the arrival falls back to the sweep's own gain.
+     */
+    private static final Map<String, Integer> DEPARTURE_COUNT = new ConcurrentHashMap<>();
 
     private DeathRetrievalService() {}
 
@@ -150,6 +157,7 @@ public final class DeathRetrievalService {
                 : who.trim();
         NavigationArtifactService.schedulePostArrival(alias, new NavigationArtifactService.PostArrivalAction(
                 DeathRetrievalPolicy.actionType(mode, whoForAction), stand, recipient, null));
+        DEPARTURE_COUNT.put(alias.toLowerCase(java.util.Locale.ROOT), countItems(bot));
         LOGGER.info("[Retrieve] {} departing to stand point {} in {} (death {}) return={}",
                 alias, stand.toShortString(), dimKey.getValue(), target.pos().toShortString(), mode);
 
@@ -170,6 +178,9 @@ public final class DeathRetrievalService {
     public static void onArrival(MinecraftServer server, String botAlias, BlockPos arrivedDest,
                                  boolean dimensionFallback, NavigationArtifactService.PostArrivalAction action) {
         server.execute(() -> {
+            Integer departureBoxed = botAlias == null ? null
+                    : DEPARTURE_COUNT.remove(botAlias.toLowerCase(java.util.Locale.ROOT));
+            int departure = departureBoxed == null ? -1 : departureBoxed;
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botAlias);
             if (bot != null) {
                 // Never inherit a filter a stuck earlier sweep left behind.
@@ -228,7 +239,7 @@ public final class DeathRetrievalService {
                     DropSweeper.setAllowedDrops(botUuid, null);
                 }
                 final SkillExecutionResult finalResult = result;
-                server.execute(() -> finish(server, botAlias, bot, before, sweepStartMs, finalResult, action, filter));
+                server.execute(() -> finish(server, botAlias, bot, departure, before, sweepStartMs, finalResult, action, filter));
             });
         });
     }
@@ -250,7 +261,8 @@ public final class DeathRetrievalService {
      * Server thread. {@code sweptBot} is the entity that arrived, so a respawn elsewhere is not
      * mistaken for it.
      */
-    private static void finish(MinecraftServer server, String botAlias, ServerPlayerEntity sweptBot, int before,
+    private static void finish(MinecraftServer server, String botAlias, ServerPlayerEntity sweptBot,
+                               int departure, int before,
                                long sweepStartMs, SkillExecutionResult result,
                                NavigationArtifactService.PostArrivalAction action, Set<UUID> filter) {
         UUID recipient = action.ownerUuid();
@@ -267,11 +279,16 @@ public final class DeathRetrievalService {
             LOGGER.info("[Retrieve] {} gone before the sweep report", botAlias);
             return;
         }
-        // Offload is off for this sweep, so the inventory gain is the real count.
-        int picked = Math.max(0, countItems(bot) - before);
+        // Offload is off for this sweep, so the inventory gain is the real count. Vanilla pickup on
+        // landing happens before the sweep, so the gain since departure counts too (creditedPickup).
+        int after = countItems(bot);
+        int sweepGain = Math.max(0, after - before);
+        int tagged = filter == null ? 0 : filter.size();
+        int gone = taggedGone(bot, filter);
+        int picked = DeathRetrievalPolicy.creditedPickup(departure, before, after, tagged, gone);
         boolean ok = result != null && result.success();
-        LOGGER.info("[Retrieve] {} sweep done: picked={} tagged={} taggedGone={} success={} msg='{}'",
-                botAlias, picked, filter == null ? 0 : filter.size(), taggedGone(bot, filter), ok,
+        LOGGER.info("[Retrieve] {} sweep done: picked={} sweepGain={} departure={} arrival={} after={} tagged={} taggedGone={} success={} msg='{}'",
+                botAlias, picked, sweepGain, departure, before, after, tagged, gone, ok,
                 result == null ? "null" : result.message());
         if (!ok) {
             LOGGER.info("[Retrieve] {} stays: sweep failed twice", botAlias);
@@ -287,7 +304,7 @@ public final class DeathRetrievalService {
                     "§e" + DeathRetrievalPolicy.leftItemsBehind(botAlias) + "§r");
         } else {
             NavigationArtifactService.notifyPlayer(server, recipient,
-                    "§a" + DeathRetrievalPolicy.sweepReport(botAlias, result.message(), picked) + "§r");
+                    "§a" + DeathRetrievalPolicy.sweepReport(botAlias, result.message(), sweepGain, picked) + "§r");
         }
 
         Optional<DeathRetrievalPolicy.ReturnMode> mode = DeathRetrievalPolicy.parseAction(action.type());

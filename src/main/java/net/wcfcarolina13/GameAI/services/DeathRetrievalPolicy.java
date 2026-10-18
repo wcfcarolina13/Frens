@@ -328,11 +328,28 @@ public final class DeathRetrievalPolicy {
     }
 
     /**
-     * The report after a successful sweep: the sweep's own line (it counts what it picked up,
-     * {@code DropSweepMessages}), or {@link #result} when that line is blank.
+     * Items credited to the trip. Vanilla pickup on landing already took drops before the sweep
+     * started, so the sweep's own gain ({@code after - arrival}) can be 0 although the bot did fetch
+     * them. The gain since departure counts too, but only when it can be tied to this death: no
+     * departure count (reload) or tagged drops of which none left the world mean sweep gain only.
+     * Untagged trips (no filter) count from departure.
      */
-    public static String sweepReport(String bot, String sweepMessage, int inventoryGain) {
-        if (sweepMessage == null || sweepMessage.isBlank()) return result(bot, inventoryGain);
+    public static int creditedPickup(int departureCount, int arrivalCount, int afterCount,
+                                     int taggedTotal, int taggedGone) {
+        int sweepGain = Math.max(0, afterCount - arrivalCount);
+        if (departureCount < 0) return sweepGain;
+        if (taggedTotal > 0 && taggedGone == 0) return sweepGain;
+        return Math.max(sweepGain, afterCount - departureCount);
+    }
+
+    /**
+     * The report after a successful sweep: the sweep's own line (it counts what it picked up,
+     * {@code DropSweepMessages}), or {@link #result} when that line is blank or when the trip
+     * credited more ({@code total}, from {@link #creditedPickup}) than the sweep itself picked up.
+     */
+    public static String sweepReport(String bot, String sweepMessage, int sweepGain, int total) {
+        if (total > sweepGain) return result(bot, total);
+        if (sweepMessage == null || sweepMessage.isBlank()) return result(bot, total);
         return bot + " at the death spot: " + sweepMessage.trim();
     }
 

@@ -250,11 +250,42 @@ class DeathRetrievalPolicyTest {
     @Test
     void sweepReportRelaysTheSweepsOwnCount() {
         assertEquals("Bob at the death spot: Picked up 12 items.",
-                DeathRetrievalPolicy.sweepReport("Bob", "Picked up 12 items.", 0));
+                DeathRetrievalPolicy.sweepReport("Bob", "Picked up 12 items.", 0, 0));
         assertEquals("Bob at the death spot: My inventory is full, so I stopped after picking up 3 items.",
-                DeathRetrievalPolicy.sweepReport("Bob", "My inventory is full, so I stopped after picking up 3 items.", 0));
-        assertEquals("Bob picked up 4 items at the death spot.", DeathRetrievalPolicy.sweepReport("Bob", " ", 4));
-        assertEquals("Bob found nothing to pick up at the death spot.", DeathRetrievalPolicy.sweepReport("Bob", null, 0));
+                DeathRetrievalPolicy.sweepReport("Bob", "My inventory is full, so I stopped after picking up 3 items.", 3, 3));
+        assertEquals("Bob picked up 4 items at the death spot.", DeathRetrievalPolicy.sweepReport("Bob", " ", 4, 4));
+        assertEquals("Bob found nothing to pick up at the death spot.", DeathRetrievalPolicy.sweepReport("Bob", null, 0, 0));
+    }
+
+    @Test
+    void sweepReportUsesTheTripCountWhenArrivalPickupBeatTheSweep() {
+        // Field 2026-10-18: vanilla pickup on landing took the drops, the sweep found nothing.
+        assertEquals("Wally picked up 20 items at the death spot.",
+                DeathRetrievalPolicy.sweepReport("Wally", "Nothing to pick up.", 0, 20));
+    }
+
+    @Test
+    void creditedPickupCountsArrivalPickupWhenTheTaggedDropsLeft() {
+        // departure 153, arrival 173, after sweep 173, 1 tagged drop gone
+        assertEquals(20, DeathRetrievalPolicy.creditedPickup(153, 173, 173, 1, 1));
+    }
+
+    @Test
+    void creditedPickupWithoutADepartureCountIsTheSweepGain() {
+        assertEquals(0, DeathRetrievalPolicy.creditedPickup(-1, 173, 173, 1, 1));
+        assertEquals(5, DeathRetrievalPolicy.creditedPickup(-1, 168, 173, 0, 0));
+    }
+
+    @Test
+    void creditedPickupIgnoresTravelGainWhenNoTaggedDropLeft() {
+        assertEquals(2, DeathRetrievalPolicy.creditedPickup(150, 170, 172, 4, 0));
+    }
+
+    @Test
+    void creditedPickupUntaggedCountsFromDeparture() {
+        assertEquals(22, DeathRetrievalPolicy.creditedPickup(150, 170, 172, 0, 0));
+        // a gain lost on the way never makes the count negative
+        assertEquals(2, DeathRetrievalPolicy.creditedPickup(180, 170, 172, 0, 0));
     }
 
     @Test
