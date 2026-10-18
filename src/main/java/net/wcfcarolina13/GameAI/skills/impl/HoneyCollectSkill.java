@@ -141,7 +141,7 @@ public final class HoneyCollectSkill implements Skill {
                     return hasEmptySlot(bot);
                 }, INTERACT_TIMEOUT_MS, false);
                 if (!freeAfterPack) {
-                    depositHoneyItems(source, bot, world);
+                    depositHoneyItemsIfFull(source, bot, world);
                 }
                 if (!hasEmptySlot(bot)) {
                     skip(outcomes, hivePos, HoneyHarvestOutcome.INVENTORY_FULL, "no free slot for honeycombs");
@@ -199,7 +199,7 @@ public final class HoneyCollectSkill implements Skill {
             packHoneyIntoContainers(bot);
             return true;
         }, INTERACT_TIMEOUT_MS, false);
-        depositHoneyItems(source, bot, world);
+        depositHoneyItemsIfFull(source, bot, world);
 
         return SkillExecutionResult.success("Collected honey from " + harvested
                 + (harvested == 1 ? " beehive." : " beehives."));
@@ -230,33 +230,10 @@ public final class HoneyCollectSkill implements Skill {
         // Must be smoked (campfire within 5 blocks below). getBlockEntity is null off the
         // server thread, so read the hive there (skill bodies run on a worker).
         BlockPos hivePos = pos.toImmutable();
-        return callOnServer(world, () -> {
+        return SupplyServerHop.call(world.getServer(), () -> {
             BlockEntity be = world.getBlockEntity(hivePos);
             return be instanceof BeehiveBlockEntity hive && hive.isSmoked();
-        }, false);
-    }
-
-    private static <T> T callOnServer(ServerWorld world, java.util.function.Supplier<T> task, T fallback) {
-        var server = world.getServer();
-        if (server == null || server.isOnThread()) {
-            return task.get();
-        }
-        java.util.concurrent.CompletableFuture<T> future = new java.util.concurrent.CompletableFuture<>();
-        server.execute(() -> {
-            try {
-                future.complete(task.get());
-            } catch (Throwable t) {
-                future.completeExceptionally(t);
-            }
-        });
-        try {
-            return future.get(500L, java.util.concurrent.TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return fallback;
-        } catch (Exception e) {
-            return fallback;
-        }
+        }, INTERACT_TIMEOUT_MS, false);
     }
 
     // ── Interaction ─────────────────────────────────────────────────
@@ -315,7 +292,8 @@ public final class HoneyCollectSkill implements Skill {
     private static String moveIntoReach(ServerCommandSource source, ServerPlayerEntity bot,
                                         ServerWorld world, BlockPos hivePos) {
         if (canUseHive(world, bot, hivePos)) return null;
-        List<BlockPos> stands = callOnServer(world, () -> findStandCellsNearHive(world, bot, hivePos), List.of());
+        List<BlockPos> stands = SupplyServerHop.call(world.getServer(),
+                () -> findStandCellsNearHive(world, bot, hivePos), INTERACT_TIMEOUT_MS, List.of());
         if (stands.isEmpty()) {
             return "no stand cell within reach";
         }
@@ -333,6 +311,14 @@ public final class HoneyCollectSkill implements Skill {
             if (canUseHive(world, bot, hivePos)) {
                 return null;
             }
+            // The walk counts 1.5 blocks as arrived, which can leave the hive just past reach:
+            // drive the last stretch onto the stand cell (worker thread, like FishingSkill).
+            if (!SkillManager.shouldAbortSkill(bot)) {
+                MovementService.nudgeTowardUntilClose(bot, stand, 0.7, 1500L, 0.18, "honey-stand");
+                if (canUseHive(world, bot, hivePos)) {
+                    return null;
+                }
+            }
             if (detail.length() > 0) detail.append(", ");
             detail.append(stand.toShortString()).append(' ')
                     .append(result == null ? "no-result" : (result.success() ? "arrived-out-of-reach" : "walk-failed"));
@@ -341,7 +327,7 @@ public final class HoneyCollectSkill implements Skill {
                 + " botPos=" + bot.getBlockPos().toShortString();
     }
 
-    /** Reach from the eye plus line of sight, read on the server thread. */
+    /** Reach from the feet plus line of sight, read on the server thread. */
     private static boolean canUseHive(ServerWorld world, ServerPlayerEntity bot, BlockPos hivePos) {
         // Same abandon-safe 1000 ms hop as the harvest: one slow tick must not read an in-reach hive as unreachable.
         return SupplyServerHop.call(world.getServer(),
@@ -349,7 +335,7 @@ public final class HoneyCollectSkill implements Skill {
     }
 
     /**
-     * Two-high stand cells around the hive whose eye point reaches the hive centre, nearest to the bot
+     * Two-high stand cells around the hive from which canInteract's reach (feet to hive centre) holds, nearest to the bot
      * first. Cells straight over a campfire are left out. A cell whose eye ray to the hive hits another
      * block first is left out too. Server thread only (block states).
      */
@@ -597,15 +583,63 @@ public final class HoneyCollectSkill implements Skill {
         return false;
     }
 
-    private static void depositHoneyItems(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world) {
-        try {
-            ChestStoreService.depositMatchingWalkOnly(source, bot, bot.getBlockPos(),
-                    stack -> stack != null && stack.isOf(Items.HONEYCOMB));
-            ChestStoreService.depositMatchingWalkOnly(source, bot, bot.getBlockPos(),
-                    stack -> stack != null && stack.isOf(Items.HONEY_BOTTLE));
-        } catch (Exception e) {
-            LOGGER.debug("Honey deposit failed: {}", e.getMessage());
+    /**
+     * Put loose honey in an existing nearby chest, only when the main inventory is still full after
+     * packing (HoneyHarvestOutcome.shouldDeposit). Tries the deposit candidates in order and stops at
+     * the first chest that takes anything. Never places a chest. With no taker the bot keeps the
+     * honey (one log line, no chat). Worker thread: the walks run here, the transfers hop to the server.
+     */
+    private static void depositHoneyItemsIfFull(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world) {
+        int[] state = SupplyServerHop.call(world.getServer(),
+                () -> new int[]{countEmptyMainSlots(bot), countLooseHoneyStacks(bot)},
+                INTERACT_TIMEOUT_MS, null);
+        if (state == null || !HoneyHarvestOutcome.shouldDeposit(state[0], state[1])) {
+            return;
         }
+        java.util.function.Predicate<ItemStack> honey = HoneyCollectSkill::isHoneyItem;
+        int tried = 0;
+        try {
+            for (ChestStoreService.StorageChestCandidate candidate : ChestStoreService.listDepositChestCandidates(
+                    source, bot, null, 12, 6, 140.0D * 140.0D)) {
+                if (SkillManager.shouldAbortSkill(bot)) {
+                    return;
+                }
+                tried++;
+                int moved = ChestStoreService.depositMatchingWalkOnly(source, bot, candidate.pos(), honey);
+                if (moved > 0) {
+                    LOGGER.info("honey_collect deposited {} honey item(s) in {} chest at {}",
+                            moved, candidate.source(), candidate.pos().toShortString());
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.info("honey_collect deposit failed after {} chest(s): {}", tried, e.toString());
+            return;
+        }
+        LOGGER.info("honey_collect inventory full, no existing chest took the honey ({} tried), keeping {} stack(s)",
+                tried, state[1]);
+    }
+
+    private static boolean isHoneyItem(ItemStack stack) {
+        return stack != null && (stack.isOf(Items.HONEYCOMB) || stack.isOf(Items.HONEY_BOTTLE));
+    }
+
+    /** Server thread only. Empty main inventory slots (hotbar 0-8 + main 9-35). */
+    private static int countEmptyMainSlots(ServerPlayerEntity bot) {
+        int n = 0;
+        for (int i = 0; i < 36; i++) {
+            if (bot.getInventory().getStack(i).isEmpty()) n++;
+        }
+        return n;
+    }
+
+    /** Server thread only. Main inventory stacks of loose honeycombs or honey bottles. */
+    private static int countLooseHoneyStacks(ServerPlayerEntity bot) {
+        int n = 0;
+        for (int i = 0; i < 36; i++) {
+            if (isHoneyItem(bot.getInventory().getStack(i))) n++;
+        }
+        return n;
     }
 
     // ── Utilities ───────────────────────────────────────────────────

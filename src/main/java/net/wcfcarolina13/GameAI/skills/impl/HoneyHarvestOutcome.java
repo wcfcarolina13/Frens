@@ -26,7 +26,7 @@ public enum HoneyHarvestOutcome {
 
     /** Vanilla survival block reach, squared (matches BlockInteractionService.SURVIVAL_REACH_SQ). */
     static final double REACH_SQ = 20.25D;
-    /** Standing eye height above the feet block's floor. */
+    /** Standing eye height above the feet block's floor (line-of-sight ray origin). */
     static final double EYE_HEIGHT = 1.62D;
 
     /**
@@ -52,13 +52,24 @@ public enum HoneyHarvestOutcome {
     }
 
     /**
-     * True when a bot with its feet in a block cell can reach the centre of the hive.
-     * {@code dx, dy, dz} are hive minus feet cell, in blocks. The eye sits {@link #EYE_HEIGHT}
-     * above the feet cell's floor, the hive centre 0.5 above its own floor.
+     * True when a bot standing at the centre of a feet cell passes the reach half of
+     * {@code BlockInteractionService.canInteract}: the squared distance from the player's position
+     * (the feet, at the cell's floor centre) to the hive's block centre is at most {@link #REACH_SQ}.
+     * {@code dx, dy, dz} are hive minus feet cell, in blocks, so the offset to the hive centre is
+     * {@code (dx, dy + 0.5, dz)}.
      */
     public static boolean withinReach(int dx, int dy, int dz) {
-        double vertical = dy + 0.5D - EYE_HEIGHT;
+        double vertical = dy + 0.5D;
         return (double) dx * dx + vertical * vertical + (double) dz * dz <= REACH_SQ;
+    }
+
+    /**
+     * Whether {@code honey_collect} should walk to a chest with its honey: only when the main
+     * inventory is still full after packing ({@code emptyMainSlots <= 0}) and there is honey
+     * (honeycombs or honey bottles) loose in it to put away.
+     */
+    public static boolean shouldDeposit(int emptyMainSlots, int looseHoneyStacks) {
+        return emptyMainSlots <= 0 && looseHoneyStacks > 0;
     }
 
     private static int count(Map<HoneyHarvestOutcome, Integer> outcomes, HoneyHarvestOutcome key) {

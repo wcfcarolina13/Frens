@@ -81,7 +81,43 @@ class HoneyHarvestOutcomeTest {
         // Sweep Woods repro: hive two above the pad floor, bot three blocks out.
         assertTrue(HoneyHarvestOutcome.withinReach(0, 2, 3));
         assertTrue(HoneyHarvestOutcome.withinReach(0, 1, -3));
-        assertTrue(HoneyHarvestOutcome.withinReach(3, 2, 3));
+    }
+
+    @Test
+    void diagonalTwoBelowIsOutOfFeetReach() {
+        // Measured from the eye this passed (18.77) and canInteract then always refused it (24.25).
+        assertFalse(HoneyHarvestOutcome.withinReach(3, 2, 3));
+        assertTrue(HoneyHarvestOutcome.withinReach(3, 1, 3)); // 9 + 2.25 + 9 = 20.25, the edge
+        assertTrue(HoneyHarvestOutcome.withinReach(0, 4, 0)); // 4.5^2 = 20.25, the edge
+        assertFalse(HoneyHarvestOutcome.withinReach(0, 5, 0));
+    }
+
+    /**
+     * Pins withinReach to canInteract's reach test: squared distance from the player's position (feet,
+     * standing at the centre of the feet cell's floor) to the hive's block centre, at most 20.25.
+     */
+    @Test
+    void reachAgreesWithCanInteractDistanceForEveryStandOffset() {
+        for (int dx = -5; dx <= 5; dx++) {
+            for (int dy = -6; dy <= 6; dy++) {
+                for (int dz = -5; dz <= 5; dz++) {
+                    double feetX = 0.5D, feetY = 0.0D, feetZ = 0.5D;
+                    double hiveX = dx + 0.5D, hiveY = dy + 0.5D, hiveZ = dz + 0.5D;
+                    double ex = hiveX - feetX, ey = hiveY - feetY, ez = hiveZ - feetZ;
+                    boolean canInteractReach = ex * ex + ey * ey + ez * ez <= 20.25D;
+                    assertEquals(canInteractReach, HoneyHarvestOutcome.withinReach(dx, dy, dz),
+                            "offset " + dx + "," + dy + "," + dz);
+                }
+            }
+        }
+    }
+
+    @Test
+    void depositOnlyWhenStillFullAndCarryingHoney() {
+        assertTrue(HoneyHarvestOutcome.shouldDeposit(0, 2));
+        assertFalse(HoneyHarvestOutcome.shouldDeposit(1, 2));
+        assertFalse(HoneyHarvestOutcome.shouldDeposit(5, 3));
+        assertFalse(HoneyHarvestOutcome.shouldDeposit(0, 0));
     }
 
     @Test
@@ -95,6 +131,8 @@ class HoneyHarvestOutcomeTest {
     void reachFromAboveTheHive() {
         assertTrue(HoneyHarvestOutcome.withinReach(1, -1, 0));
         assertTrue(HoneyHarvestOutcome.withinReach(0, -3, 0));
-        assertFalse(HoneyHarvestOutcome.withinReach(3, -3, 2));
+        assertTrue(HoneyHarvestOutcome.withinReach(3, -1, 3)); // 9 + 0.25 + 9
+        assertTrue(HoneyHarvestOutcome.withinReach(3, -3, 2)); // 9 + 6.25 + 4 = 19.25 from the feet
+        assertFalse(HoneyHarvestOutcome.withinReach(3, -3, 3)); // 24.25
     }
 }
