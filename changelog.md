@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Bradley's decisions on six open questions (2026-10-18, no build)
+
+Asked as decision cards with a recommendation each. Bradley took every recommendation except the voice credit, where he chose the generic line.
+- **Pre-deploy check per instance.** Check only the target instance's natives path (Nirn `instances/1.21.11`, sandbox `instances/mcp-sandbox`). Each instance has its own `mods/`. CLAUDE.md (local) and the frens-release-loop skill updated. Cost if wrong: none found.
+- **Food reserve 16 → 8.** A bot may take food from a chest while it leaves 8 (the 1.1.221 provisional ruling was 16). Code change goes into 1.1.268. Cost if wrong: a hungry bot eats into the owner's bread sooner.
+- **`OLLAMA_NUM_PARALLEL` stays 4** (the LaunchAgent comment records why).
+- **PlayerMemory vs relations:** decide after the 6aj-6bg field sweep.
+- **Modrinth:** the first build after the sweep with no high-severity failures goes public. Notes prepared for Bradley's OK, he uploads.
+- **Voice clip credit:** "Voice lines are synthetic speech generated with licensed text-to-speech." No engine or voice names.
+
 ## Ralph loop retired (2026-10-17, no build)
 
 Bradley asked whether the project's Ralph system was redundant next to the release-loop skill, the changelog and auto-memory. Fable's verdict: retire the loop, keep the live artifacts, rename nothing. Done in phases with a retention audit first, so no rule or deferred item was lost.

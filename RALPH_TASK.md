@@ -161,12 +161,12 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "per-action control mode upstream PR." ("Upstream PR plan ... nothing sent" in `MCP_MOD_IMPROVEMENTS.md`; 1.1.236 handoff, 2026-10-14)
 
 ### Docs and process
-- [ ] Needs Bradley: "scope the CLAUDE.md pre-deploy check to the target instance (`pgrep -f "PrismLauncher/instances/1.21.11/natives"`). The any-instance pattern blocks every release while a sandbox test runs." (1.1.263 handoff, 2026-10-17)
-- [ ] Needs Bradley: "the TTS engine and voice names for the dialogue-clip attribution line (still a placeholder)." (1.1.225 handoff; also 1.1.224 and 1.1.223 handoffs, 2026-09-25/26)
-- [ ] Needs Bradley: confirm "Food reserve 16 as the survival cutoff (early game: a bot can't eat from a chest holding ≤16 bread)." (provisional ruling made on his behalf in 1.1.221; 1.1.221 and 1.1.222 handoffs, 2026-09-25)
-- [ ] Needs Bradley: "Whether to lower `OLLAMA_NUM_PARALLEL`." ("machine-wide; other local jobs share it"; 1.1.217 through 1.1.222 handoffs, 2026-09-25)
-- [ ] Needs Bradley: "relations coexist with `PlayerMemory`, decide after the field session" (1.1.211 handoff, 2026-09-06)
-- [ ] Needs Bradley: "1.1.231–1.1.233 NOT published" on Modrinth (now everything after 1.1.230; held by the "no Modrinth until the live playthroughs settle" ruling, 2026-10-14; 1.1.233 handoff, 2026-10-13)
+- [x] ✅ Ruled 2026-10-18: per instance (CLAUDE.md and the release skill updated). Was: Needs Bradley: "scope the CLAUDE.md pre-deploy check to the target instance (`pgrep -f "PrismLauncher/instances/1.21.11/natives"`). The any-instance pattern blocks every release while a sandbox test runs." (1.1.263 handoff, 2026-10-17)
+- [x] ✅ Ruled 2026-10-18: generic credit "Voice lines are synthetic speech generated with licensed text-to-speech." for the release notes (no engine or voice names). Was: Needs Bradley: "the TTS engine and voice names for the dialogue-clip attribution line (still a placeholder)." (1.1.225 handoff; also 1.1.224 and 1.1.223 handoffs, 2026-09-25/26)
+- [ ] Ruled 2026-10-18: lower the survival food cutoff to 8 (code change, sent to the 1.1.268 field-sweep session). Was: Needs Bradley: confirm "Food reserve 16 as the survival cutoff (early game: a bot can't eat from a chest holding ≤16 bread)." (provisional ruling made on his behalf in 1.1.221; 1.1.221 and 1.1.222 handoffs, 2026-09-25)
+- [x] ✅ Ruled 2026-10-18: keep 4 (com.bradley.ollama-env LaunchAgent, measured for souls). Was: Needs Bradley: "Whether to lower `OLLAMA_NUM_PARALLEL`." ("machine-wide; other local jobs share it"; 1.1.217 through 1.1.222 handoffs, 2026-09-25)
+- [ ] Ruled 2026-10-18: decide after the 6aj-6bg field sweep (note any disagreement seen in play). Was: Needs Bradley: "relations coexist with `PlayerMemory`, decide after the field session" (1.1.211 handoff, 2026-09-06)
+- [ ] Ruled 2026-10-18: publish the first build after the field sweep with no high-severity failures (likely 1.1.268); notes prepared for Bradley's OK, he uploads. Was: Needs Bradley: "1.1.231–1.1.233 NOT published" on Modrinth (now everything after 1.1.230; held by the "no Modrinth until the live playthroughs settle" ruling, 2026-10-14; 1.1.233 handoff, 2026-10-13)
 - [ ] (uncertain) "5. Fresh-install part 2." (no clean-instance run recorded; 1.1.236 handoff; also 1.1.234, 1.1.229, 1.1.227 and 1.1.225 handoffs)
 - [ ] (uncertain) "(mention the REI/EMI/JEI note)" in the Modrinth changelog (1.1.228 handoff, 2026-10-13)
 - [ ] (uncertain) "Session cards: task_43ec92da (merged finder, now largely done) and task_e6032cb8 (audit) can be dismissed or re-scoped by Bradley." (1.1.242 handoff, 2026-10-15)
