@@ -13,7 +13,7 @@ test_command: "./gradlew build -x test"
 - M1: 15 s no-planks table window. M2: a held unplaceable table gives one line. M3: mounted leaf clearing goes bare-handed instead of using shears or a weapon. M4: a bot named after a material can take a craft.
 - Reviewed by Fable, one fix wave, re-review, two small follow-ups. Field items: Phase 6bg (checklist now 330 open items).
 **Next:**
-- Fallback re-search when a refusing unified search returns NO_PATH. Seed 103 is a lawful mining path still missed through dedup staleness. Costs double time on failing server-thread probes, so it needs a ruling.
+- **Ruling (Bradley, 2026-10-17): no fallback re-search** after a refusing unified NO_PATH for now. Revisit only if the field shows missed routes (seed 103 is a lawful mining path still missed through dedup staleness; a retry would double failing server-thread probes).
 - Per-search overlay allocation into `SearchBuffers` (needs a `MoveSimulator.Overlay` base-terrain change).
 - With the Spawn-tree toggle On, a tree that needs a pillar is cut one log at a time: `pillarUp` is refused in the Spawn base (1.1.238 ruling, `7f89c502`, logs and leaves only), so the bot leaves the rest and relocates. Seen on a floating test tree. Watch whether rooted Spawn trees do the same, it may need a ruling.
 - M2 not set up in game (tests only). New player string "woodcut_cleanup interrupted." for the next text sweep.
