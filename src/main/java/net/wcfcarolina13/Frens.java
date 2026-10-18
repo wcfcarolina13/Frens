@@ -89,6 +89,17 @@ public class Frens implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("frens");
     public static final String MOD_ID = "frens";
     private record PermissionResolution(PermissionPredicate predicate, String mode, String className, String fieldName) {}
+    // Intermediary ids (verified in the 1.21.11 Yarn mappings.tiny): LeveledPermissionPredicate is
+    // class_12086 (OWNERS field_63185 ... ALL field_63181); PermissionPredicate is class_12096
+    // (ALL field_63208). Resolved through the MappingResolver so the lookup works in production
+    // (intermediary) and in dev (named) alike, and falls back cleanly where the class is absent.
+    // Keep these above OPERATOR_PERMISSION_RESOLUTION: static initializers run in source order.
+    private static final String LEVELED_PERMISSION_INTERMEDIARY = "net.minecraft.class_12086";
+    private static final String[][] LEVELED_PERMISSION_FIELDS = {
+            {"field_63185", "OWNERS"}, {"field_63184", "ADMINS"}, {"field_63183", "GAMEMASTERS"},
+            {"field_63182", "MODERATORS"}, {"field_63181", "ALL"}};
+    private static final String PERMISSION_PREDICATE_INTERMEDIARY = "net.minecraft.class_12096";
+    private static final String PERMISSION_PREDICATE_ALL_FIELD = "field_63208";
     private static final PermissionResolution OPERATOR_PERMISSION_RESOLUTION = resolveOperatorPermissions();
     public static final PermissionPredicate OPERATOR_PERMISSIONS = OPERATOR_PERMISSION_RESOLUTION.predicate();
 
@@ -191,17 +202,6 @@ public class Frens implements ModInitializer {
         return net.wcfcarolina13.GameAI.services.HostPermissionPolicy.allowsBotCommands(false, operator, host);
     }
 
-    // Intermediary ids (verified in the 1.21.11 Yarn mappings.tiny): LeveledPermissionPredicate is
-    // class_12086 (OWNERS field_63185 ... ALL field_63181); PermissionPredicate is class_12096
-    // (ALL field_63208). Resolved through the MappingResolver so the lookup works in production
-    // (intermediary) and in dev (named) alike, and falls back cleanly where the class is absent.
-    private static final String LEVELED_PERMISSION_INTERMEDIARY = "net.minecraft.class_12086";
-    private static final String[][] LEVELED_PERMISSION_FIELDS = {
-            {"field_63185", "OWNERS"}, {"field_63184", "ADMINS"}, {"field_63183", "GAMEMASTERS"},
-            {"field_63182", "MODERATORS"}, {"field_63181", "ALL"}};
-    private static final String PERMISSION_PREDICATE_INTERMEDIARY = "net.minecraft.class_12096";
-    private static final String PERMISSION_PREDICATE_ALL_FIELD = "field_63208";
-
     private static PermissionResolution resolveOperatorPermissions() {
         ClassLoader loader = Frens.class.getClassLoader();
         MappingResolver resolver = null;
@@ -250,7 +250,7 @@ public class Frens implements ModInitializer {
      * Reads the first present static {@link PermissionPredicate} among {@code fields}
      * ({intermediary, label} pairs) of the class with intermediary name {@code intermediaryClass},
      * mapped to the runtime namespace. Null when the class or every field is absent (e.g. on a
-     * Minecraft version without it) -- an expected fallback, so nothing is logged here.
+     * Minecraft version without it) -- an expected fallback, not logged. Any other runtime failure logs at debug and also returns null.
      */
     private static PermissionResolution resolveMappedStatic(MappingResolver resolver, ClassLoader loader,
                                                             String intermediaryClass, String[][] fields,
