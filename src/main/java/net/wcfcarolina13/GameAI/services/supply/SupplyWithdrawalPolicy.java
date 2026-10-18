@@ -484,8 +484,10 @@ public final class SupplyWithdrawalPolicy {
     /**
      * Whether a request for an item judged {@code verdict} at a chest could get anywhere now, for
      * {@link SupplyWithdrawals#grantablePreview}: the bot has an owner, the item passes the
-     * pre-filter, the chest has a key, and either a standing permission covers the chest or the
-     * owner is in prompt range. A bot noted away ({@link #ownerAwayStep} would refuse quietly)
+     * pre-filter, the chest has a key, the chest's access check is {@link Access#OK} (the same
+     * {@link SupplyChestRules#access} verdict a request reads, so a foreign, locked, territory-barred
+     * or blocked chest, or one whose zones are not loaded, never counts), and either a standing
+     * permission covers the chest or the owner is in prompt range. A bot noted away ({@link #ownerAwayStep} would refuse quietly)
      * falls under the last clause: that refusal needs no "always" and the owner out of range, so it
      * is never allowed here. An owner out of range without a note is not allowed either: the
      * request would come back {@code OWNER_NOT_NEARBY}. Advisory: tickets and grants are not seen,
@@ -494,12 +496,13 @@ public final class SupplyWithdrawalPolicy {
      * @param hasOwner      the bot resolves to an owner
      * @param verdict       the item's {@link SupplyRequestPolicy#classify} verdict
      * @param chestKeyKnown the chest's canonical key could be read
+     * @param access        the chest's access verdict for this bot and owner; null fails closed
      * @param alwaysCovers  the owner has a standing permission for this chest
      * @param ownerInRange  the owner is online, in the bot's world and within prompt range now
      */
-    public static boolean previewAllows(boolean hasOwner, Verdict verdict, boolean chestKeyKnown,
+    public static boolean previewAllows(boolean hasOwner, Verdict verdict, boolean chestKeyKnown, Access access,
                                         boolean alwaysCovers, boolean ownerInRange) {
-        if (!hasOwner || !passesPreFilter(verdict) || !chestKeyKnown) {
+        if (!hasOwner || !passesPreFilter(verdict) || !chestKeyKnown || access != Access.OK) {
             return false;
         }
         return alwaysCovers || ownerInRange;

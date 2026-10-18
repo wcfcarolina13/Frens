@@ -200,6 +200,31 @@ class SupplyEntryPointTest {
     }
 
     @Test
+    void thePreviewConsultsTheSameChestAccessReadAsARequest() {
+        // A foreign, locked or territory-barred chest is DENIED by request() -> readChest; the
+        // preview must not count it as food, so it reads that same verdict and hands it to the policy.
+        String facade = sources.get(SUPPLY_DIR + FACADE);
+        String service = sources.get(SUPPLY_DIR + SERVICE);
+        assertNotNull(facade);
+        assertNotNull(service);
+        int at = facade.indexOf("public static int grantablePreview(");
+        int end = facade.indexOf("\n    }\n", at);
+        assertTrue(at >= 0 && end > at, "grantablePreview's body not found");
+        String preview = facade.substring(at, end);
+        Matcher accessRead = Pattern.compile("(\\w+)\\s*=[^;]*SupplyRequestService\\s*\\.\\s*accessAt\\s*\\(")
+                .matcher(preview);
+        assertTrue(accessRead.find(), "grantablePreview must read SupplyRequestService.accessAt(...)");
+        String var = accessRead.group(1);
+        assertTrue(Pattern.compile("previewAllows\\s*\\([^;]*\\b" + var + "\\b").matcher(preview).find(),
+                "grantablePreview must pass the access verdict to previewAllows");
+        int helper = service.indexOf("static Access accessAt(");
+        assertTrue(helper >= 0, "SupplyRequestService.accessAt not found");
+        String body = service.substring(helper, service.indexOf("\n    }\n", helper));
+        assertTrue(Pattern.compile("readChest\\s*\\([^;]*\\)\\s*\\.\\s*access\\s*\\(\\)").matcher(body).find(),
+                "accessAt must be readChest's own access verdict, not a copy of the rules");
+    }
+
+    @Test
     void noFileButTheServiceNamesTheEntryPointsForReflection() {
         List<String> offenders = new ArrayList<>();
         for (Map.Entry<String, String> e : sources.entrySet()) {

@@ -311,8 +311,9 @@ public final class HoneyCollectSkill implements Skill {
             if (canUseHive(world, bot, hivePos)) {
                 return null;
             }
-            // The walk counts 1.5 blocks as arrived, which can leave the hive just past reach:
-            // drive the last stretch onto the stand cell (worker thread, like FishingSkill).
+            // The walk counts 3 blocks as arrived (MovementService.ARRIVAL_DISTANCE_SQ = 9), which can
+            // leave the hive just past reach: drive the last stretch onto the stand cell (worker
+            // thread, like FishingSkill).
             if (!SkillManager.shouldAbortSkill(bot)) {
                 MovementService.nudgeTowardUntilClose(bot, stand, 0.7, 1500L, 0.18, "honey-stand");
                 if (canUseHive(world, bot, hivePos)) {
@@ -589,6 +590,9 @@ public final class HoneyCollectSkill implements Skill {
      * the first chest that takes anything. Never places a chest. With no taker the bot keeps the
      * honey (one log line, no chat). Worker thread: the walks run here, the transfers hop to the server.
      */
+    /** Remembered chests farther than 32 blocks are never walked to for a honey deposit. */
+    private static final double DEPOSIT_REMEMBERED_CHEST_DIST_SQ = 32.0D * 32.0D;
+
     private static void depositHoneyItemsIfFull(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world) {
         int[] state = SupplyServerHop.call(world.getServer(),
                 () -> new int[]{countEmptyMainSlots(bot), countLooseHoneyStacks(bot)},
@@ -600,7 +604,7 @@ public final class HoneyCollectSkill implements Skill {
         int tried = 0;
         try {
             for (ChestStoreService.StorageChestCandidate candidate : ChestStoreService.listDepositChestCandidates(
-                    source, bot, null, 12, 6, 140.0D * 140.0D)) {
+                    source, bot, null, 12, 6, DEPOSIT_REMEMBERED_CHEST_DIST_SQ)) {
                 if (SkillManager.shouldAbortSkill(bot)) {
                     return;
                 }

@@ -987,6 +987,21 @@ public final class SupplyRequestService {
     }
 
     /**
+     * The access verdict a request from {@code bot} for {@code owner} would get at the chest at
+     * {@code pos}: {@link #readChest}'s own read, so the preview and the real take can never
+     * disagree on locks, ownership, territory, zones or a blocked lid. Read-only (nothing is asked,
+     * logged, recorded or moved; never loads a chunk). {@code null} when the service is not running
+     * or an argument is missing, which callers treat as denied. Server thread only.
+     */
+    static Access accessAt(ServerPlayerEntity bot, BlockPos pos, UUID owner) {
+        MinecraftServer srv = server;
+        if (srv == null || bot == null || pos == null || owner == null) {
+            return null;
+        }
+        return readChest(srv, bot.getEntityWorld(), pos, bot, owner).access();
+    }
+
+    /**
      * The canonical key of the chest at {@code pos} — the same key a request records, whichever
      * half {@code pos} names — or {@code null} when the service is not running, the chunk is not
      * loaded, the block is not a chest, or it is a double chest whose other half cannot be

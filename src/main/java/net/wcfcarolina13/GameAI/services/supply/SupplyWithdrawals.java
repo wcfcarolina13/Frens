@@ -236,7 +236,8 @@ public final class SupplyWithdrawals {
     /**
      * {@link #grantableEstimate} for {@code bot} at the chest at {@code chestPos}, or 0 when a
      * request from this bot for this chest would be refused before the owner could answer: the
-     * bot has no owner, the item fails the pre-filter, the chest has no readable key, or neither a
+     * bot has no owner, the item fails the pre-filter, the chest has no readable key, the chest's
+     * access check (the one a request makes: foreign, locked, territory, zones, blocked) denies it, or neither a
      * standing permission covers the chest nor is the owner in prompt range (which covers a bot
      * noted away; {@link SupplyWithdrawalPolicy#previewAllows}). Advisory, like the estimate:
      * nothing is asked, logged or moved, no ticket, grant or owner-away note is read or changed,
@@ -263,9 +264,11 @@ public final class SupplyWithdrawals {
         UUID owner = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
         Verdict verdict = SupplyRequestPolicy.classify(SupplyRequestService.itemKeyOf(world, sample), config);
         ChestKey chestKey = owner == null ? null : SupplyRequestService.chestKeyAt(world, chestPos);
+        // The same access read a request makes: a foreign, locked or territory-barred chest never counts.
+        SupplyChestRules.Access access = chestKey == null ? null : SupplyRequestService.accessAt(bot, chestPos, owner);
         boolean always = chestKey != null && SupplyRequestService.hasAlways(owner, chestKey);
         boolean inRange = chestKey != null && !always && SupplyRequestService.isOwnerInPromptRange(bot, owner);
-        return SupplyWithdrawalPolicy.previewAllows(owner != null, verdict, chestKey != null, always, inRange)
+        return SupplyWithdrawalPolicy.previewAllows(owner != null, verdict, chestKey != null, access, always, inRange)
                 ? estimate : 0;
     }
 
