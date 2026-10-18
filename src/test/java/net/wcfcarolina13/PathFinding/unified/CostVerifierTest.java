@@ -123,14 +123,27 @@ class CostVerifierTest {
 
     @Test
     void aNoPathCausedByTheSearchsOwnRefusalsIsSelfConflict() {
-        SearchContext ctx = minesItsOwnStep();
+        // minesItsOwnStep keeps its real cause: its walls and ceiling are unbreakable.
+        PathPlan walled = UnifiedPathFinder.search(minesItsOwnStep(), () -> 0L);
+        assertEquals(PlanStatus.NO_PATH, walled.status(), walled.moves().toString());
+        assertEquals(NoPathReason.BLOCKED_UNBREAKABLE, walled.reason());
+        // The same corridor with nothing unbreakable in reach: the box ends at the corridor and the cell
+        // over the start is lava (never broken, never tallied), so only the search's own refusal is left.
+        VoxelGrid g = new VoxelGrid(0, 0, 0, 5, 6, 3, VoxelGrid.ToolTable.HAND);
+        g.fill(0, 0, 0, 4, 5, 2, 'n');
+        g.fill(0, 1, 1, 2, 4, 1, '.');
+        g.set(0, 3, 1, '!');
+        g.set(1, 1, 1, 'd');
+        SearchContext ctx = SearchContext.builder(g, 0, 1, 1, 1, 2, 1).allowBreak(true)
+                .box(new SearchBox(0, 1, 1, 2, 4, 1)).build();
         PathPlan plan = UnifiedPathFinder.search(ctx, () -> 0L);
         assertEquals(PlanStatus.NO_PATH, plan.status(), plan.moves().toString());
         assertEquals(NoPathReason.SELF_CONFLICT, plan.reason());
-        // Only the generic exhausted-region reasons give way; the specific ones stay.
+        // Only the generic BOXED_IN gives way; a pit with one incidental self-refusal keeps its cause.
         assertEquals(NoPathReason.SELF_CONFLICT, UnifiedPathFinder.selfConflictOr(NoPathReason.BOXED_IN, 1));
-        assertEquals(NoPathReason.SELF_CONFLICT,
+        assertEquals(NoPathReason.BLOCKED_UNBREAKABLE,
                 UnifiedPathFinder.selfConflictOr(NoPathReason.BLOCKED_UNBREAKABLE, 1));
+        assertEquals(NoPathReason.NO_SCAFFOLD, UnifiedPathFinder.selfConflictOr(NoPathReason.NO_SCAFFOLD, 2));
         assertEquals(NoPathReason.BOXED_IN, UnifiedPathFinder.selfConflictOr(NoPathReason.BOXED_IN, 0));
         assertEquals(NoPathReason.BUDGET, UnifiedPathFinder.selfConflictOr(NoPathReason.BUDGET, 3));
         assertEquals(NoPathReason.BLOCKED_PROTECTED,

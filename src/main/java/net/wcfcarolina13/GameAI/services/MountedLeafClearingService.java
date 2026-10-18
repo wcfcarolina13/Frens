@@ -123,9 +123,14 @@ public final class MountedLeafClearingService {
      * slot only when the pick is not already held. Server tick only: the leaf branch of the
      * selector reads the hotbar and never swaps, reaches into bundles or hops threads. Returns false
      * (the caller skips this pass) when the pick cannot be held: no empty hotbar slot for a bare
-     * hand, a pick not found in the hotbar, or shears still in the main hand.
+     * hand, a pick not found in the hotbar, shears still in the main hand, or a hotbar locked by
+     * {@link HotbarLockService} (the slot is left alone, as {@code BotActions.selectHotbarSlot} does).
      */
     private static boolean holdLeafTool(ServerPlayerEntity bot, BlockState leafState) {
+        if (HotbarLockService.isLocked(bot)) {
+            HotbarLockService.maybeLogBlocked(bot, "mount-leaf");
+            return false;
+        }
         ItemStack tool = ToolSelector.selectBestToolForBlock(bot, leafState);
         ItemStack held = bot.getMainHandStack();
         if (tool.isEmpty()) {

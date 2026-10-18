@@ -303,18 +303,12 @@ public final class UnifiedPathFinder {
 
     /**
      * The NO_PATH reason once the search's own refusals count: SELF_CONFLICT when it refused at least
-     * one successor that an earlier move of its path undoes and {@code reason} is only the generic
-     * exhausted-region family (BOXED_IN, BLOCKED_UNBREAKABLE, NO_SCAFFOLD). BUDGET, UNLOADED,
-     * BLOCKED_PROTECTED and GOAL_NOT_STANDABLE are more specific and stay.
+     * one successor that an earlier move of its path undoes and {@code reason} is the generic BOXED_IN.
+     * Every other reason stays: {@link #reason} gives BLOCKED_UNBREAKABLE on any unbreakable refusal and
+     * NO_SCAFFOLD on any scaffold refusal, so a pit with one incidental self-refusal keeps its real cause.
      */
     static NoPathReason selfConflictOr(NoPathReason reason, int selfRefused) {
-        if (selfRefused <= 0) {
-            return reason;
-        }
-        return switch (reason) {
-            case BOXED_IN, BLOCKED_UNBREAKABLE, NO_SCAFFOLD -> NoPathReason.SELF_CONFLICT;
-            default -> reason;
-        };
+        return selfRefused > 0 && reason == NoPathReason.BOXED_IN ? NoPathReason.SELF_CONFLICT : reason;
     }
 
     private static boolean mutates(PlannedMove mv) {

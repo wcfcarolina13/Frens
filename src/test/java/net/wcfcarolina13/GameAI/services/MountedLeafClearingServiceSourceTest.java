@@ -42,5 +42,6 @@ class MountedLeafClearingServiceSourceTest {
         assertTrue(src.contains("if (empty < 0) {\n                    return false;"),
                 "no empty hotbar slot skips the pass");
         assertTrue(src.contains("ItemStack.areEqual("), "a copied pick still finds its slot");
+        assertTrue(src.contains("HotbarLockService.isLocked(bot)"), "a locked hotbar skips the pass");
     }
 }
