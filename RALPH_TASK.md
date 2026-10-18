@@ -3,7 +3,22 @@ task: "Backlog lineup 2026-09-03. DONE: 1.1.200, 1.1.201 (memory digest), 1.1.20
 test_command: "./gradlew build -x test"
 ---
 
-## Session Handoff 2026-10-17 (1.1.266) — next session starts here
+## Session Handoff 2026-10-17 (1.1.267) — next session starts here
+
+**State:** main = origin/main @ 1.1.267. Suite 2771 green. Deployed to Nirn and the mcp-sandbox instance.
+**1.1.266 sandbox recheck done** (save "Fix 266", results in the 1.1.266 changelog entry): A, C/C2/C4, D, E, G pass. B was honest but still took about 2 minutes, so it went into 1.1.267. F never fired in the field. The save now has "Cut trees in the Spawn base" On.
+**1.1.267:**
+- F: the unified search refuses a move an earlier move of its own path undoes, and routes around it (`MUTATED_LAYER` key bit, truncation kept as backstop). `canReach`, `probePlan` and the PathCompare shadow now see the truncated plan.
+- B2: an empty forest `woodcut_cleanup` takes 16 s in the sandbox (was 126 s), with a 30 s empty-phase cap.
+- M1: 15 s no-planks table window. M2: a held unplaceable table gives one line. M3: mounted leaf clearing goes bare-handed instead of using shears or a weapon. M4: a bot named after a material can take a craft.
+- Reviewed by Fable, one fix wave, re-review, two small follow-ups. Field items: Phase 6bg (checklist now 330 open items).
+**Next:**
+- Fallback re-search when a refusing unified search returns NO_PATH. Seed 103 is a lawful mining path still missed through dedup staleness. Costs double time on failing server-thread probes, so it needs a ruling.
+- Per-search overlay allocation into `SearchBuffers` (needs a `MoveSimulator.Overlay` base-terrain change).
+- M2 not set up in game (tests only). New player string "woodcut_cleanup interrupted." for the next text sweep.
+- Everything in the 1.1.265 block below.
+
+## Session Handoff 2026-10-17 (1.1.266) — superseded
 
 **State:** main = origin/main @ 1.1.266. Suite 2748 green. 1.1.266 = the sandbox bugs A-G from field phases 6ad-6al
 (`docs/testing/FIELD_6AD_6AL_SANDBOX_2026-10-17.md`): no shears on leaves (A), empty forest cleanup bounded and honest (B,
