@@ -1201,8 +1201,6 @@ public final class SmeltingService {
         if (recipeType == null) {
             return found;
         }
-        String filterNorm = normalizeName(itemFilter);
-        String filterSlug = filterNorm.replace(" ", "");
         // Direct slots only: cookAllFoodSync moves stacks by slot index on the server thread, and a
         // bundle extraction mid-batch would shift those indices. Bundled cookables are only reported.
         int bundledCookables = 0;
@@ -1218,11 +1216,7 @@ public final class SmeltingService {
                 }
                 continue;
             }
-            String stackNameNorm = normalizeName(stack.getName().getString());
-            String stackNameSlug = stackNameNorm.replace(" ", "");
-            if (!filterNorm.isEmpty()
-                    && !stackNameNorm.contains(filterNorm)
-                    && !stackNameSlug.contains(filterSlug)) {
+            if (!matchesFilter(stack, itemFilter)) {
                 continue;
             }
             if (matchesCookablePolicy(stack, world, recipeType, foodOnly)) {
@@ -1290,14 +1284,9 @@ public final class SmeltingService {
         if (stack == null || stack.isEmpty()) {
             return false;
         }
-        if (itemFilter == null || itemFilter.isBlank()) {
-            return true;
-        }
-        String filterNorm = normalizeName(itemFilter);
-        String filterSlug = filterNorm.replace(" ", "");
-        String stackNameNorm = normalizeName(stack.getName().getString());
-        String stackNameSlug = stackNameNorm.replace(" ", "");
-        return stackNameNorm.contains(filterNorm) || stackNameSlug.contains(filterSlug);
+        // Name or item id, and "fish" also takes raw cod and salmon (CookFilterPolicy).
+        return CookFilterPolicy.matches(itemFilter, stack.getName().getString(),
+                Registries.ITEM.getId(stack.getItem()).getPath());
     }
 
     private static boolean hasMatchingCookables(ServerPlayerEntity bot,
