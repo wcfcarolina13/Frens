@@ -83,11 +83,67 @@ public final class WoodcutBaseAccessPolicy {
     }
 
     /**
+     * What a bot block mutation is, for the Spawn-base exemptions (1.1.268 ruling: a bot may place
+     * and remove its own woodcut scaffold in the Spawn base when the toggle is on; every other
+     * mutation there stays refused).
+     */
+    public enum MutationKind {
+        /** Any mutation the toggle never opens (dirt, stone, supports, bridges, replant, ...). */
+        OTHER,
+        /** Breaking a log or leaves block (the 1.1.238 toggle exemption). */
+        TREE_BLOCK,
+        /** Placing a scaffold-material block on an explicitly flagged woodcut climb pillar. */
+        OWN_SCAFFOLD_PLACE,
+        /** Breaking a block this bot placed as own scaffold (registry) that is still scaffold material. */
+        OWN_SCAFFOLD_BREAK
+    }
+
+    /**
      * Mining: a zone that would otherwise refuse the mutation lets it through only when the zone
      * is a server-owned base zone, the block is a log or leaves, and the toggle is on.
+     * Same answer as {@link #mutationExempt} with {@link MutationKind#TREE_BLOCK} / {@link MutationKind#OTHER}.
      */
     public static boolean miningExempt(boolean serverOwnedBaseZone, boolean treeBlock, boolean spawnBaseWoodcutAllowed) {
-        return serverOwnedBaseZone && treeBlock && spawnBaseWoodcutAllowed;
+        return mutationExempt(serverOwnedBaseZone, treeBlock ? MutationKind.TREE_BLOCK : MutationKind.OTHER,
+                false, false, spawnBaseWoodcutAllowed);
+    }
+
+    /**
+     * Whether a zone that would otherwise refuse a bot mutation lets it through. Only a
+     * server-owned base zone (the Spawn base) can ever be exempted:
+     * <ul>
+     *   <li>{@link MutationKind#TREE_BLOCK}: the toggle is on.</li>
+     *   <li>{@link MutationKind#OWN_SCAFFOLD_PLACE}: the toggle is on and the block placed is a
+     *       scaffold material.</li>
+     *   <li>{@link MutationKind#OWN_SCAFFOLD_BREAK}: the position is in this bot's own scaffold
+     *       registry and the live block is still a scaffold material. The toggle is NOT needed, so a
+     *       bot can always remove what it placed (the admin may turn the toggle off mid-fell).</li>
+     *   <li>{@link MutationKind#OTHER}: never.</li>
+     * </ul>
+     */
+    public static boolean mutationExempt(boolean serverOwnedBaseZone, MutationKind kind,
+                                         boolean ownedByThisBot, boolean stillScaffoldMaterial,
+                                         boolean spawnBaseWoodcutAllowed) {
+        if (!serverOwnedBaseZone || kind == null) {
+            return false;
+        }
+        return switch (kind) {
+            case TREE_BLOCK -> spawnBaseWoodcutAllowed;
+            case OWN_SCAFFOLD_PLACE -> spawnBaseWoodcutAllowed && stillScaffoldMaterial;
+            case OWN_SCAFFOLD_BREAK -> ownedByThisBot && stillScaffoldMaterial;
+            case OTHER -> false;
+        };
+    }
+
+    /**
+     * The pillar's {@code overhead-in-base} abort (ScaffoldService) is skipped only for an
+     * own-scaffold woodcut pillar, when every base covering the overhead block is server-owned,
+     * the toggle is on, and the overhead block is a log or leaves. Any other overhead block in a
+     * base still aborts; the overhead mine itself still goes through the miner's normal gate.
+     */
+    public static boolean overheadBaseAbortExempt(boolean ownScaffold, boolean serverOwnedBaseOnly,
+                                                  boolean treeBlockOverhead, boolean spawnBaseWoodcutAllowed) {
+        return ownScaffold && serverOwnedBaseOnly && treeBlockOverhead && spawnBaseWoodcutAllowed;
     }
 
     /**

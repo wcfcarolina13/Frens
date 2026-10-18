@@ -148,4 +148,63 @@ class WoodcutBaseAccessPolicyTest {
         boolean serverOwned = SERVER_BASE_ZONE.apply(legacyBase()) == WoodcutBaseAccessPolicy.ZoneKind.SERVER_BASE;
         assertFalse(WoodcutBaseAccessPolicy.miningExempt(serverOwned, true, true));
     }
+
+    // ── 1.1.268: own scaffold in the Spawn base ─────────────────────────────
+
+    private static final WoodcutBaseAccessPolicy.MutationKind[] ALL_KINDS = WoodcutBaseAccessPolicy.MutationKind.values();
+
+    @Test
+    void mutationExemptTreeBlockMatchesMiningExempt() {
+        boolean[] b = {false, true};
+        for (boolean zone : b) {
+            for (boolean toggle : b) {
+                for (boolean owned : b) {
+                    for (boolean material : b) {
+                        assertEquals(WoodcutBaseAccessPolicy.miningExempt(zone, true, toggle),
+                                WoodcutBaseAccessPolicy.mutationExempt(zone,
+                                        WoodcutBaseAccessPolicy.MutationKind.TREE_BLOCK, owned, material, toggle));
+                        assertFalse(WoodcutBaseAccessPolicy.mutationExempt(zone,
+                                WoodcutBaseAccessPolicy.MutationKind.OTHER, owned, material, toggle));
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void ownScaffoldPlaceNeedsServerZoneToggleAndMaterial() {
+        WoodcutBaseAccessPolicy.MutationKind place = WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_PLACE;
+        assertTrue(WoodcutBaseAccessPolicy.mutationExempt(true, place, false, true, true));
+        assertFalse(WoodcutBaseAccessPolicy.mutationExempt(true, place, false, true, false));
+        assertFalse(WoodcutBaseAccessPolicy.mutationExempt(true, place, false, false, true));
+        assertFalse(WoodcutBaseAccessPolicy.mutationExempt(false, place, true, true, true));
+    }
+
+    @Test
+    void ownScaffoldBreakNeedsOwnershipAndMaterialButNotToggle() {
+        WoodcutBaseAccessPolicy.MutationKind brk = WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_BREAK;
+        assertTrue(WoodcutBaseAccessPolicy.mutationExempt(true, brk, true, true, true));
+        // Admin turned the toggle off mid-fell: the bot can still remove what it placed.
+        assertTrue(WoodcutBaseAccessPolicy.mutationExempt(true, brk, true, true, false));
+        assertFalse(WoodcutBaseAccessPolicy.mutationExempt(true, brk, false, true, true));
+        assertFalse(WoodcutBaseAccessPolicy.mutationExempt(true, brk, true, false, true));
+        assertFalse(WoodcutBaseAccessPolicy.mutationExempt(false, brk, true, true, true));
+    }
+
+    @Test
+    void nothingIsExemptOutsideAServerBaseZoneOrWithNullKind() {
+        for (WoodcutBaseAccessPolicy.MutationKind kind : ALL_KINDS) {
+            assertFalse(WoodcutBaseAccessPolicy.mutationExempt(false, kind, true, true, true));
+        }
+        assertFalse(WoodcutBaseAccessPolicy.mutationExempt(true, null, true, true, true));
+    }
+
+    @Test
+    void overheadAbortExemptOnlyForOwnScaffoldTreeOverheadInServerOnlyBaseWithToggle() {
+        assertTrue(WoodcutBaseAccessPolicy.overheadBaseAbortExempt(true, true, true, true));
+        assertFalse(WoodcutBaseAccessPolicy.overheadBaseAbortExempt(false, true, true, true));
+        assertFalse(WoodcutBaseAccessPolicy.overheadBaseAbortExempt(true, false, true, true));
+        assertFalse(WoodcutBaseAccessPolicy.overheadBaseAbortExempt(true, true, false, true));
+        assertFalse(WoodcutBaseAccessPolicy.overheadBaseAbortExempt(true, true, true, false));
+    }
 }
