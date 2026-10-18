@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services.construction;
 
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldOwnershipPolicy.OwnedVerdict;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy.MutationKind;
 import org.junit.jupiter.api.Test;
 
@@ -52,31 +53,88 @@ class ScaffoldOwnershipPolicyTest {
         assertEquals("placed-detected-after-retry", ScaffoldOwnershipPolicy.PLACED_DETECTED_AFTER_RETRY);
     }
 
+    private static final long T0 = 1_760_000_000_000L;
+    private static final long DAY = ScaffoldOwnershipPolicy.OWNERSHIP_TTL_MS;
+    private static final String PLANKS = "minecraft:oak_planks";
+
     @Test
-    void breakOwnedNeedsOwnershipAndLiveMaterial() {
-        assertTrue(ScaffoldOwnershipPolicy.mayBreakOwned(true, true));
-        assertFalse(ScaffoldOwnershipPolicy.mayBreakOwned(true, false));
-        assertFalse(ScaffoldOwnershipPolicy.mayBreakOwned(false, true));
-        assertFalse(ScaffoldOwnershipPolicy.mayBreakOwned(false, false));
+    void ttlIsTwentyFourHours() {
+        assertEquals(86_400_000L, DAY);
+    }
+
+    @Test
+    void expiryBoundaryIsExactlyTwentyFourHours() {
+        assertFalse(ScaffoldOwnershipPolicy.isExpired(T0, T0));
+        assertFalse(ScaffoldOwnershipPolicy.isExpired(T0, T0 + DAY - 1));
+        assertTrue(ScaffoldOwnershipPolicy.isExpired(T0, T0 + DAY));
+        assertTrue(ScaffoldOwnershipPolicy.isExpired(T0, T0 + DAY + 1));
+    }
+
+    @Test
+    void missingOrFarFutureTimestampIsExpired() {
+        assertTrue(ScaffoldOwnershipPolicy.isExpired(0L, T0));
+        assertTrue(ScaffoldOwnershipPolicy.isExpired(-5L, T0));
+        assertFalse(ScaffoldOwnershipPolicy.isExpired(T0 + 1_000L, T0));
+        assertTrue(ScaffoldOwnershipPolicy.isExpired(T0 + DAY + 1, T0));
+    }
+
+    @Test
+    void usableEntryNeedsBlockIdAndUnexpiredTime() {
+        assertTrue(ScaffoldOwnershipPolicy.isUsableEntry(PLANKS, T0, T0 + 1));
+        assertFalse(ScaffoldOwnershipPolicy.isUsableEntry(null, T0, T0 + 1));
+        assertFalse(ScaffoldOwnershipPolicy.isUsableEntry("  ", T0, T0 + 1));
+        assertFalse(ScaffoldOwnershipPolicy.isUsableEntry(PLANKS, T0, T0 + DAY));
+    }
+
+    @Test
+    void verdictBreaksOnlyTheExactPlacedBlock() {
+        assertEquals(OwnedVerdict.BREAK,
+                ScaffoldOwnershipPolicy.ownedVerdict(PLANKS, T0, T0 + 60_000L, PLANKS, false));
+        // Another scaffold material in the same cell is still a different block: forget, never break.
+        assertEquals(OwnedVerdict.FORGET_CHANGED,
+                ScaffoldOwnershipPolicy.ownedVerdict(PLANKS, T0, T0 + 1, "minecraft:dirt", false));
+        assertEquals(OwnedVerdict.FORGET_CHANGED,
+                ScaffoldOwnershipPolicy.ownedVerdict(PLANKS, T0, T0 + 1, "minecraft:chest", false));
+        assertEquals(OwnedVerdict.FORGET_CHANGED,
+                ScaffoldOwnershipPolicy.ownedVerdict(PLANKS, T0, T0 + 1, "minecraft:oak_log", false));
+        assertEquals(OwnedVerdict.FORGET_CHANGED,
+                ScaffoldOwnershipPolicy.ownedVerdict(PLANKS, T0, T0 + 1, null, false));
+    }
+
+    @Test
+    void verdictForgetsAirAndExpiredAndIgnoresUnowned() {
+        assertEquals(OwnedVerdict.FORGET_GONE,
+                ScaffoldOwnershipPolicy.ownedVerdict(PLANKS, T0, T0 + 1, null, true));
+        assertEquals(OwnedVerdict.FORGET_EXPIRED,
+                ScaffoldOwnershipPolicy.ownedVerdict(PLANKS, T0, T0 + DAY, PLANKS, false));
+        // Expiry is decided before the live block: an expired entry never breaks, even unchanged.
+        assertEquals(OwnedVerdict.FORGET_EXPIRED,
+                ScaffoldOwnershipPolicy.ownedVerdict(PLANKS, T0, T0 + DAY + 1, null, true));
+        assertEquals(OwnedVerdict.FORGET_EXPIRED,
+                ScaffoldOwnershipPolicy.ownedVerdict("", T0, T0 + 1, "", false));
+        assertEquals(OwnedVerdict.NOT_OWNED,
+                ScaffoldOwnershipPolicy.ownedVerdict(null, T0, T0 + 1, PLANKS, false));
+    }
+
+    @Test
+    void forgetForEveryForgetVerdictOnly() {
+        assertTrue(ScaffoldOwnershipPolicy.shouldForget(OwnedVerdict.FORGET_GONE));
+        assertTrue(ScaffoldOwnershipPolicy.shouldForget(OwnedVerdict.FORGET_CHANGED));
+        assertTrue(ScaffoldOwnershipPolicy.shouldForget(OwnedVerdict.FORGET_EXPIRED));
+        assertFalse(ScaffoldOwnershipPolicy.shouldForget(OwnedVerdict.BREAK));
+        assertFalse(ScaffoldOwnershipPolicy.shouldForget(OwnedVerdict.NOT_OWNED));
+        assertFalse(ScaffoldOwnershipPolicy.shouldForget(null));
     }
 
     @Test
     void breakKindTreeWinsThenOwnedScaffoldElseOther() {
-        assertEquals(MutationKind.TREE_BLOCK, ScaffoldOwnershipPolicy.breakKind(true, false, false));
-        assertEquals(MutationKind.TREE_BLOCK, ScaffoldOwnershipPolicy.breakKind(true, true, true));
-        assertEquals(MutationKind.OWN_SCAFFOLD_BREAK, ScaffoldOwnershipPolicy.breakKind(false, true, true));
-        // Someone replaced the bot's scaffold with another block: not an own-scaffold break.
-        assertEquals(MutationKind.OTHER, ScaffoldOwnershipPolicy.breakKind(false, true, false));
-        // Scaffold material the bot never placed (natural dirt, a player's planks).
-        assertEquals(MutationKind.OTHER, ScaffoldOwnershipPolicy.breakKind(false, false, true));
-        assertEquals(MutationKind.OTHER, ScaffoldOwnershipPolicy.breakKind(false, false, false));
-    }
-
-    @Test
-    void forgetWhenGoneOrChangedNeverForUnowned() {
-        assertTrue(ScaffoldOwnershipPolicy.shouldForget(true, true, false));
-        assertTrue(ScaffoldOwnershipPolicy.shouldForget(true, false, false));
-        assertFalse(ScaffoldOwnershipPolicy.shouldForget(true, false, true));
-        assertFalse(ScaffoldOwnershipPolicy.shouldForget(false, true, false));
+        assertEquals(MutationKind.TREE_BLOCK, ScaffoldOwnershipPolicy.breakKind(true, OwnedVerdict.NOT_OWNED));
+        assertEquals(MutationKind.TREE_BLOCK, ScaffoldOwnershipPolicy.breakKind(true, OwnedVerdict.BREAK));
+        assertEquals(MutationKind.OWN_SCAFFOLD_BREAK, ScaffoldOwnershipPolicy.breakKind(false, OwnedVerdict.BREAK));
+        assertEquals(MutationKind.OTHER, ScaffoldOwnershipPolicy.breakKind(false, OwnedVerdict.FORGET_CHANGED));
+        assertEquals(MutationKind.OTHER, ScaffoldOwnershipPolicy.breakKind(false, OwnedVerdict.FORGET_EXPIRED));
+        assertEquals(MutationKind.OTHER, ScaffoldOwnershipPolicy.breakKind(false, OwnedVerdict.FORGET_GONE));
+        assertEquals(MutationKind.OTHER, ScaffoldOwnershipPolicy.breakKind(false, OwnedVerdict.NOT_OWNED));
+        assertEquals(MutationKind.OTHER, ScaffoldOwnershipPolicy.breakKind(false, null));
     }
 }

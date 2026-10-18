@@ -982,8 +982,8 @@ public final class BotActions {
      * @param ownScaffold explicit own-scaffold flag (1.1.268): set only by woodcut's climb pillars.
      *                    When the plain claim check refuses the cell, the placement may still go
      *                    ahead inside a SERVER-owned base (the Spawn base) with the admin toggle on,
-     *                    for a scaffold-material block into an empty (air) cell, with no clutter
-     *                    clearing. Such a placement is registered in {@link OwnedScaffoldRegistry}
+     *                    for a scaffold-material block into an air or soft plant cell (vanilla
+     *                    placement replaces the plant; no clutter clearing, never a fluid). Such a placement is registered in {@link OwnedScaffoldRegistry}
      *                    on success so this bot (and only this bot) may remove it again.
      */
     public static PlaceResult tryPlaceBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks,
@@ -1010,12 +1010,17 @@ public final class BotActions {
                 return new PlaceResult(false, "out-of-reach distSq=" + String.format(Locale.ROOT, "%.2f", distSq));
             }
 
-            if (ownScaffoldExemption && !world.getBlockState(target).isAir()) {
-                // The exemption places into air only: no clutter clearing, no replacing fluids.
-                return new PlaceResult(false, "claim-denied " + auth.reason());
+            if (ownScaffoldExemption) {
+                // The exemption places into air or a soft plant cell (vanilla placement replaces the
+                // plant itself), never into a fluid or a solid/occupied block.
+                net.minecraft.block.BlockState cur = world.getBlockState(target);
+                boolean soft = cur.isAir() || (cur.isReplaceable() && cur.getCollisionShape(world, target).isEmpty());
+                if (!soft || !world.getFluidState(target).isEmpty()) {
+                    return new PlaceResult(false, "claim-denied " + auth.reason());
+                }
             }
 
-            if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
+            if (!ownScaffoldExemption && !world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
                 // Allow replacing certain "clutter" blocks to avoid placement failures.
                 // (E.g., grass/flowers/snow layers/carpets that occupy the cell but should not block building.)
                 net.minecraft.block.BlockState state = world.getBlockState(target);
@@ -1064,6 +1069,17 @@ public final class BotActions {
                 return new PlaceResult(false, "no-block-item-available");
             }
             PlayerInventory inventory = bot.getInventory();
+            if (ownScaffoldExemption) {
+                // Checked before ensureHotbarAccess so a refused exemption never reshuffles the hotbar.
+                ItemStack candidate = inventory.getStack(slot);
+                boolean material = ScaffoldOwnershipPolicy.isScaffoldMaterial(
+                        net.minecraft.registry.Registries.ITEM.getId(candidate.getItem()).toString());
+                var scaffoldAuth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target,
+                        WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_PLACE, material);
+                if (!scaffoldAuth.allowed()) {
+                    return new PlaceResult(false, "claim-denied " + scaffoldAuth.reason());
+                }
+            }
             slot = ensureHotbarAccess(bot, inventory, slot);
             if (slot < 0) {
                 return new PlaceResult(false, "no-block-item-available");
@@ -1072,14 +1088,9 @@ public final class BotActions {
             if (!(stack.getItem() instanceof BlockItem blockItem)) {
                 return new PlaceResult(false, "selected-item-not-block");
             }
-            if (ownScaffoldExemption) {
-                boolean material = ScaffoldOwnershipPolicy.isScaffoldMaterial(
-                        net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).toString());
-                var scaffoldAuth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target,
-                        WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_PLACE, material);
-                if (!scaffoldAuth.allowed()) {
-                    return new PlaceResult(false, "claim-denied " + scaffoldAuth.reason());
-                }
+            if (ownScaffoldExemption && !ScaffoldOwnershipPolicy.isScaffoldMaterial(
+                    net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).toString())) {
+                return new PlaceResult(false, "claim-denied " + auth.reason());
             }
             selectHotbarSlot(bot, slot);
 
@@ -1143,10 +1154,11 @@ public final class BotActions {
                     bot.getName().getString(), placedAt == null ? "?" : placedAt.toShortString(), target.toShortString());
             return;
         }
-        if (!OwnedScaffoldRegistry.isScaffoldMaterial(world.getBlockState(target))) {
+        net.minecraft.block.BlockState placed = world.getBlockState(target);
+        if (!OwnedScaffoldRegistry.isScaffoldMaterial(placed)) {
             return;
         }
-        OwnedScaffoldRegistry.register(bot, world, target.toImmutable());
+        OwnedScaffoldRegistry.register(bot, world, target.toImmutable(), OwnedScaffoldRegistry.blockId(placed));
         LOGGER.info("[spawn-scaffold] {} placed own scaffold at {}", bot.getName().getString(), target.toShortString());
     }
 

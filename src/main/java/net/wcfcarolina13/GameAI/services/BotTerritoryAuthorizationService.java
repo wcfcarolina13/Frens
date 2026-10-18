@@ -8,6 +8,7 @@ import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
 import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldOwnershipPolicy;
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 
@@ -64,8 +65,8 @@ public final class BotTerritoryAuthorizationService {
      * Only a SERVER-owned base zone can be exempted, and never for {@code OTHER}.
      *
      * <p>{@code OWN_SCAFFOLD_BREAK} is not trusted from the caller: ownership is re-read from this
-     * bot's {@link OwnedScaffoldRegistry} entry and the live block must still be a scaffold
-     * material, so passing the kind can never open a block the bot did not place.
+     * bot's unexpired {@link OwnedScaffoldRegistry} entry and the live block id must equal the
+     * placed id exactly, so passing the kind can never open a block the bot did not place.
      *
      * @param placeMaterialIsScaffold read only for {@code OWN_SCAFFOLD_PLACE}: the block about to
      *                                be placed is a scaffold material
@@ -88,8 +89,12 @@ public final class BotTerritoryAuthorizationService {
         boolean ownedByThisBot = false;
         boolean scaffoldMaterial = false;
         if (kind == WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_BREAK) {
-            ownedByThisBot = OwnedScaffoldRegistry.isOwned(bot, world, pos);
-            scaffoldMaterial = ownedByThisBot && OwnedScaffoldRegistry.isScaffoldMaterial(world.getBlockState(pos));
+            // Unexpired, this bot's, and the live block id equals the placed id exactly; a gone,
+            // changed or expired entry is forgotten by the verdict.
+            boolean breakable = OwnedScaffoldRegistry.verdict(bot, world, pos, world.getBlockState(pos))
+                    == ScaffoldOwnershipPolicy.OwnedVerdict.BREAK;
+            ownedByThisBot = breakable;
+            scaffoldMaterial = breakable;
         } else if (kind == WoodcutBaseAccessPolicy.MutationKind.OWN_SCAFFOLD_PLACE) {
             scaffoldMaterial = placeMaterialIsScaffold;
         }

@@ -391,24 +391,16 @@ public class MiningTool {
 
     /**
      * Claim-gate kind for breaking {@code state} at {@code pos}: a log or leaves is TREE_BLOCK; this
-     * bot's registered own scaffold still holding scaffold material is OWN_SCAFFOLD_BREAK (the gate
-     * re-checks both itself); else OTHER. An owned position whose block is no longer a scaffold
-     * material is forgotten here, never broken (someone else changed it).
+     * bot's unexpired own scaffold whose live block id equals the placed id is OWN_SCAFFOLD_BREAK
+     * (the gate re-checks it itself); else OTHER. An owned position that is gone, changed or
+     * expired is forgotten by the verdict, never broken.
      */
     private static WoodcutBaseAccessPolicy.MutationKind breakKind(ServerPlayerEntity bot, ServerWorld world,
                                                                   BlockPos pos, BlockState state) {
         boolean tree = isTreeBlock(state);
-        boolean owned = !tree && OwnedScaffoldRegistry.isOwned(bot, world, pos);
-        boolean material = owned && OwnedScaffoldRegistry.isScaffoldMaterial(state);
-        boolean gone = state == null || state.isAir();
-        if (ScaffoldOwnershipPolicy.shouldForget(owned, gone, material)) {
-            OwnedScaffoldRegistry.forget(bot, world, pos);
-            if (!gone) {
-                LOGGER.info("[spawn-scaffold] {} own scaffold at {} is now {}; forgotten, not broken",
-                        bot.getName().getString(), pos.toShortString(), state.getBlock().getName().getString());
-            }
-        }
-        return ScaffoldOwnershipPolicy.breakKind(tree, owned, material);
+        // Always asked, so an owned cell now holding a log (or anything else) is forgotten too.
+        ScaffoldOwnershipPolicy.OwnedVerdict verdict = OwnedScaffoldRegistry.verdict(bot, world, pos, state);
+        return ScaffoldOwnershipPolicy.breakKind(tree, verdict);
     }
 
     /** Logs and leaves: the only blocks the Spawn-base woodcut toggle can open to mining. */

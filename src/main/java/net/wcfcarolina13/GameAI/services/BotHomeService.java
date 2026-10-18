@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
+import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldLedger;
 import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 import net.wcfcarolina13.PlayerUtils.DebouncedWriter;
@@ -1908,47 +1909,74 @@ public final class BotHomeService {
     }
 
     /**
-     * This save's remembered own Spawn-base scaffold (1.1.268), bot UUID -> packed positions, from
-     * the Overworld's per-save data. Unparseable bot keys are skipped. Never null.
+     * This save's remembered own Spawn-base scaffold (1.1.268), bot UUID -> packed position -> the
+     * placed block id and placement time, from the Overworld's per-save data. Unparseable bot keys
+     * and records are skipped; expiry is applied by the caller ({@code OwnedScaffoldLedger.replaceAll}).
+     * Entries in the pre-release {@code ownedSpawnScaffold} format (positions without a block id)
+     * can never prove which block was placed, so they are dropped here. Never null.
      */
-    public static Map<UUID, List<Long>> loadOwnedSpawnScaffold(MinecraftServer server) {
-        Map<UUID, List<Long>> out = new HashMap<>();
+    public static Map<UUID, Map<Long, OwnedScaffoldLedger.Owned>> loadOwnedSpawnScaffold(MinecraftServer server) {
+        Map<UUID, Map<Long, OwnedScaffoldLedger.Owned>> out = new HashMap<>();
         if (server == null || server.getOverworld() == null) {
             return out;
         }
         WorldData wd = worldData(server, server.getOverworld());
+        boolean droppedLegacy = false;
         synchronized (LOCK) {
-            if (wd.ownedSpawnScaffold == null) {
-                return out;
+            if (wd.ownedSpawnScaffold != null && !wd.ownedSpawnScaffold.isEmpty()) {
+                LOGGER.info("[spawn-scaffold] dropping {} bot entr(ies) of own scaffold saved without block ids",
+                        wd.ownedSpawnScaffold.size());
+                wd.ownedSpawnScaffold = new HashMap<>();
+                droppedLegacy = true;
             }
-            for (Map.Entry<String, List<Long>> e : wd.ownedSpawnScaffold.entrySet()) {
-                if (e.getKey() == null || e.getValue() == null || e.getValue().isEmpty()) continue;
-                try {
-                    out.put(UUID.fromString(e.getKey()), new ArrayList<>(e.getValue()));
-                } catch (IllegalArgumentException ignored) {
-                    // not a bot UUID: skip
+            if (wd.ownedSpawnScaffoldBlocks != null) {
+                for (Map.Entry<String, List<SavedOwnedScaffold>> e : wd.ownedSpawnScaffoldBlocks.entrySet()) {
+                    if (e.getKey() == null || e.getValue() == null || e.getValue().isEmpty()) continue;
+                    UUID bot;
+                    try {
+                        bot = UUID.fromString(e.getKey());
+                    } catch (IllegalArgumentException ignored) {
+                        continue; // not a bot UUID: skip
+                    }
+                    Map<Long, OwnedScaffoldLedger.Owned> cells = new HashMap<>();
+                    for (SavedOwnedScaffold saved : e.getValue()) {
+                        if (saved == null) continue;
+                        // A missing block id stays null/blank here and is dropped by replaceAll.
+                        cells.put(saved.pos, new OwnedScaffoldLedger.Owned(saved.block, saved.placedAtMs));
+                    }
+                    if (!cells.isEmpty()) {
+                        out.put(bot, cells);
+                    }
                 }
             }
+        }
+        if (droppedLegacy) {
+            flush();
         }
         return out;
     }
 
-    /** Stores one bot's own Spawn-base scaffold positions (empty removes the entry). Debounced write. */
-    public static void saveOwnedSpawnScaffold(MinecraftServer server, UUID bot, List<Long> positions) {
+    /** Stores one bot's own Spawn-base scaffold entries (empty removes the entry). Debounced write. */
+    public static void saveOwnedSpawnScaffold(MinecraftServer server, UUID bot, Map<Long, OwnedScaffoldLedger.Owned> entries) {
         if (server == null || bot == null || server.getOverworld() == null) {
             return;
         }
         WorldData wd = worldData(server, server.getOverworld());
         synchronized (LOCK) {
-            if (wd.ownedSpawnScaffold == null) {
-                wd.ownedSpawnScaffold = new HashMap<>();
+            if (wd.ownedSpawnScaffoldBlocks == null) {
+                wd.ownedSpawnScaffoldBlocks = new HashMap<>();
             }
-            if (positions == null || positions.isEmpty()) {
-                if (wd.ownedSpawnScaffold.remove(bot.toString()) == null) {
+            if (entries == null || entries.isEmpty()) {
+                if (wd.ownedSpawnScaffoldBlocks.remove(bot.toString()) == null) {
                     return;
                 }
             } else {
-                wd.ownedSpawnScaffold.put(bot.toString(), new ArrayList<>(positions));
+                List<SavedOwnedScaffold> saved = new ArrayList<>();
+                for (Map.Entry<Long, OwnedScaffoldLedger.Owned> e : entries.entrySet()) {
+                    if (e.getKey() == null || e.getValue() == null) continue;
+                    saved.add(new SavedOwnedScaffold(e.getKey(), e.getValue().blockId(), e.getValue().placedAtMs()));
+                }
+                wd.ownedSpawnScaffoldBlocks.put(bot.toString(), saved);
             }
         }
         flush();
@@ -2025,9 +2053,29 @@ public final class BotHomeService {
         int maxBaseRadius; // 0 = use DEFAULT_MAX_BASE_RADIUS; Gson defaults missing field to 0
         boolean spawnBaseInitialized; // seeded by initializeSpawnBaseIfNeeded; sticky across restarts
         boolean spawnBaseWoodcutAllowed; // admin toggle; Gson defaults a missing field to false
-        // 1.1.268: own woodcut scaffold each bot placed in the Spawn base, bot UUID -> packed
-        // BlockPos longs (Overworld entry only). Missing on older saves: kept as this empty default.
+        // Pre-release 1.1.268 format (bot UUID -> packed BlockPos longs, no block id). Kept with its
+        // old type only so such a file still parses; its entries are dropped on load.
         Map<String, List<Long>> ownedSpawnScaffold = new HashMap<>();
+        // 1.1.268: own woodcut scaffold each bot placed in the Spawn base, bot UUID -> records with
+        // the placed block id and placement time (Overworld entry only). Missing on older saves:
+        // kept as this empty default.
+        Map<String, List<SavedOwnedScaffold>> ownedSpawnScaffoldBlocks = new HashMap<>();
+    }
+
+    /** One persisted own-scaffold cell: packed BlockPos, placed block id, placement epoch ms. */
+    private static final class SavedOwnedScaffold {
+        long pos;
+        String block;
+        long placedAtMs;
+
+        private SavedOwnedScaffold() {
+        }
+
+        private SavedOwnedScaffold(long pos, String block, long placedAtMs) {
+            this.pos = pos;
+            this.block = block;
+            this.placedAtMs = placedAtMs;
+        }
     }
 
     private static final class SavedBase {

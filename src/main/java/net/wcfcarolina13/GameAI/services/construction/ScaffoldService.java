@@ -577,10 +577,9 @@ public final class ScaffoldService {
                         return;
                     }
                     // 1.1.268: the bot's own Spawn-base scaffold asks as OWN_SCAFFOLD_BREAK (the gate
-                    // re-checks ownership and the live material itself); everything else as before.
-                    boolean owned = OwnedScaffoldRegistry.isOwned(bot, world, pos);
-                    var kind = ScaffoldOwnershipPolicy.breakKind(false, owned,
-                            owned && OwnedScaffoldRegistry.isScaffoldMaterial(state));
+                    // re-checks ownership and the exact placed block itself); everything else as before.
+                    var kind = ScaffoldOwnershipPolicy.breakKind(false,
+                            OwnedScaffoldRegistry.verdict(bot, world, pos, state));
                     var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos, kind);
                     precheck.complete(auth.allowed()
                             ? ScaffoldTeardownPolicy.Precheck.BREAK
@@ -696,6 +695,8 @@ public final class ScaffoldService {
 
     /** Reach (squared, to the block centre) a remembered-pass nudge aims for. */
     private static final double OWNED_APPROACH_REACH_SQ = 9.0D;
+    /** R5 remembered pass: only own scaffold within 16 blocks of the bot is tried (16 squared). */
+    private static final double REMEMBERED_PASS_RANGE_SQ = 256.0D;
     private static final long OWNED_APPROACH_TIMEOUT_MS = 3_000L;
 
     /**
@@ -763,8 +764,7 @@ public final class ScaffoldService {
                 if (!abortSafe && SkillManager.shouldAbortSkill(bot)) {
                     break;
                 }
-                String taskNow = activeTaskIdentity(bot);
-                if (abortSafe && taskNow != null && !taskNow.equals(taskAtStart)) {
+                if (abortSafe && taskChanged(bot, taskAtStart)) {
                     LOGGER.info("[spawn-scaffold] {} own scaffold teardown stops: a new task took over",
                             bot.getName().getString());
                     break;
@@ -790,7 +790,7 @@ public final class ScaffoldService {
                     givenUpColumns.add(column);
                     continue;
                 }
-                if (mineOwnedScaffoldBlock(bot, pos, deadline, abortSafe, interrupted)) {
+                if (mineOwnedScaffoldBlock(bot, pos, deadline, abortSafe, taskAtStart, interrupted)) {
                     removed.add(pos);
                     pauseOwned(150L, abortSafe, interrupted); // let gravity settle the bot
                 } else {
@@ -818,16 +818,33 @@ public final class ScaffoldService {
         if (bot == null || TaskService.isServerStopping() || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return OwnedTeardownResult.NONE;
         }
-        List<BlockPos> owned = OwnedScaffoldRegistry.ownedPositions(bot, world);
-        if (owned.isEmpty()) {
+        List<BlockPos> remembered = OwnedScaffoldRegistry.ownedPositions(bot, world);
+        if (remembered.isEmpty()) {
             return OwnedTeardownResult.NONE;
         }
-        OwnedTeardownResult result = teardownOwnedScaffold(bot, owned, OWNED_TEARDOWN_BUDGET_MS, false, true);
-        if (result.total() > 0) {
-            LOGGER.info("[spawn-scaffold] {} cleared {} leftover own scaffold block(s) from an earlier fell",
-                    bot.getName().getString(), result.removed());
+        // Only what is near enough to walk to; the rest stays remembered for a later start nearby.
+        BlockPos from = bot.getBlockPos();
+        List<BlockPos> near = new ArrayList<>();
+        for (BlockPos pos : remembered) {
+            if (pos.getSquaredDistance(from) <= REMEMBERED_PASS_RANGE_SQ) {
+                near.add(pos);
+            }
+        }
+        int skipped = remembered.size() - near.size();
+        OwnedTeardownResult result = near.isEmpty()
+                ? OwnedTeardownResult.NONE
+                : teardownOwnedScaffold(bot, near, OWNED_TEARDOWN_BUDGET_MS, false, true);
+        if (result.total() > 0 || skipped > 0) {
+            LOGGER.info("[spawn-scaffold] {} cleared {} leftover own scaffold block(s) from an earlier fell ({} farther than 16 blocks left remembered)",
+                    bot.getName().getString(), result.removed(), skipped);
         }
         return result;
+    }
+
+    /** True when a new task took this bot's task slot since {@code taskAtStart} (no task now is not a change). */
+    private static boolean taskChanged(ServerPlayerEntity bot, String taskAtStart) {
+        String taskNow = activeTaskIdentity(bot);
+        return taskNow != null && !taskNow.equals(taskAtStart);
     }
 
     /** Name and creation time of the bot's active task, or null: a change means a new task took the slot. */
@@ -845,17 +862,23 @@ public final class ScaffoldService {
         server.execute(() -> {
             try {
                 var state = world.getBlockState(pos);
-                boolean owned = OwnedScaffoldRegistry.isOwned(bot, world, pos);
-                boolean gone = state.isAir();
-                boolean material = OwnedScaffoldRegistry.isScaffoldMaterial(state);
-                if (ScaffoldOwnershipPolicy.shouldForget(owned, gone, material)) {
-                    OwnedScaffoldRegistry.forget(bot, world, pos);
-                    future.complete(gone ? OwnedPrecheck.GONE : OwnedPrecheck.CHANGED);
-                    return;
-                }
-                if (!ScaffoldOwnershipPolicy.mayBreakOwned(owned, material)) {
-                    future.complete(OwnedPrecheck.NOT_OWNED);
-                    return;
+                // Forgets a gone, changed (different block id) or expired entry itself.
+                var owned = OwnedScaffoldRegistry.verdict(bot, world, pos, state);
+                switch (owned) {
+                    case FORGET_GONE -> {
+                        future.complete(OwnedPrecheck.GONE);
+                        return;
+                    }
+                    case FORGET_CHANGED, FORGET_EXPIRED -> {
+                        future.complete(OwnedPrecheck.CHANGED);
+                        return;
+                    }
+                    case NOT_OWNED -> {
+                        future.complete(OwnedPrecheck.NOT_OWNED);
+                        return;
+                    }
+                    case BREAK -> {
+                    }
                 }
                 boolean standingOnBlock = bot.getBlockPos().equals(pos.up());
                 future.complete(standingOnBlock || BlockInteractionService.canInteract(bot, pos)
@@ -881,8 +904,12 @@ public final class ScaffoldService {
         }
     }
 
-    /** Survival-timed mine of one owned scaffold block; true when MiningTool reports it gone. */
+    /**
+     * Survival-timed mine of one owned scaffold block; true when MiningTool reports it gone. An
+     * abort-safe swing still stops (and cancels the mine) as soon as a new task takes the bot's slot.
+     */
     private static boolean mineOwnedScaffoldBlock(ServerPlayerEntity bot, BlockPos pos, long deadline, boolean abortSafe,
+                                                  String taskAtStart,
                                                   java.util.concurrent.atomic.AtomicBoolean interrupted) {
         java.util.concurrent.CompletableFuture<String> mining = MiningTool.mineBlock(bot, pos, false, false, abortSafe);
         long ceiling = Math.min(deadline, System.currentTimeMillis() + TEARDOWN_BREAK_CEILING_MS);
@@ -897,6 +924,7 @@ public final class ScaffoldService {
                 return ok;
             } catch (java.util.concurrent.TimeoutException te) {
                 if ((!abortSafe && SkillManager.shouldAbortSkill(bot))
+                        || (abortSafe && taskChanged(bot, taskAtStart))
                         || TaskService.isServerStopping()
                         || System.currentTimeMillis() > ceiling) {
                     mining.cancel(true);
