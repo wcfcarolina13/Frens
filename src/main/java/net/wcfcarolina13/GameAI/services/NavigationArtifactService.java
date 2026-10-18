@@ -683,7 +683,11 @@ public final class NavigationArtifactService {
         PendingTravel removed = PENDING_TRAVELS.remove(botUuid);
         if (removed != null) {
             RESPAWN_RETRY_COUNTS.remove(botUuid);
-            PENDING_POST_ARRIVAL.remove(removed.botAlias().toLowerCase(java.util.Locale.ROOT));
+            PostArrivalAction dropped = PENDING_POST_ARRIVAL.remove(removed.botAlias().toLowerCase(java.util.Locale.ROOT));
+            if (dropped != null && dropped.type() != null
+                    && DeathRetrievalPolicy.parseAction(dropped.type()).isPresent()) {
+                DeathRetrievalService.forgetDeparture(removed.botAlias());
+            }
             PENDING_POST_SPAWN.remove(removed.botAlias().toLowerCase(java.util.Locale.ROOT));
             flushPendingTravels();
             LOGGER.info("Canceled pending travel for '{}' to {}", removed.botAlias(), removed.destination().toShortString());
@@ -1676,6 +1680,7 @@ public final class NavigationArtifactService {
         QUEUED_NOTIFICATIONS.clear();
         PENDING_POST_SPAWN.clear();
         PENDING_POST_ARRIVAL.clear();
+        DeathRetrievalService.resetSession();
         TRAVEL_COOLDOWNS.clear();
         synchronized (LOCK) {
             OTHER_WORLD_TRAVELS.clear();

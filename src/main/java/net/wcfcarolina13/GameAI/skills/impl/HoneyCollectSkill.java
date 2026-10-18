@@ -332,7 +332,9 @@ public final class HoneyCollectSkill implements Skill {
 
     /** Reach from the eye plus line of sight, read on the server thread. */
     private static boolean canUseHive(ServerWorld world, ServerPlayerEntity bot, BlockPos hivePos) {
-        return callOnServer(world, () -> BlockInteractionService.canInteract(bot, hivePos), false);
+        // Same abandon-safe 1000 ms hop as the harvest: one slow tick must not read an in-reach hive as unreachable.
+        return SupplyServerHop.call(world.getServer(),
+                () -> BlockInteractionService.canInteract(bot, hivePos), INTERACT_TIMEOUT_MS, false);
     }
 
     /**

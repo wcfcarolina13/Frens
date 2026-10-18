@@ -109,7 +109,7 @@ public final class LeashToFenceSkill implements Skill {
             fencePos = tryPlaceFence(bot, world, bot.getBlockPos());
         }
         if (fencePos == null) {
-            return SkillExecutionResult.failure("No reachable fence found or placeable.");
+            return SkillExecutionResult.failure("No reachable fence found or placeable. Use /bot leash release to let go of the leads.");
         }
         if (!isWithinReach(bot, fencePos)) {
             // As a last resort, consider walking only when handling a single lead.
@@ -121,7 +121,7 @@ public final class LeashToFenceSkill implements Skill {
                     return SkillExecutionResult.failure("Couldn't reach the fence.");
                 }
             } else {
-                return SkillExecutionResult.failure("Fence not within safe reach.");
+                return SkillExecutionResult.failure("Fence not within safe reach. Bring the animals closer to a fence so the leads do not snap.");
             }
         }
 
@@ -149,7 +149,7 @@ public final class LeashToFenceSkill implements Skill {
         sleepQuiet(150);
         if (outcome == null) {
             LOGGER.warn("Leash skill: fence tie hop did not finish (fence={})", fencePos.toShortString());
-            return SkillExecutionResult.failure("Fence tie did not run.");
+            return SkillExecutionResult.failure("Fence tie did not run. Try again.");
         }
         boolean interacted = outcome.interacted();
         int tiedNow = outcome.tiedNow();

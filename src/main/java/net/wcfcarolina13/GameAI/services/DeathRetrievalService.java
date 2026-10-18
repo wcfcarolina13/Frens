@@ -58,9 +58,24 @@ public final class DeathRetrievalService {
 
     /**
      * Inventory count when the retrieval trip set off, by lowercase alias. Server thread writes and
-     * reads. Not persisted: after a reload the arrival falls back to the sweep's own gain.
+     * reads. Not persisted, and static, so it would outlive a world switch in the same JVM: it is
+     * cleared by {@link #resetSession()} (from {@code NavigationArtifactService.resetSession}) and
+     * per alias by {@link #forgetDeparture} when the trip is cancelled. With no entry (fresh JVM,
+     * reload, cancelled trip) the arrival falls back to the sweep's own gain.
      */
     private static final Map<String, Integer> DEPARTURE_COUNT = new ConcurrentHashMap<>();
+
+    /** Drops every departure count. Called when the server session ends. */
+    public static void resetSession() {
+        DEPARTURE_COUNT.clear();
+    }
+
+    /** Drops the departure count for a trip that will never arrive (travel cancelled). */
+    public static void forgetDeparture(String alias) {
+        if (alias != null) {
+            DEPARTURE_COUNT.remove(alias.toLowerCase(java.util.Locale.ROOT));
+        }
+    }
 
     private DeathRetrievalService() {}
 
