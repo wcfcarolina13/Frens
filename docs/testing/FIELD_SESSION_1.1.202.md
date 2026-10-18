@@ -480,11 +480,13 @@ These are regression checks: every item must behave exactly as it did on 1.1.207
 fail, even an improvement — note it and move on.
 
 - [ ] **Leaf-blocked navigation unchanged (1.1.208)**
+  - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: `/bot come` through a dense leaf canopy (oak/jungle), twice.
   - Claude watches for: the same bypass-then-mine sequence as before; the 1200 ms per-bot cooldown
     still visible as the gap between leaf-mine attempts; no new exceptions mentioning `LeafClearService`.
   - Pass when: he gets through with the same feel and roughly the same number of leaves broken.
 - [ ] **Woodcut cleanup line-of-sight leaf clearing unchanged (1.1.208)**
+  - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: fell a leafy tree so the cleanup pass runs.
   - Claude watches for: per-attempt leaf cap unchanged (same count of "cleared leaf" lines per target);
     decaying leaves still skipped.
@@ -493,6 +495,7 @@ fail, even an improvement — note it and move on.
   - Bradley does: woodcut across a snowy gap that needs a bridge.
   - Pass when: snow layers and leaves on the line are cleared exactly as before (raycast hit only).
 - [ ] **CollectDirt ladder exit unchanged (1.1.208)**
+  - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: `/bot skill collect_dirt` where he digs a shaft deep enough to need ladders.
   - Pass when: the ladder column goes in on the same support side as before and he climbs out.
 - [ ] **Home data survives a normal quit (1.1.208, debounce)**
@@ -515,6 +518,7 @@ hull vertices that get towers (use the same test village as before if it still e
 for the new categories `skill-fortify-tower` and `skill-fortify-cleanup` — the message text is unchanged.
 
 - [ ] **Tower build unchanged (1.1.209)**
+  - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: `/bot skill fortify` on the village and let the wall stage reach the towers.
   - Claude watches for: `[FortifyTower]` vertex lines in the same order as a 1.1.208 run; scaffold
     column placed on the same side; summit step/return lines; the ledger teardown at the end.
@@ -526,6 +530,7 @@ for the new categories `skill-fortify-tower` and `skill-fortify-cleanup` — the
     retries (`mandatory` repairs) and the "would seal current exit" skip still fire.
   - Pass when: the corridor is repaired after the bot leaves it; the queue reports empty.
 - [ ] **Tower patch unchanged (1.1.209)**
+  - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: remove two blocks from a tower top, then `/bot skill fortify patch`.
   - Pass when: both blocks are replaced via the tower staging position (same approach as before);
     a vertex that makes no progress twice is skipped, as before.
@@ -534,6 +539,7 @@ for the new categories `skill-fortify-tower` and `skill-fortify-cleanup` — the
     expand).
   - Pass when: the response is the expand behaviour, not "unknown verb".
 - [ ] **Tower replan guard unchanged (1.1.209)**
+  - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: block the tower approach so the bot triggers a medium-range replan.
   - Claude watches for: exactly one replan at a time (`replan already active` never appears twice in a
     row); the movement-epoch cancel still aborts the stale walk.
@@ -551,6 +557,7 @@ Regression checks only: carving must behave exactly as on 1.1.209. Watch the log
 `skill-fortify-carve` — the message text is unchanged. Grep: `grep -n "skill-fortify-carve" latest.log`.
 
 - [ ] **Corridor carve unchanged (1.1.210)**
+  - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: during `/bot skill fortify`, stand so the bot has to route through a hillside (or
     reuse the corridor from Phase 6h).
   - Claude watches for: break-through candidate/eligibility lines under `skill-fortify-carve`; the
@@ -562,6 +569,7 @@ Regression checks only: carving must behave exactly as on 1.1.209. Watch the log
     current exit" skip still fires when the bot is still inside.
   - Pass when: the corridor is closed and the cleanup queue reports empty.
 - [ ] **Trap-escape carve unchanged (1.1.210)**
+  - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: box the bot into a 1×1 pocket beside the wall during the build.
   - Claude watches for: emergency trap-escape eligibility and meaningful-progress lines; carving stops
     at the depth limit (6) if it cannot break out.
@@ -1172,10 +1180,11 @@ Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilCl
 
 Grep: `[bot-access] denied`, `[PermCheck]`, `scene privacy stop`, `[legacy-chat] denied`, `sqlite-vec`, `Downloading`, `NLP model`.
 
-- [ ] **Startup is quiet (1.1.224)**
-  - Bradley does: launch the game and load the world.
-  - Claude watches for: `[PermCheck] operator-permission mode=leveled-mapped … OWNERS`. There should be no `sqlite-vec`, `vss`, `xattr`, `Downloading` or `NLP model` lines.
-  - Pass when: all of that holds, and the memory-backed features still work (bots recall things).
+- [ ] **Startup permission mode (1.1.224)**
+  - Bradley's ruling 2026-10-18 (triage): the library half is closed (sqlite-vec, xattr, the NLP model and the legacy stack were deleted in 1.1.243-1.1.251, and the 1.1.270 sandbox log has none of those lines). Only the permission check is left.
+  - Found 2026-10-18: every Nirn and sandbox log since 1.1.232 shows `operator-permission mode=permission-all-mapped-fallback`, never `leveled-mapped`, so this fails today. Investigate before rechecking.
+  - Claude watches for: `[PermCheck] operator-permission mode=leveled-mapped … OWNERS`.
+  - Pass when: that line appears.
 - [ ] **Your own bot still works everywhere (1.1.224)**
   - Bradley does:
     1. Right-click Jake.
@@ -1406,8 +1415,8 @@ Run after Phase 6ac's first item. Items 1 and 6-7 are single-player; 2-5 need a 
   - Pass when: Patch and Resume run, Expand gives "You cannot work on that wall.", remove and rename are refused. On a wall with no owner the guest gets "That wall has no owner. Claim it in the Base screen first."
 - [ ] **Skins are owner-checked (1.1.232)**
   - Sandbox 2026-10-17: NOT TESTABLE in the sandbox (needs a guest), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
-  - Bradley does: as the guest, pick a preset skin for their own bot, then try the host's bot (Admin "allow everyone" ON and OFF).
-  - Pass when: own bot changes in both cases, the host's bot gives "You can only change the skin of your own bot." in both cases.
+  - Bradley does: as a LAN guest, pick a preset skin for the guest's own bot, then try the host's bot. (Bradley's ruling 2026-10-18 (triage): the "allow everyone" toggle was removed, so that half is dropped.)
+  - Pass when: the guest's own bot changes skin, and the host's bot answers "You can only change the skin of your own bot."
 - [x] **Throttle notice (1.1.232)**
   - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: click one bot button about 30 times fast.
@@ -1431,7 +1440,8 @@ Run after Phase 6ac's first item. Items 1 and 6-7 are single-player; 2-5 need a 
 - [ ] **Leaves drop saplings, teardown uses hands (1.1.233)**
   - Sandbox 2026-10-17: FAIL: shears still mine leaves during felling and pillarUp (bug A); stone scaffold pass, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: give a bot shears and a pickaxe in the hotbar, run woodcut on a tree that needs scaffold, then watch the cleanup and a fortify/shelter scaffold teardown.
-  - Pass when: leaves cleared during cleanup drop saplings/sticks (not leaf blocks), dirt/plank scaffold comes down without the pickaxe losing durability, stone scaffold is mined with the pickaxe and drops.
+  - Bradley's ruling 2026-10-18 (triage): open only for the part never tested: dirt and plank scaffold comes down without the pickaxe losing durability.
+  - Pass when: the pickaxe's durability is the same before and after a dirt or plank scaffold teardown.
 - [x] **Crafting table line (1.1.233)**
   - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: order a craft that needs a crafting table when the bot has none.
@@ -1470,7 +1480,8 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 - [ ] **Drop sweep, return and craft feedback (1.1.234)**
   - Sandbox 2026-10-17: FAIL: no-wood craft answers with two lines (bug C); sweep counts stacks, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: drop a few items, run a drop sweep. Then `/bot craft` an axe with no wood anywhere.
-  - Pass when: the sweep says "Picked up N items." with the right N, no fast-travel error and no return trip after it, and the craft answers with exactly one line.
+  - Bradley's ruling 2026-10-18 (triage): the craft half passed (bug C fixed in 1.1.266). Open only for the sweep count.
+  - Pass when: the sweep says "Picked up N items." with the right N (items, not stacks), no fast-travel error and no return trip after it.
 
 ## Phase 6ag — Sandbox fixes and Questing flag (1.1.235)
 
@@ -1521,7 +1532,8 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 - [ ] **Admin toggle lets bots cut Spawn trees (1.1.238)**
   - Sandbox 2026-10-17: FAIL: logs are cut but every one reports a protected-claim refusal afterwards (bug E), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: Admin, World Settings, "Cut trees in the Spawn base: On", then woodcut at spawn.
-  - Pass when: the bot fells a Spawn-base tree without refusals. Dirt in the Spawn base is still refused. A non-admin gets a refusal in chat.
+  - Bradley's ruling 2026-10-18 (triage): felling passed in later builds (1.1.266 bug E, 1.1.268 own scaffold). Open only for the two parts never rechecked.
+  - Pass when: dirt in the Spawn base is still refused, and a non-admin who tries the toggle gets a refusal in chat.
 - [ ] **Own base over spawn still works (1.1.238)**
   - Sandbox 2026-10-17: PARTIAL: host bot mines inside its own base over spawn; torches not placeable by command, Nirn half not testable, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: host makes a base overlapping spawn, has his bot plant or place torches there.
@@ -1560,7 +1572,7 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
   - Sandbox 2026-10-18 (1.1.267): PARTIAL: BREAK ok=true and WALK_AROUND moves seen, both WALK_AROUND ok=false, no PLACE, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Sandbox 2026-10-17: PARTIAL: walk-arounds ok, no timeouts, no BREAK or PLACE success seen, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): woodcut with a no-tools companion in rough terrain (ravines, sand banks, stepped hills), outside the Spawn base.
-  - Claude watches for: `terrain move: WALK_AROUND|BREAK|PLACE cost=…` then `terrain move result: … ok=true … displaced=true`, no `Refusing path … not a standing cell`, no `A* pathfinding timed out`. `frens_log_report.py` section 3: Baritone p90 under 500 ms.
+  - Claude watches for: `terrain move: WALK_AROUND|BREAK|PLACE cost=…` then `terrain move result: … ok=true … displaced=true`, no `Refusing path … not a standing cell`, no `A* pathfinding timed out`. (Bradley's ruling 2026-10-18 (triage): the Baritone p90 part is dropped, unified is the default since 1.1.261.)
   - Pass when: the bot reaches trees it used to slam against, and any dirt step it leaves is a single plain dirt block.
 - [x] **Wading through shallow water (1.1.240)**
   - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
@@ -1635,6 +1647,7 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
   - Sandbox 2026-10-18 (1.1.267): NEEDS BRADLEY (Nirn save data), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: open Nirn, spawn the usual companions, check their skins, and rejoin with a saved horse or mount.
   - Claude watches for: no `random preset` skin line for an existing bot, mount restore lines as before, a one-time `old-format mount entry skipped` only if the file had one.
+  - Bradley's ruling 2026-10-18 (triage): Nirn already ran the 1.1.246 update (logs from 1.1.255 on), so this closes after one look: open Nirn, check the companions' skins, rejoin with a saved mount.
   - Pass when: every companion keeps its skin and the saved mount comes back.
 - [x] **Fast travel Guide topic reads right (1.1.246)**
   - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
