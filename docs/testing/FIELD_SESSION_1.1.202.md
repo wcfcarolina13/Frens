@@ -164,7 +164,7 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
   - Bradley does: `bots, what should we do next?` with both near.
   - Claude watches for: `[souls] scene-routing routingId=… player=… outcome=… candidates=… eligible=… routingMs=…` then a PARTY scene.
   - Pass when: both bots contribute, ≤2 lines each.
-- [ ] **Mixed soul / non-soul broadcast**
+- [x] **Mixed soul / non-soul broadcast** — closed 2026-10-18 by triage: OBSOLETE, the legacy LLM chat path the pass line needs was deleted in 1.1.250 (04032600) and 1.1.251 (080160e4); a non-soul bot now gets the AI-chat-off notice
   - Bradley does: same with a non-soul bot present.
   - Pass when: the non-soul bot uses the legacy path, no crosstalk.
 - [ ] **Voice-off beat pacing**
@@ -172,7 +172,7 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
   - Pass when: lines still pace sensibly with no synth.
 - [ ] **A group scene resets the banter timer**
   - Pass when: banter's next-eligible pushes out after the scene.
-- [ ] **`soulPartyEnabled=false` → legacy loop**
+- [x] **`soulPartyEnabled=false` → legacy loop** — closed 2026-10-18 by triage: SUPERSEDED, the legacy loop was deleted in 1.1.250 (04032600); covered by 6q "Guys" and "everyone" reach both bots (1.1.219)
   - Bradley does: toggle it off in settings, one "bots, …" line, toggle back on.
   - Pass when: legacy behaviour, no PARTY scene.
 
@@ -350,7 +350,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
 - [ ] **Travel-wait cancels on stop (1.1.204)**
   - Bradley does: during the wait above, `/bot stop Jake`.
   - Pass when: no `retrying travel` line fires later — he stays put.
-- [ ] **Travel-wait offload stays deferred (1.1.204, known)**
+- [x] **Travel-wait offload stays deferred (1.1.204, known)** — closed 2026-10-18 by triage: SUPERSEDED, 1.1.205 (39b48d9a) made the offload real and removed the deferred line; covered by 6d Travel-wait offload to an existing chest (1.1.205)
   - Bradley does: same setup with hobbies **off**, inventory ≥85 % full, a registered chest nearby.
   - Claude watches for: exactly one `travel-wait offload deferred (no worker launch path)` per
     wait — not one per tick.
@@ -1215,7 +1215,7 @@ Grep: `[bot-access] denied`, `[PermCheck]`, `scene privacy stop`, `[legacy-chat]
 
 Grep: `[ai-setup]`, `Ollama not detected`, `Ollama is not reachable`, `Processing your message`, `Rejected config save`, `reloadSettings failed`.
 
-- [ ] **No-Ollama first run (1.1.225)**
+- [x] **No-Ollama first run (1.1.225)** — closed 2026-10-18 by triage: OBSOLETE, the legacy config hub, its Refresh and the "Ollama not detected" lines were deleted in 1.1.250/1.1.251 (7e25ac47, 080160e4) and the chooser is off by default since 1.1.235; the rest is covered by 6ar, 6as and 6y
   - Bradley does:
     1. Create a new world (cheats off) with Ollama stopped.
     2. Read the first-run screen.
@@ -1296,7 +1296,7 @@ Grep: `Unknown or incomplete command`, `No recipient resolved`, `Stopped by the 
   - Bradley does: in a new commands-off world press `-`, tick Jake, Spawn Selected. Then the follow key, then `\` to stop.
   - Claude watches for: no `Unknown or incomplete command` anywhere; `Spawned new bot Jake!`; follow ON; a single "Jake has stopped." line.
   - Pass when: Jake spawns, follows and stops with no red error, and stop shows one chat line.
-- [ ] **World Mode chooser for the host (1.1.227)**
+- [x] **World Mode chooser for the host (1.1.227)** — closed 2026-10-18 by triage: SUPERSEDED, Questing is behind an off-by-default server flag since 1.1.235, so a new world shows no chooser; covered by 6ag Questing hidden (1.1.235)
   - Bradley does: create a new commands-off world.
   - Claude watches for: the World Mode selection screen opening on join (F2 screenshot).
   - Pass when: "Choose Frens World Mode" opens without enabling cheats.
@@ -1464,7 +1464,7 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 - [x] **No canopy pillar at cleanup start (1.1.234)**
   - Sandbox 2026-10-17: PASS, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Pass when: starting woodcut cleanup under leaves logs no `ensureAtSurface: … pillar recovery`.
-- [ ] **Cleanup finishes and says one sentence (1.1.234)**
+- [x] **Cleanup finishes and says one sentence (1.1.234)** — closed 2026-10-18 by triage: SUPERSEDED, bug B fixed in 1.1.266 and 1.1.267 (c2bc8ad0, 16 s in the sandbox); covered by 6bg Empty cleanup ends fast (B2)
   - Sandbox 2026-10-17: FAIL: right sentence, 1 s on bare ground but 127 s in forest (bug B), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Pass when: with nothing to clean, woodcut cleanup ends within a few seconds with "Nothing left to clean up here." (no `minedLogs=` stats in chat).
 - [ ] **Drop sweep, return and craft feedback (1.1.234)**
@@ -1513,7 +1513,7 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 
 ## Phase 6ai — Spawn-base trees protected, admin toggle (1.1.238)
 
-- [ ] **Fresh world: bot walks out of the Spawn base (1.1.238)**
+- [x] **Fresh world: bot walks out of the Spawn base (1.1.238)** — closed 2026-10-18 by triage: SUPERSEDED, bug D fixed in 1.1.266 (6bcd088e, af1b322e); covered by 6bf Relocation reaches distant trees (D)
   - Sandbox 2026-10-17: FAIL: spawn line once, but relocation walks hit their deadline and it got no logs (bug D), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): new default world, a companion with no axe, `/bot skill woodcut <name>` at spawn.
   - Claude watches for: `Woodcut detect` with `protectedFail>0`, then the chat line "The trees around spawn are protected, so I'm heading out to find others.", relocation, logs mined outside the zone. `logscan.sh` shows no repeated `Cannot mine: protected claim` (at most one per block).
@@ -1890,14 +1890,14 @@ Observed across several scenes; collect as the session runs.
 
 ## Phase 8 — Gameplay bugs (noisy; RALPH_TASK Lane 2 / P1)
 
-- [ ] **Woodcut restart loop diagnostic (1.1.200) — the priority item**
+- [x] **Woodcut restart loop diagnostic (1.1.200) — the priority item** — closed 2026-10-18 by triage: SUPERSEDED, root cause fixed in 1.1.216 (HobbyBackoffPolicy) and the axeless question answered in 1.1.229; covered by 6n The woodcut storm is gone (1.1.216), 6n The backoff ladder widens (1.1.216) and 6aa Woodcut from nothing (1.1.229)
   - Bradley does: put an **axeless** bot near trees, idle, and leave it there.
   - Claude watches for: `Idle wooden fallback: starting one-tree woodcut for {}` repeating, and critically the new INFO line `Idle wooden fallback: {} signature changed {} -> {} with {} ticks of cooldown left; resetting` — capture the **A -> B** values verbatim, they name what is invalidating the 240-tick `NEXT_WOODEN_FALLBACK_TICK` cooldown.
   - Pass when: at least one signature-changed line is captured with both signatures, so the fix can be made at the source. Also note whether `I have no axe and can't make or find one` still accompanies it, and answer the product question: **should an axeless bot punch one tree instead of refusing?**
-- [ ] **Idle hobbies have real shared state (1.1.200 fix, verify)**
+- [x] **Idle hobbies have real shared state (1.1.200 fix, verify)** — closed 2026-10-18 by triage: OBSOLETE, neither watched line can occur: the unavailable-state path was removed in 7123d837 (1.1.200) and FunctionCallerV2/ollama4j were deleted in 1.1.251 (080160e4, 4bb9df49)
   - Claude watches for: `Shared state unavailable for idle-hobbies` and any `NoClassDefFoundError`/`OllamaBaseException` — must NOT appear.
   - Pass when: neither appears in a full session.
-- [ ] **BotTorchHoldService not firing (P1, diagnostic-first)**
+- [x] **BotTorchHoldService not firing (P1, diagnostic-first)** — closed 2026-10-18 by triage: SUPERSEDED, logs show the service fires and 1.1.217 added hysteresis; covered by 6o Torch stays up in the dark (1.1.217) and 6o Quit mid-hold does not reload with a torch in hand (1.1.217)
   - Log evidence 2026-09-07/08 (1.1.216): it DOES fire — Jake held 5 times at light 6–7 but yielded within ≤1 s at light 8 (spatial flicker); Bob had `no-torch-in-inventory`. 1.1.217 added hysteresis (keep until light ≥12) — use Phase 6o's torch items; this item passes if 6o's do.
   - Bradley does: follow-mode in a dim cave and at night, with a torch in the bot's inventory.
   - Claude watches for (1.1.202 state-change diagnostics): `[torch-hold] <Bot> verdict=reject gate=<gate> dist=<d> light=<l> mob=<id>` and `[torch-hold] <Bot> verdict=hold gate=none ... action=promoted+held slot=<n> savedSlot=<m>`. Gates: `mode-<M>`, `active-task`, `using-item`, `mounted`, `sleeping`, `light-above-7`, `audible-hostile-8`, `visible-hostile-16`, `no-torch-in-inventory`. Each line prints only when the verdict changes.
