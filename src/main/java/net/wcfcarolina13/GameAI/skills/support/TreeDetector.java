@@ -279,6 +279,45 @@ public final class TreeDetector {
                 .filter(t -> !getWoodcutProtectionDecision(world, t.base(), Math.max(4, t.height())).blocked());
     }
 
+    /**
+     * One woodcut detect scan's tree memo (1.1.268 finding 4), strict and loose kept apart. Every
+     * log of one trunk resolves to the same tree, so the scan builds it once per base. Never kept
+     * across scans: another bot cuts between them.
+     */
+    public static final class DetectScanMemo {
+        private final BaseVerdictMemo<Optional<TreeTarget>> strict = new BaseVerdictMemo<>();
+        private final BaseVerdictMemo<Optional<TreeTarget>> loose = new BaseVerdictMemo<>();
+
+        /** Distinct trunk bases the strict detect built. */
+        public int strictBases() {
+            return strict.misses();
+        }
+
+        /** Detect calls (strict and loose) answered from the memo. */
+        public int hits() {
+            return strict.hits() + loose.hits();
+        }
+    }
+
+    /**
+     * {@link #detectTreeAtForWoodcut(ServerWorld, BlockPos, TreeDetectionMode)} with a scan memo
+     * ({@code null} for none). The answer is a function of the trunk base alone: the resolver
+     * reads {@code logPos} only to check it is a log, then works from {@link #trunkBaseOf}, and the
+     * tree build and protection check read only the resolved trunk. So it is cached per base and
+     * mode.
+     */
+    public static Optional<TreeTarget> detectTreeAtForWoodcut(ServerWorld world,
+                                                              BlockPos logPos,
+                                                              TreeDetectionMode mode,
+                                                              DetectScanMemo memo) {
+        if (memo == null || world == null || logPos == null || !isLog(world.getBlockState(logPos))) {
+            return detectTreeAtForWoodcut(world, logPos, mode);
+        }
+        BaseVerdictMemo<Optional<TreeTarget>> cache = mode == TreeDetectionMode.STRICT_STANDING ? memo.strict : memo.loose;
+        return cache.computeIfAbsent(trunkBaseOf(world, logPos).asLong(),
+                () -> detectTreeAtForWoodcut(world, logPos, mode));
+    }
+
     private static Optional<TreeTarget> detectTreeAtCore(ServerWorld world,
                                                          BlockPos logPos,
                                                          TreeDetectionMode mode) {

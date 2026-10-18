@@ -54,6 +54,7 @@ import net.wcfcarolina13.GameAI.skills.support.RelocationWalkPolicy;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
+import net.wcfcarolina13.GameAI.skills.support.BaseVerdictMemo;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutFailureStreakPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutTreeOwnershipPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutFinalReasonPolicy;
@@ -338,7 +339,11 @@ public final class WoodcutSkill implements Skill {
             int leafFail,
             Map<String, Integer> protectedReasonCounts,
             List<String> rejectSamples,
-            boolean allLocalLogsProtectedOrHuman) {
+            boolean allLocalLogsProtectedOrHuman,
+            // bases = distinct trunk bases the strict detect built; memoHits = detect calls (strict
+            // and loose) answered from the scan's memo (1.1.268 finding 4).
+            int detectBases,
+            int detectMemoHits) {
     }
 
     private record RequestedWorkBounds(int minX,
@@ -4339,7 +4344,7 @@ public final class WoodcutSkill implements Skill {
                                                            RequestedWorkBounds requestedBounds,
                                                            Set<BlockPos> claimedByOthers) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return new WoodcutDetectionSnapshot(Optional.empty(), Optional.empty(), null, null, null, 0, 0, 0, 0, 0, 0, Map.of(), List.of(), false);
+            return new WoodcutDetectionSnapshot(Optional.empty(), Optional.empty(), null, null, null, 0, 0, 0, 0, 0, 0, Map.of(), List.of(), false, 0, 0);
         }
         BlockPos origin = bot.getBlockPos();
         BotBeehiveRegistryService.discoverBeehivesNear(world, origin, radius, vertical);
@@ -4361,6 +4366,12 @@ public final class WoodcutSkill implements Skill {
         double bestAnyDist = Double.MAX_VALUE;
         Map<String, Integer> protectedReasons = new LinkedHashMap<>();
         List<String> rejectSamples = new ArrayList<>(3);
+        // One memo per scan, never across scans (1.1.268 finding 4): every log of one trunk
+        // resolves to the same tree, hazard verdict and standing check, so they are built once per
+        // base. The per-log visited / claim / failed-base branches still read the live sets.
+        TreeDetector.DetectScanMemo detectMemo = new TreeDetector.DetectScanMemo();
+        BaseVerdictMemo<Boolean> hazardEnclosedMemo = new BaseVerdictMemo<>();
+        TreeDetector.CleanupScanMemo cleanupMemo = new TreeDetector.CleanupScanMemo();
         int scanMinX = origin.getX() - radius;
         int scanMaxX = origin.getX() + radius;
         int scanMinY = origin.getY() - vertical;
@@ -4376,7 +4387,7 @@ public final class WoodcutSkill implements Skill {
             scanMaxZ = Math.min(scanMaxZ, requestedBounds.maxZ());
         }
         if (scanMinX > scanMaxX || scanMinY > scanMaxY || scanMinZ > scanMaxZ) {
-            return new WoodcutDetectionSnapshot(Optional.empty(), Optional.empty(), null, null, null, 0, 0, 0, 0, 0, 0, Map.of(), List.of(), false);
+            return new WoodcutDetectionSnapshot(Optional.empty(), Optional.empty(), null, null, null, 0, 0, 0, 0, 0, 0, Map.of(), List.of(), false, 0, 0);
         }
 
         for (BlockPos pos : BlockPos.iterate(scanMinX, scanMinY, scanMinZ, scanMaxX, scanMaxY, scanMaxZ)) {
@@ -4410,7 +4421,7 @@ public final class WoodcutSkill implements Skill {
 
             if (!nearHuman && !protectedTarget) {
                 Optional<TreeDetector.TreeTarget> treeOpt = TreeDetector.detectTreeAtForWoodcut(
-                        world, pos, TreeDetector.TreeDetectionMode.STRICT_STANDING);
+                        world, pos, TreeDetector.TreeDetectionMode.STRICT_STANDING, detectMemo);
                 if (treeOpt.isPresent()) {
                     TreeDetector.TreeTarget tree = treeOpt.get();
                     if (visited != null && visited.contains(tree.base())) {
@@ -4434,9 +4445,9 @@ public final class WoodcutSkill implements Skill {
                         continue;
                     }
                     // Hazard terrain check: reject trees fully enclosed by ravines/deep water
-                    WoodcutHazardScanner.TreeHazardProfile hazard =
-                            WoodcutHazardScanner.scan(world, tree.base());
-                    if (hazard.fullyEnclosed()) {
+                    boolean hazardEnclosed = hazardEnclosedMemo.computeIfAbsent(tree.base().asLong(),
+                            () -> WoodcutHazardScanner.scan(world, tree.base()).fullyEnclosed());
+                    if (hazardEnclosed) {
                         failedBaseReasons.put(tree.base().toImmutable(), "hazardous terrain on all sides");
                         failedBases.add(tree.base().toImmutable());
                         continue;
@@ -4450,7 +4461,7 @@ public final class WoodcutSkill implements Skill {
                 }
 
                 Optional<TreeDetector.TreeTarget> looseTreeOpt = TreeDetector.detectTreeAtForWoodcut(
-                        world, pos, TreeDetector.TreeDetectionMode.LOOSE_FRAGMENT);
+                        world, pos, TreeDetector.TreeDetectionMode.LOOSE_FRAGMENT, detectMemo);
                 if (looseTreeOpt.isPresent()) {
                     TreeDetector.TreeTarget looseTree = looseTreeOpt.get();
                     if ((visited == null || !visited.contains(looseTree.base()))
@@ -4465,7 +4476,7 @@ public final class WoodcutSkill implements Skill {
                 }
 
                 TreeDetector.CleanupLogDisposition cleanupDisposition =
-                        TreeDetector.classifyCleanupLog(world, pos, false);
+                        TreeDetector.classifyCleanupLog(world, pos, false, cleanupMemo);
                 if (cleanupDisposition.actionable() && distSq < bestFloatingDist) {
                     bestFloatingDist = distSq;
                     bestFloating = pos.toImmutable();
@@ -4483,8 +4494,8 @@ public final class WoodcutSkill implements Skill {
             if (rejectSamples.size() < 3) {
                 boolean strictStandingReject = !nearHuman
                         && !protectedTarget
-                        && TreeDetector.detectTreeAtForWoodcut(world, pos, TreeDetector.TreeDetectionMode.LOOSE_FRAGMENT).isPresent()
-                        && TreeDetector.detectTreeAtForWoodcut(world, pos, TreeDetector.TreeDetectionMode.STRICT_STANDING).isEmpty();
+                        && TreeDetector.detectTreeAtForWoodcut(world, pos, TreeDetector.TreeDetectionMode.LOOSE_FRAGMENT, detectMemo).isPresent()
+                        && TreeDetector.detectTreeAtForWoodcut(world, pos, TreeDetector.TreeDetectionMode.STRICT_STANDING, detectMemo).isEmpty();
                 rejectSamples.add(String.format("%s (soilFail=%s, leafFail=%s, humanFail=%s, protected=%s, protection=%s%s)",
                         pos.toShortString(),
                         !soilValid,
@@ -4557,19 +4568,23 @@ public final class WoodcutSkill implements Skill {
                 leafFail,
                 Map.copyOf(protectedReasons),
                 List.copyOf(rejectSamples),
-                allProtectedOrHuman
+                allProtectedOrHuman,
+                detectMemo.strictBases(),
+                detectMemo.hits()
         );
     }
 
     private void logDetectionSnapshot(WoodcutDetectionSnapshot snapshot, long durationMs) {
         BlockPos nearest = snapshot.nearestTree().map(TreeDetector.TreeTarget::base).orElse(null);
-        LOGGER.info("Woodcut detect: durationMs={} logs={} visited={} humanProx={} protected={} nearest={}",
+        LOGGER.info("Woodcut detect: durationMs={} logs={} visited={} humanProx={} protected={} nearest={} bases={} memoHits={}",
                 durationMs,
                 snapshot.totalLogs(),
                 snapshot.visitedLogs(),
                 snapshot.humanAdjacentLogs(),
                 snapshot.protectedLogs(),
-                nearest == null ? "none" : nearest.toShortString());
+                nearest == null ? "none" : nearest.toShortString(),
+                snapshot.detectBases(),
+                snapshot.detectMemoHits());
         for (int i = 0; i < snapshot.rejectSamples().size(); i++) {
             LOGGER.info("Woodcut detect reject sample {} at {}", i + 1, snapshot.rejectSamples().get(i));
         }
