@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
+import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 import net.wcfcarolina13.PlayerUtils.DebouncedWriter;
 import net.minecraft.registry.tag.BlockTags;
@@ -316,6 +317,8 @@ public final class BotHomeService {
         if (changed) {
             flush();
         }
+        // 1.1.268: this save's remembered own Spawn-base scaffold replaces any previous save's.
+        OwnedScaffoldRegistry.loadFor(server);
     }
 
     /**
@@ -1904,6 +1907,53 @@ public final class BotHomeService {
         }
     }
 
+    /**
+     * This save's remembered own Spawn-base scaffold (1.1.268), bot UUID -> packed positions, from
+     * the Overworld's per-save data. Unparseable bot keys are skipped. Never null.
+     */
+    public static Map<UUID, List<Long>> loadOwnedSpawnScaffold(MinecraftServer server) {
+        Map<UUID, List<Long>> out = new HashMap<>();
+        if (server == null || server.getOverworld() == null) {
+            return out;
+        }
+        WorldData wd = worldData(server, server.getOverworld());
+        synchronized (LOCK) {
+            if (wd.ownedSpawnScaffold == null) {
+                return out;
+            }
+            for (Map.Entry<String, List<Long>> e : wd.ownedSpawnScaffold.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null || e.getValue().isEmpty()) continue;
+                try {
+                    out.put(UUID.fromString(e.getKey()), new ArrayList<>(e.getValue()));
+                } catch (IllegalArgumentException ignored) {
+                    // not a bot UUID: skip
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Stores one bot's own Spawn-base scaffold positions (empty removes the entry). Debounced write. */
+    public static void saveOwnedSpawnScaffold(MinecraftServer server, UUID bot, List<Long> positions) {
+        if (server == null || bot == null || server.getOverworld() == null) {
+            return;
+        }
+        WorldData wd = worldData(server, server.getOverworld());
+        synchronized (LOCK) {
+            if (wd.ownedSpawnScaffold == null) {
+                wd.ownedSpawnScaffold = new HashMap<>();
+            }
+            if (positions == null || positions.isEmpty()) {
+                if (wd.ownedSpawnScaffold.remove(bot.toString()) == null) {
+                    return;
+                }
+            } else {
+                wd.ownedSpawnScaffold.put(bot.toString(), new ArrayList<>(positions));
+            }
+        }
+        flush();
+    }
+
     /** Sets {@link #isSpawnBaseWoodcutAllowed}. Returns the stored value. Caller gates on admin. */
     public static boolean setSpawnBaseWoodcutAllowed(MinecraftServer server, boolean allowed) {
         if (server == null || server.getOverworld() == null) {
@@ -1975,6 +2025,9 @@ public final class BotHomeService {
         int maxBaseRadius; // 0 = use DEFAULT_MAX_BASE_RADIUS; Gson defaults missing field to 0
         boolean spawnBaseInitialized; // seeded by initializeSpawnBaseIfNeeded; sticky across restarts
         boolean spawnBaseWoodcutAllowed; // admin toggle; Gson defaults a missing field to false
+        // 1.1.268: own woodcut scaffold each bot placed in the Spawn base, bot UUID -> packed
+        // BlockPos longs (Overworld entry only). Missing on older saves: kept as this empty default.
+        Map<String, List<Long>> ownedSpawnScaffold = new HashMap<>();
     }
 
     private static final class SavedBase {

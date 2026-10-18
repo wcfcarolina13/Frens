@@ -6,6 +6,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.GameAI.services.BotHomeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -142,11 +143,24 @@ public final class OwnedScaffoldRegistry {
 
     // ── Persistence (BotHomeService WorldData, Overworld only) ───────────────
 
+    private static final Object PERSIST_LOCK = new Object();
+
     private static Map<UUID, List<Long>> loadPersisted(MinecraftServer server) {
-        return Map.of();
+        try {
+            return BotHomeService.loadOwnedSpawnScaffold(server);
+        } catch (Throwable t) {
+            LOGGER.warn("[spawn-scaffold] could not load remembered own scaffold: {}", t.getMessage());
+            return Map.of();
+        }
     }
 
+    /** Writes this bot's Overworld entries through (snapshot and save under one lock, so order holds). */
     private static void persist(ServerWorld world, UUID bot, String dim) {
-        // Wired to BotHomeService in the persistence phase.
+        if (!OVERWORLD_ID.equals(dim) || world == null || world.getServer() == null) {
+            return;
+        }
+        synchronized (PERSIST_LOCK) {
+            BotHomeService.saveOwnedSpawnScaffold(world.getServer(), bot, LEDGER.positions(bot, dim));
+        }
     }
 }
