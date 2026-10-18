@@ -751,7 +751,7 @@ public final class ScaffoldService {
         // Abort-safe: a stop interrupts this worker; clear the flag so waits work, restore it at the end.
         java.util.concurrent.atomic.AtomicBoolean interrupted =
                 new java.util.concurrent.atomic.AtomicBoolean(abortSafe && Thread.interrupted());
-        boolean hadTaskAtStart = TaskService.hasActiveTask(bot.getUuid());
+        String taskAtStart = activeTaskIdentity(bot);
         long deadline = System.currentTimeMillis() + Math.max(1_000L, budgetMs);
         Set<Long> givenUpColumns = new HashSet<>();
         List<BlockPos> removed = new ArrayList<>();
@@ -763,7 +763,8 @@ public final class ScaffoldService {
                 if (!abortSafe && SkillManager.shouldAbortSkill(bot)) {
                     break;
                 }
-                if (abortSafe && !hadTaskAtStart && TaskService.hasActiveTask(bot.getUuid())) {
+                String taskNow = activeTaskIdentity(bot);
+                if (abortSafe && taskNow != null && !taskNow.equals(taskAtStart)) {
                     LOGGER.info("[spawn-scaffold] {} own scaffold teardown stops: a new task took over",
                             bot.getName().getString());
                     break;
@@ -805,6 +806,35 @@ public final class ScaffoldService {
             }
         }
         return new OwnedTeardownResult(removed.size(), owned.size(), removed);
+    }
+
+    /**
+     * R5 (1.1.268): mine this bot's remembered own Spawn-base scaffold (an earlier fell, possibly
+     * before a restart) that still holds scaffold material. Registry positions only, decided by
+     * MiningTool's claim gate alone (no TreeDetector protection check); a position whose block
+     * changed is forgotten, never broken. Called at woodcut and woodcut_cleanup start.
+     */
+    public static OwnedTeardownResult clearRememberedOwnScaffold(ServerPlayerEntity bot) {
+        if (bot == null || TaskService.isServerStopping() || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return OwnedTeardownResult.NONE;
+        }
+        List<BlockPos> owned = OwnedScaffoldRegistry.ownedPositions(bot, world);
+        if (owned.isEmpty()) {
+            return OwnedTeardownResult.NONE;
+        }
+        OwnedTeardownResult result = teardownOwnedScaffold(bot, owned, OWNED_TEARDOWN_BUDGET_MS, false, true);
+        if (result.total() > 0) {
+            LOGGER.info("[spawn-scaffold] {} cleared {} leftover own scaffold block(s) from an earlier fell",
+                    bot.getName().getString(), result.removed());
+        }
+        return result;
+    }
+
+    /** Name and creation time of the bot's active task, or null: a change means a new task took the slot. */
+    private static String activeTaskIdentity(ServerPlayerEntity bot) {
+        return TaskService.getActiveTaskInfo(bot.getUuid())
+                .map(info -> info.name() + "@" + info.createdAt())
+                .orElse(null);
     }
 
     /** Server-thread pre-check of one owned position; forgets it when it is gone or changed. */

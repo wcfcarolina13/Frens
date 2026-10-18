@@ -30,6 +30,7 @@ import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.WoodcutCleanupMemoryService;
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -271,6 +272,11 @@ public final class WoodcutCleanupSkill implements Skill {
             }
             return SkillExecutionResult.failure("Couldn't reach the surface to run cleanup.");
         }
+
+        // R5 (1.1.268): this bot's remembered own scaffold in the Spawn base, from an earlier fell.
+        // Registry positions only, decided by MiningTool's claim gate alone (no isProtected check);
+        // the heuristic passes below stay closed in bases.
+        ScaffoldService.clearRememberedOwnScaffold(bot);
 
         Map<String, Object> params = context.parameters();
 

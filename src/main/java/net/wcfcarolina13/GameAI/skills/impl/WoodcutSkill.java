@@ -42,6 +42,7 @@ import net.wcfcarolina13.GameAI.services.BotBeehiveRegistryService;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.construction.BridgeScaffoldService;
+import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
@@ -771,6 +772,9 @@ public final class WoodcutSkill implements Skill {
             }
             return SkillExecutionResult.failure("I couldn't reach the surface to cut trees.");
         }
+
+        // R5 (1.1.268): remembered own Spawn-base scaffold from an earlier fell.
+        ScaffoldService.clearRememberedOwnScaffold(bot);
 
         Object rawOrigin = context.parameters() != null ? context.parameters().get("_origin") : null;
         boolean bootstrapAllowed = WoodcutAxeBootstrapPolicy.allowBootstrap(
@@ -1921,7 +1925,8 @@ public final class WoodcutSkill implements Skill {
                             }
 
                             int startY = bot.getBlockY();
-                            List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, 1);
+                            // R1 (1.1.268): the fell ascent is own scaffold (Spawn base with the toggle on).
+                            List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, 1, true);
                             LOGGER.info("Woodcut pillar step {} via ScaffoldService placed={}",
                                     step + 1, placed.size());
                             if (placed.isEmpty()) {
@@ -2026,7 +2031,8 @@ public final class WoodcutSkill implements Skill {
                 pillarNeeded = Math.min(pillarNeeded, MAX_COLUMN_PILLAR_STEPS);
                 boolean canBridge = pillarNeeded <= 0;
                 if (pillarNeeded > 0) {
-                    List<BlockPos> pillarPlaced = ScaffoldService.pillarUpWithPositions(bot, pillarNeeded);
+                    // R1: the fallback pillar is own scaffold; the bridge after it is not.
+                    List<BlockPos> pillarPlaced = ScaffoldService.pillarUpWithPositions(bot, pillarNeeded, true);
                     if (!pillarPlaced.isEmpty()) {
                         recordRecoveryPlacements(bot, world, pillarPlaced, sharedState, reachSession);
                         sleepQuiet(PILLAR_STEP_DELAY_MS);
@@ -2117,7 +2123,47 @@ public final class WoodcutSkill implements Skill {
                     cleanupNearbyScaffold(bot, bot.getBlockPos(), sharedState);
                 }
             }
+            // R4: own Spawn-base scaffold is torn down even after a stop (bounded); outside bases
+            // the abort behaviour above is unchanged.
+            teardownOwnSpawnScaffold(bot, world, target.base(), sharedState, reachSession);
         }
+    }
+
+    /** Owned scaffold within this many blocks (x/z) of the tree base is this fell's own (R4). */
+    private static final int OWN_SPAWN_SCAFFOLD_TEARDOWN_RADIUS = 12;
+
+    /**
+     * R4 (1.1.268): bounded, abort-safe teardown of this bot's own scaffold in the Spawn base around
+     * {@code treeBase}. Only positions in {@link OwnedScaffoldRegistry} (placed by this bot with the
+     * own-scaffold flag, inside a SERVER-owned base) are considered; what stays (unreachable, budget
+     * spent) is remembered for the next woodcut / woodcut_cleanup start.
+     */
+    private void teardownOwnSpawnScaffold(ServerPlayerEntity bot, ServerWorld world, BlockPos treeBase,
+                                          Map<String, Object> sharedState, WoodcutReachSession reachSession) {
+        if (bot == null || world == null || treeBase == null || TaskService.isServerStopping()) {
+            return;
+        }
+        List<BlockPos> owned = new ArrayList<>();
+        for (BlockPos pos : OwnedScaffoldRegistry.ownedPositions(bot, world)) {
+            if (Math.abs(pos.getX() - treeBase.getX()) <= OWN_SPAWN_SCAFFOLD_TEARDOWN_RADIUS
+                    && Math.abs(pos.getZ() - treeBase.getZ()) <= OWN_SPAWN_SCAFFOLD_TEARDOWN_RADIUS) {
+                owned.add(pos);
+            }
+        }
+        if (owned.isEmpty()) {
+            return;
+        }
+        boolean abort = isAbortRequested(bot);
+        ScaffoldService.OwnedTeardownResult result = ScaffoldService.teardownOwnedScaffold(
+                bot, owned, ScaffoldService.OWNED_TEARDOWN_BUDGET_MS, true, false);
+        for (BlockPos removed : result.removedPositions()) {
+            forgetScaffoldPlacement(sharedState, world, removed);
+            if (reachSession != null) {
+                reachSession.recordRemoval(removed);
+            }
+        }
+        LOGGER.info("[spawn-scaffold] {} removed {}/{} own scaffold block(s) (abort={})",
+                bot.getName().getString(), result.removed(), result.total(), abort);
     }
 
     /** Log blocks inside the tree's scan box (the same box {@link #collectRemainingEnvelopeLogs} scans). */
@@ -3748,7 +3794,7 @@ public final class WoodcutSkill implements Skill {
             }
             BlockPos support = stand.down();
             LOGGER.info("Woodcut terrain recovery: placing temporary support {} for {}", support.toShortString(), target.toShortString());
-            if (!tryPlaceScaffold(bot, support, sharedState, reachSession)) {
+            if (!tryPlaceScaffold(bot, support, sharedState, reachSession, false)) {
                 continue;
             }
             reachSession.minorTerrainCorrections++;
@@ -4231,7 +4277,7 @@ public final class WoodcutSkill implements Skill {
             if (!world.getBlockState(candidate).isAir()) {
                 candidate = candidate.up();
             }
-            boolean placed = tryPlaceScaffold(bot, candidate, sharedState, reachSession);
+            boolean placed = tryPlaceScaffold(bot, candidate, sharedState, reachSession, true);
             if (!placed) {
                 LOGGER.warn("Failed to place scaffold block at {}", candidate.toShortString());
                 bot.setSneaking(wasSneaking);
@@ -4979,10 +5025,17 @@ public final class WoodcutSkill implements Skill {
         return false;
     }
 
+    /**
+     * @param ownScaffold R1 (1.1.268): true only for woodcut's own reach pillar ({@link #pillarUp}),
+     *                    whose placements may then go ahead in the Spawn base with the toggle on.
+     *                    Emergency steps and terrain-correction supports pass false; the support
+     *                    blocks placed by {@link #ensureSupportBlock} are never flagged.
+     */
     private boolean tryPlaceScaffold(ServerPlayerEntity bot,
                                      BlockPos target,
                                      Map<String, Object> sharedState,
-                                     WoodcutReachSession reachSession) {
+                                     WoodcutReachSession reachSession,
+                                     boolean ownScaffold) {
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
         if (!isWithinRequestedBounds(bot, target)) {
             LOGGER.info("Woodcut bounded: refusing scaffold placement outside bounds at {}", target.toShortString());
@@ -4998,7 +5051,8 @@ public final class WoodcutSkill implements Skill {
             breakSoftBlock(world, bot, placePos);
         }
         BlockPos support = ensureSupportBlock(bot, placePos, sharedState, reachSession);
-        BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, placePos, Direction.UP, PILLAR_BLOCKS);
+        BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, placePos, Direction.UP, PILLAR_BLOCKS,
+                false, ownScaffold);
         if (result.success()) {
             recordScaffoldPlacement(sharedState, world, placePos);
             if (reachSession != null) {
@@ -5037,7 +5091,8 @@ public final class WoodcutSkill implements Skill {
                     breakSoftBlock(world, bot, alt);
                 }
                 BlockPos altSupport = ensureSupportBlock(bot, alt, sharedState, reachSession);
-                BotActions.PlaceResult altResult = BotActions.tryPlaceBlockAt(bot, alt, Direction.UP, PILLAR_BLOCKS);
+                BotActions.PlaceResult altResult = BotActions.tryPlaceBlockAt(bot, alt, Direction.UP, PILLAR_BLOCKS,
+                        false, ownScaffold);
                 if (!altResult.success()) {
                     LOGGER.debug("Woodcut scaffold: offset {} at {} failed reason={} supportPlaced={}",
                             dir, alt.toShortString(), altResult.reason(),
@@ -5111,7 +5166,7 @@ public final class WoodcutSkill implements Skill {
         BlockPos below = foot.down();
         breakSoftBlock(world, bot, foot);
         breakSoftBlock(world, bot, below);
-        if (tryPlaceScaffold(bot, below, sharedState, reachSession)) {
+        if (tryPlaceScaffold(bot, below, sharedState, reachSession, false)) {
             if (reachSession != null) {
                 reachSession.recordPlacement(below);
             }
@@ -6012,7 +6067,8 @@ public final class WoodcutSkill implements Skill {
         if (pillarSteps > 0) {
             LOGGER.info("Woodcut {}: pillar-up {} step(s) from {} toward surfaceY={}",
                     label, pillarSteps, bot.getBlockPos().toShortString(), targetSurfaceY);
-            List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, pillarSteps);
+            // R1: woodcut's surface-recovery pillar is own scaffold.
+            List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, pillarSteps, true);
             recordRecoveryPlacements(bot, world, placed, sharedState, reachSession);
             if (world.isSkyVisible(bot.getBlockPos().up()) && bot.getBlockY() + 1 >= targetSurfaceY) {
                 return true;
