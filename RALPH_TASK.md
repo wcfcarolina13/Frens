@@ -15,6 +15,7 @@ test_command: "./gradlew build -x test"
 **Next:**
 - Fallback re-search when a refusing unified search returns NO_PATH. Seed 103 is a lawful mining path still missed through dedup staleness. Costs double time on failing server-thread probes, so it needs a ruling.
 - Per-search overlay allocation into `SearchBuffers` (needs a `MoveSimulator.Overlay` base-terrain change).
+- With the Spawn-tree toggle On, a tree that needs a pillar is cut one log at a time: `pillarUp` is refused in the Spawn base (1.1.238 ruling, `7f89c502`, logs and leaves only), so the bot leaves the rest and relocates. Seen on a floating test tree. Watch whether rooted Spawn trees do the same, it may need a ruling.
 - M2 not set up in game (tests only). New player string "woodcut_cleanup interrupted." for the next text sweep.
 - Everything in the 1.1.265 block below.
 
