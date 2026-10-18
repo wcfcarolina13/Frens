@@ -1557,6 +1557,7 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 ## Phase 6ak — Multi-step navigation (1.1.240)
 
 - [ ] **Bots walk around, break soft blocks or place a dirt step (1.1.240)**
+  - Sandbox 2026-10-18 (1.1.267): PARTIAL: BREAK ok=true and WALK_AROUND moves seen, both WALK_AROUND ok=false, no PLACE, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Sandbox 2026-10-17: PARTIAL: walk-arounds ok, no timeouts, no BREAK or PLACE success seen, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): woodcut with a no-tools companion in rough terrain (ravines, sand banks, stepped hills), outside the Spawn base.
   - Claude watches for: `terrain move: WALK_AROUND|BREAK|PLACE cost=…` then `terrain move result: … ok=true … displaced=true`, no `Refusing path … not a standing cell`, no `A* pathfinding timed out`. `frens_log_report.py` section 3: Baritone p90 under 500 ms.
@@ -1566,7 +1567,8 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
   - Bradley does: a target across a 1-deep stream or pond edge.
   - Claude watches for: `Path wades N of M cells`.
   - Pass when: the bot wades across instead of walking around a long way, and never dives into 2-deep water.
-- [ ] **Baritone default migrated once (1.1.240)**
+- [x] **Baritone default migrated once (1.1.240)**
+  - Sandbox 2026-10-18 (1.1.267): SUPERSEDED: replaced by 6ba-1 (passed), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Sandbox 2026-10-17: SUPERSEDED by 1.1.261 (Phase 6ba); classic still survives a restart, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Claude watches for: `1.1.240 config migration: pathfinder switched to baritone` on the first Nirn launch only. `/bot config pathfinder` says baritone.
   - Pass when: the line appears once and a later `classic` choice survives a restart.
@@ -1578,7 +1580,8 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 
 ## Phase 6al — Tree claims, creeper line, walk outcomes (1.1.241)
 
-- [ ] **Several bots spread across one forest (1.1.241)**
+- [x] **Several bots spread across one forest (1.1.241)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Sandbox 2026-10-17: FAIL: claims keyed on the base block, a second bot takes the same tree after its bottom log is cut (bug G), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): `/bot skill woodcut` on three companions in the same forest.
   - Claude watches for: `Woodcut: tree <base> is claimed by <bot>, picking another`, no single-file queue (`walk blocked near` on each other), at most one `sharing it (no free tree after waiting)` near the end.
@@ -1594,197 +1597,252 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 
 ## Phase 6am — Unified pathfinder opt-in, audit bug fixes, per-bot dig gate (1.1.242)
 
-- [ ] **Unified finder A/B, longer run (1.1.242)**
+- [x] **Unified finder A/B, longer run (1.1.242)**
+  - Sandbox 2026-10-18 (1.1.267): SUPERSEDED: the 2026-10-17 swapped A/B (`0ce0441d`) and the 1.1.261 default, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): daylight, bots outside the Spawn base with axes, terrain with water, cliffs and soft walls. `/bot config pathcompare on`, then `/bot config pathfinder unified <bot>` on half the bots, woodcut on all.
   - Claude watches for: `frens_log_report.py` section 4: reached rate per primary finder (baseline 61.5%), `unified-only reachable`, `planned move ASCEND|ASCEND_PLACE|SWIM|FALL … ok=true`, no `placed-not-dirt`, no breaks of planks, logs, fences or anything near a build.
   - Pass when: unified reaches its goal at least as often as Baritone over 30+ joined walks and crosses terrain the others refuse. Then 1.1.243 makes it the default and removes the old finders.
 - [ ] **Audit fixes in play (1.1.242)**
+  - Sandbox 2026-10-18 (1.1.267): FAIL: hobby fishing says "No 'fish' to cook" (finding 8), honey_collect harvests nothing (finding 9), wool shears but deposit not reached, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: let a companion fish with a furnace and chest nearby, run the honey hobby by a smoked hive, wool deposit to a chest.
   - Claude watches for: no "That furnace is unavailable." while a furnace is in range, fish deposited to the home chest, honey harvested, wool deposited.
   - Pass when: all three work on the first try.
-- [ ] **Only the bot doing the task digs (1.1.242)**
+- [x] **Only the bot doing the task digs (1.1.242)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: one bot woodcutting, another following you through a narrow cave.
   - Claude watches for: no `movement obstruction mine` or `terrain move: BREAK` for the following bot.
   - Pass when: the follower never mines because the other bot is busy.
 
 ## Phase 6an — Dead-code removal 2: RL and training gone, debug gate, command paths (1.1.244)
 
-- [ ] **Saved training bot still spawns (1.1.244)**
+- [x] **Saved training bot still spawns (1.1.244)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: open a save whose Bot Controls list a bot with spawn mode Training (or `/bot spawn <name> training`).
   - Claude watches for: `maps to mode 'admin'`, no `Invalid spawn mode!`.
   - Pass when: the bot spawns and behaves as an admin bot. If the world was still waiting for survival recruitment, note whether it switched to recruited (expected, ruling 2).
-- [ ] **Dev commands only with debug on (1.1.244)**
+- [x] **Dev commands only with debug on (1.1.244)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: type `/bot test` and look at tab completion, then `/bot debug on`, then again, then `/bot debug off`.
   - Pass when: `testgear` and `test_chat_message` appear only while debug is on, and `/bot emote list` and `/bot wizard_tome` work.
-- [ ] **Respawn point stays put near lava or cliffs (1.1.244)**
+- [x] **Respawn point stays put near lava or cliffs (1.1.244)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: let a companion idle next to a cliff edge or lava for a minute, then let it die elsewhere.
   - Pass when: it respawns at its commanded spawn, not at the cliff edge.
 
 ## Phase 6ao — Dead-code removal 4: nav_mode, legacy config and mount data (1.1.246)
 
 - [ ] **Skins and saved mounts survive the update (1.1.246)**
+  - Sandbox 2026-10-18 (1.1.267): NEEDS BRADLEY (Nirn save data), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: open Nirn, spawn the usual companions, check their skins, and rejoin with a saved horse or mount.
   - Claude watches for: no `random preset` skin line for an existing bot, mount restore lines as before, a one-time `old-format mount entry skipped` only if the file had one.
   - Pass when: every companion keeps its skin and the saved mount comes back.
-- [ ] **Fast travel Guide topic reads right (1.1.246)**
+- [x] **Fast travel Guide topic reads right (1.1.246)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: open the Guide, search "fast travel", read "Fast Travel & Navigation Tiers".
   - Pass when: it matches what happens (lodestone compass in the bot's hands is full speed, a Map and Compass is slower, no walk or fast-travel setting).
 
 ## Phase 6ap — Combat callouts, base owner command, leash target (1.1.248)
 
-- [ ] **Multi-mob and friendly-fire lines play (1.1.248)**
+- [x] **Multi-mob and friendly-fire lines play (1.1.248)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: fight 3 or more hostiles next to a companion at night. Separately, stand in front of a companion while it fights (or shoots) so it hits you.
   - Claude watches for: `[combat-callout] <bot> faces <n> hostiles, multi-mob line`, `combat ended after up to <n> hostiles, post-combat multi line`, `hit player <you> for <x> damage, apology line`.
   - Pass when: you hear a "there are lots of them" style line mid-fight and an apology after a hit, each not more than once per cooldown.
 - [ ] **/bot base owner (1.1.248)**
+  - Sandbox 2026-10-18 (1.1.267): PARTIAL: owner command and log line pass, Bases screen not read, non-op half needs a second player, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: in Nirn, `/bot base list`, then `/bot base owner "<an old base>" <you>` and open the Bases screen.
   - Claude watches for: `[base-owner] ... set owner of base`.
   - Pass when: the Bases screen shows you as owner, and a non-op player gets "Only operators or the host can reassign base ownership."
-- [ ] **Tied animals stay tied (1.1.248)**
+- [x] **Tied animals stay tied (1.1.248)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: have a companion lead a horse (dismount with the leash key, no fence near), then use the leash action near a fence so it ties the horse. Leave and rejoin.
   - Claude watches for: `[leash-target] <bot> cleared leash target ... after tying to a fence` and `saved mount ... no longer held by bot (TIED_TO_FENCE)`.
   - Pass when: after the rejoin the horse is still on the fence and the bot does not pull a lead to grab it.
 
 ## Phase 6aq — Wall-off night shelter (1.1.249)
 
-- [ ] **A companion walls itself into an overhang at night and walks out at dawn (1.1.249)**
+- [x] **A companion walls itself into an overhang at night and walks out at dawn (1.1.249)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: away from bases and villages, give a companion 8 dirt or cobblestone and leave it idle near a natural overhang or a 1 to 2 sided nook at dusk, then come back at dawn.
   - Claude watches for: `wall-off: scan`, `walking to`, `arrival arrived`, `sealed at`, `wall-off shelter active`, then at dawn `wall-off teardown: removed N/N` and `broke free from wall-off shelter via <side>`.
   - Pass when: the bot spends the night sealed in, at dawn the placed blocks are gone, the overhang is untouched and there is no hole. No overhang near: it falls back to cliff-dig or dig-down as before.
-- [ ] **No wall-off with only valuables, near a village, or in a protected zone (1.1.249)**
+- [x] **No wall-off with only valuables, near a village, or in a protected zone (1.1.249)**
+  - Sandbox 2026-10-18 (1.1.267): PASS (valuables case; village and zone cases not set up), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: same setup with only diamond blocks in the inventory, or inside a mapped village, or inside a protected zone.
   - Pass when: `candidates=0` or `blocks=0` and it falls through to the old tactics.
 
 ## Phase 6ar — Legacy LLM chat retired, part 1 (1.1.250)
 
-- [ ] **Bot Controls keep their settings (1.1.250)**
+- [x] **Bot Controls keep their settings (1.1.250)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: before updating, note the global toggles in Bot Controls (Recruitment, Text, Voice, Soul Chat, Soul Voice, Banter, Active, Local) and one bot's per-bot toggles and Voiced Dialogue. Update, open `/configMan` (it now opens Bot Controls directly) and compare.
   - Pass when: every toggle shows the same value as before, and the "LLM World (legacy)" and "LLM Chat (this bot)" rows are gone.
-- [ ] **Companions still talk and work (1.1.250)**
+- [x] **Companions still talk and work (1.1.250)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: with Soul Chat on, talk to a companion by name and in a group. Spawn a bot and give it a task.
   - Pass when: souls answer as before, the bot starts moving right after spawn, and nothing says "connects to the language model".
 
 ## Phase 6as — Legacy LLM stack and libraries deleted (1.1.251)
 
-- [ ] **Souls still talk, startup is quieter (1.1.251)**
+- [x] **Souls still talk, startup is quieter (1.1.251)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: start Nirn with Soul Chat on and Ollama running, talk to two companions, let banter run for a few minutes.
   - Claude watches for: `[souls] runtime started; masterEnabled=true`, soul replies as before, no `ClassNotFound` or `NoClassDefFound`, no "Legacy BERT" or "Ollama not detected" lines at startup.
   - Pass when: souls answer and banter as before and the log has none of the old legacy startup lines.
 
 ## Phase 6at — Leash release, leash threading, base commands (1.1.252)
 
-- [ ] **Release a held animal anywhere (1.1.252)**
+- [x] **Release a held animal anywhere (1.1.252)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: dismount a companion with the leash key away from fences so it holds the horse, then use Release Leads in its menu (or `/bot leash release <bot>`). Leave and rejoin.
   - Claude watches for: `[leash-release] <bot> let go of 1 lead(s)`, `saved mount ... no longer held by bot (RELEASED)`.
   - Pass when: the horse is free, the lead is in the bot's inventory, and after the rejoin the bot does not grab it again.
-- [ ] **Leash key still dismounts and ties (1.1.252)**
+- [x] **Leash key still dismounts and ties (1.1.252)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: ride with a companion, press the leash key near a fence, then away from one.
   - Pass when: near a fence the horse is tied, away from one the bot holds it, no "couldn't dismount" line, nothing odd in the log.
-- [ ] **Base commands and rename (1.1.252)**
+- [x] **Base commands and rename (1.1.252)**
+  - Sandbox 2026-10-18 (1.1.267): PASS (command rename), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: rename one of your bases in the Bases screen, then check its owner and radius.
   - Pass when: the owner and radius are unchanged after the rename.
 
 ## Phase 6au — Shelters: seal order, reload, dig-down (1.1.253)
 
-- [ ] **Dirt first without a pickaxe (1.1.253)**
+- [x] **Dirt first without a pickaxe (1.1.253)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: at dusk, leave a companion with dirt and cobblestone but no pickaxe near an overhang.
   - Pass when: it seals with dirt and takes the dirt back at dawn.
-- [ ] **A shelter survives quitting the game (1.1.253)**
+- [x] **A shelter survives quitting the game (1.1.253)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: while a companion is sealed in for the night (any shelter type), save and quit, reopen the world.
   - Claude watches for: `shelter restored on join type=...`, then at dawn the matching break-free line.
   - Pass when: the bot stays sheltered after the reload and walks or digs out normally at dawn, with no roof mined and no blocks left behind.
-- [ ] **Dig-down leaves no open pit (1.1.253)**
+- [x] **Dig-down leaves no open pit (1.1.253)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: at night on open flat ground, a companion with 4 dirt and no overhang or cliff near.
   - Claude watches for: `dig-down: centred=true`, `cap placed`, `dug emergency bunker`, or `dig-down skipped reason=...`, or `climbing out` and `column ... marked`.
   - Pass when: either a capped bunker (and a normal exit in the morning) or no hole at all. Never an open 1x1 pit with the bot at the bottom at night.
 
 ## Phase 6av — Bot Controls per world, remote server (1.1.254)
 
-- [ ] **Bot Controls keep their per-bot settings (1.1.254)**
+- [x] **Bot Controls keep their per-bot settings (1.1.254)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: open Nirn, `/configMan`, check one bot's toggles, change one, close, reopen.
   - Pass when: the change sticks and the other bots are unchanged.
 - [ ] **Remote server edits stick (1.1.254, only if a dedicated or LAN server is handy)**
+  - Sandbox 2026-10-18 (1.1.267): NEEDS BRADLEY (server), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: join a server running 1.1.254 as an op, change a bot's toggle in Bot Controls, rejoin.
   - Pass when: the change is still there after rejoining.
 
 ## Phase 6aw — Death retrieval (1.1.255)
 
-- [ ] **Fetch your own drops (1.1.255)**
+- [x] **Fetch your own drops (1.1.255)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: with keep inventory off, die somewhere on land (not lava), respawn, open a companion's menu and use Retrieve Drops (or `/bot retrieve <bot>`).
   - Claude watches for: `[DeathRecord] RotiWokeman died at`, `[Retrieve] ... verdict=GO`, `sweep done: picked=`, `returning to RotiWokeman`.
   - Pass when: the bot comes back to you with your items within a minute or so and lands on the ground.
-- [ ] **Fetch a companion's drops (1.1.255)**
+- [x] **Fetch a companion's drops (1.1.255)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: after a companion dies, `/bot retrieve <another bot> <dead bot>`.
   - Pass when: the items come back, and a lava death gets the "items burned up" refusal instead.
 
 ## Phase 6ax — Dig-down dawn climb-out, shelter lock (1.1.257)
 
-- [ ] **A dig-down bot is out of its pit at dawn (1.1.257)**
+- [x] **A dig-down bot is out of its pit at dawn (1.1.257)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: let a companion dig down for the night on open ground, check on it at sunrise.
   - Claude watches for: `dig-down dawn exit: climbing out`, `climb-out: out at`.
   - Pass when: within a few seconds of sunrise the bot is on the surface, the hole is filled to ground level, and no block sticks up.
 
 ## Phase 6ay — Retrieval drops only, trips survive a reload (1.1.258)
 
-- [ ] **Quit while a companion is fast travelling (1.1.258)**
+- [x] **Quit while a companion is fast travelling (1.1.258)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: send a companion somewhere with fast travel (or Retrieve Drops), save and quit before it arrives, reopen.
   - Claude watches for: `Auto-spawn skipped for <bot>: in transit`, then its arrival.
   - Pass when: the bot finishes the trip instead of reappearing where it started.
 
 ## Phase 6az — Ranged hits pause tasks, woodcut stand memory (1.1.259)
 
-- [ ] **A skeleton shooting a busy companion makes it stop and deal with it (1.1.259)**
+- [x] **A skeleton shooting a busy companion makes it stop and deal with it (1.1.259)**
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: let a companion woodcut near a skeleton or Bogged at dusk or in a dark forest.
   - Claude watches for: `paused task for ranged hit` or `hostile hit did not pause task: reason=...`.
   - Pass when: the bot stops cutting, fights or flees, and resumes once it is safe.
 
 ## Phase 6ba — Unified pathfinder is the default (1.1.261)
 
-- [ ] **First load migrates once.** Bradley opens Nirn on 1.1.261. Claude greps latest.log for `1.1.261 config migration: pathfinder switched to unified` (exactly once), then reopens and checks it does not repeat. Pass when the line appears once and `config/settings.json5` has `"unifiedDefaultMigrated": true`.
-- [ ] **The command reports and saves.** `/bot config pathfinder` replies `Current pathfinder: unified (default)`. `/bot config pathfinder baritone`, quit and reopen, then `/bot config pathfinder` replies baritone. Switch back with `/bot config pathfinder unified`. Pass when the choice survives the reload.
-- [ ] **Bots walk on unified.** Woodcut or follow for a few minutes. Claude runs `tools/logs/frens_log_report.py latest.log --since <start>`. Pass when section 3 shows `unified: n=...` as the primary finder, no `SERVER PAUSED`, no deaths, and walk reach is about where the sandbox A/B had it (around two thirds).
-- [ ] **Settings toggle.** In Bot Controls the topic reads "Unified Pathfinder". Turning it off gives Baritone (`/bot config pathfinder` says baritone), and turning it on gives unified again. Pass when both directions show in the command reply.
+- [x] **First load migrates once.** Bradley opens Nirn on 1.1.261. Claude greps latest.log for `1.1.261 config migration: pathfinder switched to unified` (exactly once), then reopens and checks it does not repeat. Pass when the line appears once and `config/settings.json5` has `"unifiedDefaultMigrated": true`.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **The command reports and saves.** `/bot config pathfinder` replies `Current pathfinder: unified (default)`. `/bot config pathfinder baritone`, quit and reopen, then `/bot config pathfinder` replies baritone. Switch back with `/bot config pathfinder unified`. Pass when the choice survives the reload.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Bots walk on unified.** Woodcut or follow for a few minutes. Claude runs `tools/logs/frens_log_report.py latest.log --since <start>`. Pass when section 3 shows `unified: n=...` as the primary finder, no `SERVER PAUSED`, no deaths, and walk reach is about where the sandbox A/B had it (around two thirds).
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Settings toggle.** In Bot Controls the topic reads "Unified Pathfinder". Turning it off gives Baritone (`/bot config pathfinder` says baritone), and turning it on gives unified again. Pass when both directions show in the command reply.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
 
 ## Phase 6bc — Sunset return and reach probes use the bot's pathfinder (1.1.263)
 
-- [ ] **Sunset return uses the chosen finder.** With a base set and auto-return at sunset on, let a companion work more than 60 blocks from the base until dusk. Claude greps latest.log for `Sunset segment for <bot> finder=`. Pass when the finder word matches `/bot config pathfinder` (unified by default) and the bot heads home. With `/bot config pathfinder baritone` the line says baritone.
-- [ ] **No server hitch at dusk.** During the same return, Claude checks for no `Can't keep up` lines and no `unified probe failed` WARN. Pass when the return does not stall the game.
+- [x] **Sunset return uses the chosen finder.** With a base set and auto-return at sunset on, let a companion work more than 60 blocks from the base until dusk. Claude greps latest.log for `Sunset segment for <bot> finder=`. Pass when the finder word matches `/bot config pathfinder` (unified by default) and the bot heads home. With `/bot config pathfinder baritone` the line says baritone.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **No server hitch at dusk.** During the same return, Claude checks for no `Can't keep up` lines and no `unified probe failed` WARN. Pass when the return does not stall the game.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
 
 ## Phase 6bd — Stuck escape reads collision shapes (1.1.264)
 
 Claude runs these in the mcp-sandbox with `tools/sandbox/stucktest.py` (Wall Test save), never in Nirn.
 
-- [ ] **Head-level wall nudge.** `stucktest.py wall`: stone at head height beside the bot. Pass when latest.log shows `nudged away from wall west to escape collision clip (head-level)`.
-- [ ] **Plants are not walls.** `stucktest.py clip`: short grass, leaf litter and a snow layer around the bot, stone diagonal at head height. Pass when the log shows `escape side cell ... enterable (partial or plant), moving there instead of up` and no `escape movement toward up`.
-- [ ] **Drop one off a block.** `stucktest.py pen`: bot on a plank in a closed fence ring, `/bot return`. Pass when the log shows `quick-nudge drop-1 toward` and no `ALL 8 directions blocked`.
-- [ ] **Fences block the backup path.** `stucktest.py lane`: closed stone pocket with a fence two cells out. Pass when the log shows `feet blocked by Oak Fence ... (collision shape)` and the bot stays inside the pocket.
-- [ ] **No regressions on paths and farms.** In live play, a companion on a dirt path or in a farm never logs `ALL 8 directions blocked` while it can walk. Claude greps for it during any field session.
+- [x] **Head-level wall nudge.** `stucktest.py wall`: stone at head height beside the bot. Pass when latest.log shows `nudged away from wall west to escape collision clip (head-level)`.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Plants are not walls.** `stucktest.py clip`: short grass, leaf litter and a snow layer around the bot, stone diagonal at head height. Pass when the log shows `escape side cell ... enterable (partial or plant), moving there instead of up` and no `escape movement toward up`.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Drop one off a block.** `stucktest.py pen`: bot on a plank in a closed fence ring, `/bot return`. Pass when the log shows `quick-nudge drop-1 toward` and no `ALL 8 directions blocked`.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Fences block the backup path.** `stucktest.py lane`: closed stone pocket with a fence two cells out. Pass when the log shows `feet blocked by Oak Fence ... (collision shape)` and the bot stays inside the pocket.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **No regressions on paths and farms.** In live play, a companion on a dirt path or in a farm never logs `ALL 8 directions blocked` while it can walk. Claude greps for it during any field session.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
 
 ## Phase 6be — /bot go_to uses the bot's pathfinder (1.1.265)
 
 Claude runs this in the mcp-sandbox with `tools/sandbox/gototest.py` (a copy of New World-commands), never in Nirn.
 
-- [ ] **go_to follows a per-bot override.** `/bot config pathfinder unified`, then `/bot config pathfinder baritone <bot>`, then `/bot go_to <bot> <x y z> false` to a spot about 20 blocks away. Pass when the first `[PathFinder] mode=` line after the command says `baritone`, and after `/bot config pathfinder default <bot>` the same go_to says `unified`.
+- [x] **go_to follows a per-bot override.** `/bot config pathfinder unified`, then `/bot config pathfinder baritone <bot>`, then `/bot go_to <bot> <x y z> false` to a spot about 20 blocks away. Pass when the first `[PathFinder] mode=` line after the command says `baritone`, and after `/bot config pathfinder default <bot>` the same go_to says `unified`.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
 
 ## Phase 6bf — Sandbox bugs A-G fixed (1.1.266)
 
-- [ ] **No shears on leaves (A).** A bot with shears in its inventory fells a leafy tree and pillars up under leaves. Claude greps `Mining .* with minecraft:shears` (none on leaves) and checks `bot_state` for no `oak_leaves`. Pass when leaves are mined by hand or hoe and drop saplings or sticks.
-- [ ] **Empty cleanup in forest (B).** `woodcut_cleanup` in untouched forest. Claude greps `woodcut_cleanup completed` for `coverage=` and the time from `woodcut_cleanup starting`. Pass when it ends well under 2 minutes, or ends with "I checked what I could reach in time and found nothing to clean up." rather than "Nothing left to clean up here." when coverage is below 1.
-- [ ] **One line for a failed craft (C).** A bot with no wood: `/bot craft wooden_axe` gives one line naming planks, sticks and the table. `/bot craft axe` gives one line, "I need 4 planks per craft.". Then give 7 planks: `/bot craft crafting_table` works right away (C2). `/bot craft wooden_axe <botName>` crafts with that bot (C4). Pass when each answer is one line and C2 and C4 hold.
-- [ ] **Relocation reaches distant trees (D).** A fresh copied world with all trees inside the Spawn base protected. Claude greps `Woodcut relocation` for `continuing toward` and for no `direct: deadline` on the first hop under 130 blocks. Pass when the bot reaches a tree 60-120 blocks away and cuts logs.
-- [ ] **Spawn-tree toggle cuts without a refusal (E).** "Cut trees in the Spawn base: On", woodcut a Spawn tree. Pass when there is no `miner refused … protected claim` and the logs count as cut.
-- [ ] **No second claim on a half-cut tree (G).** Three bots woodcut near two trees. Pass when no two bots log `selected tree target` with the same x and z within 2 blocks while both claims are live, and the waiting bot's line names the owner.
-- [ ] **Unified self-conflict is cut (F).** Watch any long unified walk with breaks. Claude greps `unified plan truncated at move` and `cost verification move .* now forbidden`. Pass when a forbidden line, if any, is not followed by the same plan again, and the truncation line shows which earlier move breaks the cell.
+- [x] **No shears on leaves (A).** A bot with shears in its inventory fells a leafy tree and pillars up under leaves. Claude greps `Mining .* with minecraft:shears` (none on leaves) and checks `bot_state` for no `oak_leaves`. Pass when leaves are mined by hand or hoe and drop saplings or sticks.
+  - Sandbox 2026-10-18 (1.1.267): PASS (1.1.266 recheck `366552e0`), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Empty cleanup in forest (B).** `woodcut_cleanup` in untouched forest. Claude greps `woodcut_cleanup completed` for `coverage=` and the time from `woodcut_cleanup starting`. Pass when it ends well under 2 minutes, or ends with "I checked what I could reach in time and found nothing to clean up." rather than "Nothing left to clean up here." when coverage is below 1.
+  - Sandbox 2026-10-18 (1.1.267): SUPERSEDED by 6bg B2, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **One line for a failed craft (C).** A bot with no wood: `/bot craft wooden_axe` gives one line naming planks, sticks and the table. `/bot craft axe` gives one line, "I need 4 planks per craft.". Then give 7 planks: `/bot craft crafting_table` works right away (C2). `/bot craft wooden_axe <botName>` crafts with that bot (C4). Pass when each answer is one line and C2 and C4 hold.
+  - Sandbox 2026-10-18 (1.1.267): PASS (1.1.266 recheck `366552e0`), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Relocation reaches distant trees (D).** A fresh copied world with all trees inside the Spawn base protected. Claude greps `Woodcut relocation` for `continuing toward` and for no `direct: deadline` on the first hop under 130 blocks. Pass when the bot reaches a tree 60-120 blocks away and cuts logs.
+  - Sandbox 2026-10-18 (1.1.267): PASS (1.1.266 recheck `366552e0`), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Spawn-tree toggle cuts without a refusal (E).** "Cut trees in the Spawn base: On", woodcut a Spawn tree. Pass when there is no `miner refused … protected claim` and the logs count as cut.
+  - Sandbox 2026-10-18 (1.1.267): PASS (1.1.266 recheck `366552e0`), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **No second claim on a half-cut tree (G).** Three bots woodcut near two trees. Pass when no two bots log `selected tree target` with the same x and z within 2 blocks while both claims are live, and the waiting bot's line names the owner.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Unified self-conflict is cut (F).** Watch any long unified walk with breaks. Claude greps `unified plan truncated at move` and `cost verification move .* now forbidden`. Pass when a forbidden line, if any, is not followed by the same plan again, and the truncation line shows which earlier move breaks the cell.
+  - Sandbox 2026-10-18 (1.1.267): SUPERSEDED by 6bg F, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
 
 ## Phase 6bg — Unified search routes around its own breaks, faster empty cleanup (1.1.267)
 
-- [ ] **Empty cleanup ends fast (B2).** `woodcut_cleanup` in untouched forest. Claude greps `woodcut_cleanup starting` and the `Skill 'woodcut_cleanup' exit` line. Pass when it ends in well under a minute, with "Nothing left to clean up here." at `coverage=1.00`, or with `empty scan phase capped after` and "I checked what I could reach in time and found nothing to clean up." (sandbox: 16 s at 400,96,-298).
-- [ ] **Cleanup with real work still finds it (B2).** Stop a bot mid-woodcut to leave floating logs or a scaffold pillar, then `woodcut_cleanup`. Pass when the floaters and scaffold are removed and no `empty scan phase capped` line appears.
-- [ ] **No self-undoing route (F).** Watch long unified walks that break blocks (forest, hills). Claude greps `unified plan truncated at move`, `now forbidden` and `SELF_CONFLICT`. Pass when the bot never mines the block it then needs to step up onto, and a truncation line, if any, is rare (it now means search staleness, not bug F).
-- [ ] **Probes still answer (F).** Sunset return and `canReach` callers over mining terrain. Pass when there is no new `reason=BUDGET` on sunset probes compared with 1.1.266.
-- [ ] **Table craft without planks (M1, M2).** A bot with no wood near a chest with no wood: `/bot craft wooden_axe` twice within 15 s. Claude greps `pulled|withdraw|table` lines. Pass when the second call does no chest pull. A bot holding a crafting table where it can't place one (e.g. standing in water): `/bot craft wooden_axe` gives one line, ending "I have a crafting table but can't place it here.".
-- [ ] **Mounted leaf clearing (M3).** Ride a horse under leaves with a bot holding a sword or shears and an empty hotbar slot. Pass when it clears leaves bare-handed (saplings or sticks drop, no leaf blocks, no sword wear) and does nothing while its hotbar is locked.
-- [ ] **Bot named after a material (M4).** A bot named Iron: `/bot craft stone_axe Iron` runs on Iron, `/bot craft axe Iron` still makes an iron axe with the active bot (sandbox: passed).
+- [x] **Empty cleanup ends fast (B2).** `woodcut_cleanup` in untouched forest. Claude greps `woodcut_cleanup starting` and the `Skill 'woodcut_cleanup' exit` line. Pass when it ends in well under a minute, with "Nothing left to clean up here." at `coverage=1.00`, or with `empty scan phase capped after` and "I checked what I could reach in time and found nothing to clean up." (sandbox: 16 s at 400,96,-298).
+  - Sandbox 2026-10-18 (1.1.267): PASS (1.1.267 sandbox, 16 s), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Cleanup with real work still finds it (B2).** Stop a bot mid-woodcut to leave floating logs or a scaffold pillar, then `woodcut_cleanup`. Pass when the floaters and scaffold are removed and no `empty scan phase capped` line appears.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **No self-undoing route (F).** Watch long unified walks that break blocks (forest, hills). Claude greps `unified plan truncated at move`, `now forbidden` and `SELF_CONFLICT`. Pass when the bot never mines the block it then needs to step up onto, and a truncation line, if any, is rare (it now means search staleness, not bug F).
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Probes still answer (F).** Sunset return and `canReach` callers over mining terrain. Pass when there is no new `reason=BUDGET` on sunset probes compared with 1.1.266.
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Table craft without planks (M1, M2).** A bot with no wood near a chest with no wood: `/bot craft wooden_axe` twice within 15 s. Claude greps `pulled|withdraw|table` lines. Pass when the second call does no chest pull. A bot holding a crafting table where it can't place one (e.g. standing in water): `/bot craft wooden_axe` gives one line, ending "I have a crafting table but can't place it here.".
+  - Sandbox 2026-10-18 (1.1.267): PASS, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Mounted leaf clearing (M3).** Ride a horse under leaves with a bot holding a sword or shears and an empty hotbar slot. Pass when it clears leaves bare-handed (saplings or sticks drop, no leaf blocks, no sword wear) and does nothing while its hotbar is locked.
+  - Sandbox 2026-10-18 (1.1.267): PASS (clearing; locked hotbar not set up), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
+- [x] **Bot named after a material (M4).** A bot named Iron: `/bot craft stone_axe Iron` runs on Iron, `/bot craft axe Iron` still makes an iron axe with the active bot (sandbox: passed).
+  - Sandbox 2026-10-18 (1.1.267): PASS (1.1.267 sandbox), see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 

@@ -44,6 +44,8 @@ Our fork: `~/dev/minecraft-mod-mcp-hardened` (from langyo/minecraft-mod-mcp v0.4
 
 - **DONE in the fork (2026-10-14/15): `bot_state`, `blocks`, server time in `players`** (`5750ab3`, `dbbb980`, `55e4eb8`). Read-only singleplayer inspection: a bot's food/inventory/onGround and the block grid around it, which explained a boxed-in bot (2-deep pond, 2-high sand) in one call. Upstream candidate as a generic `world_inspect` group.
 
+- **DONE in the fork (2026-10-18, `71efa71`): in-world key bindings, `look`, `scroll`, screen typing fallback.** `keybinds [filter]` lists every `KeyBinding` (id, category, bound key, pressed). `keybind id=<translation id or unique substring> action=tap|hold|release ms=` presses a binding through an accessor mixin on its own `pressed` flag and press count. Not `KeyBinding.onKeyPressed` (it presses every binding on that key, and all unbound bindings share "unknown") and not `setPressed` (toggle-mode sneak/sprint flip). A hold is re-asserted each client tick because vanilla releases all keys when it re-grabs the mouse. Refuses with a screen open unless `force=true`. `look yaw pitch` sets the player's rotation. `scroll x y amount` calls `Screen.mouseScrolled` at screenshot pixels. `type_text` falls back to the screen's own `charTyped` when no TextFieldWidget exists (`"via":"screen"`), for custom-drawn search boxes. Caveats: holding attack does not mine in control mode (the mouse is not captured), holds end if a screen opens. Unblocked the Frens leash, Guide and roster key binds. Upstream candidate (generic input group).
+
 ## Upstream PR plan (langyo/minecraft-mod-mcp, prepared 2026-10-14, nothing sent)
 
 Order: security first, then fixes that make production builds work, then new commands. Each PR is one fork commit (branch `hardened` in `~/dev/minecraft-mod-mcp-hardened`), rebased onto upstream main and split per loader where needed (our commits touch only the 1.21.11 Fabric module plus `packages/common`). Bradley approves each PR's text before anything is opened (outbound action).
@@ -54,6 +56,6 @@ Order: security first, then fixes that make production builds work, then new com
 4. **`save_and_quit` hang** (pause-menu disconnect path) and **`pause_menu` blocked in control mode** (`a42e7ed`).
 5. **`health` / stuck detection** (`502af9a`).
 6. **`screen_buttons` / `click_button` with list rows** (`7a7aa46` + rows commit), replacing `get_screen_buttons` (always `[]` in production).
-7. **`type_text` / `press_key`** (`03a4a20`), **`players`**, **`bot_view`** (+ HUD hiding), **`set_time`**, **`click_px`**, **pack metadata** (`1c28266`).
+7. **`type_text` / `press_key`** (`03a4a20`), **`keybinds` / `keybind` / `look` / `scroll`** (`71efa71`), **`players`**, **`bot_view`** (+ HUD hiding), **`set_time`**, **`click_px`**, **pack metadata** (`1c28266`).
 
 Open questions for upstream: whether they want game-specific helpers (`set_time`, `bot_view`, `players`) or only generic UI control; their loader matrix (NeoForge/Forge equivalents of our Fabric-only changes).

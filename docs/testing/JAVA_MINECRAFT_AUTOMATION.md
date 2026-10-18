@@ -54,8 +54,12 @@ Fork: `~/dev/minecraft-mod-mcp-hardened`, branch `hardened`. Build `cd packages/
 | `pause_menu` | yes | Opens the game menu (reports if it did not open). |
 | `save_and_quit` | yes | Pause-menu disconnect path, replies first. |
 | `set_time` time | yes | Singleplayer overworld time. |
+| `keybinds` filter | no | Every key binding: id, category, bound key, pressed. Frens: `key.frens.leash` (`'`), `key.frens.open_guide` (`]`), `key.frens.go_to_look` (`-`), ... |
+| `keybind` id, action tap/hold/release, ms, force | yes | Presses an in-world key binding (mod or vanilla movement). Refused with a screen open unless `force=true`. Holding attack does not mine in control mode. |
+| `look` yaw, pitch | yes | Sets the player's rotation (aim a movement hold). |
+| `scroll` x, y, amount | yes | Mouse wheel on the open screen at screenshot pixels (negative = down). |
 
-Scratch helpers (session scratchpad, not in the repo): `mc.sh shot|click|cmd|buttons|press|type|key|health`, `logscan.sh [HH:MM:SS]` (WARN/ERROR grouped, numbers masked, most frequent first).
+Repo helpers: `tools/sandbox/ft.py shot <name> [bot]` saves a 1200-px-wide screenshot (or bot view) to `$FT_DIR` and `ft.py clickr x y` / `ft.py scroll x y n` act in that image's pixels, for custom-drawn Frens screens that `screen_buttons` cannot see (Bot Controls, the bot inventory overlay). `tools/sandbox/forest.py X Y Z MIN BOT[:kit]...` runs a multi-bot woodcut with the world kept unpaused. `tools/sandbox/sb.sh`: `sb_lock`/`sb_unlock` (`.superpowers/SANDBOX.lock` in the base checkout), `sb_up <save>`, `sb_down` (self-kill-safe patterns). Scratch helpers (session scratchpad, not in the repo): `mc.sh shot|click|cmd|buttons|press|type|key|health`, `logscan.sh [HH:MM:SS]` (WARN/ERROR grouped, numbers masked, most frequent first).
 
 ## Gotchas
 
@@ -66,6 +70,8 @@ Scratch helpers (session scratchpad, not in the repo): `mc.sh shot|click|cmd|but
 - 1.21.x renamed "Allow Cheats" to **Allow Commands** (Create World → Game tab). It's OFF by default in Survival.
 
 ## Log
+
+- **2026-10-18: field sweep 6aj-6bg (1.1.267).** The MCP gained in-world key bindings, `look`, `scroll` and screen typing (fork `71efa71`). Learned: `screen_buttons` sees nothing in Frens' own custom-drawn screens (Bot Controls rows, the bot inventory overlay), so drive them by screenshot pixels. A bot keeps its health across `/bot despawn` and `/bot spawn`, so heal it before a combat check or it flees. `/summon ... {leash:{UUID:[I;...]}}` to a fake-player bot does not attach in 1.21.11. The 1.1.261 pathfinder migration keeps an explicit `"pathfinder"` string by design: to replay it, remove the key and set `baritonePathfinderEnabled: true`.
 
 - **2026-10-15: scripted smoke and the wall-off dusk test (audit phase 2, 1.1.243-1.1.251).** Scripts now in the repo: `tools/sandbox/smoke.sh <jar> [save] [extra /commands...]` (pgrep guard, deploy to mcp-sandbox, launch, `/bot spawn Smokey admin`, run commands, grep ERROR/Exception, save and quit) and `tools/sandbox/walltest.py setup|dusk|dawn|quit` (builds a 3-wall overhang next to a bot, sets time, prints the `wall-off` log lines and a `blocks` grid). Learned: `prismlauncher --launch mcp-sandbox --world "<save name>"` loads a world directly, no title-screen clicks. `/bot spawn <name>` needs a mode (`admin`). An open screen pauses the integrated server, so nothing ticks (the Companions restore screen opens on a save with no roster): `press_key escape` first. The "Wall Test" save is a commands-on copy of "New World", made by copying the folder and flipping the `allowCommands` byte in its gzipped `level.dat` with the game closed. A `/bot stop` leaves an abort latch that background movement reads later, so a smoke that stops a bot then expects it to move on its own will fail until the latch is cleared.
 

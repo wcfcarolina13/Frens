@@ -54,6 +54,8 @@ def prepare():
     chat(f"/tp {BOT} 60 80 60", 3)
     chat("/tp @s 63 80 60", 3)
     chat(f"/bot stop {BOT}")
+    # a bot keeps its health across despawn/spawn: a low-health bot flees instead of fighting
+    chat(f"/effect give {BOT} instant_health 1 10")
 
 
 stage = sys.argv[1] if len(sys.argv) > 1 else "leash"
