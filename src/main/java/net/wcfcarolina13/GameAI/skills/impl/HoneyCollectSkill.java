@@ -5,20 +5,29 @@ import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.state.property.Properties;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.DropSweeper;
+import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.BotBeehiveRegistryService;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
+import net.wcfcarolina13.GameAI.services.DropStandHelper;
 import net.wcfcarolina13.GameAI.services.MovementService;
+import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -29,10 +38,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Idle hobby: collect honey bottles or honeycombs from nearby smoked beehives.
@@ -44,7 +52,12 @@ public final class HoneyCollectSkill implements Skill {
 
     private static final int DEFAULT_COUNT = 2;
     private static final int DEFAULT_RADIUS = 16;
-    private static final double REACH_SQ = 4.5 * 4.5;
+    private static final long INTERACT_TIMEOUT_MS = 1000L;
+    /** Horizontal search ring around the hive for a stand cell, and the feet heights above/below it. */
+    private static final int STAND_RING = 3;
+    private static final int STAND_DY_MAX = 1;
+    private static final int STAND_DY_MAX_BELOW = 4;
+    private static final int MAX_STAND_TRIES = 3;
     private static final double DROP_SWEEP_RADIUS = 6.0;
     private static final long DROP_SWEEP_DURATION_MS = 3000L;
 
@@ -78,35 +91,44 @@ public final class HoneyCollectSkill implements Skill {
         // Discover and find harvestable hives
         BotBeehiveRegistryService.discoverBeehivesNear(world, bot.getBlockPos(), radius, 6);
         List<BlockPos> candidates = findHarvestableHives(world, bot, radius);
+        LOGGER.info("honey_collect: {} candidate hive(s) within r={} of {}: {}", candidates.size(), radius,
+                bot.getBlockPos().toShortString(), formatPositions(candidates, 8));
         if (candidates.isEmpty()) {
-            return SkillExecutionResult.failure("No harvestable beehives nearby.");
+            return SkillExecutionResult.failure(HoneyHarvestOutcome.NO_HIVES);
         }
 
         int harvested = 0;
-        Set<BlockPos> unreachable = new HashSet<>();
+        Map<HoneyHarvestOutcome, Integer> outcomes = new EnumMap<>(HoneyHarvestOutcome.class);
 
         for (BlockPos hivePos : candidates) {
             if (harvested >= count) break;
             if (SkillManager.shouldAbortSkill(bot)) {
                 return SkillExecutionResult.failure("Honey collection interrupted.");
             }
-            if (unreachable.contains(hivePos)) continue;
 
             // Re-validate before walking (state may have changed)
-            if (!isHarvestable(world, hivePos)) continue;
+            if (!isHarvestable(world, hivePos)) {
+                skip(outcomes, hivePos, HoneyHarvestOutcome.NOT_HARVESTABLE, "before walking");
+                continue;
+            }
 
-            // Walk to the hive
-            if (!moveIntoReach(source, bot, hivePos)) {
-                unreachable.add(hivePos);
+            // Walk to a stand cell within reach of the hive
+            String reachDetail = moveIntoReach(source, bot, world, hivePos);
+            if (reachDetail != null) {
+                skip(outcomes, hivePos, HoneyHarvestOutcome.UNREACHABLE, reachDetail);
                 continue;
             }
 
             // Re-validate after walking (bees may have left, honey may have been taken)
-            if (!isHarvestable(world, hivePos)) continue;
+            if (!isHarvestable(world, hivePos)) {
+                skip(outcomes, hivePos, HoneyHarvestOutcome.NOT_HARVESTABLE, "after walking");
+                continue;
+            }
 
             // Determine which tool to use for this hive.
-            // Bottles do a 1:1 swap (glass bottle -> honey bottle) so no free slot needed.
-            // Shears drop 3 honeycombs on the ground — need inventory space.
+            // Bottles: vanilla takes one glass bottle and inserts the honey bottle, dropping it on the
+            // ground if the inventory is full (the drop sweep below picks it up), so no free slot is required.
+            // Shears drop 3 honeycombs on the ground and need inventory space.
             boolean useBottle = hasBottles;
             if (!useBottle && hasShears) {
                 // Shears path: ensure at least 1 free slot for honeycomb pickup.
@@ -118,7 +140,7 @@ public final class HoneyCollectSkill implements Skill {
                     depositHoneyItems(source, bot, world);
                 }
                 if (!hasEmptySlot(bot)) {
-                    LOGGER.debug("Skipping honey harvest at {}: inventory full", hivePos.toShortString());
+                    skip(outcomes, hivePos, HoneyHarvestOutcome.INVENTORY_FULL, "no free slot for honeycombs");
                     continue;
                 }
             }
@@ -129,16 +151,18 @@ public final class HoneyCollectSkill implements Skill {
                 extractItemFromContainer(bot, tool);
             }
             if (!equipItem(bot, tool)) {
+                skip(outcomes, hivePos, HoneyHarvestOutcome.EQUIP_FAILED, "tool=" + tool);
                 continue;
             }
 
-            boolean used = useOnHive(bot, hivePos);
+            InteractResult interact = useOnHive(world, bot, hivePos);
 
-            if (used) {
+            if (interact.accepted()) {
                 harvested++;
+                outcomes.merge(HoneyHarvestOutcome.HARVESTED, 1, Integer::sum);
                 LOGGER.info("Harvested honey from beehive at {}", hivePos.toShortString());
 
-                // Sweep dropped honeycombs (shears drop items; bottles go into hand)
+                // Sweep dropped honeycombs (shears drop items, a bottle overflow drops too)
                 try {
                     DropSweeper.sweep(source, DROP_SWEEP_RADIUS, 4.0D, 8, DROP_SWEEP_DURATION_MS);
                 } catch (Exception e) {
@@ -147,6 +171,9 @@ public final class HoneyCollectSkill implements Skill {
 
                 // Brief pause between hives
                 sleepQuietly(300L);
+            } else {
+                skip(outcomes, hivePos, HoneyHarvestOutcome.INTERACT_REJECTED,
+                        "result=" + interact.result() + " held=" + interact.heldItem());
             }
 
             // Refresh tool availability for next iteration (check containers too)
@@ -156,7 +183,7 @@ public final class HoneyCollectSkill implements Skill {
         }
 
         if (harvested <= 0) {
-            return SkillExecutionResult.failure("Couldn't harvest any beehives.");
+            return SkillExecutionResult.failure(HoneyHarvestOutcome.failureMessage(outcomes));
         }
 
         // Pack overflow into bundles/shulker boxes, then deposit remainder in nearby chests
@@ -223,29 +250,139 @@ public final class HoneyCollectSkill implements Skill {
 
     // ── Interaction ─────────────────────────────────────────────────
 
-    private static boolean useOnHive(ServerPlayerEntity bot, BlockPos hivePos) {
-        LookController.faceBlock(bot, hivePos);
-        ItemStack handStack = bot.getMainHandStack();
-        var result = handStack.useOnBlock(new net.minecraft.item.ItemUsageContext(
-                bot, Hand.MAIN_HAND,
-                new net.minecraft.util.hit.BlockHitResult(
-                        Vec3d.ofCenter(hivePos), Direction.NORTH, hivePos, false)));
-        if (result.isAccepted()) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            return true;
+    /** How one use on a hive ended: the vanilla result (null when the hop never ran) and what was held. */
+    private record InteractResult(ActionResult result, String heldItem) {
+        boolean accepted() {
+            return result != null && result.isAccepted();
         }
-        return false;
+    }
+
+    /**
+     * Harvest through the block interaction, as a player's right click does: BeehiveBlock handles
+     * bottles and shears in onUseWithItem, which only ServerPlayerInteractionManager.interactBlock
+     * reaches (ItemStack.useOnBlock returns PASS for both items on a hive). One bounded server hop.
+     * A sneaking player skips the block's use, so the bot stands up first.
+     */
+    private static InteractResult useOnHive(ServerWorld world, ServerPlayerEntity bot, BlockPos hivePos) {
+        InteractResult fallback = new InteractResult(null, describeHeld(bot));
+        return SupplyServerHop.call(world.getServer(), () -> {
+            if (bot.isSneaking()) {
+                bot.setSneaking(false);
+            }
+            LookController.faceBlock(bot, hivePos);
+            ItemStack held = bot.getMainHandStack();
+            String heldName = describeStack(held);
+            BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(hivePos), Direction.NORTH, hivePos, false);
+            ActionResult result = bot.interactionManager.interactBlock(bot, world, held, Hand.MAIN_HAND, hit);
+            if (result != null && result.isAccepted()) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+            }
+            return new InteractResult(result, heldName);
+        }, INTERACT_TIMEOUT_MS, fallback);
+    }
+
+    private static String describeHeld(ServerPlayerEntity bot) {
+        try {
+            return describeStack(bot.getMainHandStack());
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    private static String describeStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "empty";
+        return stack.getCount() + "x " + Registries.ITEM.getId(stack.getItem());
     }
 
     // ── Movement ────────────────────────────────────────────────────
 
-    private static boolean moveIntoReach(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
-        if (bot.getBlockPos().getSquaredDistance(target) <= REACH_SQ) return true;
-        MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                MovementService.Mode.DIRECT, target, target, null, null, null);
-        MovementService.MovementResult result = MovementService.execute(
-                source, bot, plan, SkillPreferences.teleportDuringSkills(bot), true);
-        return result != null && (result.success() || bot.getBlockPos().getSquaredDistance(target) <= REACH_SQ);
+    /**
+     * Walk to a standable cell from which the hive is within reach and in sight. Returns null when the
+     * bot can use the hive now, otherwise a short reason for the skip log. The hive itself is never the
+     * walk goal (the pathfinder would aim at the cell on top of it).
+     */
+    private static String moveIntoReach(ServerCommandSource source, ServerPlayerEntity bot,
+                                        ServerWorld world, BlockPos hivePos) {
+        if (canUseHive(world, bot, hivePos)) return null;
+        List<BlockPos> stands = callOnServer(world, () -> findStandCellsNearHive(world, bot, hivePos), List.of());
+        if (stands.isEmpty()) {
+            return "no stand cell within reach";
+        }
+        int tries = Math.min(MAX_STAND_TRIES, stands.size());
+        StringBuilder detail = new StringBuilder();
+        for (int i = 0; i < tries; i++) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return "aborted";
+            }
+            BlockPos stand = stands.get(i);
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT, stand, stand, null, null, null);
+            MovementService.MovementResult result = MovementService.execute(
+                    source, bot, plan, SkillPreferences.teleportDuringSkills(bot), true);
+            if (canUseHive(world, bot, hivePos)) {
+                return null;
+            }
+            if (detail.length() > 0) detail.append(", ");
+            detail.append(stand.toShortString()).append(' ')
+                    .append(result == null ? "no-result" : (result.success() ? "arrived-out-of-reach" : "walk-failed"));
+        }
+        return "stands tried (" + tries + " of " + stands.size() + "): " + detail
+                + " botPos=" + bot.getBlockPos().toShortString();
+    }
+
+    /** Reach from the eye plus line of sight, read on the server thread. */
+    private static boolean canUseHive(ServerWorld world, ServerPlayerEntity bot, BlockPos hivePos) {
+        return callOnServer(world, () -> BlockInteractionService.canInteract(bot, hivePos), false);
+    }
+
+    /**
+     * Two-high stand cells around the hive whose eye point reaches the hive centre, nearest to the bot
+     * first. Cells straight over a campfire are left out. A cell whose eye ray to the hive hits another
+     * block first is left out too. Server thread only (block states).
+     */
+    private static List<BlockPos> findStandCellsNearHive(ServerWorld world, ServerPlayerEntity bot, BlockPos hivePos) {
+        List<BlockPos> out = new ArrayList<>();
+        BlockPos botPos = bot.getBlockPos();
+        for (int dy = STAND_DY_MAX; dy >= -STAND_DY_MAX_BELOW; dy--) {
+            for (int dx = -STAND_RING; dx <= STAND_RING; dx++) {
+                for (int dz = -STAND_RING; dz <= STAND_RING; dz++) {
+                    // Offsets are stand minus hive; withinReach takes hive minus feet.
+                    if (!HoneyHarvestOutcome.withinReach(-dx, -dy, -dz)) continue;
+                    BlockPos feet = hivePos.add(dx, dy, dz);
+                    if (!world.isChunkLoaded(feet)) continue;
+                    if (!DropStandHelper.isTwoHighStand(world, feet)) continue;
+                    if (world.getBlockState(feet.down()).isIn(BlockTags.CAMPFIRES)) continue;
+                    if (!hasSightOfHive(world, bot, feet, hivePos)) continue;
+                    out.add(feet.toImmutable());
+                }
+            }
+        }
+        out.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(botPos)));
+        return out;
+    }
+
+    private static boolean hasSightOfHive(ServerWorld world, ServerPlayerEntity bot, BlockPos feet, BlockPos hivePos) {
+        Vec3d eye = new Vec3d(feet.getX() + 0.5D, feet.getY() + HoneyHarvestOutcome.EYE_HEIGHT, feet.getZ() + 0.5D);
+        BlockHitResult hit = world.raycast(new RaycastContext(eye, Vec3d.ofCenter(hivePos),
+                RaycastContext.ShapeType.OUTLINE, RaycastContext.FluidHandling.NONE, bot));
+        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(hivePos);
+    }
+
+    private static void skip(Map<HoneyHarvestOutcome, Integer> outcomes, BlockPos hivePos,
+                             HoneyHarvestOutcome outcome, String detail) {
+        outcomes.merge(outcome, 1, Integer::sum);
+        LOGGER.info("honey_collect skip {}: {} {}", hivePos.toShortString(), outcome, detail);
+    }
+
+    private static String formatPositions(List<BlockPos> positions, int max) {
+        StringBuilder sb = new StringBuilder("[");
+        int n = Math.min(max, positions.size());
+        for (int i = 0; i < n; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(positions.get(i).toShortString());
+        }
+        if (positions.size() > n) sb.append(", +").append(positions.size() - n).append(" more");
+        return sb.append(']').toString();
     }
 
     // ── Inventory helpers ───────────────────────────────────────────
