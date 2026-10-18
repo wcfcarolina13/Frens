@@ -396,6 +396,24 @@ class SupplyRequestLedgerTest {
     }
 
     @Test
+    void foodReserveOfEightHoldsUnderAlways() {
+        ItemKey bread = ItemKey.plain("minecraft:bread");
+        UUID id = openOk(fp(OWNER, BOT, CHEST, bread, 8));
+        ledger.respond(id, OWNER, false, Choice.ALWAYS_COMMON);
+
+        int stock = 30;
+        for (int i = 0; i < 10; i++) {
+            Consume c = ledger.consumeGrant(fp(OWNER, BOT, CHEST, bread, 10), Stock.of(stock), 10);
+            stock -= c.quantity();
+            assertTrue(stock >= SupplyRequestPolicy.DEFAULT_FOOD_RESERVE, "stock=" + stock);
+        }
+        assertEquals(8, stock);
+        Consume dry = ledger.consumeGrant(fp(OWNER, BOT, CHEST, bread, 10), Stock.of(stock), 10);
+        assertEquals(ConsumeStatus.INELIGIBLE, dry.status());
+        assertEquals(Verdict.RESERVE_EXHAUSTED, dry.verdict());
+    }
+
+    @Test
     void onceGrantRechecksTheReserveAndSurvivesARefusal() {
         UUID id = openOk(cobble(8));
         ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);

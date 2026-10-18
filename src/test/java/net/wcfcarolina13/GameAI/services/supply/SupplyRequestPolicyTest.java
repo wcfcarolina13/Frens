@@ -127,6 +127,70 @@ class SupplyRequestPolicyTest {
     }
 
     @Test
+    void foodKeepsEightNotSixteen() {
+        ItemKey bread = ItemKey.plain("minecraft:bread");
+        assertEquals(2, SupplyRequestPolicy.grantable(bread, Stock.of(10), 10, 10, CFG));
+        assertEquals(1, SupplyRequestPolicy.grantable(bread, Stock.of(9), 10, 10, CFG));
+        assertEquals(0, SupplyRequestPolicy.grantable(bread, Stock.of(8), 10, 10, CFG));
+        assertEquals(Verdict.RESERVE_EXHAUSTED,
+                SupplyRequestPolicy.assess(OWNER, bread, Stock.of(8), 10, 10, CFG).verdict());
+        Assessment ok = SupplyRequestPolicy.assess(OWNER, bread, Stock.of(16), 3, 3, CFG);
+        assertEquals(Verdict.ELIGIBLE, ok.verdict());
+        assertEquals(3, ok.quantity());
+        assertEquals(8, SupplyRequestPolicy.reserveFor(bread, CFG));
+    }
+
+    @Test
+    void carrotAndPotatoCountAsFood() {
+        for (String id : new String[]{"minecraft:carrot", "minecraft:potato"}) {
+            ItemKey item = ItemKey.plain(id);
+            assertEquals(8, SupplyRequestPolicy.reserveFor(item, CFG), id);
+            assertEquals(2, SupplyRequestPolicy.grantable(item, Stock.of(10), 10, 10, CFG), id);
+        }
+        // Plain seeds are not food and keep the material reserve.
+        assertEquals(16, SupplyRequestPolicy.reserveFor(ItemKey.plain("minecraft:wheat_seeds"), CFG));
+    }
+
+    @Test
+    void nonFoodMaterialsStillKeepSixteen() {
+        ItemKey cobble = ItemKey.plain("minecraft:cobblestone");
+        assertEquals(Verdict.RESERVE_EXHAUSTED,
+                SupplyRequestPolicy.assess(OWNER, cobble, Stock.of(16), 8, 8, CFG).verdict());
+        assertEquals(4, SupplyRequestPolicy.grantable(cobble, Stock.of(20), 8, 8, CFG));
+        assertEquals(16, SupplyRequestPolicy.reserveFor(cobble, CFG));
+        assertEquals(8, SupplyRequestPolicy.reserveFor(ItemKey.plain("minecraft:bread"), CFG));
+    }
+
+    @Test
+    void foodReserveIsNeverBreached() {
+        for (String id : SupplyRequestPolicy.DEFAULT_FOOD_IDS) {
+            ItemKey food = ItemKey.plain(id);
+            for (int stock = 0; stock <= 80; stock++) {
+                for (int requested = 0; requested <= 70; requested += 7) {
+                    int take = SupplyRequestPolicy.grantable(food, Stock.of(stock), requested, 64, CFG);
+                    assertTrue(take >= 0 && take <= requested, id + " stock=" + stock + " requested=" + requested);
+                    if (take > 0) {
+                        assertTrue(stock - take >= SupplyRequestPolicy.DEFAULT_FOOD_RESERVE,
+                                id + " stock=" + stock + " requested=" + requested);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void everyFoodIdIsAllowlisted() {
+        assertTrue(SupplyRequestPolicy.DEFAULT_MATERIAL_IDS.containsAll(SupplyRequestPolicy.DEFAULT_FOOD_IDS));
+    }
+
+    @Test
+    void equipmentSpareUnaffectedByTheFoodReserve() {
+        ItemKey stoneAxe = ItemKey.plain("minecraft:stone_axe");
+        assertEquals(1, SupplyRequestPolicy.reserveFor(stoneAxe, CFG));
+        assertEquals(2, SupplyRequestPolicy.grantable(stoneAxe, Stock.of(3), 5, 5, CFG));
+    }
+
+    @Test
     void equipmentLeavesOneOfItsTypeAndNeverExceedsTheExactItem() {
         ItemKey stoneAxe = ItemKey.plain("minecraft:stone_axe");
         // The only axe in the chest stays.
@@ -233,6 +297,9 @@ class SupplyRequestPolicyTest {
     @Test
     void defaultsMatchTheRulings() {
         assertEquals(16, CFG.materialReserve());
+        assertEquals(8, CFG.foodReserve());
+        assertTrue(CFG.foodIds().contains("minecraft:bread"));
+        assertFalse(CFG.foodIds().contains("minecraft:cobblestone"));
         assertEquals(1, CFG.equipmentSpare());
         assertEquals(Set.of("minecraft:damage"), CFG.allowedComponentIds());
         assertFalse(CFG.operatorMayApprove());

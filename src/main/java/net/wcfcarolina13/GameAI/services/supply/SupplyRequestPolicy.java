@@ -23,8 +23,9 @@ import java.util.UUID;
  *       of an allowed equipment tier, and carrying no component beyond
  *       {@link Config#allowedComponentIds()} — so a named, enchanted, lore-carrying or
  *       custom-data stack is never requested even when its item id is common.</li>
- *   <li><b>Quantity</b> ({@link #grantable}): never below the chest's reserve and never more than
- *       the bot asked for or actually needs.</li>
+ *   <li><b>Quantity</b> ({@link #grantable}): never below the chest's reserve (8 of a food, 16 of
+ *       any other material, one piece of an equipment type) and never more than the bot asked for
+ *       or actually needs.</li>
  *   <li><b>Who may answer</b> ({@link #mayRespond}): the bot's recorded owner, and nobody at all
  *       for an un-owned bot.</li>
  * </ul>
@@ -203,7 +204,10 @@ public final class SupplyRequestPolicy {
      * @param tierById             equipment id → tier ({@code "wooden"}, {@code "iron"}, …)
      * @param allowedTiers         tiers a bot may ask for; equipment of any other tier is
      *                             {@link Verdict#TIER_NOT_ALLOWED}
-     * @param materialReserve      materials left in the chest after any withdrawal
+     * @param materialReserve      non-food materials left in the chest after any withdrawal
+     * @param foodIds              materials that are food and keep {@code foodReserve} instead;
+     *                             each must also be in {@code materialIds} to be requestable
+     * @param foodReserve          food left in the chest after any withdrawal
      * @param equipmentSpare       pieces of the same equipment type left in the chest
      * @param allowedComponentIds  non-default components a requestable stack may carry
      * @param operatorMayApprove   whether a server operator who is not the owner may answer
@@ -213,6 +217,8 @@ public final class SupplyRequestPolicy {
                          Map<String, String> tierById,
                          Set<String> allowedTiers,
                          int materialReserve,
+                         Set<String> foodIds,
+                         int foodReserve,
                          int equipmentSpare,
                          Set<String> allowedComponentIds,
                          boolean operatorMayApprove) {
@@ -222,31 +228,37 @@ public final class SupplyRequestPolicy {
             tierById = tierById == null ? Map.of() : Map.copyOf(tierById);
             allowedTiers = copyNonNull(allowedTiers);
             materialReserve = Math.max(0, materialReserve);
+            foodIds = copyNonNull(foodIds);
+            foodReserve = Math.max(0, foodReserve);
             equipmentSpare = Math.max(0, equipmentSpare);
             allowedComponentIds = copyNonNull(allowedComponentIds);
         }
 
         public static Config defaults() {
             return new Config(DEFAULT_MATERIAL_IDS, DEFAULT_EQUIPMENT_TYPE_BY_ID, DEFAULT_TIER_BY_ID,
-                    DEFAULT_ALLOWED_TIERS, DEFAULT_MATERIAL_RESERVE, DEFAULT_EQUIPMENT_SPARE,
+                    DEFAULT_ALLOWED_TIERS, DEFAULT_MATERIAL_RESERVE, DEFAULT_FOOD_IDS,
+                    DEFAULT_FOOD_RESERVE, DEFAULT_EQUIPMENT_SPARE,
                     DEFAULT_ALLOWED_COMPONENT_IDS, false);
         }
 
         public Config withAllowedTiers(Set<String> tiers) {
             return new Config(materialIds, equipmentTypeById, tierById, tiers, materialReserve,
-                    equipmentSpare, allowedComponentIds, operatorMayApprove);
+                    foodIds, foodReserve, equipmentSpare, allowedComponentIds, operatorMayApprove);
         }
 
         public Config withOperatorMayApprove(boolean mayApprove) {
             return new Config(materialIds, equipmentTypeById, tierById, allowedTiers, materialReserve,
-                    equipmentSpare, allowedComponentIds, mayApprove);
+                    foodIds, foodReserve, equipmentSpare, allowedComponentIds, mayApprove);
         }
     }
 
     // ── Defaults ─────────────────────────────────────────────────────────────────────────────
 
-    /** Materials left in the chest: 16 of each (a quarter stack stays with the owner). */
+    /** Non-food materials left in the chest: 16 of each (a quarter stack stays with the owner). */
     public static final int DEFAULT_MATERIAL_RESERVE = 16;
+
+    /** Food left in the chest: 8 of each (Bradley 2026-10-18, was the shared 16). */
+    public static final int DEFAULT_FOOD_RESERVE = 8;
 
     /** Equipment left in the chest: one piece of the same type (one spare axe stays). */
     public static final int DEFAULT_EQUIPMENT_SPARE = 1;
@@ -299,6 +311,17 @@ public final class SupplyRequestPolicy {
             "minecraft:cooked_salmon",
             // seeds (carrot and potato are both food and the crop's seed)
             "minecraft:wheat_seeds", "minecraft:beetroot_seeds", "minecraft:carrot", "minecraft:potato");
+
+    /**
+     * The allowlisted materials that keep {@link #DEFAULT_FOOD_RESERVE} instead of
+     * {@link #DEFAULT_MATERIAL_RESERVE}. Carrot and potato count as food even though they are also
+     * the crop's seed, so a seed restock can draw their chest down to 8.
+     */
+    public static final Set<String> DEFAULT_FOOD_IDS = Set.of(
+            "minecraft:bread", "minecraft:apple", "minecraft:baked_potato",
+            "minecraft:cooked_beef", "minecraft:cooked_porkchop", "minecraft:cooked_chicken",
+            "minecraft:cooked_mutton", "minecraft:cooked_rabbit", "minecraft:cooked_cod",
+            "minecraft:cooked_salmon", "minecraft:carrot", "minecraft:potato");
 
     public static final Map<String, String> DEFAULT_EQUIPMENT_TYPE_BY_ID;
     public static final Map<String, String> DEFAULT_TIER_BY_ID;
@@ -381,13 +404,18 @@ public final class SupplyRequestPolicy {
         return Verdict.ELIGIBLE;
     }
 
-    /** Units of this item's reserve: the material reserve, or the equipment spare. */
+    /** Units of this item's reserve: the food or material reserve, or the equipment spare. */
     public static int reserveFor(ItemKey item, Config cfg) {
         Category category = item == null ? null : category(item.itemId(), cfg);
         if (category == Category.EQUIPMENT) {
             return cfg.equipmentSpare();
         }
-        return cfg == null ? 0 : cfg.materialReserve();
+        return cfg == null ? 0 : materialReserveFor(item == null ? null : item.itemId(), cfg);
+    }
+
+    /** {@link Config#foodReserve()} for a food id, {@link Config#materialReserve()} otherwise. */
+    static int materialReserveFor(String itemId, Config cfg) {
+        return itemId != null && cfg.foodIds().contains(itemId) ? cfg.foodReserve() : cfg.materialReserve();
     }
 
     /**
@@ -400,8 +428,8 @@ public final class SupplyRequestPolicy {
     }
 
     /**
-     * {@link #grantable(int, int, int, int)} for a concrete item. A material keeps
-     * {@link Config#materialReserve()} of itself; equipment keeps {@link Config#equipmentSpare()}
+     * {@link #grantable(int, int, int, int)} for a concrete item. A food keeps
+     * {@link Config#foodReserve()} of itself, any other material {@link Config#materialReserve()}; equipment keeps {@link Config#equipmentSpare()}
      * of its type and can never exceed the pieces of this exact item actually present.
      */
     public static int grantable(ItemKey item, Stock stock, int requested, int need, Config cfg) {
@@ -413,7 +441,7 @@ public final class SupplyRequestPolicy {
             return 0;
         }
         if (category == Category.MATERIAL) {
-            return grantable(stock.itemCount(), cfg.materialReserve(), requested, need);
+            return grantable(stock.itemCount(), materialReserveFor(item.itemId(), cfg), requested, need);
         }
         int byType = grantable(stock.typeCount(), cfg.equipmentSpare(), requested, need);
         return Math.min(stock.itemCount(), byType);

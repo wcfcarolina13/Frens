@@ -88,6 +88,10 @@ class SupplyWithdrawalPolicyTest {
         assertEquals(1, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, cfg, reserve + 1));
         assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, cfg, reserve), "the reserve stays");
         assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, cfg, 3));
+        // Food keeps 8, not the material 16 (Bradley 2026-10-18).
+        assertEquals(2, SupplyWithdrawalPolicy.grantableEstimate(BREAD, cfg, 10));
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(BREAD, cfg, 8), "the food reserve stays");
+        assertEquals(0, SupplyWithdrawalPolicy.grantableEstimate(COBBLE, cfg, 10));
         // Equipment keeps its spare.
         assertEquals(3 - SupplyRequestPolicy.DEFAULT_EQUIPMENT_SPARE,
                 SupplyWithdrawalPolicy.grantableEstimate(STONE_AXE, cfg, 3));
