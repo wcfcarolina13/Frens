@@ -1190,14 +1190,16 @@ public final class WoodcutSkill implements Skill {
                 // Chat counts logs that actually left this tree (log blocks in its envelope before
                 // minus after), not mine attempts: retries and other break paths cannot skew it.
                 ServerWorld logCountWorld = bot.getEntityWorld() instanceof ServerWorld w ? w : null;
-                int envelopeLogsBefore = countEnvelopeLogs(logCountWorld, target);
+                // Same ownership filter as the leftover list, one list for both counts.
+                List<int[]> logCountOtherBases = logCountWorld == null ? List.of() : ownershipOtherBases(logCountWorld, target);
+                int envelopeLogsBefore = countEnvelopeLogs(logCountWorld, target, logCountOtherBases);
                 if (!refreshTreeClaim(bot)) {
                     LOGGER.info("Woodcut: abandoning tree {} before felling; claimed by {}",
                             target.base().toShortString(), treeClaimOwnerName(bot, target.base(), target.top().getY()));
                     continue;
                 }
                 TreeHarvestResult harvest = fellTree(source, bot, target, sharedState, replantSaplings, pendingFloaters, reachSession);
-                int logsCutFromTree = Math.max(0, envelopeLogsBefore - countEnvelopeLogs(logCountWorld, target));
+                int logsCutFromTree = Math.max(0, envelopeLogsBefore - countEnvelopeLogs(logCountWorld, target, logCountOtherBases));
                 trunkMineStarts += reachSession.trunkMineAttemptsStarted;
                 leafBlocksBroken += reachSession.leafBlocksBroken;
                 scaffoldPlaced += reachSession.scaffoldPlaced;
@@ -2177,8 +2179,12 @@ public final class WoodcutSkill implements Skill {
                 bot.getName().getString(), result.removed(), result.total(), abort);
     }
 
-    /** Log blocks inside the tree's scan box (the same box {@link #collectRemainingEnvelopeLogs} scans). */
-    private static int countEnvelopeLogs(ServerWorld world, TreeDetector.TreeTarget target) {
+    /**
+     * This tree's own log blocks inside its scan box (the same box {@link #collectRemainingEnvelopeLogs}
+     * scans), filtered by {@link WoodcutTreeOwnershipPolicy} like the leftover list: a neighbour's
+     * logs are not counted, and owned logs beyond radius 5 go uncounted too.
+     */
+    private static int countEnvelopeLogs(ServerWorld world, TreeDetector.TreeTarget target, List<int[]> otherBases) {
         if (world == null || target == null) {
             return 0;
         }
@@ -2186,7 +2192,7 @@ public final class WoodcutSkill implements Skill {
         BlockPos max = target.envelopeMax().add(WOODCUT_LOG_SCAN_EXPANSION + 2, WOODCUT_LOG_SCAN_EXPANSION + 4, WOODCUT_LOG_SCAN_EXPANSION + 2);
         int count = 0;
         for (BlockPos candidate : BlockPos.iterate(min, max)) {
-            if (world.getBlockState(candidate).isIn(BlockTags.LOGS)) {
+            if (world.getBlockState(candidate).isIn(BlockTags.LOGS) && ownsTreeLog(target, candidate, otherBases)) {
                 count++;
             }
         }
