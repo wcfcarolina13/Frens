@@ -4,6 +4,7 @@ import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -13,6 +14,9 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
+import net.wcfcarolina13.GameAI.services.MovementService;
+import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -201,7 +205,7 @@ public final class ScaffoldService {
 
             // Place scaffold block (adaptive retry across the jump window; more tolerant of
             // timing variance and early/late attempts than a single apex-only click)
-            ScaffoldPlaceAttemptResult placement = tryPlaceScaffoldAcrossJumpWindow(bot, pillarWorld, targetPos, startY, PILLAR_PLACE_WINDOW_MAX_MS);
+            ScaffoldPlaceAttemptResult placement = tryPlaceScaffoldAcrossJumpWindow(bot, pillarWorld, targetPos, startY, PILLAR_PLACE_WINDOW_MAX_MS, false);
             if (!placement.success()) {
                 LOGGER.warn("Failed to place scaffold block at {} reason={}",
                         targetPos.toShortString(), placement.reason());
@@ -269,10 +273,25 @@ public final class ScaffoldService {
     }
 
     /**
+     * {@link #pillarUpWithPositions(ServerPlayerEntity, int)} with the explicit own-scaffold flag
+     * (1.1.268). Only WoodcutSkill's tree-fell climb pillars pass {@code true}: inside a SERVER-owned
+     * base with the admin toggle on, their scaffold placements may then go ahead and are registered
+     * as this bot's own ({@link OwnedScaffoldRegistry}). Every other caller keeps the old behaviour.
+     */
+    public static List<BlockPos> pillarUpWithPositions(ServerPlayerEntity bot, int steps, boolean ownScaffold) {
+        return pillarUpDetailed(bot, steps, ownScaffold).placed();
+    }
+
+    /**
      * Pillar up, reporting both the placed positions and (when nothing was placed)
      * the reason the per-step loop broke out.
      */
     public static PillarResult pillarUpDetailed(ServerPlayerEntity bot, int steps) {
+        return pillarUpDetailed(bot, steps, false);
+    }
+
+    /** {@link #pillarUpDetailed(ServerPlayerEntity, int)} with the own-scaffold flag (WoodcutSkill only). */
+    public static PillarResult pillarUpDetailed(ServerPlayerEntity bot, int steps, boolean ownScaffold) {
         List<BlockPos> positions = new ArrayList<>();
         String breakReason = "";
 
@@ -349,10 +368,21 @@ public final class ScaffoldService {
                 // Phase 2 layers this on top of the zone gate; this is the cheap belt-and-suspenders.
                 if (world.getServer() != null
                         && BotHomeService.findBaseNearPosition(world.getServer(), world, headSpace).isPresent()) {
-                    LOGGER.info("pillarUp step {}/{}: overhead at {} is inside a registered base — aborting pillar",
-                            i, steps, headSpace.toShortString());
-                    breakReason = "overhead-in-base";
-                    break;
+                    // 1.1.268: an own-scaffold woodcut pillar in the Spawn base (toggle on) may go on
+                    // when the overhead block is a log or leaves; MiningTool's gate still decides it.
+                    var overhead = world.getBlockState(headSpace);
+                    boolean treeOverhead = overhead.isIn(BlockTags.LOGS) || overhead.isIn(BlockTags.LEAVES);
+                    boolean serverOnly = ownScaffold && treeOverhead
+                            && onlyServerOwnedBasesCover(world, headSpace);
+                    boolean toggle = serverOnly && BotHomeService.isSpawnBaseWoodcutAllowed(world.getServer());
+                    if (!WoodcutBaseAccessPolicy.overheadBaseAbortExempt(ownScaffold, serverOnly, treeOverhead, toggle)) {
+                        LOGGER.info("pillarUp step {}/{}: overhead at {} is inside a registered base — aborting pillar",
+                                i, steps, headSpace.toShortString());
+                        breakReason = "overhead-in-base";
+                        break;
+                    }
+                    LOGGER.info("pillarUp step {}/{}: overhead {} at {} is in the Spawn base; own-scaffold pillar may clear it",
+                            i, steps, overhead.getBlock().getName().getString(), headSpace.toShortString());
                 }
                 // Try mining the overhead block instead of giving up — works bare-handed
                 // for soft blocks (dirt, sand, gravel, leaves) and with tools for harder blocks
@@ -401,7 +431,8 @@ public final class ScaffoldService {
                 }
             }
 
-            ScaffoldPlaceAttemptResult placement = tryPlaceScaffoldAcrossJumpWindow(bot, world, targetPos, startY, PILLAR_PLACE_WINDOW_MAX_MS);
+            ScaffoldPlaceAttemptResult placement = tryPlaceScaffoldAcrossJumpWindow(bot, world, targetPos, startY,
+                    PILLAR_PLACE_WINDOW_MAX_MS, ownScaffold);
             if (!placement.success()) {
                 LOGGER.info("pillarUp step {}/{}: failed to place at {} reason={}",
                         i, steps, targetPos.toShortString(), placement.reason());
@@ -545,7 +576,12 @@ public final class ScaffoldService {
                         precheck.complete(ScaffoldTeardownPolicy.Precheck.SKIP);
                         return;
                     }
-                    var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
+                    // 1.1.268: the bot's own Spawn-base scaffold asks as OWN_SCAFFOLD_BREAK (the gate
+                    // re-checks ownership and the live material itself); everything else as before.
+                    boolean owned = OwnedScaffoldRegistry.isOwned(bot, world, pos);
+                    var kind = ScaffoldOwnershipPolicy.breakKind(false, owned,
+                            owned && OwnedScaffoldRegistry.isScaffoldMaterial(state));
+                    var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos, kind);
                     precheck.complete(auth.allowed()
                             ? ScaffoldTeardownPolicy.Precheck.BREAK
                             : ScaffoldTeardownPolicy.Precheck.SKIP);
@@ -620,6 +656,246 @@ public final class ScaffoldService {
             } catch (Exception e) {
                 mining.cancel(true);
                 return false;
+            }
+        }
+    }
+
+    /**
+     * True when at least one base covers {@code pos} (same radius rule as
+     * {@link BotHomeService#findBaseNearPosition}) and every base covering it is owned literally
+     * by SERVER. A player base overlapping the Spawn base makes this false.
+     */
+    private static boolean onlyServerOwnedBasesCover(ServerWorld world, BlockPos pos) {
+        var server = world.getServer();
+        if (server == null || pos == null) {
+            return false;
+        }
+        boolean covered = false;
+        for (BotHomeService.BaseEntry base : BotHomeService.listBases(server, world)) {
+            if (base == null || base.pos() == null) {
+                continue;
+            }
+            int radius = base.radius() > 0 ? base.radius() : BotHomeService.DEFAULT_BASE_PROTECTION_RADIUS;
+            if (!base.pos().isWithinDistance(pos, radius)) {
+                continue;
+            }
+            if (!WoodcutBaseAccessPolicy.isServerOwnedBaseOwner(base.ownerUuid())) {
+                return false;
+            }
+            covered = true;
+        }
+        return covered;
+    }
+
+    // ---------------------------------------------------------------
+    // Own Spawn-base scaffold teardown (1.1.268)
+    // ---------------------------------------------------------------
+
+    /** R4: fixed time budget for the abort-safe teardown of a fell's own Spawn-base scaffold. */
+    public static final long OWNED_TEARDOWN_BUDGET_MS = 20_000L;
+
+    /** Reach (squared, to the block centre) a remembered-pass nudge aims for. */
+    private static final double OWNED_APPROACH_REACH_SQ = 9.0D;
+    private static final long OWNED_APPROACH_TIMEOUT_MS = 3_000L;
+
+    /**
+     * @param removed          blocks mined, or found already gone
+     * @param total            this bot's owned positions considered
+     * @param removedPositions the positions counted in {@code removed}
+     */
+    public record OwnedTeardownResult(int removed, int total, List<BlockPos> removedPositions) {
+        static final OwnedTeardownResult NONE = new OwnedTeardownResult(0, 0, List.of());
+    }
+
+    private enum OwnedPrecheck { GONE, CHANGED, NOT_OWNED, OUT_OF_REACH, BREAK, UNKNOWN }
+
+    /**
+     * Bounded teardown of this bot's own scaffold (positions in {@link OwnedScaffoldRegistry}).
+     * Worker thread only (refused on the server thread). Top to bottom; a position that is no
+     * longer a scaffold material is forgotten, never broken; a block that cannot be reached or
+     * mined is given up and the rest of its column is left (no floating blocks below it).
+     *
+     * @param abortSafe R4: the skill abort latch and thread interrupts do not stop it (the
+     *                  interrupt flag is restored on return). It still stops on a server stop, at
+     *                  {@code budgetMs}, or when a new task takes this bot's task slot.
+     * @param approach  R5 remembered pass: nudge toward an out-of-reach block before giving up on it
+     */
+    public static OwnedTeardownResult teardownOwnedScaffold(ServerPlayerEntity bot, Collection<BlockPos> positions,
+                                                            long budgetMs, boolean abortSafe, boolean approach) {
+        if (bot == null || positions == null || positions.isEmpty()
+                || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return OwnedTeardownResult.NONE;
+        }
+        var server = world.getServer();
+        if (server == null || TaskService.isServerStopping()) {
+            return OwnedTeardownResult.NONE;
+        }
+        if (server.isOnThread()) {
+            LOGGER.warn("[spawn-scaffold] refusing own scaffold teardown for {} on the server thread",
+                    bot.getName().getString());
+            return OwnedTeardownResult.NONE;
+        }
+        List<BlockPos> owned = new ArrayList<>();
+        for (BlockPos pos : new LinkedHashSet<>(positions)) {
+            if (pos != null && OwnedScaffoldRegistry.isOwned(bot, world, pos)) {
+                owned.add(pos.toImmutable());
+            }
+        }
+        if (owned.isEmpty()) {
+            return OwnedTeardownResult.NONE;
+        }
+        BlockPos from = bot.getBlockPos();
+        owned.sort(Comparator.comparingInt(BlockPos::getY).reversed()
+                .thenComparingDouble(p -> p.getSquaredDistance(from)));
+
+        // Abort-safe: a stop interrupts this worker; clear the flag so waits work, restore it at the end.
+        java.util.concurrent.atomic.AtomicBoolean interrupted =
+                new java.util.concurrent.atomic.AtomicBoolean(abortSafe && Thread.interrupted());
+        boolean hadTaskAtStart = TaskService.hasActiveTask(bot.getUuid());
+        long deadline = System.currentTimeMillis() + Math.max(1_000L, budgetMs);
+        Set<Long> givenUpColumns = new HashSet<>();
+        List<BlockPos> removed = new ArrayList<>();
+        try {
+            for (BlockPos pos : owned) {
+                if (System.currentTimeMillis() >= deadline || TaskService.isServerStopping()) {
+                    break;
+                }
+                if (!abortSafe && SkillManager.shouldAbortSkill(bot)) {
+                    break;
+                }
+                if (abortSafe && !hadTaskAtStart && TaskService.hasActiveTask(bot.getUuid())) {
+                    LOGGER.info("[spawn-scaffold] {} own scaffold teardown stops: a new task took over",
+                            bot.getName().getString());
+                    break;
+                }
+                long column = BlockPos.asLong(pos.getX(), 0, pos.getZ());
+                if (givenUpColumns.contains(column)) {
+                    continue;
+                }
+                OwnedPrecheck verdict = precheckOwned(server, world, bot, pos, abortSafe, interrupted);
+                if (verdict == OwnedPrecheck.OUT_OF_REACH && approach && !abortSafe) {
+                    MovementService.nudgeTowardUntilClose(bot, pos, OWNED_APPROACH_REACH_SQ,
+                            OWNED_APPROACH_TIMEOUT_MS, 0.20D, "own-scaffold-cleanup");
+                    verdict = precheckOwned(server, world, bot, pos, abortSafe, interrupted);
+                }
+                if (verdict == OwnedPrecheck.GONE) {
+                    removed.add(pos);
+                    continue;
+                }
+                if (verdict == OwnedPrecheck.CHANGED || verdict == OwnedPrecheck.NOT_OWNED) {
+                    continue;
+                }
+                if (verdict != OwnedPrecheck.BREAK) {
+                    givenUpColumns.add(column);
+                    continue;
+                }
+                if (mineOwnedScaffoldBlock(bot, pos, deadline, abortSafe, interrupted)) {
+                    removed.add(pos);
+                    pauseOwned(150L, abortSafe, interrupted); // let gravity settle the bot
+                } else {
+                    givenUpColumns.add(column);
+                }
+                if (abortSafe && Thread.interrupted()) {
+                    interrupted.set(true);
+                }
+            }
+        } finally {
+            if (interrupted.get()) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        return new OwnedTeardownResult(removed.size(), owned.size(), removed);
+    }
+
+    /** Server-thread pre-check of one owned position; forgets it when it is gone or changed. */
+    private static OwnedPrecheck precheckOwned(net.minecraft.server.MinecraftServer server, ServerWorld world,
+                                               ServerPlayerEntity bot, BlockPos pos, boolean abortSafe,
+                                               java.util.concurrent.atomic.AtomicBoolean interrupted) {
+        var future = new java.util.concurrent.CompletableFuture<OwnedPrecheck>();
+        server.execute(() -> {
+            try {
+                var state = world.getBlockState(pos);
+                boolean owned = OwnedScaffoldRegistry.isOwned(bot, world, pos);
+                boolean gone = state.isAir();
+                boolean material = OwnedScaffoldRegistry.isScaffoldMaterial(state);
+                if (ScaffoldOwnershipPolicy.shouldForget(owned, gone, material)) {
+                    OwnedScaffoldRegistry.forget(bot, world, pos);
+                    future.complete(gone ? OwnedPrecheck.GONE : OwnedPrecheck.CHANGED);
+                    return;
+                }
+                if (!ScaffoldOwnershipPolicy.mayBreakOwned(owned, material)) {
+                    future.complete(OwnedPrecheck.NOT_OWNED);
+                    return;
+                }
+                boolean standingOnBlock = bot.getBlockPos().equals(pos.up());
+                future.complete(standingOnBlock || BlockInteractionService.canInteract(bot, pos)
+                        ? OwnedPrecheck.BREAK : OwnedPrecheck.OUT_OF_REACH);
+            } catch (Exception e) {
+                future.complete(OwnedPrecheck.UNKNOWN);
+            }
+        });
+        long until = System.currentTimeMillis() + 2_000L;
+        while (true) {
+            try {
+                return future.get(Math.max(1L, until - System.currentTimeMillis()), java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (InterruptedException ie) {
+                interrupted.set(true);
+                if (!abortSafe) {
+                    Thread.currentThread().interrupt();
+                    return OwnedPrecheck.UNKNOWN;
+                }
+                // Abort-safe: a second stop must not drop the check; the caller restores the flag.
+            } catch (Exception e) {
+                return OwnedPrecheck.UNKNOWN;
+            }
+        }
+    }
+
+    /** Survival-timed mine of one owned scaffold block; true when MiningTool reports it gone. */
+    private static boolean mineOwnedScaffoldBlock(ServerPlayerEntity bot, BlockPos pos, long deadline, boolean abortSafe,
+                                                  java.util.concurrent.atomic.AtomicBoolean interrupted) {
+        java.util.concurrent.CompletableFuture<String> mining = MiningTool.mineBlock(bot, pos, false, false, abortSafe);
+        long ceiling = Math.min(deadline, System.currentTimeMillis() + TEARDOWN_BREAK_CEILING_MS);
+        while (true) {
+            try {
+                String result = mining.get(200, java.util.concurrent.TimeUnit.MILLISECONDS);
+                boolean ok = result != null && !result.startsWith("\u26a0\ufe0f");
+                if (!ok) {
+                    LOGGER.info("[spawn-scaffold] own scaffold at {} for {} not removed: {}",
+                            pos.toShortString(), bot.getName().getString(), result);
+                }
+                return ok;
+            } catch (java.util.concurrent.TimeoutException te) {
+                if ((!abortSafe && SkillManager.shouldAbortSkill(bot))
+                        || TaskService.isServerStopping()
+                        || System.currentTimeMillis() > ceiling) {
+                    mining.cancel(true);
+                    return false;
+                }
+            } catch (InterruptedException ie) {
+                interrupted.set(true);
+                if (!abortSafe) {
+                    mining.cancel(true);
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+                // Abort-safe: the stop already happened; keep the bounded swing going. The caller
+                // restores the interrupt flag when the teardown ends.
+            } catch (Exception e) {
+                mining.cancel(true);
+                return false;
+            }
+        }
+    }
+
+    /** Sleep; an interrupt is recorded (and re-set at once unless abort-safe). */
+    private static void pauseOwned(long ms, boolean abortSafe, java.util.concurrent.atomic.AtomicBoolean interrupted) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            interrupted.set(true);
+            if (!abortSafe) {
+                Thread.currentThread().interrupt();
             }
         }
     }
@@ -739,11 +1015,13 @@ public final class ScaffoldService {
     private static ScaffoldPlaceAttemptResult tryPlaceScaffoldWithAdaptiveTarget(ServerPlayerEntity bot,
                                                                                  ServerWorld world,
                                                                                  BlockPos initialTarget,
-                                                                                 int maxAttempts) {
+                                                                                 int maxAttempts,
+                                                                                 boolean ownScaffold) {
         BlockPos targetPos = initialTarget;
         String lastReason = "unknown";
         for (int attempt = 0; attempt < Math.max(1, maxAttempts); attempt++) {
-            BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, targetPos, Direction.UP, SCAFFOLD_BLOCKS);
+            BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, targetPos, Direction.UP, SCAFFOLD_BLOCKS,
+                    false, ownScaffold);
             if (result.success()) {
                 return new ScaffoldPlaceAttemptResult(true, targetPos, null);
             }
@@ -767,7 +1045,8 @@ public final class ScaffoldService {
                                                                                ServerWorld world,
                                                                                BlockPos initialTarget,
                                                                                double startY,
-                                                                               long maxWaitMs) {
+                                                                               long maxWaitMs,
+                                                                               boolean ownScaffold) {
         if (bot == null || world == null || initialTarget == null) {
             return new ScaffoldPlaceAttemptResult(false, initialTarget, "no-world-or-target");
         }
@@ -798,7 +1077,8 @@ public final class ScaffoldService {
             }
 
             attempts++;
-            ScaffoldPlaceAttemptResult attempt = tryPlaceScaffoldWithAdaptiveTarget(bot, world, targetPos, attempts == 1 ? 2 : 1);
+            ScaffoldPlaceAttemptResult attempt = tryPlaceScaffoldWithAdaptiveTarget(bot, world, targetPos,
+                    attempts == 1 ? 2 : 1, ownScaffold);
             targetPos = attempt.placedPos() != null ? attempt.placedPos() : targetPos;
             if (attempt.success()) {
                 return attempt;
@@ -815,7 +1095,9 @@ public final class ScaffoldService {
             boolean becameScaffold = SCAFFOLD_BLOCKS.stream()
                     .anyMatch(item -> item.equals(world.getBlockState(checkPos).getBlock().asItem()));
             if (becameScaffold) {
-                return new ScaffoldPlaceAttemptResult(true, targetPos, "placed-detected-after-retry");
+                // Adoption, not a placement: the block may not be this bot's, so it is never
+                // registered as own scaffold (only BotActions' accepted placement registers).
+                return new ScaffoldPlaceAttemptResult(true, targetPos, ScaffoldOwnershipPolicy.PLACED_DETECTED_AFTER_RETRY);
             }
             if (bot.isOnGround() && attempts >= 1) {
                 break;
