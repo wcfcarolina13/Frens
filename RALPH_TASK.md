@@ -4,7 +4,23 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-17 (1.1.267) — next session starts here
+## Session Handoff 2026-10-18 (1.1.268) — next session starts here
+
+**State:** main = origin/main @ 1.1.268. Suite 2842 green. Deployed to Nirn and the mcp-sandbox instance.
+**Field sweep done:** phases 6aj-6bg in the sandbox on 1.1.267 (`docs/testing/FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`): 58 items got a verdict, 49 pass, 4 superseded, 2 partial (6ak-1 no PLACE move seen, 6ap-2 Bases screen and non-op half), 1 fail (6am-2 audit fixes, fixed in 1.1.268), 2 need Bradley (6ao-1 Nirn skins and mounts, 6av-2 remote server). **No high-severity failure**, so by Bradley's 2026-10-18 rule 1.1.268 is the next Modrinth release.
+**1.1.268** (changelog entry has rulings and costs):
+- Spawn-base trees: with "Cut trees in the Spawn base" On a woodcut bot places and removes its own pillar scaffold there (Bradley's ruling 2026-10-17, extends 1.1.238 `7f89c502`). Owned-scaffold registry keyed to the exact block, 24 h expiry, persisted per save, abort-safe teardown inside the base. Sandbox: a rooted Spawn oak cut whole, placed 4 removed 4.
+- Forest woodcut counts only the felled tree's logs (no early relocation), tree scans build each tree once (detection 0.2-1.9 s, was 2-16 s), food keeps 8 in chests (Bradley 2026-10-18), honey_collect harvests at all, fishing cooks cod and salmon, retrieval reports vanilla pickups, one line for strict crafts and leash results.
+- Test tooling: MCP fork key bindings, `look`, `scroll`, key-code typing (`71efa71`, `052c4ec`), `tools/sandbox/forest.py`, `leashtest.py`, `ft.py shot/clickr/scroll`, paused-screen warning, `sb_deploy`, per-instance deploy checks, log report thread fix.
+**Next:**
+- **Modrinth:** draft notes for 1.1.231-1.1.268 are in `.superpowers/sdd/modrinth/MODRINTH_NOTES_1.1.268_DRAFT.md` (untracked). Bradley OKs the exact text and uploads himself. Nothing was published.
+- **Field Phase 6bh:** three items ticked from today's sandbox check (Spawn tree whole, forest, honey and fish), three open: the mid-fell `/bot stop` abort teardown in the Spawn base (not caught in the sandbox, a fell takes about two seconds), leftover own scaffold cleared after a quit, an axeless bot in the Spawn base. Checklist now 280 open items.
+- Deferred from 1.1.268 review: honey's `equipItem`/`extractItemFromContainer`/`packHoneyIntoContainers` mutate the inventory on the worker; `countEnvelopeLogs` ("Got N logs" count) is unfiltered; ascent bridge probe still bridges toward any log within 6; raised-base neighbour trunks still lend logs (the soil-under-base rule); `BotEmergencyRescueService.hasNearbyStorageFood` ignores reserve and allowlist; abort-safe scaffold cleanup outside bases; finding 2 (ranged pause resumed while the shooter lived, unrepeated).
+- PlayerMemory vs relations: nothing in the sweep showed them disagreeing (one note: a bot on the fallback Jake profile answered "It's Jake, not Wally."). Bradley's decision is now due.
+- Sandbox notes for the next session: an open screen pauses the integrated server (`ft.py` warns now), `screen_buttons` cannot see Frens' custom-drawn screens (use `ft.py shot` + `clickr`), Flashback is installed (record from the pause menu: "Start Recording", "Finish Recording", then "Save Replay"), and `.superpowers/SANDBOX.lock` is the shared lock.
+- The 1.1.267 Next list (no fallback re-search ruling, SearchBuffers overlay, M2 in game, "woodcut_cleanup interrupted." for the text sweep) still stands. The Spawn-tree pillar item shipped in 1.1.268.
+
+## Session Handoff 2026-10-17 (1.1.267) — superseded
 
 **State:** main = origin/main @ 1.1.267. Suite 2771 green. Deployed to Nirn and the mcp-sandbox instance.
 **1.1.266 sandbox recheck done** (save "Fix 266", results in the 1.1.266 changelog entry): A, C/C2/C4, D, E, G pass. B was honest but still took about 2 minutes, so it went into 1.1.267. F never fired in the field. The save now has "Cut trees in the Spawn base" On.
@@ -163,10 +179,10 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 ### Docs and process
 - [x] ✅ Ruled 2026-10-18: per instance (CLAUDE.md and the release skill updated). Was: Needs Bradley: "scope the CLAUDE.md pre-deploy check to the target instance (`pgrep -f "PrismLauncher/instances/1.21.11/natives"`). The any-instance pattern blocks every release while a sandbox test runs." (1.1.263 handoff, 2026-10-17)
 - [x] ✅ Ruled 2026-10-18: generic credit "Voice lines are synthetic speech generated with licensed text-to-speech." for the release notes (no engine or voice names). Was: Needs Bradley: "the TTS engine and voice names for the dialogue-clip attribution line (still a placeholder)." (1.1.225 handoff; also 1.1.224 and 1.1.223 handoffs, 2026-09-25/26)
-- [ ] Ruled 2026-10-18: lower the survival food cutoff to 8 (code change, sent to the 1.1.268 field-sweep session). Was: Needs Bradley: confirm "Food reserve 16 as the survival cutoff (early game: a bot can't eat from a chest holding ≤16 bread)." (provisional ruling made on his behalf in 1.1.221; 1.1.221 and 1.1.222 handoffs, 2026-09-25)
+- [x] ✅ 1.1.268 Ruled 2026-10-18: lower the survival food cutoff to 8 (food keeps 8, other materials 16, `472afa60`). Was: Needs Bradley: confirm "Food reserve 16 as the survival cutoff (early game: a bot can't eat from a chest holding ≤16 bread)." (provisional ruling made on his behalf in 1.1.221; 1.1.221 and 1.1.222 handoffs, 2026-09-25)
 - [x] ✅ Ruled 2026-10-18: keep 4 (com.bradley.ollama-env LaunchAgent, measured for souls). Was: Needs Bradley: "Whether to lower `OLLAMA_NUM_PARALLEL`." ("machine-wide; other local jobs share it"; 1.1.217 through 1.1.222 handoffs, 2026-09-25)
-- [ ] Ruled 2026-10-18: decide after the 6aj-6bg field sweep (note any disagreement seen in play). Was: Needs Bradley: "relations coexist with `PlayerMemory`, decide after the field session" (1.1.211 handoff, 2026-09-06)
-- [ ] Ruled 2026-10-18: publish the first build after the field sweep with no high-severity failures (likely 1.1.268); notes prepared for Bradley's OK, he uploads. Was: Needs Bradley: "1.1.231–1.1.233 NOT published" on Modrinth (now everything after 1.1.230; held by the "no Modrinth until the live playthroughs settle" ruling, 2026-10-14; 1.1.233 handoff, 2026-10-13)
+- [ ] Ruled 2026-10-18: decide after the 6aj-6bg field sweep (note any disagreement seen in play). Sweep done 2026-10-18: no disagreement seen, decision due. Was: Needs Bradley: "relations coexist with `PlayerMemory`, decide after the field session" (1.1.211 handoff, 2026-09-06)
+- [ ] Ruled 2026-10-18: publish the first build after the field sweep with no high-severity failures (likely 1.1.268); notes prepared for Bradley's OK, he uploads. 1.1.268 qualifies; draft notes in `.superpowers/sdd/modrinth/MODRINTH_NOTES_1.1.268_DRAFT.md`, awaiting his OK. Was: Needs Bradley: "1.1.231–1.1.233 NOT published" on Modrinth (now everything after 1.1.230; held by the "no Modrinth until the live playthroughs settle" ruling, 2026-10-14; 1.1.233 handoff, 2026-10-13)
 - [ ] (uncertain) "5. Fresh-install part 2." (no clean-instance run recorded; 1.1.236 handoff; also 1.1.234, 1.1.229, 1.1.227 and 1.1.225 handoffs)
 - [ ] (uncertain) "(mention the REI/EMI/JEI note)" in the Modrinth changelog (1.1.228 handoff, 2026-10-13)
 - [ ] (uncertain) "Session cards: task_43ec92da (merged finder, now largely done) and task_e6032cb8 (audit) can be dismissed or re-scoped by Bradley." (1.1.242 handoff, 2026-10-15)
