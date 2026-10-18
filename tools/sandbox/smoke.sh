@@ -8,7 +8,11 @@ LOG="$S/minecraft/logs/latest.log"
 API=http://127.0.0.1:9876/api/cmd
 cmd() { curl -s -m 20 -X POST "$API" -H 'Content-Type: application/json' -d "$1"; echo; }
 
-if pgrep -f "PrismLauncher/instances/.*/natives" >/dev/null; then echo "ABORT: a game is running"; exit 1; fi
+# Deploy check covers only the sandbox (Bradley 2026-10-18: per-instance pre-deploy check). Patterns are split so pgrep
+# never matches this script's own command line. The launch guard stays on any instance: two games share one GPU.
+SB_JAVA="java.*mcp-sand""box/nat""ives"; ANY_JAVA="java.*PrismLauncher/instances/.*/nat""ives"
+if pgrep -f "$SB_JAVA" >/dev/null; then echo "ABORT: the sandbox is running"; exit 1; fi
+if pgrep -f "$ANY_JAVA" >/dev/null; then echo "ABORT: another instance is running (launch guard)"; exit 1; fi
 rm -f "$S/minecraft/mods"/frens-*.jar && cp "$JAR" "$S/minecraft/mods/" || exit 1
 echo "deployed $(basename "$JAR")"
 "/Applications/Prism Launcher.app/Contents/MacOS/prismlauncher" --launch mcp-sandbox --world "$WORLD" >/dev/null 2>&1 &
@@ -33,6 +37,6 @@ cmd '{"cmd":"save_and_quit"}'
 sleep 20
 cmd '{"cmd":"exit_control_mode"}' >/dev/null 2>&1
 # quit from title: SIGTERM the sandbox java
-pkill -TERM -f "instances/mcp-sandbox/natives"
+pkill -TERM -f "$SB_JAVA"
 sleep 8
-pgrep -f "PrismLauncher/instances/.*/natives" >/dev/null && echo "WARN: game still running" || echo "game closed"
+pgrep -f "$SB_JAVA" >/dev/null && echo "WARN: game still running" || echo "game closed"
