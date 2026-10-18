@@ -584,15 +584,15 @@ public final class HoneyCollectSkill implements Skill {
         return false;
     }
 
+    /** Remembered chests farther than 32 blocks are never walked to for a honey deposit. */
+    private static final double DEPOSIT_REMEMBERED_CHEST_DIST_SQ = 32.0D * 32.0D;
+
     /**
      * Put loose honey in an existing nearby chest, only when the main inventory is still full after
      * packing (HoneyHarvestOutcome.shouldDeposit). Tries the deposit candidates in order and stops at
      * the first chest that takes anything. Never places a chest. With no taker the bot keeps the
      * honey (one log line, no chat). Worker thread: the walks run here, the transfers hop to the server.
      */
-    /** Remembered chests farther than 32 blocks are never walked to for a honey deposit. */
-    private static final double DEPOSIT_REMEMBERED_CHEST_DIST_SQ = 32.0D * 32.0D;
-
     private static void depositHoneyItemsIfFull(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world) {
         int[] state = SupplyServerHop.call(world.getServer(),
                 () -> new int[]{countEmptyMainSlots(bot), countLooseHoneyStacks(bot)},
