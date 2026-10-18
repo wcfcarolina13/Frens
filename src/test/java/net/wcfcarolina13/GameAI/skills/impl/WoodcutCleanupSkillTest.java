@@ -413,4 +413,15 @@ class WoodcutCleanupSkillTest {
         memo = memo.substring(0, memo.indexOf("\n    }\n"));
         assertTrue(memo.contains("standingTrees.clear();"), "the verdict cache clears with the component memo");
     }
+
+    @Test
+    void aFastPassRefreshKeepsMergedTargetsAndAMergeThatAddedTargetsResetsTheRefreshCount() throws java.io.IOException {
+        String cleanup = source("WoodcutCleanupSkill.java");
+        assertFalse(cleanup.contains("cachedTargets = new ArrayList<>(fastCollection.targets());"),
+                "the fast pass must not replace the list a merge filled");
+        assertTrue(cleanup.contains("for (CleanupTarget t : fastCollection.targets()) {\n                        if (cachedKeys.add(t.pos().asLong())) {\n                            cachedTargets.add(t);"),
+                "fast targets are appended with position dedupe");
+        assertTrue(cleanup.contains("if (added > 0) {\n                            // Fresh targets: work them before the next refresh, not straight into one.\n                            sinceLastScan = 0;"),
+                "a merge that added targets resets sinceLastScan");
+    }
 }

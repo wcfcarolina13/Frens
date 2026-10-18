@@ -390,6 +390,10 @@ public final class WoodcutCleanupSkill implements Skill {
                                 String.format(Locale.ROOT, "%.2f", coverage.fraction()),
                                 coverage.scannedSinceLastFind(), coverage.volume());
                         consecutiveEmptyMerges = emptyMerge ? consecutiveEmptyMerges + 1 : 0;
+                        if (added > 0) {
+                            // Fresh targets: work them before the next refresh, not straight into one.
+                            sinceLastScan = 0;
+                        }
                     } catch (Exception e) {
                         LOGGER.warn("woodcut_cleanup async scan failed: {}", e.getMessage());
                     }
@@ -421,11 +425,19 @@ public final class WoodcutCleanupSkill implements Skill {
                     CompanionOverheadHologramService.show(bot, "Scanning for cleanup targets...", 5_000);
                     CleanupTargetCollection fastCollection = collectFastTargets(
                             world, bot, scanMin, scanMax, failedLogCooldowns, floaterMemory);
-                    cachedTargets = new ArrayList<>(fastCollection.targets());
+                    // Appended with position dedupe: a refresh never drops targets a merged region
+                    // scan found (those would otherwise wait until the scan cursor wraps).
+                    Set<Long> cachedKeys = cachedTargets.stream()
+                            .map(t -> t.pos().asLong()).collect(Collectors.toSet());
+                    for (CleanupTarget t : fastCollection.targets()) {
+                        if (cachedKeys.add(t.pos().asLong())) {
+                            cachedTargets.add(t);
+                        }
+                    }
                     lastScanStats = fastCollection.stats();
                     sinceLastScan = 0;
-                    int rememberedTargets = (int) cachedTargets.stream().filter(t -> t.kind() == CleanupTargetKind.REMEMBERED_LEFTOVER).count();
-                    int overheadTargets = (int) cachedTargets.stream().filter(t -> t.kind() == CleanupTargetKind.OVERHEAD_SUSPENDED).count();
+                    int rememberedTargets = (int) fastCollection.targets().stream().filter(t -> t.kind() == CleanupTargetKind.REMEMBERED_LEFTOVER).count();
+                    int overheadTargets = (int) fastCollection.targets().stream().filter(t -> t.kind() == CleanupTargetKind.OVERHEAD_SUSPENDED).count();
                     LOGGER.info("woodcut_cleanup fast scan: rememberedTargets={} overheadTargets={} attemptedTargets={} minedLogs={}",
                             rememberedTargets, overheadTargets, attemptedTargets, logsMined);
 
