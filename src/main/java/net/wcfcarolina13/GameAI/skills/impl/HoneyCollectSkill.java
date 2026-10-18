@@ -132,11 +132,15 @@ public final class HoneyCollectSkill implements Skill {
             boolean useBottle = hasBottles;
             if (!useBottle && hasShears) {
                 // Shears path: ensure at least 1 free slot for honeycomb pickup.
-                // Try packing into containers first, then chest offload.
-                if (!hasEmptySlot(bot)) {
-                    packHoneyIntoContainers(bot);
-                }
-                if (!hasEmptySlot(bot)) {
+                // Try packing into containers first, then chest offload. Packing moves stacks, so it
+                // runs on the server thread in one abandon-safe hop; a timeout reads as still full.
+                boolean freeAfterPack = SupplyServerHop.call(world.getServer(), () -> {
+                    if (!hasEmptySlot(bot)) {
+                        packHoneyIntoContainers(bot);
+                    }
+                    return hasEmptySlot(bot);
+                }, INTERACT_TIMEOUT_MS, false);
+                if (!freeAfterPack) {
                     depositHoneyItems(source, bot, world);
                 }
                 if (!hasEmptySlot(bot)) {
@@ -145,12 +149,16 @@ public final class HoneyCollectSkill implements Skill {
                 }
             }
 
-            // Extract tool from containers if not already in flat inventory
+            // Extract tool from containers if not already in flat inventory, then equip it. Both move
+            // stacks, so they run on the server thread in one abandon-safe hop; a timeout is EQUIP_FAILED.
             net.minecraft.item.Item tool = useBottle ? Items.GLASS_BOTTLE : Items.SHEARS;
-            if (!hasItem(bot, tool)) {
-                extractItemFromContainer(bot, tool);
-            }
-            if (!equipItem(bot, tool)) {
+            boolean equipped = SupplyServerHop.call(world.getServer(), () -> {
+                if (!hasItem(bot, tool)) {
+                    extractItemFromContainer(bot, tool);
+                }
+                return equipItem(bot, tool);
+            }, INTERACT_TIMEOUT_MS, false);
+            if (!equipped) {
                 skip(outcomes, hivePos, HoneyHarvestOutcome.EQUIP_FAILED, "tool=" + tool);
                 continue;
             }
@@ -186,8 +194,11 @@ public final class HoneyCollectSkill implements Skill {
             return SkillExecutionResult.failure(HoneyHarvestOutcome.failureMessage(outcomes));
         }
 
-        // Pack overflow into bundles/shulker boxes, then deposit remainder in nearby chests
-        packHoneyIntoContainers(bot);
+        // Pack overflow into bundles/shulker boxes (server thread), then deposit remainder in nearby chests
+        SupplyServerHop.call(world.getServer(), () -> {
+            packHoneyIntoContainers(bot);
+            return true;
+        }, INTERACT_TIMEOUT_MS, false);
         depositHoneyItems(source, bot, world);
 
         return SkillExecutionResult.success("Collected honey from " + harvested
@@ -489,7 +500,7 @@ public final class HoneyCollectSkill implements Skill {
 
     /**
      * Pack loose honeycombs and honey bottles into bundles and shulker boxes
-     * in the bot's inventory to free up main inventory slots.
+     * in the bot's inventory to free up main inventory slots. Server thread only (moves stacks).
      */
     private static void packHoneyIntoContainers(ServerPlayerEntity bot) {
         // First, use the existing BundleService to pack any bundlable items
