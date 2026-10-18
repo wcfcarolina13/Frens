@@ -54,6 +54,8 @@ import net.wcfcarolina13.GameAI.skills.support.RelocationWalkPolicy;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutFailureStreakPolicy;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutTreeOwnershipPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutFinalReasonPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutStandRetryPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutApproachFeasibilityPolicy;
@@ -1202,7 +1204,10 @@ public final class WoodcutSkill implements Skill {
                 }
                 if (!harvest.success()) {
                     totalFailures++;
-                    consecutiveFailures++;
+                    // A partly felled tree that gave logs resets the streak (1.1.268 finding 3):
+                    // six of them in a forest relocated the bot away from the trees it was cutting.
+                    boolean productivePartial = WoodcutFailureStreakPolicy.isProductivePartial(harvest.detail(), logsCutFromTree);
+                    consecutiveFailures = WoodcutFailureStreakPolicy.next(consecutiveFailures, false, harvest.detail(), logsCutFromTree);
                     failedBases.add(target.base().toImmutable());
                     failedBaseReasons.put(target.base().toImmutable(), harvest.detail());
                     if (harvest.failureReason() == WoodcutFailureReason.PROTECTED_AT_MINING) {
@@ -1210,7 +1215,7 @@ public final class WoodcutSkill implements Skill {
                     } else if (harvest.failureReason() == WoodcutFailureReason.PATH_OR_REACH_FAILURE) {
                         // A stop mid-tree reports cluster-logs-remained once a log is cut, so the
                         // abort check covers what the detail alone misses.
-                        if (!MiningWaitOutcome.isCancelledDetail(harvest.detail()) && !isAbortRequested(bot)) {
+                        if (!productivePartial && !MiningWaitOutcome.isCancelledDetail(harvest.detail()) && !isAbortRequested(bot)) {
                             pathFailures++;
                         }
                         // Recover to surface before trying the next tree — bot likely fell
@@ -2182,6 +2187,32 @@ public final class WoodcutSkill implements Skill {
         return count;
     }
 
+    private static boolean ownsTreeLog(TreeDetector.TreeTarget target, BlockPos pos, List<int[]> otherBases) {
+        return WoodcutTreeOwnershipPolicy.ownsLog(pos.getX(), pos.getY(), pos.getZ(),
+                target.base().getX(), target.base().getZ(), WoodcutTreeOwnershipPolicy.DEFAULT_RADIUS, otherBases);
+    }
+
+    /**
+     * The target's neighbouring rooted trunks as {@code {x, z, baseY, topY}}. Only bases standing
+     * on soil count: the rooted-base scan also accepts a raised log column with soil somewhere
+     * below it (an acacia's bent upper trunk, a steep oak branch), and treating that as another
+     * tree would disown this tree's own logs.
+     */
+    private static List<int[]> ownershipOtherBases(ServerWorld world, TreeDetector.TreeTarget target) {
+        if (target.nearbyRootedBases().isEmpty()) {
+            return List.of();
+        }
+        List<int[]> bases = new ArrayList<>(target.nearbyRootedBases().size());
+        for (Map.Entry<BlockPos, Integer> entry : target.nearbyRootedBases().entrySet()) {
+            BlockPos base = entry.getKey();
+            if (base == null || !TreeDetector.isValidSoil(world.getBlockState(base.down()))) {
+                continue;
+            }
+            bases.add(new int[]{base.getX(), base.getZ(), base.getY(), entry.getValue()});
+        }
+        return bases;
+    }
+
     private List<BlockPos> collectRemainingEnvelopeLogs(ServerPlayerEntity bot,
                                                         ServerWorld world,
                                                         TreeDetector.TreeTarget target) {
@@ -2235,16 +2266,22 @@ public final class WoodcutSkill implements Skill {
                 }
             }
         }
+        // Only this tree's logs (1.1.268 finding 3): the leaf-linked cluster reaches the
+        // neighbours' logs in a forest. The remembered merge is filtered too, since sites were
+        // recorded with the wide set.
+        List<int[]> otherBases = ownershipOtherBases(world, target);
         List<BlockPos> remaining = new ArrayList<>();
         for (Long key : visited) {
             BlockPos pos = allLogs.get(key);
-            if (pos != null && isWithinRequestedBounds(bot, pos)) {
+            if (pos != null && isWithinRequestedBounds(bot, pos) && ownsTreeLog(target, pos, otherBases)) {
                 remaining.add(pos);
             }
         }
-        remaining = bot != null
-                ? WoodcutKnowledgeService.mergeRememberedLogs(bot, world, target, remaining)
-                : remaining;
+        if (bot != null) {
+            remaining = WoodcutKnowledgeService.mergeRememberedLogs(bot, world, target, remaining).stream()
+                    .filter(pos -> ownsTreeLog(target, pos, otherBases))
+                    .collect(Collectors.toCollection(ArrayList::new));
+        }
         if (isBoundedWorkMode(bot)) {
             // NOTE: Stream.toList() returns an unmodifiable list. The
             // subsequent sort() call below would throw UOE. Wrap in a
