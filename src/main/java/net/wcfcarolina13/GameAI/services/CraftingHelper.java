@@ -814,26 +814,43 @@ public final class CraftingHelper {
     }
 
     private static int craftSticks(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amount) {
+        return craftSticks(bot, source, commander, amount, false);
+    }
+
+    /**
+     * {@code quiet}: the caller answers with its own line (a strict tool craft's shortfall), so the
+     * stick sub-step says nothing.
+     */
+    private static int craftSticks(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander,
+                                   int amount, boolean quiet) {
         // 2 planks => 4 sticks
         int craftsNeeded = (int) Math.ceil(amount / 4.0);
         if (!ensurePlanksAvailable(bot, source, craftsNeeded * 2)) {
-            sendCraftTableNeededOnce(bot, source, "Sticks need 2 planks per craft.");
+            if (!quiet) {
+                sendCraftTableNeededOnce(bot, source, "Sticks need 2 planks per craft.");
+            }
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "stick"))) {
-            say(source, "I don't know how to craft that yet.");
+            if (!quiet) {
+                say(source, "I don't know how to craft that yet.");
+            }
             return 0;
         }
         int plankCount = countPlanks(bot);
         int maxByPlanks = plankCount / 2;
         int crafts = Math.min(craftsNeeded, maxByPlanks);
         if (crafts <= 0) {
-            sendCraftTableNeededOnce(bot, source, "Sticks need 2 planks per craft.");
+            if (!quiet) {
+                sendCraftTableNeededOnce(bot, source, "Sticks need 2 planks per craft.");
+            }
             return 0;
         }
         ensureInventorySpaceForOutput(bot, source, Items.STICK, crafts * 4, crafts * 2, 0, Map.of());
         if (!consumePlanks(bot, crafts * 2)) {
-            say(source, "I couldn't reserve planks for sticks.");
+            if (!quiet) {
+                say(source, "I couldn't reserve planks for sticks.");
+            }
             return 0;
         }
         distributeOutput(bot, Items.STICK, crafts * 4);
@@ -1441,7 +1458,8 @@ public final class CraftingHelper {
         }
 
         int neededSticks = stickCount * amount;
-        if (!ensureSticks(bot, source, neededSticks)) {
+        // A strict craft answers with its own shortfall line, so the stick sub-step stays quiet.
+        if (!ensureSticks(bot, source, neededSticks, shortfall != null)) {
             if (shortfall != null) {
                 if (shortfall.message == null) {
                     String line = toolShortfallLine(bot, kind, mat, amount, headCount, stickCount);
@@ -3145,12 +3163,17 @@ public final class CraftingHelper {
     }
 
     private static boolean ensureSticks(ServerPlayerEntity bot, ServerCommandSource source, int needed) {
+        return ensureSticks(bot, source, needed, false);
+    }
+
+    /** {@code quiet}: see {@link #craftSticks(ServerPlayerEntity, ServerCommandSource, ServerPlayerEntity, int, boolean)}. */
+    private static boolean ensureSticks(ServerPlayerEntity bot, ServerCommandSource source, int needed, boolean quiet) {
         int have = countItem(bot, Items.STICK);
         if (have >= needed) {
             return true;
         }
         int missing = needed - have;
-        int crafted = craftSticks(bot, source, source.getPlayer(), missing);
+        int crafted = craftSticks(bot, source, source.getPlayer(), missing, quiet);
         int after = countItem(bot, Items.STICK);
         LOGGER.info("ensureSticks: needed={} before={} crafted={} after={} planks={}",
                 needed, have, crafted, after, countPlanks(bot));

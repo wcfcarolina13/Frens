@@ -318,6 +318,24 @@ class CraftingStationPolicyTest {
         assertTrue(logger.contains("CraftingStationPolicy.shouldLogDecline("), "the line is rate-limited by the policy");
     }
 
+    @Test
+    void aStrictToolCraftKeepsTheStickSubStepQuiet() throws IOException {
+        String source = craftingHelperSource();
+        String sticks = bodyOf(source, "int amount, boolean quiet) {");
+        assertGuarded(sticks, "sendCraftTableNeededOnce(", "if (!quiet)");
+        assertGuarded(sticks, "say(source,", "if (!quiet)");
+        String ensure = bodyOf(source,
+                "private static boolean ensureSticks(ServerPlayerEntity bot, ServerCommandSource source, int needed, boolean quiet)");
+        assertTrue(ensure.contains("craftSticks(bot, source, source.getPlayer(), missing, quiet)"),
+                "ensureSticks passes its quiet flag on");
+        assertEquals(1, count(source, "ensureSticks(bot, source, neededSticks, shortfall != null)"),
+                "the tool craft's stick step is quiet exactly when it reports a shortfall itself");
+        assertTrue(bodyOf(source,
+                        "private static boolean ensureSticks(ServerPlayerEntity bot, ServerCommandSource source, int needed) {")
+                        .contains("ensureSticks(bot, source, needed, false)"),
+                "other callers keep the stick lines");
+    }
+
     /**
      * Every occurrence of {@code call} in {@code body} has a {@code guard} after the previous
      * occurrence of {@code call} and before it, and there is at least one.
