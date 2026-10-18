@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Bot operator-permission lookup reaches the leveled predicate (was null since 1.1.232); 1.1.271 (2026-10-18)
+
+One-bug build from the 1.1.270 triage finding: every Nirn and sandbox log since 1.1.232 said `[PermCheck] operator-permission mode=permission-all-mapped-fallback`, never `leveled-mapped`.
+
+- **Cause** (`7dba5ee4`, `Frens.java`): `OPERATOR_PERMISSION_RESOLUTION = resolveOperatorPermissions()` sat at line 92, above the `LEVELED_PERMISSION_FIELDS` array (line 199). Static initializers run in source order. The String constants are compile-time constants and got inlined, the `String[][]` did not, so the leveled lookup ran over a null array, threw NPE, logged it at debug only and returned null. javap of the deployed 1.1.270 `Frens.class`: putstatic `OPERATOR_PERMISSION_RESOLUTION` at offset 11, `LEVELED_PERMISSION_FIELDS` at 132. The intermediary names were right all along (`class_12086` fields `field_63181`-`field_63185`, `class_12096.field_63208`, checked against the 1.21.11 Yarn `mappings.tiny`). Fix: the four constants now sit above the resolution, with a comment saying why; the `resolveMappedStatic` javadoc no longer claims nothing is logged.
+- **What the fallback granted** (javap of the 1.21.11 jar): `PermissionPredicate.ALL` is a lambda returning true for every `Permission`. `LeveledPermissionPredicate.OWNERS` returns true for every `Permission.Level` (OWNERS is the top level) and for `ENTITY_SELECTORS` (needs GAMEMASTERS), false for any other `Permission.Atom`. Vanilla defines no other Atom, and Carpet's `/player` check (`CommandHelper.canUseCommand`) uses the vanilla level checks, so bot command sources (chat sends, Carpet `/player` moves in `ChartPathToBlock` and `modCommandRegistry`) behaved the same. The only difference is a third-party mod that registers its own Atom permission: ALL passed it, OWNERS denies it, which is the intended least-privilege. Nothing in vanilla reads a source's predicate type (the only `LeveledPermissionPredicate` casts are op-list and server.properties code). `/bot` permission checks (`hasBotCommandPermission`) use ops.json and the host test, not this predicate, so they never changed.
+- **Ruling (Claude, on Bradley's standing pre-approval):** fix rather than reword Phase 6v to accept the fallback, because the fallback came from a bug, not a design. Cost if wrong: a modded server where something only the ALL predicate passed would now refuse a bot's command; revert is moving four lines back.
+- **Autopsy:** 1.1.232 checked that the log line printed, not which branch produced it. A mode log line is only evidence when the expected mode name is in it.
+
+Tests 2853 → 2853 (no unit test possible: the bug is class-init order of a class that needs `net.minecraft.*`; the proof is the startup log line).
+
+**Field checks:** Phase 6v "Startup permission mode" reworded to the 1.1.271 line; no new items.
+
 ## Rescue sees a refused or locked chest and an absent owner, honey reaches a hive from close up and deposits into a real chest, field checklist triage; 1.1.270 (2026-10-18)
 
 Two deferrals from the 1.1.269 handoff, each scoped read-only first, plus the field-checklist triage that the 1.1.268 and 1.1.269 handoffs had dropped.

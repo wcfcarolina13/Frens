@@ -4,12 +4,19 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-18 (1.1.270) — next session starts here
+## Session Handoff 2026-10-18 (1.1.271) — next session starts here
+
+**State:** main = origin/main @ 1.1.271. Suite 2853 green. Deployed to Nirn; the mcp-sandbox still has 1.1.270 (a field sweep held the sandbox lock at release time), deploy there when the lock is free.
+**1.1.271:** the bot operator-permission lookup now reaches `leveled-mapped` OWNERS. Since 1.1.232 a static-init order bug (the leveled field list was still null) made every launch fall back to `PermissionPredicate.ALL`. The fallback was harmless in vanilla and Carpet; the changelog entry has the javap evidence.
+**Field checklist drain:** unchanged from the 1.1.270 handoff below (step 2: sandbox sweeps of phases 0 to 6ai, then step 3, one guided session). The permission finding is resolved; Phase 6v now expects the 1.1.271 line. **Checklist 267 open.**
+**Next:** the 1.1.270 Next list still stands.
+
+## Session Handoff 2026-10-18 (1.1.270) — superseded
 
 **State:** main = origin/main @ 1.1.270. Suite 2853 green. Deployed to Nirn and the mcp-sandbox instance.
 **1.1.270** (changelog entry has rulings and costs): emergency rescue stops counting chest food behind a refusal or owner-away hold, a denied chest (foreign, locked, territory) or an owner out of prompt range (`SupplyWithdrawals.grantablePreview`), and memoizes its chest scan 20 ticks; honey_collect reaches a hive from about 4 blocks (feet-based reach, nudge onto the stand) and deposits into an existing chest within 32 blocks only when still full after packing. Fable review: one Important (chest access), fixed.
 **Sandbox:** Phase 6bi passed on the 1.1.270 jar (`tools/sandbox/rescuetest.py`, save "Wall Test"), plus owner-away and honey from 4 and 8 blocks. No new field items. **Checklist 267 open.**
-**Field checklist drain (Bradley's plan 2026-10-18, carry this line forward until step 3 is done):** step 1 done in 1.1.270 (`2fb21417`, 10 closed, 27 more already closed by the 6aj-6bg sweep). The 9 NEEDS-JUDGEMENT items are answered (Bradley took Claude's picks 2026-10-18): 8 reworded in place to the part still worth checking, 6ar was already ticked. New finding: the bot operator-permission lookup has used `permission-all-mapped-fallback` in every log since 1.1.232 (never `leveled-mapped`), see Phase 6v; investigate. Next: step 2, sandbox sweeps of the older phases (0 to 6ai) the way 6aj-6bg was swept, then step 3, one guided session with Bradley.
+**Field checklist drain (Bradley's plan 2026-10-18, carry this line forward until step 3 is done):** step 1 done in 1.1.270 (`2fb21417`, 10 closed, 27 more already closed by the 6aj-6bg sweep). The 9 NEEDS-JUDGEMENT items are answered (Bradley took Claude's picks 2026-10-18): 8 reworded in place to the part still worth checking, 6ar was already ticked. The operator-permission finding was fixed in 1.1.271. Next: step 2, sandbox sweeps of the older phases (0 to 6ai) the way 6aj-6bg was swept, then step 3, one guided session with Bradley.
 **Next:**
 - **Modrinth:** the 1.1.268 notes draft (`.superpowers/sdd/modrinth/MODRINTH_NOTES_1.1.268_DRAFT.md`, base checkout, untracked, over length) still waits for Bradley's OK. The Discord post of 2026-10-18 promised the Spawn-tree scaffold "in the next Frens release". If he wants 1.1.270 shipped, add the 1.1.269 and 1.1.270 fixes and trim to about 700 words.
 - Deferred, new: an unanswered supply prompt expires in 30 s and counts as an answer (60 s hold), so the rescue and the prompt take turns a minute at a time for an owner who ignores chat (ruling: should an expired prompt hold the rescue's chest-food view?); the off-thread rescue hop (ensureAtSurface callers run the rescue on workers); the preview does not read the per-chest reject cooldown; an ownership filter for deposits across all skills; the rest of `assessDireStraits` still runs every tick for a starving bot that is not dire; the nudge may stop about 0.7 blocks off centre at an exact-edge honey stand.
