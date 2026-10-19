@@ -2,13 +2,14 @@
 
 Step 2 of Bradley's field-checklist drain plan (2026-10-18). Claude swept the open items of phases 0 to 6ai of
 `FIELD_SESSION_1.1.202.md` in the `mcp-sandbox` Prism instance over the MCP API, alone, on `frens-1.1.270-release+1.21.11.jar`
-(the jar already in the sandbox; nothing was deployed). Nirn was never launched. The checklist was swept against the
+(sessions 1-3), then `frens-1.1.271-release+1.21.11.jar` (session 4, copied from Nirn's `mods/`, md5 ec6d16a7..., sandbox closed). Nirn was never launched. The checklist was swept against the
 text after Bradley's triage rulings (`124595f7`). Phases 7-10 are out of scope (they come after 6ai).
 
-**Counts in `FIELD_SESSION_1.1.202.md`:** before 267 open, 95 done; after **214 open, 148 done** (`grep -c '^- \[ \]'` and `'^- \[x\]'`).
+**Counts in `FIELD_SESSION_1.1.202.md`:** before 267 open, 95 done; after **208 open, 154 done** (`grep -c '^- \[ \]'` and `'^- \[x\]'`).
 
-239 open items were in scope. 71 got a verdict: **53 PASS (ticked), 10 FAIL, 8 PARTIAL**. 49 need Bradley or were reworded
-for a part not set up (listed below with the reason), 119 were not reached in this session's time. Every item with a verdict
+239 open items were in scope. 78 got a verdict: **59 PASS (ticked), 9 FAIL, 10 PARTIAL**. 49 need Bradley or were reworded
+for a part not set up (listed below with the reason, all already in `GUIDED_SESSION_BRADLEY.md`), 13 more are listed in that
+guided doc and were left to it, and 99 sandbox-checkable items were not reached. Every item with a verdict
 also got a `Sandbox 2026-10-18:` sub-line in the checklist. No high-severity finding: nothing stops a feature for a whole session,
 apart from finding 5 (a guarding bot wedged in a hole never climbs out).
 
@@ -19,11 +20,17 @@ Sessions (each save a fresh copy made with `tools/sandbox/worldcopy.py` while th
 | S1 (16:49-16:52) | `Sweep Souls`, copy of `New World`, commands on | Phase 0, first banter |
 | S2 (16:57-17:47) | `Sweep Souls` again | souls: phases 1-6, 6j-6o, 6q, 6v-6x |
 | S3 (17:47-18:51) | `Sweep Old`, copy of `New World`, commands on, plus one relaunch | crafting, bundles, guard escape, supplies, idle upgrade, woodcut, drop sweep, build, home data, auto-spawn |
+| S4 (18:57-19:20, 1.1.271) | `Sweep Old2`, copy of `New World`, commands on, Flashback recording | 6v permission line, 6t full bag, gear, flower, far table; supply commands; unreachable drop; fishing memory |
 
 Setup: Piper came from Nirn's installed `config/frens/piper/` folder, copied into the sandbox config (read-only use, no download).
 Souls ran on Ollama `llama3.1:8b` through `tools/sandbox/ollama_tap.py`, a loopback tap that records each `/api/chat` request,
 so the prompt checks (contract, BELIEFS, CURRENT STATE) could be read. The sandbox config points back at 11434 again.
 `/bot config diagnostics` was left on and the soul novelty/relations/structured toggles on in the sandbox config.
+
+**Replays (S4 only; S1-S3 ran before the recording rule):** in `mcp-sandbox/minecraft/flashback/replays/`, named in each S4 row.
+- `frens_1_1_271_6t_full_bag_gear_craft.zip` (18:58-19:06): the junk drop and bread pickup at about 19:00:2x, the sword hand-over between Jake and Bob at 19:02:35, Jake walking 15 blocks to a table and crafting at 19:06:04-08. Best visual moment: the sword hand-over.
+- `frens_1_1_271_6q_6aa_supply_cmds_and_drops.zip` (19:07-19:12): supply commands (chat only), the sapling on the leaves, then two trees felled by Jake at 19:11:3x-19:12:25 (good felling footage).
+- `frens_1_1_271_6f_fishing_spot_memory.zip` (19:12-19:20): Jake casting into the pond under the overhang.
 
 ## Findings (backlog for a fix build)
 
@@ -64,7 +71,14 @@ Each finding is a hypothesis for the scoper, not a diagnosis.
 11. **"Picked up N items." overcounts (minor).** S3 drop sweep: chat "Picked up 27 items.", skill summary `collected: 20`,
     bag 21 items after a `/clear`. The 1.1.234 count fix (`d7ce8aaf`) does not hold here.
 12. **Phase 6v permission mode** (known, not investigated here): every 1.1.270 launch logged `operator-permission mode=permission-all-mapped-fallback`.
-    Recorded as FAIL. Already fixed in 1.1.271 (`7dba5ee4`, static-init order), which shipped while this sweep ran; recheck on any 1.1.271 launch.
+    Fixed in 1.1.271 (`7dba5ee4`, static-init order): S4 on 1.1.271 logs `mode=leveled-mapped ... OWNERS`. The item is PARTIAL only for the Carpet `/player` half (no Carpet in the sandbox).
+13. **`/bot craft` right after a failed table reach ignores a reachable table and burns planks (minor, needs repro).** S4 19:04:31: a table 15 blocks away
+    on open ground, 6 planks: "No crafting table found; attempting to craft one.", crafted a table from 4 planks, failed to place it beside the bot,
+    then "I need 3 planks and 2 sticks ... I have a crafting table but can't place it here." The previous run had walked to a buried table and failed
+    ("I need a crafting table placed nearby"). 90 s later the same command walked to the table and crafted. A reach cooldown or the
+    `LAST_KNOWN_CRAFTING_TABLE` entry is the suspect.
+14. **The fishing spot search takes 18.7 s (minor).** S4 `/bot fish 1` beside a 7x7 pond: `Fishing spot search took 18729ms` before the first cast
+    (the remembered spot on later runs is instant).
 
 Not a finding but worth a look: Streaming first-word latency is about 5-7 s with `llama3.1:8b` (Ollama `promptEvalMs` 1.7-4.4 s
 plus Piper 0.5 s), over the ~3 s target. The 1.1.226 auto-spawn reserve no longer leaves a bot out now that auto-spawn waits for
@@ -107,6 +121,7 @@ the host (7 bots + host = 8/8 spawned fine), so that item's "6 bots" text may be
 | 6f | `/bot direction reset` is the real name (1.1.207) | PARTIAL | S3 `/bot direction reset Jake` exists and answers "Jake has no stored work direction." Setting a direction and the next strip mine were not run. |
 | 6f | Crafting refusal says exactly what's missing (1.1.207) | FAIL | S3 Jake with 1 white wool and 10 planks, `/bot craft bed`: in the Spawn base it crafted a crafting table, failed to place it (`claim-denied protected-zone`) and said only "I crafted a crafting table but couldn't place it here."; outside the base it crafted and placed a table first (4 planks spent), then said "Can't craft bed: need 2 more matching wool". The torch half passed: 2 sticks, no coal, `/bot craft torch 4` gave "Can't craft torch: need 1 more coal or charcoal" and crafted nothing. Finding 4. |
 | 6f | Unknown craft name speaks once per 30 s (1.1.207) | FAIL | S3 `/bot craft spaceship Jake` three times in 6 s, then once 40 s later: "I don't know how to craft spaceship." all four times. Finding 7. |
+| 6f | Remembered fishing spot (1.1.207) | PARTIAL | S4 second `/bot fish 1` at the same pond: `[19:16:29] Reusing remembered fishing spot: water=60, 77, -47 stand=59, 78, -47` with no new scan. The pond sat under an overhang and three runs ended "No bites after 6 casts.", so no catch, no 40-60 block walk back and no fill-in check. The first spot search took 18.7 s (`Fishing spot search took 18729ms`). Replay `frens_1_1_271_6f_fishing_spot_memory`. |
 | 6g | Home data survives a normal quit (1.1.208, debounce) | PASS | S3 `/bot base set QuitBase` then save-and-quit within the same second: `bot_home_data.json` mtime moved to the quit second and holds QuitBase, no `frens-bot-home-writer` exception; after relaunch `/bot base list` shows `QuitBase @ 120, 103, -58`. |
 | 6j | Toggle defaults off and round-trips (1.1.211) | PASS | S2 `/bot soul novelty status` "Novelty rejection is OFF", `on`, status "is ON", settings.json5 `"soulNoveltyRejectionEnabled": true`. Singleplayer only; the LAN/dedicated sync half was not run. |
 | 6k | Peer entry appears after shared scenes (1.1.212) | PASS | S1/S2 `peer stance bot=Jake peer=Bob trust=4 exasperation=0 curiosity=3` and the Bob mirror (16:51:47). mind.json: Jake's `peerStances` has one entry keyed `6a00845c...` (Bob's UUID), Bob's keyed `2af3f0a5...` (Jake's), values `trust 4, exasperation 0, curiosity 3`, trust off baseline. |
@@ -126,6 +141,7 @@ the host (7 bots + host = 8/8 spawned fine), so that item's "6 bots" text may be
 | 6q | "Guys" and "everyone" reach both bots (1.1.219) | PARTIAL | S2 "hey guys, what's the plan?" `scene-routing ... candidates=2 eligible=2 outcome=submitted` (17:04:15, 17:14:22), no "Processing your message". Only Bob spoke (`lines=1`, finding 2). The party-OFF half was not run. |
 | 6q | A named bot beats a soft word (1.1.219) | PASS | S2 "hey guys, Jake come here" (17:10:44): one `[souls] routing ... bot=2af3f0a5` (Jake), no scene-routing line, only Jake answered ("I'm here. What's up?"). |
 | 6q | Trailing name and comma lists (1.1.219) | PASS | S2 "where did Bob put the torches, Jake?" routed to Jake only (17:11:27); "Jake, Bob come here" gave `scene-routing ... candidates=2 eligible=2` (17:15:47, after Bob was rebound); "Bob, Jake says the chest is full" routed to Bob only (17:16:29). |
+| 6q | Supply commands are safe for non-ops (1.1.219) | PASS | S4 as the host: `/frens supply answer 00000000-... once` gave `[supply] answer ... result=NOT_FOUND` and "That request is no longer open."; `/frens supply revoke` on a fresh chest gave `revoke ... removed=false` and "Nothing to revoke: you hadn't allowed \"always\" for the chest at 58, 79, -61."; `[supply] started: 0 standing permission(s) restored` at load. Nothing moved, no error. Not tried from a non-op account. Replay `frens_1_1_271_6q_6aa_supply_cmds_and_drops`. |
 | 6s | Do this first: mark your supply chest Always (1.1.221) | PARTIAL | S3 Always works for food: `choice=always result=GRANTED_ALWAYS` (18:12:53), the next take `outcome=COVERED_BY_ALWAYS ... MOVED` with no prompt. The axe case never prompted: `/bot skill woodcut` with no axe beside a chest of 2 stone axes punched a tree ("No axe yet, so I'll punch a tree first.", the 1.1.229 bootstrap) and logged no `[supply]` line. Finding 8. |
 | 6s | Allow once really lets him take it (1.1.221) | PASS | S3 (bread, not the axe/sword kit): `answer ... choice=once result=GRANTED_ONCE` at 18:07:02, `withdraw ... result=MOVED moved=2` at 18:07:08 (6 s), no second prompt for it. Also planks for a craft: once at 18:16:55, `MOVED` at 18:16:58. |
 | 6s | No means no (1.1.221) | PASS | S3 `food 10 no 70`: `choice=no result=REJECTED`, then `withdraw ... REFUSED reason=NOT_PERMITTED`, and 68 s later `request ... outcome=REJECT_COOLDOWN` with no new prompt. Nothing moved. Three minutes later the same chest still answered REJECT_COOLDOWN. |
@@ -134,8 +150,12 @@ the host (7 bots + host = 8/8 spawned fine), so that item's "6 bots" text may be
 | 6s | Crafting and seeds from a chest (1.1.221, new behaviour) | PARTIAL | S3 craft half: the first `/bot craft stick` asked (`purpose=craft-planks ... WAITING`) and answered "Sticks need 2 planks per craft."; after [Allow once] the second run `withdraw ... MOVED moved=2` then "Crafted 4 Sticks." The harvest seeds half was not set up. |
 | 6s | Revoke all (1.1.221) | PASS | S3 after an Always: `[18:14:14] [supply] revoke-all owner=RotiWokeman removed=1 grants=0`, chat "Revoked 1 standing permission(s)...", and the next hunger take prompted again (`outcome=OPENED` 18:14:24). |
 | 6t | Idle stone upgrade with a table in reach (1.1.222) | PARTIAL | S3 with the item's kit (wooden pickaxe and shovel, 3 cobblestone, 2 sticks, table 2 blocks away, idle hobbies on) nothing crafted in 100 s: every 12 s `Idle wooden fallback: Jake blocked — no safe woodcut target near or ahead`, which runs before the stone upgrade and returns first (finding 9). With a wooden axe and sword added: `[18:20:19] Crafted 1 pickaxe(s) using stone ...`, `Idle stone upgrade: Jake upgraded wooden tools to stone`, at the table in reach, no walk, no `Can't keep up!`. |
+| 6t | `/bot craft` still walks to a far table (1.1.222, unchanged) | PASS | S4 planks in the bag, a table 15 blocks away on open ground: "Give me a moment. I'll use the crafting table at 57, 79, -59.", walked there in 4 s, "Crafted 1 Wooden Pickaxe.", no `craft-station tick-side` line. A run 20 s earlier, right after a failed reach, did not see that table, crafted a spare one from 4 of its 6 planks and could not place it (finding 13). Replay `frens_1_1_271_6t_full_bag_gear_craft`. |
+| 6t | A starving bot with a full bag drops junk, not a chest walk (1.1.222) | PASS | S4 (1.1.271) Jake with 36 stacks of cobblestone and dirt, a chest 10 blocks away, hunger 4, a bread summoned at his feet: `[19:00:2x] Dropped 64x Cobblestone to free inventory space.`, `Mutual aid: Jake cleared inventory space for nearby dropped food Bread`, food 4 to 9, no walk (same spot), no `Can't keep up!`. (A first try failed only because the player stood on the same block and took the bread.) Replay `frens_1_1_271_6t_full_bag_gear_craft`. |
+| 6t | Gear: the full bot only makes room when there is something to give (1.1.222) | PASS | S4 Bob full of junk with no weapon, Jake one stone sword: no `to free inventory space` for Bob in 65 s. Two more swords to Jake: `[19:02:35] Dropped 64x Cobblestone to free inventory space.`, `Mutual aid: Jake offered spare gear to Bob`, `shared Stone Sword with Bob after acknowledgment`. Replay `frens_1_1_271_6t_full_bag_gear_craft`. |
+| 6t | A flower never makes a full bot drop anything (1.1.222) | PASS | S4 Bob full, Jake carrying 5 poppies and 5 dandelions for 65 s: no `to free inventory space` line for Bob, no gift. Replay `frens_1_1_271_6t_full_bag_gear_craft`. |
 | 6u | `/bot craft stone_axe` names what's missing (1.1.223) | PASS | S3 3 sticks only: "I need 3 cobblestone and 2 sticks for a stone axe. I have 3 sticks."; with 3 cobblestone added: "Crafted 1 Stone Axe.", no "I don't know how to craft". |
-| 6v | Startup permission mode (1.1.224) | FAIL | S2/S3 every launch: `[PermCheck] operator-permission mode=permission-all-mapped-fallback class=net.minecraft.class_12096 field=ALL/field_63208`, never `leveled-mapped ... OWNERS`. Known since 1.1.232 (checklist note 2026-10-18); investigated in the separate "why bot permissions use the fallback" session, not here. |
+| 6v | Startup permission mode (1.1.224) | PARTIAL | S4 on 1.1.271: `[18:57:13] [PermCheck] operator-permission mode=leveled-mapped class=net.minecraft.class_12086 field=OWNERS/field_63185`; bots spoke in chat as before (Jake's lines through this session). Carpet is not in the sandbox, so the `/player` half was not run. (On 1.1.270 this was the fallback line, finding 12.) |
 | 6v | Diagnostics switch (1.1.224) | PASS | S2 `/bot config diagnostics off` with Jake following: 0 `Follow status:` lines in 30 s (0 in the whole log before it). `on`: 25 lines in the next 40 s. |
 | 6w | Scene logs carry no private text (1.1.225) | PASS | S2 diagnostics on, after the "I hate the Nether" DM: banter, scene and playback lines show only ids, counts, `seedChars=`, `privateSeedCount=`, `dropped rawLine=N reason=... chars=`. The only log line with the DM text is vanilla's own `[Not Secure] <RotiWokeman>` chat line. |
 | 6x | Auto-spawn after the host joins (1.1.226) | PASS | S2 reopening Sweep Souls with Jake and Bob saved: `[16:57:35] Auto-spawn deferred until the first real player joins (integrated server).`, then `RotiWokeman[local] logged in` (16:57:38) and only after it `Spawned new bot Jake!` / `Bob`, at their saved spot. |
@@ -143,11 +163,14 @@ the host (7 bots + host = 8/8 spawned fine), so that item's "6 bots" text may be
 | 6aa | Woodcut from nothing (1.1.229) | PASS | S3 Jake empty in the forest, `/bot skill woodcut`: `Woodcut axe bootstrap: Jake has no axe, punching logs bare-handed`, chat "No axe yet, so I'll punch a tree first.", first punch about 4 s later, `has enough wood (logs=3 planks=0 sticks=1), crafting an axe` (18:26:24), `crafted an axe, back to normal woodcut`, then normal felling. It used an existing table 45 blocks away instead of placing one. The `admin-zone` rejects are an old zone at 59,-112, not the Spawn base. No A* timeout. |
 | 6aa | Follow comes back after a task, no "Busy" (1.1.229) | PASS | S3 Jake following, `/bot skill woodcut 4 Jake` ran four trees and ended: `[18:34:53] [FollowAssert] task-resume bot=Jake mode=follow ... resumed=true result='Now following RotiWokeman.'`, no "Busy with another task" and no "Stopping follow command." |
 | 6aa | No axe wear on dirt (1.1.229) | PASS | S3 two woodcut runs with an axe and dirt: every dirt pillar and bridge block came down `with minecraft:dirt` in hand (300-750 ms), never the axe. Note: plank bridge blocks were also mined with planks in hand, some at about 3000 ms each, not with the axe (finding 10). |
+| 6aa | Unreachable drop given up fast (1.1.229) | PASS | S4 a sapling dropped on a persistent leaf block 4 above idle Jake (idle hobbies on for 2 of the 3 minutes): no `[IdleSweep]` target at it, so no bot stared at it. The abandon path was not exercised. Replay `frens_1_1_271_6q_6aa_supply_cmds_and_drops`. |
 | 6ae | Leaves drop saplings, teardown uses hands (1.1.233) | PASS | S3 Jake with stone pickaxe, iron axe, shears and 32 dirt woodcut two trees with a 2-step dirt pillar: the dirt teardown was mined `with minecraft:dirt` in hand, stone pickaxe `damage 0` before and after (shears also 0). Plank scaffold was not part of this run. |
 | 6af | Drop sweep, return and craft feedback (1.1.234) | FAIL | S3 drops spread around Jake, `/bot skill drop_sweep Jake`: chat "Picked up 27 items.", but the skill's own summary says `collected: 20` and Jake's bag (cleared before) holds 21 items (13 saplings, 5 logs, 2 apples, 1 stick). No fast-travel error, no return trip. Finding 11. |
 
 
 ## Items without a verdict
+
+Every item in the four "Needs Bradley" groups is already in `GUIDED_SESSION_BRADLEY.md` (built from the same checklist), so none was appended there.
 
 ### Needs Bradley: a second player, LAN guest or server op (23)
 
@@ -216,40 +239,54 @@ the host (7 bots + host = 8/8 spawned fine), so that item's "6 bots" text may be
 - 6ad: **Skins are owner-checked (1.1.232)**. reworded 2026-10-18 (triage), open for the part never tested; not set up in this sweep.
 - 6ai: **Admin toggle lets bots cut Spawn trees (1.1.238)**. reworded 2026-10-18 (triage), open for the part never tested; not set up in this sweep.
 
-### Not reached in this sweep (119)
+### Listed in GUIDED_SESSION_BRADLEY.md, not swept (13)
+
+- 4: **Voice-off beat pacing**.
+- 6: **Ambient mute matrix on banter/local (1.1.177, 1.1.178)**.
+- 6: **Global toggles UI (1.1.189, 1.1.191)**.
+- 6c: **Silas persona (1.1.204)**.
+- 6o: **Voice on, text off still arms the floor (1.1.217)**.
+- 6s: **Old bot chests prompt instead of refusing (1.1.221)**.
+- 6u: **Out through the plate gate (1.1.223)**.
+- 6u: **The bot leaves the plate's gate alone (1.1.223)**.
+- 6w: **Checklist fits a small window (1.1.225)**.
+- 6z: **Narrow fits (1.1.228)**.
+- 6z: **Scaled inventory clicks (1.1.228)**.
+- 6ag: **Questing hidden (1.1.235)**.
+- 6ai: **Own base over spawn still works (1.1.238)**.
+
+### Not reached, sandbox-checkable (99)
 
 - 1: llama3.2:3b speed vs llama3.1:8b (1.1.175, still open); Failed generation retries (1.1.184).
 - 2: ~1/3 of banter ends addressed to the player (1.1.181); Active lane fires on work (1.1.188); Pacing sliders (1.1.188); Walking away / bystander earshot (1.1.176); Cooldown spacing over the session.
 - 3: Addressing a bot mid-window closes it; Danger veto; Server-thread cost under load (1.1.178, never measured); Roster-lost backoff (1.1.179).
-- 4: Voice-off beat pacing.
-- 6: Category-muting round-trip (1.1.175); The separation proof (1.1.182); Ambient mute matrix on banter/local (1.1.177, 1.1.178); `vetoed:muted` only in the right condition (1.1.182); Two lanes, two masters (1.1.193); Live-settings apply (1.1.184); Global toggles UI (1.1.189, 1.1.191); At most one bot comments on the same thing (1.1.184).
+- 6: Category-muting round-trip (1.1.175); The separation proof (1.1.182); `vetoed:muted` only in the right condition (1.1.182); Two lanes, two masters (1.1.193); Live-settings apply (1.1.184); At most one bot comments on the same thing (1.1.184).
 - 6b: Cheats-off single-player still saves (1.1.203, review fix); Mute screen sends a mask, not a global save (1.1.203); RAM warning on the Download button (1.1.203); Dreamsleeve row on macOS (1.1.203).
-- 6c: Spells key opens the inventory Spells tab (1.1.204); Silas persona (1.1.204); Travel-wait: hobby during a fast-travel cooldown (1.1.204, P1 idle); Travel-wait cancels on stop (1.1.204); Hotbar-lock combat honesty (1.1.204, side effect).
+- 6c: Spells key opens the inventory Spells tab (1.1.204); Travel-wait: hobby during a fast-travel cooldown (1.1.204, P1 idle); Travel-wait cancels on stop (1.1.204); Hotbar-lock combat honesty (1.1.204, side effect).
 - 6d: Bundled cobblestone still gets a pillar (1.1.205); Bundled armor equips only if better (1.1.205); Boat + out-of-hotbar sword, FarmSkill/RideSync variants (1.1.205); Travel-wait offload to an existing chest (1.1.205); Offload backoff on a full chest (1.1.205); `/bot stop` during the offload does not poison later offloads (1.1.205); Furnace fuel fallback (1.1.205).
 - 6e: Swap re-validation is rare (1.1.206); Full unlocked hotbar keeps the selected slot (1.1.206); `/bot stop` during an offload does not disable later offloads (1.1.206).
-- 6f: Actions tab has no Regroup; Spells tab still does (1.1.207); Remembered fishing spot (1.1.207); Wider fishing scan (1.1.207); Farm reuses its irrigation source (1.1.207); Per-kind cap keeps fishing memory (1.1.207).
+- 6f: Actions tab has no Regroup; Spells tab still does (1.1.207); Wider fishing scan (1.1.207); Farm reuses its irrigation source (1.1.207); Per-kind cap keeps fishing memory (1.1.207).
 - 6g: Leaf-blocked navigation unchanged (1.1.208); Bridge scaffold still clears snow (1.1.208); CollectDirt ladder exit unchanged (1.1.208); Home data write is batched (1.1.208, debounce).
 - 6j: Novelty fires and does not gag the bots (1.1.211); Silas stays laconic (1.1.211); Quoted short idiom is not a repeat (1.1.211); Toggle off is silent (1.1.211).
 - 6k: Peer clause reaches the prompt (1.1.212).
 - 6l: SEEN fact forms from repeated completions (1.1.213); BELIEFS block reaches the prompt (1.1.213); Relation anchor fires and goes on cooldown (1.1.213); Toggle off is inert (1.1.213).
 - 6m: A malformed tail never costs a scene (1.1.214); A model fact lands as INFERRED at ≤0.6 (1.1.214); Model stance delta is peers-only and once per day (1.1.214).
 - 6n: No two bots talk over each other (1.1.216); Scripted lines do not interleave with a soul scene (1.1.216); A scene still gets through a scripted floor (1.1.216); The two banter lanes respect one quiet period (1.1.216); Muting scripted dialogue does not mute souls (1.1.216); Mount and animal lines stop repeating (1.1.216); A hurt wolf still gets an answer (1.1.216); The woodcut storm is gone (1.1.216); The backoff ladder widens (1.1.216); An axe in a chest wakes it back up (1.1.216); Commanded work still starts immediately (1.1.216).
-- 6o: Torch stays up in the dark (1.1.217); Quit mid-hold does not reload with a torch in hand (1.1.217); Scripted lines hold off while a scene is generating (1.1.217); Voice on, text off still arms the floor (1.1.217); Scripted logs tell the truth (1.1.217); Model switch keeps voices alive (1.1.217, Codex 7a663785); Group-chat hint appears once (1.1.217, Codex 43bd5474).
+- 6o: Torch stays up in the dark (1.1.217); Quit mid-hold does not reload with a torch in hand (1.1.217); Scripted lines hold off while a scene is generating (1.1.217); Scripted logs tell the truth (1.1.217); Model switch keeps voices alive (1.1.217, Codex 7a663785); Group-chat hint appears once (1.1.217, Codex 43bd5474).
 - 6p: Hovel builder uses the door from the wall line (1.1.218); No fall off a raised floor (1.1.218); Line-of-sight retries stay local (1.1.218); `/bot stop` mid-egress stops cleanly (1.1.218).
-- 6q: Handled lines don't become DMs (1.1.219); Bot-placed chests record their owner (1.1.219, supplies groundwork); Supply commands are safe for non-ops (1.1.219).
+- 6q: Handled lines don't become DMs (1.1.219); Bot-placed chests record their owner (1.1.219, supplies groundwork).
 - 6r: Collect still works for the owner (1.1.220); Go and Dismiss still work for the owner (1.1.220); Quick Store / Quick Fetch still work for the owner (1.1.220).
-- 6s: Walking away keeps the log quiet; coming back works at once (1.1.221); Old bot chests prompt instead of refusing (1.1.221); Never-allowed items stay put (1.1.221).
-- 6t: A far table: no walk, no freeze, one quiet line (1.1.222); A table in his bag gets placed beside him (1.1.222); `/bot craft` still walks to a far table (1.1.222, unchanged); A starving bot with a full bag drops junk, not a chest walk (1.1.222); Gear: the full bot only makes room when there is something to give (1.1.222); A flower never makes a full bot drop anything (1.1.222).
-- 6u: Out through the plate gate (1.1.223); The bot leaves the plate's gate alone (1.1.223); Ordinary doors still get closed behind the bots (1.1.223); No server-thread walk warning (1.1.223 tripwire); A scene that mentions you plays in full (1.1.223); Crafting window search and sort (1.1.223).
+- 6s: Walking away keeps the log quiet; coming back works at once (1.1.221); Never-allowed items stay put (1.1.221).
+- 6t: A far table: no walk, no freeze, one quiet line (1.1.222); A table in his bag gets placed beside him (1.1.222).
+- 6u: Ordinary doors still get closed behind the bots (1.1.223); No server-thread walk warning (1.1.223 tripwire); A scene that mentions you plays in full (1.1.223); Crafting window search and sort (1.1.223).
 - 6v: Your own bot still works everywhere (1.1.224).
-- 6w: Setup checklist, cheats-off singleplayer (1.1.225); Enable message names the blocker (1.1.225); Checklist fits a small window (1.1.225); Bot Controls keeps a Soul Chat change (1.1.225).
+- 6w: Setup checklist, cheats-off singleplayer (1.1.225); Enable message names the blocker (1.1.225); Bot Controls keeps a Soul Chat change (1.1.225).
 - 6y: Spawn and command with commands off (1.1.227); Roster and hints (1.1.227).
-- 6z: Wide unchanged (1.1.228); Narrow fits (1.1.228); Scaled inventory clicks (1.1.228).
-- 6aa: No crevice suffocation on pickups (1.1.229); Unreachable drop given up fast (1.1.229).
+- 6z: Wide unchanged (1.1.228).
+- 6aa: No crevice suffocation on pickups (1.1.229).
 - 6ab: Bot says why it skips your base trees (1.1.230).
 - 6ac: Buttons still work for the host (1.1.231).
-- 6ag: Questing hidden (1.1.235).
-- 6ai: Own base over spawn still works (1.1.238).
+
 
 ## Test-method notes
 
@@ -264,4 +301,6 @@ the host (7 bots + host = 8/8 spawned fine), so that item's "6 bots" text may be
 - `/bot skill build <schematic>` (not `/bot build`); small_hut needs a torch. `/bot idle_hobbies on <bot>` turns hobbies on.
 - Supply prompts: `/frens supply answer <id> once|always|no` inside 30 s; a "No" holds that chest and item for more than 3 minutes
   (`REJECT_COOLDOWN`), so move the chest (`SX=` in supplytest.py) between runs.
-- New tools: `tools/sandbox/ollama_tap.py` (prompt tap), `tools/sandbox/supplytest.py` (6s prompts).
+- New tools: `tools/sandbox/ollama_tap.py` (prompt tap), `tools/sandbox/supplytest.py` (6s prompts), `tools/sandbox/rec.py start|stop <name>|status` (Flashback from the pause menu; the save dialog's name field is index 2, Save Replay index 6).
+- A player standing on the bot's block picks up items summoned at the bot's feet: step away before a dropped-item check.
+- A table set into a hillside (`setblock` into terrain) is buried: clear the cells around it first.

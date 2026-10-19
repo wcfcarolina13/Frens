@@ -485,6 +485,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Bradley does: `/bot craft spaceship` three times in ten seconds, then once more after 40 s.
   - Pass when: `I don't know how to craft spaceship.` appears at the 1st and 4th attempt only.
 - [ ] **Remembered fishing spot (1.1.207)**
+  - Sandbox 2026-10-18: PARTIAL: S4 second `/bot fish 1` at the same pond: `[19:16:29] Reusing remembered fishing spot: water=60, 77, -47 stand=59, 78, -47` with no new scan. The pond sat under an overhang and three runs ended "No bites after 6 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot fish 1` at a pond, let him catch one; walk him 40–60 blocks away where no water
     is visible; `/bot fish 1` again.
   - Claude watches for: `Reusing remembered fishing spot: water=… stand=…`; then normal casting.
@@ -1005,7 +1006,8 @@ nearby, solo. Supplies Phase 2 is dormant: bots can't ask for chest items yet, s
   - Pass when: the new record has `"ownerUuid"` set to Bradley's UUID. Records from before 1.1.219 have no owner;
     that is expected and they are refused for future supply requests until re-placed. (Superseded by 1.1.221: they
     prompt like any other chest; see Phase 6s.)
-- [ ] **Supply commands are safe for non-ops (1.1.219)**
+- [x] **Supply commands are safe for non-ops (1.1.219)**
+  - Sandbox 2026-10-18: PASS: S4 as the host: `/frens supply answer 00000000-... once` gave `[supply] answer ... result=NOT_FOUND` and "That request is no longer open."; `/frens supply revoke` on a fresh chest gave `revoke ... removed=false` and ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: as a non-op (or just as himself), `/frens supply answer 00000000-0000-0000-0000-000000000000 once` and
     `/frens supply revoke ~ ~ ~` on a chest.
   - Claude watches for: `[supply] answer … result=NOT_FOUND` (or NOT_RUNNING_OR_INVALID) and
@@ -1155,26 +1157,30 @@ Grep: `craft-station tick-side`, `Idle stone upgrade`, `to free inventory space`
   - Bradley does: the same kit plus 1 crafting table in Jake's inventory, with no table nearby.
   - Claude watches for: `Idle stone upgrade: Jake upgraded wooden tools to stone`, and no `Can't keep up!`.
   - Pass when: a crafting table appears within 2 blocks of him and he crafts the stone pickaxe.
-- [ ] **`/bot craft` still walks to a far table (1.1.222, unchanged)**
+- [x] **`/bot craft` still walks to a far table (1.1.222, unchanged)**
+  - Sandbox 2026-10-18: PASS: S4 planks in the bag, a table 15 blocks away on open ground: "Give me a moment. I'll use the crafting table at 57, 79, -59.", walked there in 4 s, "Crafted 1 Wooden Pickaxe.", no `craft-station tick-side` line. A run ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with a crafting table about 15 blocks away and planks in Jake's bag (no table in it), run
     `/bot craft` for a wooden pickaxe.
   - Claude watches for: no `craft-station tick-side` line for this command.
   - Pass when: he walks to that table and crafts, as before.
-- [ ] **A starving bot with a full bag drops junk, not a chest walk (1.1.222)**
+- [x] **A starving bot with a full bag drops junk, not a chest walk (1.1.222)**
+  - Sandbox 2026-10-18: PASS: S4 (1.1.271) Jake with 36 stacks of cobblestone and dirt, a chest 10 blocks away, hunger 4, a bread summoned at his feet: `[19:00:2x] Dropped 64x Cobblestone to free inventory space.`, `Mutual aid: Jake cleared ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: fill Jake's bag with cobblestone and dirt stacks, put a chest 10 blocks away, then run
     `/bot set hunger 4 Jake` and drop a bread at his feet.
   - Claude watches for: `Dropped 64x … to free inventory space.`, then
     `Mutual aid: Jake cleared inventory space for nearby dropped food`. No `Can't keep up!`.
   - Pass when: he throws out one junk stack and eats the bread without walking to the chest. Rarely he may pick his
     own stack back up after 2 s; that is known and accepted.
-- [ ] **Gear: the full bot only makes room when there is something to give (1.1.222)**
+- [x] **Gear: the full bot only makes room when there is something to give (1.1.222)**
+  - Sandbox 2026-10-18: PASS: S4 Bob full of junk with no weapon, Jake one stone sword: no `to free inventory space` for Bob in 65 s. Two more swords to Jake: `[19:02:35] Dropped 64x Cobblestone to free inventory space.`, `Mutual aid: Jake ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: fill Bob's bag with junk and take every sword, axe and pickaxe from him (the gear share counts any
     axe or pickaxe as a weapon). Give Jake one weapon and no leather armour, and wait a minute. Then give Jake two
     stone swords; he gives away a spare only when he holds at least two weapons.
   - Claude watches for: no `to free inventory space` line for Bob in the first minute. After the sword, one
     `Dropped …` for Bob, then `Mutual aid: Jake offered spare gear to Bob`.
   - Pass when: Bob throws nothing away until Jake actually has a sword for him.
-- [ ] **A flower never makes a full bot drop anything (1.1.222)**
+- [x] **A flower never makes a full bot drop anything (1.1.222)**
+  - Sandbox 2026-10-18: PASS: S4 Bob full, Jake carrying 5 poppies and 5 dandelions for 65 s: no `to free inventory space` line for Bob, no gift. Replay `frens_1_1_271_6t_full_bag_gear_craft`. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: keep Bob's bag full, and give Jake a few flowers.
   - Claude watches for: no `to free inventory space` line for Bob.
   - Pass when: Bob keeps all his stacks; the flower gift simply doesn't happen while he is full.
@@ -1242,7 +1248,7 @@ Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilCl
 Grep: `[bot-access] denied`, `[PermCheck]`, `scene privacy stop`, `[legacy-chat] denied`, `sqlite-vec`, `Downloading`, `NLP model`.
 
 - [ ] **Startup permission mode (1.1.224)**
-  - Sandbox 2026-10-18: FAIL on 1.1.270: every launch logged `[PermCheck] operator-permission mode=permission-all-mapped-fallback`. Fixed in 1.1.271 (`7dba5ee4`), recheck on the next launch. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
+  - Sandbox 2026-10-18: PARTIAL: S4 on 1.1.271: `[18:57:13] [PermCheck] operator-permission mode=leveled-mapped class=net.minecraft.class_12086 field=OWNERS/field_63185`; bots spoke in chat as before (Jake's lines through this session). Carpet is ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): the library half is closed (sqlite-vec, xattr, the NLP model and the legacy stack were deleted in 1.1.243-1.1.251, and the 1.1.270 sandbox log has none of those lines). Only the permission check is left.
   - Found 2026-10-18: every log from 1.1.232 to 1.1.270 showed `mode=permission-all-mapped-fallback`. Cause: a static-init order bug (the field list was still null when the lookup ran). Fixed in 1.1.271. The old fallback was harmless (ALL grants everything OWNERS does in vanilla and Carpet), see the 1.1.271 changelog.
   - Claude watches for (startup, no play needed; any 1.1.271+ launch): `[PermCheck] operator-permission mode=leveled-mapped class=net.minecraft.class_12086 field=OWNERS/field_63185`.
@@ -1424,7 +1430,8 @@ Best on a brand-new Survival world (the `frens-fresh` instance or a new world on
   - Bradley does: woodcut near uneven ground where drops fall into 1-high gaps.
   - Claude watches for: `Drop sweep nudge skipped near …: no 2-high clearance`. No `nudged away from wall … to escape collision clip`.
   - Pass when: the bot never takes suffocation damage while picking up and leaves items it can't safely reach.
-- [ ] **Unreachable drop given up fast (1.1.229)**
+- [x] **Unreachable drop given up fast (1.1.229)**
+  - Sandbox 2026-10-18: PASS: S4 a sapling dropped on a persistent leaf block 4 above idle Jake (idle hobbies on for 2 of the 3 minutes): no `[IdleSweep]` target at it, so no bot stared at it. The abandon path was not exercised. Replay ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: while bots idle, leave a sapling or item up in leaves 3+ blocks above them (or wait for one to land there).
   - Claude watches for: either no `[IdleSweep]` target at it, or `[IdleSweep] <bot> abandoning unreachable drop at … (dy=3+) … no progress for 3s`. If the item falls, the bot follows it to the new spot.
   - Pass when: no bot stares at an unreachable item for more than a few seconds.
