@@ -4,7 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-19 (1.1.273) — next session starts here
+## Session Handoff 2026-10-19 (1.1.274) — next session starts here
+
+**State:** main = origin/main @ 1.1.274. Suite 3050 green. Deployed to Nirn. Sandbox: 1.1.273 checks run by a background agent this session (results in Phase 6bk and the sweep doc when its commit lands); 1.1.274 not yet sandbox-checked.
+**1.1.274** (changelog entry has rulings and costs): woodcut keeps its axe (the AutoFaceEntity cliff branch ran the combat loadout with no hostile: the 1.1.273 re-poll axe source), slower re-poll swap extends the timeout, 13 craft after a failed reach, 7 unknown-craft line throttled, 14 fishing search capped at 1.5 s, farm no-hoe with standing crops, idle leather/cobble fallbacks run (wooden fallback reports work only when it did some), 3 same speaker twice, 20 first sightings survive a relaunch (minds preload), 21 damage and tasks in words, 26 chest registry per save fingerprint, resume arm id. Fable review (two reviewers), one fix wave (`cca278d8`), controller read the fix diff.
+**Public release:** 1.1.274 is the candidate once its sandbox checks pass. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Needs Bradley:** the three 1.1.272 questions still stand (Spells key migration, chest axe before crafting, shared-server chest scan).
+**Deferred (reasons in the changelog):** craft call that hits a failed reach still makes a spare table; spare table placement miss; fishing A* node cap; axe-bearer's failing woodcut ignores the per-hobby backoff; merged scene lines truncated at 300 chars; BotHomeService identity-before-adopt ordering; Wither boss reads "withering"; banter director never scans around the player; group prompt hostile line count-only.
+**Findings 1-36:** all fixed except deferrals above; new findings from the 1.1.273 sandbox check (if any) are numbered 37+ in the sweep doc.
+**Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-19 (1.1.273) — superseded
 
 **State:** main = origin/main @ 1.1.273. Suite 3010 green. Deployed to Nirn only (the sandbox still has 1.1.272). Not checked in game or the sandbox yet. Phase 6bk: 4 field items; checklist 127 open.
 **1.1.273** (changelog entry has rulings and costs): second fix build from the 0-6ai sweep: 17 ambient chatter waits for the speech floor and follows the Scripted rate ("Time to punch some trees" only without an axe), 18 local director vetoes when any nearby actor is in danger, 23 a threat only resumes a task it paused within 10 min and finished skills clear their record (lost in `1296ae05`), environmental damage is not combat, 27 one stop line, 34 farm without a hoe fails, 24/28/29/36 log and chat floods, 10 bridge teardown tool, mining re-poll keeps progress on an equal-speed swap, woodcut cleanup leaves natural stone, 9 idle stone upgrade, 11 pickup count, 4 bed craft checks ingredients first. Fable review (two reviewers), one fix wave (`4ae67198`), clean re-review. The session hit a usage limit mid-build and was resumed from the CLI.
