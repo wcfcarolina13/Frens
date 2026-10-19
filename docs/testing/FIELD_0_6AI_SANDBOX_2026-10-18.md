@@ -242,8 +242,8 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
 40. **The chest registry adoption goes to the first save that loads with the level name, even when the chests are not in it (minor).**
     1.1.274 sandbox 2026-10-19 17:08:36: the first launch after the upgrade was "Sweep Souls3", a copy whose level name is also
     "New World": `Adopted legacy chest registry 'New World/minecraft:overworld' as 'New World#3644a587:minecraft:overworld'`. The block at
-    smokey's chest (68, 72, 225) is leaf litter there; the chests are in "AB R1", which then starts empty (`legacyWorldClaims` already
-    held). With the pre-upgrade file restored and AB R1 loaded first, the adoption is correct. In the sandbox every sweep save is named
+    smokey's chest (68, 72, 225) is leaf litter there; the chests are in "AB R1", which would then start empty (the claim is already
+    held in `legacyWorldClaims`; that branch was not run here). With the pre-upgrade file restored and AB R1 loaded first, the adoption is correct. In the sandbox every sweep save is named
     "New World"; for a player it bites when a copied or second default-named save loads first. The zone store already asks
     `legacyBelongsToThisSave` (`WorldStoreKeyPolicy.decideZoneStore`); the chest registry could check that a recorded chest block exists
     in this save before adopting.
