@@ -73,15 +73,18 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
   - Claude watches for: no error, no retry storm.
   - Pass when: the window closes with nothing logged as a failure.
 - [ ] **Streaming first-word latency (1.1.175, still open)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 by log: `llama3.1:8b` providerMs 8019/5476/4255 for three DMs (19:31:56-19:32:39), Piper 74-148 ms a segment; `llama3.2:3b` 2090/1896 ms after a 4829 ms load. Still over ~3 s on 8B, inside it on 3B. Replay A. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-18: FAIL: S2 by log (not by ear): DM sent 17:01:17, Ollama answer at 17:01:23 (`promptEvalMs=4386`), first segment synthesised `synthMs=545` at 17:01:24, about 7 s. Second DM 17:01:33 to first segment 17:01:38, about 5 s. ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: send Jake a DM and start a stopwatch at Enter.
   - Claude watches for: `[souls] tts correlationId=… outcome=… synthMs=… bytes=… chunks=…` and the scene's `elapsedMs=`.
   - Pass when: first audible word inside ~3 s; record the number either way.
-- [ ] **llama3.2:3b speed vs llama3.1:8b (1.1.175, still open)**
+- [x] **llama3.2:3b speed vs llama3.1:8b (1.1.175, still open)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 three DMs each: 8B median 5.5 s, 3B median 2.1 s (`Soul model set to 'llama3.2:3b'` 19:33:11, back 19:37:06). Two 3B banter scenes 4/4 lines, no MALFORMED (roster of two; roster of one not run). By speed 3B; the quality call ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: three DMs on the current model, then `/bot soul model <other>` and three more.
   - Claude watches for: `[souls] soul model set to {}` then per-turn `elapsedMs=` for both sets.
   - Pass when: both medians recorded and a preference called. Watch for 3B's known weakness — roster-of-one scenes going `MALFORMED` (1.1.184).
-- [ ] **Failed generation retries (1.1.184)**
+- [x] **Failed generation retries (1.1.184)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 `gpt-oss:20b` returns empty content (its reasoning uses the whole reply): `failed:MALFORMED` 20:29:51, then a fresh `banter ... outcome=fired` 20:31:54 with no input (2 min); again 20:32:06. Replay A. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: nothing; opportunistic.
   - Claude watches for: any `outcome=failed:` followed by a fresh attempt within ~2 min.
   - Pass when: a failure is followed by a retry, not silence. (Skip-and-note if none occurs.)
@@ -106,18 +109,21 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 - [x] **Nobody answers for the player (1.1.195)**
   - Sandbox 2026-10-18: PASS: S2 the model wrote lines as "RotiWokeman:" in 4 scenes (tap); each was cut before playback: `dropped rawLine=4 reason=OWNER_TAGGED` (17:18:16), two more at 17:21:18, one at 17:21:48. No delivered line speaks for the ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: no bot line puts words in Bradley's mouth or credits him with bot events.
-- [ ] **~1/3 of banter ends addressed to the player (1.1.181)**
+- [x] **~1/3 of banter ends addressed to the player (1.1.181)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 tap: 11 of 37 scene prompts carried "One of you may end by saying one short thing to RotiWokeman" (30 %). `addressPlayer=` is not logged at INFO, so counted from the prompts. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: `addressPlayer=true` on the fired line.
   - Pass when: across the session roughly 2/3 plain, 1/3 player-addressed.
 - [x] **`/bot soul banter now` primes both lanes (1.1.182, 1.1.188)**
   - Sandbox 2026-10-18: PASS: S1 `/bot soul banter now` at 16:51:11, `[16:51:13] banter lane=IDLE ... outcome=fired`; banter status lists both the Idle and Active lanes. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul banter now`, stand quiet 90 s.
   - Pass when: a scene inside ~10 s of eligibility; status shows both IDLE and ACTIVE lanes.
-- [ ] **Active lane fires on work (1.1.188)**
+- [x] **Active lane fires on work (1.1.188)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S6 Active on in config, `/bot skill woodcut Jake`: `banter lane=ACTIVE outcome=fired` 21:06:55 (about 2 min in), scene `kind=WORK` 4 lines, Bob "Oh, nice piece of wood!"; again 21:12:35. Replay B 21:06:55. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: set a bot woodcutting, stay nearby.
   - Claude watches for: `lane=ACTIVE … outcome=fired` within ~2.5 min.
   - Pass when: it fires and the scene mentions the work.
 - [ ] **Pacing sliders (1.1.188)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S6 Rate... after a restart showed Scripted 100 and Idle 70 (set in config, persisted). At 100: 31 voiced scripted lines in 5.9 min vs 2.9/min at 50 in S5. S7 Scripted 0 through the slider (saved, `dialogueScriptedRate: 0`): Jake ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: Banter row → **Rate…** → set Scripted to 100, play a few minutes; then 0; leave Idle at 50. Restart the client once mid-session to check persistence.
   - Pass when: 100 → denser pet/scripted remarks, 0 → near-silent, values survive restart.
 - [x] **Combat aborts a scene (1.1.177)**
@@ -125,11 +131,13 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
   - Bradley does: pick a fight mid-scene.
   - Claude watches for: `scene-playback routingId=… outcome=ambient-combat-abort`.
   - Pass when: the scene stops.
-- [ ] **Walking away / bystander earshot (1.1.176)**
+- [x] **Walking away / bystander earshot (1.1.176)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 scene 9d50eb8a 20:44:25, Bob teleported 150 blocks after line 1: `listeners=3` then 2, then 1 on Bob's own line 3 (not shown to the player), then 2. No error. No `skipped-speaker-gone` because Bob stayed online, and the far ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: walk out of earshot mid-scene; on another scene, stand at the edge of earshot.
   - Claude watches for: `scene-playback … outcome=skipped-speaker-gone`, `listeners=`.
   - Pass when: playback degrades cleanly, listener counts match who was actually near.
 - [ ] **Cooldown spacing over the session**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S5 natural fires were banter only (20:52:09, 20:57:49, 21:03:19, about 5.5 min apart at Idle 70); local never fired unprompted (lines `vetoed:salience`), so banter/local alternation could not be judged. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: banter and local alternating rather than stacking.
   - Pass when: no two surfaces fire back to back repeatedly.
 - [ ] **Solo-banter suppression judgement (1.1.181 open question)**
@@ -161,17 +169,21 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
   - Sandbox 2026-10-18: PASS: S2 the 16:59 reply drew exactly one LOCAL line (8bfdcc55); the 17:00:35 remark left unanswered lapsed with no line, error or retry. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: answer inside 30 s; on the next one, let it lapse.
   - Pass when: exactly one continuation; lapse is silent.
-- [ ] **Addressing a bot mid-window closes it**
+- [x] **Addressing a bot mid-window closes it**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 20:38:53 Jake's solo remark to the player, 20:38:55 "Jake, hold that thought." (routed as a DM), 20:39:01 unaddressed "the snow is pretty": `dm follow-up routed`, no `[souls] local ... fired` continuation. Replay A 20:38:53. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: the window closes on explicit address.
 - [ ] **Danger veto**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 easy difficulty, zombies summoned 2 and 8 blocks from Bob, `/bot soul local now`, a salient line: `local outcome=fired score=5` at 20:41:52 and 20:42:46, never `vetoed:danger`. The zombie is not in that scene's prompt, though ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: pick a fight during a local window.
   - Claude watches for: `vetoed:danger`.
   - Pass when: the veto appears and nothing fires.
-- [ ] **Server-thread cost under load (1.1.178, never measured)**
+- [x] **Server-thread cost under load (1.1.178, never measured)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 five soul bots in earshot (Jake, Bob, Ash, Birch, Cedar), 16 unaddressed lines in about 30 s (21:00): no `Can't keep up`, no `local capture failed`; the earshot scan ran on every line (it comes before the cooldown gate). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: stand several soul bots near an active chatter and chat continuously.
   - Claude watches for: tick-lag warnings, `[souls] local capture failed for bot`.
   - Pass when: no measurable tick lag attributable to the earshot scan.
 - [ ] **Roster-lost backoff (1.1.179)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: `vetoed:roster-lost` only fires when the snapshot capture throws; no way to force one from the game. The code pushes the cooldown 120 s on it (SoulLocalDirector, the roster-lost branch). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: repeated `vetoed:roster-lost` — must be spaced, not per-line.
   - Pass when: the cooldown is pushed on each roster-lost.
 
@@ -180,6 +192,7 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 ## Phase 4 — Group chat / PARTY (1.1.176)
 
 - [ ] **"bots, …" two-bot scene**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S5 on 1.1.271: "everyone, should we build a shelter..." 20:33:41 both bots spoke, one line each. "bots, what should we do next?" twice: 20:33:09 `failed:MALFORMED` (the 8B reply was only a `##FRENS` line, finding 16) and 20:34:29 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-18: FAIL: S2 three "bots,/everyone" lines with both bots eligible (`scene-routing ... candidates=2 eligible=2`, 17:04:58, 17:15:05, 17:44:45): each PARTY scene had `lines=1`, one bot spoke. The tap shows the model ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `bots, what should we do next?` with both near.
   - Claude watches for: `[souls] scene-routing routingId=… player=… outcome=… candidates=… eligible=… routingMs=…` then a PARTY scene.
@@ -190,7 +203,8 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 - [ ] **Voice-off beat pacing**
   - Bradley does: `/bot soul voice off`, run a group scene, then voice back on.
   - Pass when: lines still pace sensibly with no synth.
-- [ ] **A group scene resets the banter timer**
+- [x] **A group scene resets the banter timer**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 banter status 68 s left (20:32:57), then after the PARTY scene 328 s (20:33:36), 333 s after the next one. Pushed out each time. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-18: PARTIAL: S2 banter status before the PARTY scene: next-eligible about 17:56:22; after it (17:45:12): "592s remaining", about 17:55:04. The timer was re-armed (it jumped) but landed earlier, not later. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: banter's next-eligible pushes out after the scene.
 - [x] **`soulPartyEnabled=false` → legacy loop** — closed 2026-10-18 by triage: SUPERSEDED, the legacy loop was deleted in 1.1.250 (04032600); covered by 6q "Guys" and "everyone" reach both bots (1.1.219)
@@ -243,10 +257,12 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 ## Phase 6 — Muting matrix and live settings (1.1.175, 1.1.182, 1.1.184, 1.1.193)
 
 - [ ] **Category-muting round-trip (1.1.175)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S7 Ambient Chatter unticked in both Adv menus (config `mutedTextCategories`/`mutedVoiceCategories: ["ambient_chatter"]`): no ambient line reached chat, no GENERAL fallback. The voice half is not visible in the log: `Played sound` ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: mute `ambient_chatter` in **both** Adv menus (text and voice).
   - Claude watches for: no chat fallback leaking the line as GENERAL (the "Nice bird!" bug).
   - Pass when: scripted one-liners are silent in chat **and** voice.
-- [ ] **The separation proof (1.1.182)**
+- [x] **The separation proof (1.1.182)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S7 ambient muted in both menus, `/bot soul banter now`: scene a37da787 21:33:43 played 4/4 `text=true voiced=true`. Replay D 21:33:43. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with ambient_chatter muted in both Adv menus, wait for banter.
   - Pass when: scripted one-liners silent, **banter still speaks**.
 - [ ] **Ambient mute matrix on banter/local (1.1.177, 1.1.178)**
@@ -254,17 +270,21 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
   - Claude watches for: `scene-playback routingId=… line=n/N outcome=skipped-muted`, absence of `[souls] tts correlationId=` when voice is muted.
   - Pass when: all three quadrants behave as stated.
 - [ ] **`vetoed:muted` only in the right condition (1.1.182)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): CRITERION OUT OF DATE: Since the 1.1.193 lane split the banter/local surface is open whenever Soul Chat or Soul Voice is on (SoulRuntime ambientTextOpen/ambientVoiceOpen); the scripted Text and Voice masters no longer reach it. With Soul Chat off the ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: it appears only with Text master off AND (Voice or Soul Voice) off.
-- [ ] **Two lanes, two masters (1.1.193)**
+- [x] **Two lanes, two masters (1.1.193)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S7 Scripted Text and Voice OFF in Bot Controls (21:38), Soul Voice on: Jake's DM reply spoken (`tts ... outcome=spoken-all-1seg` 21:39:15), scene lines `voiced=true`, no `Played sound` scripted line in 4 min. Replay D 21:38-21:41. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: Soul Voice on + Scripted Voice off.
   - Pass when: soul lines are still spoken while scripted ones are not.
-- [ ] **Live-settings apply (1.1.184)**
+- [x] **Live-settings apply (1.1.184)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S7 `/bot soul disable Bob` 21:41:16: "Bob's soul communication is now disabled", the next "Bob, can you hear me?" got no turn; `/bot soul enable Bob` 21:41:27 "Bob is now speaking as Bob.", the next DM answered 21:41:37. Bot ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: save any per-bot toggle mid-session.
   - Pass when: it acts immediately, no restart, and every router notice uses the bot's real name.
 - [ ] **Global toggles UI (1.1.189, 1.1.191)**
   - Bradley does: expand the global toggle list; drag the scroll thumb; click the track; click the 9 px gutter.
   - Pass when: at least 5 rows visible, footer not buried, gutter clicks do **not** toggle the row underneath, dividers stop at the gutter.
-- [ ] **At most one bot comments on the same thing (1.1.184)**
+- [x] **At most one bot comments on the same thing (1.1.184)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 parrot beside both bots from 19:31:47: one `parrot_nearby_nice_bird` (Jake), none from Bob in the next 30 min. Only one parrot event, so a thin sample. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: stand two bots near a parrot.
   - Pass when: at most one of them comments.
 
@@ -633,19 +653,23 @@ Off by default — nothing in this phase happens until the toggle is on. Grep:
   - Pass when: the second status reads on and `config/frens/settings.json5` contains
     `soulNoveltyRejectionEnabled: true`.
 - [ ] **Novelty fires and does not gag the bots (1.1.211)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 drops happen and banter survives them (20:06:49 trigram drop, scene still 3 lines). But PLAYER scene b489440f "bots, what should we do next?" 20:34:29: the model repeated its previous answer, `novelty dropped bot=Jake ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with the toggle on and two bots in the roster, sit through ~6 scenes in one sitting.
   - Claude watches for: `novelty dropped` lines and the delivered-line count per scene.
   - Pass when: ≥1 drop occurs across the session **and** no scene delivers zero lines because of
     novelty alone.
-- [ ] **Silas stays laconic (1.1.211)**
+- [x] **Silas stays laconic (1.1.211)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 Silas in the roster for four scenes 20:11-20:14: no novelty drop for Silas at all (so never `trigram`). Replay A 20:11. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: run at least two scenes with Silas in the roster.
   - Claude watches for: any `novelty dropped bot=Silas` line and its reason.
   - Pass when: Silas's short idioms ("Aye.") only ever drop with `reason=exact`, never `trigram`.
-- [ ] **Quoted short idiom is not a repeat (1.1.211)**
+- [x] **Quoted short idiom is not a repeat (1.1.211)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 the only trigram drops were real near-repeats of long lines: 20:06:49 Jake "RotiWokeman grew up on a farm, didn't he? Maybe he knows something about dealing with...other things." after 20:05:37 "...about finding food in the ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: a `reason=trigram` drop whose dropped line is long and merely quotes a short
     earlier line (the `MIN_TRIGRAMS` floor should prevent this).
   - Pass when: none in the session; if one appears, note the two lines for the floor 3→4 follow-up.
-- [ ] **Toggle off is silent (1.1.211)**
+- [x] **Toggle off is silent (1.1.211)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 `/bot soul novelty off` 20:09:19, scenes 20:09:31 and 20:10:16: no `novelty` line, both 4/4. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul novelty off`, then two more scenes.
   - Claude watches for: any `novelty` line after the toggle.
   - Pass when: none, and scene delivery counts match the pre-toggle pattern.
@@ -659,7 +683,8 @@ until then. Grep: `grep -n "peer stance" latest.log` (lines print as
 `[souls] peer stance bot=<name> peer=<name> trust=<t> exasperation=<e> curiosity=<c>`).
 Mind files: `config/frens/souls/<botId>/mind.json` (or wherever `[souls] mind consolidated` names).
 
-- [ ] **Old minds load clean (1.1.212)**
+- [x] **Old minds load clean (1.1.212)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S7 simulated: Bob's `mind.json` saved without the `peerStances` and `relations` keys (game closed), launch, rollover 21:23:44 `mind consolidated bot=6a00845c... day=8`: the file now has `"peerStances": {}` and `"relations": []`, ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: launch with the pre-1.1.212 `mind.json` files in place (no reset); sleep through one
     night.
   - Claude watches for: `[souls] mind consolidated` at the rollover and any Jackson
@@ -672,7 +697,8 @@ Mind files: `config/frens/souls/<botId>/mind.json` (or wherever `[souls] mind co
   - Claude watches for: `[souls] peer stance bot=Jake peer=Bob …` and the mirror line for Bob.
   - Pass when: both files hold one `peerStances` entry keyed by the other bot's UUID, all three values
     in 0..6, and at least one value differs from baseline (3/0/3).
-- [ ] **Peer clause reaches the prompt (1.1.212)**
+- [x] **Peer clause reaches the prompt (1.1.212)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S6 Jake's peer curiosity for Bob seeded to 5 in `mind.json` (game closed): WORK scene 21:07:02 CURRENT STATE for Jake ends "..., curious about Bob" (16 chars, Bob in that roster). Replay B 21:07:02. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: force a question between the bots (`/bot soul banter now` until one bot ends a line
     naming the other with `?`), then one more scene next day so curiosity/exasperation ≥ the ladder
     threshold — or read the clause from `mind.json` values directly.
@@ -687,7 +713,8 @@ Mind files: `config/frens/souls/<botId>/mind.json` (or wherever `[souls] mind co
   - Claude watches for: `peer stance` lines after scene 1 vs 2 vs 3.
   - Pass when: trust changed at most once and curiosity/exasperation each at most once that day
     (no `peer stance` line at all for scenes 2–3 is the expected outcome).
-- [ ] **Day rollover decays toward baseline (1.1.212)**
+- [x] **Day rollover decays toward baseline (1.1.212)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 rollover 19:59:40 (day 1 to 2): Bob's peer entry for Jake (trust 4, curiosity 3) is gone from `peerStances`: trust stepped to 3, so it reached baseline and was dropped. Jake's map was already empty. Completes the S2 PARTIAL. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-18: PARTIAL: S2 the day-1 rollover ran (`mind consolidated bot=... day=1`, 17:23:58/17:24:06). After it both peer entries read `trust 4, curiosity 3` with `lastTrustDay: 1`: Jake's curiosity 4 moved to 3 (one step), trust was ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: sleep through a night after the entries exist; read both `mind.json` files.
   - Claude watches for: `[souls] mind consolidated` and the peer values.
@@ -709,32 +736,37 @@ Toggle-gated: `/bot soul relations on` first — until then no BELIEFS block, no
   - Claude watches for: nothing in the log; chat replies.
   - Pass when: first status reads off on a fresh config, second reads on, and `config/frens/*.json5`
     holds `soulRelationsEnabled: true` after the save.
-- [ ] **Old minds load clean (1.1.213)**
+- [x] **Old minds load clean (1.1.213)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S7 same simulated file as 6k: consolidation 21:23:44 wrote `"relations": []`, no Jackson warning. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: launch with the pre-1.1.213 `mind.json` files in place (no reset); sleep one night.
   - Claude watches for: `[souls] mind consolidated` and any Jackson `UnrecognizedProperty` /
     `InvalidDefinition` warning.
   - Pass when: consolidation succeeds and each rewritten file contains `"relations": []` (or a populated
     list) — never a missing key or a null.
-- [ ] **SEEN fact forms from repeated completions (1.1.213)**
+- [x] **SEEN fact forms from repeated completions (1.1.213)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 three finished `/bot skill woodcut Jake` on day 0 (19:43:24, 19:53:44, 19:57:44), rollover: `[19:59:45] relations bot=Jake added=1 total=1` once; `/bot soul beliefs Jake` "Jake is good at woodcut (conf 0.4, SEEN, day 2, ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with the toggle on, have Jake complete `/bot skill woodcut` at least three times in one
     Minecraft day (let each run finish, not `/bot stop`), then sleep through the night.
   - Claude watches for: `[souls] relations bot=Jake added=1 total=1`.
   - Pass when: the line appears exactly once and `/bot soul beliefs Jake` prints
     `Jake is good at woodcut (conf 0.4, SEEN, day <d>, salience 5)` — the object is `woodcut`, never `skill`.
-- [ ] **BELIEFS block reaches the prompt (1.1.213)**
+- [x] **BELIEFS block reaches the prompt (1.1.213)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 tap, scene 20:01:06: "BELIEFS (claims the bots hold, not world truth)\nJake believes:\n- Jake is good at woodcut" right after the ABOUT RotiWokeman block, about 80 chars; no "Bob believes" (Bob has no facts). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: nothing; let the next group banter scene fire (or `/bot soul banter now`).
   - Claude watches for: the request's prompt (diagnostic logging) carrying
     `BELIEFS (claims the bots hold, not world truth)` followed by `Jake believes:` / `- Jake is good at woodcut`.
   - Pass when: the block sits right after the ABOUT block, is ≤240 chars, and never appears for a bot
     whose `relations` is empty.
-- [ ] **Relation anchor fires and goes on cooldown (1.1.213)**
+- [x] **Relation anchor fires and goes on cooldown (1.1.213)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 day 5, four `banter now`: the third cue (20:16:54) "one of you points out I am good at woodcut", Bob "You're good at woodcut, though. I've seen you make quick work of those trees."; the fact's day 2 to 5 and salience 4 to 7; ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: three days after the fact formed, `/bot soul banter now` up to 4 times.
   - Claude watches for: a seed with `topic="relation:GOOD_AT|Jake|woodcut"` on a fired line; then the
     fact's `day` in `mind.json`.
   - Pass when: the seeded line references being good at woodcut without stating it as world fact, and
     after it fires the fact's `day` equals the current day and `salience` rose by 3 (cap 10) — the same
     anchor does not fire again for three days.
-- [ ] **Toggle off is inert (1.1.213)**
+- [x] **Toggle off is inert (1.1.213)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 `/bot soul relations off` 20:19:45, rollover to day 6: no `relations` line, the fact kept (salience 7 to 6); scenes 20:21:03 and 20:22:10 have no BELIEFS block and no relation cue. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul relations off`, sleep a night, fire two scenes.
   - Claude watches for: `relations` log lines, `BELIEFS` in the prompt, `relation:` seed topics.
   - Pass when: none of the three appear; `mind.json` still holds the earlier fact (decayed by 1 per
@@ -772,6 +804,7 @@ Requires `/bot soul relations on` for facts to be visible via `/bot soul beliefs
     applied), **or** the outcome is recorded as "3B cannot do it" and fallback (3), the clerk call, is
     scheduled in `RALPH_TASK.md`.
 - [ ] **A malformed tail never costs a scene (1.1.214)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 20:33:09 PLAYER scene: the 8B reply was only `##FRENS {"stance":...,"facts":[...]}` with no dialogue: `accepted=false rawChars=241`, `outcome=failed:MALFORMED`. Finding 16. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: nothing; watch the same 5 scenes.
   - Claude watches for: every `side-channel unparsed` line and the delivery outcome on the same
     `correlationId`.
@@ -783,11 +816,13 @@ Requires `/bot soul relations on` for facts to be visible via `/bot soul beliefs
   - Claude watches for: the literal `##FRENS` in a delivered line or in TTS text.
   - Pass when: it never appears in chat or audio.
 - [ ] **A model fact lands as INFERRED at ≤0.6 (1.1.214)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: no side-channel line was ever applied (the one tail came with no dialogue and failed the scene; banter replies never carried one). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: after an applied line with `facts=1/…`, run `/bot soul beliefs Jake` and `/bot soul beliefs Bob`.
   - Claude watches for: the fact in both bots' output.
   - Pass when: it prints with `INFERRED`, confidence ≤0.6, subject is Roti/Jake/Bob/the world — never an
     unknown name — and appears for every bot that was in the scene.
 - [ ] **Model stance delta is peers-only and once per day (1.1.214)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: same: no applied side-channel line. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: force three scenes in one Minecraft day; then read `mind.json` for both bots.
   - Claude watches for: `stance=` applied counts, and `peerStances` values before/after.
   - Pass when: `playerStance` never moves on a side-channel line; each peer axis moved at most one step
@@ -808,6 +843,7 @@ Needs Jake + Bob both spawned, souls enabled, and a rideable animal nearby for t
 toggles: the floor and the backoff are always on.
 
 - [ ] **No two bots talk over each other (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 273 voiced scripted lines (`Played sound`), 27 pairs under 4 s, several from two bots in the same second (20:21:49 Bob `wildlife_pig_nearby` + Jake `ambient_blame_terrain`; 20:45:28 `idle_here_if_needed` + `animal_quality`). ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: stand near both bots with an animal in view for two minutes and let ambient lines fire.
   - Claude watches for: `Scripted chat delivered bot=… part=0` timestamps in `latest.log` (1.1.217+). NOT
     `Sending chat message` — before 1.1.217 that line was logged ahead of the text gate and counted lines nobody saw.
@@ -816,36 +852,42 @@ toggles: the floor and the backoff are always on.
   - Pass when: no two scripted lines land within four seconds of each other, and the 22:30:08 shape of
     three lines from two bots inside one second never recurs.
 - [ ] **Scripted lines do not interleave with a soul scene (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 voiced ambient lines between scene lines: 20:04:49 `context_listening` (scene e0caee4c, lines 3-4), 20:05:30 and 20:05:34 (8b3eaa9a), 20:06:06 (0f9ba089), 20:07:36 `weather_sunny` (69bbfde8), 20:58:09. Finding 17. Replay A ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: trigger a scene (`/bot soul banter now`) while standing near an animal.
   - Claude watches for: `[souls] scene-playback … line=N/M` and any `Sending chat message` between the
     first and last line of that `routingId`.
   - Pass when: no scripted line lands mid-scene, and none lands in the twenty seconds after
     `outcome=finished`.
 - [ ] **A scene still gets through a scripted floor (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S5 every requested scene fired; the only `vetoed:speech-floor` lines were `armedBy=scene-end` (6). Ambient lines never arm the floor (finding 17), so the scripted-floor preemption itself was not exercised. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Log evidence 2026-09-08 20:10–20:15 (1.1.216): 4 `vetoed:speech-floor`, each followed by `fired` — PASS in logs; confirm live.
   - Bradley does: same as above, but keep the animal lines firing while asking for a scene.
   - Claude watches for: `outcome=vetoed:speech-floor` versus `outcome=fired`.
   - Pass when: scenes still fire — a run of only `vetoed:speech-floor` with no `fired` over several minutes
     means scripted ambient is starving the soul lane and the preemption is not working.
-- [ ] **The two banter lanes respect one quiet period (1.1.216)**
+- [x] **The two banter lanes respect one quiet period (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S6 ACTIVE scene finished 21:12:49, IDLE `vetoed:speech-floor armedBy=scene-end` 21:13:05, IDLE fired 21:13:10 (21 s). S5 IDLE-to-IDLE gaps 20-24 s. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Log evidence 2026-09-08 20:09–20:15 (1.1.216): finish→next fire 20–45 s, all ≥20 s — PASS in logs; confirm live.
   - Bradley does: let two scenes fire back to back without intervening.
   - Claude watches for: the gap between `scene-playback … outcome=finished` and the next
     `banter lane=… outcome=fired`.
   - Pass when: the gap is at least twenty seconds regardless of which lane fires — the 1.1.215 log had
     IDLE finish at 22:32:26 and ACTIVE fire at 22:32:35.
-- [ ] **Muting scripted dialogue does not mute souls (1.1.216)**
+- [x] **Muting scripted dialogue does not mute souls (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S7 Scripted Text and Voice masters OFF: scenes bac71e99 (21:38:31) and c99432c7 (21:39:47) played 4/4 `text=true voiced=true`, no `vetoed:speech-floor` from the scripted lane. Replay D 21:38:31. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: mute the scripted Text and Voice masters, then let a scene fire.
   - Claude watches for: `scene-playback` lines and `vetoed:speech-floor`.
   - Pass when: scenes play normally. A silent scripted lane must never close the floor — that would be the
     lane-separation rule broken.
 - [ ] **Mount and animal lines stop repeating (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S5 five minutes riding a tamed saddled horse beside cows, a sheep and a tamed wolf (20:54:39-20:59:39): no "Nice horse." / "That's a quality animal." / "I respect a well-behaved animal." at all, so no repeat (each fired once ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: stay mounted near the same animals for five minutes.
   - Claude watches for: repeats of "Nice horse.", "That's a quality animal.", "I respect a well-behaved
     animal." with their timestamps and speakers.
   - Pass when: no line repeats inside five minutes, from either bot. The 1.1.215 log repeated at 122s, 123s
     and 91s.
-- [ ] **A hurt wolf still gets an answer (1.1.216)**
+- [x] **A hurt wolf still gets an answer (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 tamed wolf beside both bots, `/damage` 20:53:49 then 20:54:05 (16 s): `wolf_leave_alone` at 20:53:49 and again at 20:54:05. Replay A 20:53:49. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: let a wolf take damage near both bots, twice, about fifteen seconds apart.
   - Claude watches for: the wolf-hurt line and which bot said it.
   - Pass when: the second event still draws a line — the per-pool dedup must not have inherited the
@@ -893,6 +935,7 @@ From the five unreviewed 1.1.216 sessions (2026-09-07/08). No new toggles. Inclu
   - Claude watches for: Jake's held item after reload (and `[torch-hold]` lines).
   - Pass when: Jake reloads holding his own pre-torch item.
 - [ ] **Scripted lines hold off while a scene is generating (1.1.217)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 20:06:44 banter fired, 20:06:50 `weather_sunny` with line 1; 20:05:59 `ambient_my_job` in the fire second. Pet and context lines do respect the reservation, ambient chatter does not (finding 17). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: stand near an animal with scripted voice or text on, trigger `/bot soul banter now`.
   - Claude watches for: `Scripted chat delivered … part=0` or audible scripted lines between `banter … outcome=fired` and the
     scene's first line; scripted veto lines naming the reservation.
@@ -902,7 +945,8 @@ From the five unreviewed 1.1.216 sessions (2026-09-07/08). No new toggles. Inclu
   - Bradley does: scripted Voice on, scripted Text off; stand near animals for two minutes.
   - Claude watches for: audible pet/context lines and their spacing.
   - Pass when: no two voiced scripted lines within four seconds of each other.
-- [ ] **Scripted logs tell the truth (1.1.217)**
+- [x] **Scripted logs tell the truth (1.1.217)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S7 Scripted Text OFF 21:38-21:41: `Scripted chat suppressed (text off) category=reactions bot=Bob` (21:39:29, 21:39:40) and Jake (21:40:20), no `Sending chat message` for a bot line. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: toggle scripted Text off for a minute, then on.
   - Claude watches for: `Scripted chat suppressed (text off)` while off, `Scripted chat delivered … part=0` while on.
   - Pass when: no `Sending chat message` line appears while Text is off.
@@ -912,12 +956,14 @@ From the five unreviewed 1.1.216 sessions (2026-09-07/08). No new toggles. Inclu
   - Claude watches for: `[souls] ollama usage model=… promptTokens=… evalTokens=…`.
   - Pass when: the line appears per call; note the largest `promptTokens` seen (sizing input for `NUM_CTX`), and flag any
     `nearCtxLimit=true`.
-- [ ] **Model switch keeps voices alive (1.1.217, Codex 7a663785)**
+- [x] **Model switch keeps voices alive (1.1.217, Codex 7a663785)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 `/bot soul model` 8B to 3B (19:33:11), back (19:37:06), to gpt-oss and back: one `tts engine started` (19:30:07), none after any switch; the next replies were voiced. Switched by command, the menu's "Selected" label not read. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: switch the soul model in the model manager mid-session, then trigger a scene.
   - Claude watches for: `tts engine started` lines after the switch.
   - Pass when: no voice engine restarts on a model-only switch; the menu says "Selected", and the first reply on the new
     model may be slow (model load).
 - [ ] **Group-chat hint appears once (1.1.217, Codex 43bd5474)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S5 seen file deleted before launch; rewritten once at 19:30:07 when two soul bots were in earshot; mtime unchanged after the 21:04 and 21:17 relaunches, so it did not come back. The on-screen hint and "Open guide" were not ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: first time with two owned soul-enabled bots in earshot, in calm gameplay.
   - Claude watches for: the hint on screen; `frens/group-chat-hint-seen.txt` in the world dir afterwards.
   - Pass when: it shows once for ~15 s, Open guide lands on the group-chat topic, and it does not come back after
@@ -995,7 +1041,8 @@ nearby, solo. Supplies Phase 2 is dormant: bots can't ask for chest items yet, s
   - Claude watches for: no soul routing line, no scene line, no overhear reaction for that line.
   - Pass when: neither bot reacts. Also: with the friend online, a DM follow-up window never opens (lines after Jake's
     reply need his name again).
-- [ ] **Handled lines don't become DMs (1.1.219)**
+- [x] **Handled lines don't become DMs (1.1.219)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 night, two beds: "Jake, it's getting dark out here." 21:01:27, reply 21:01:33; "zzz" 21:01:35: both bots `Task 'sleep' started` and slept (21:01:37-38), no `dm follow-up routed`. Replay A 21:01:35. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: right after a Jake DM reply, type "zzz" at night near a bed.
   - Claude watches for: the zzz trigger, and no `dm follow-up routed` for that line.
   - Pass when: the bot sleeps and no DM turn fires for "zzz".
@@ -1226,7 +1273,8 @@ Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilCl
   - Claude watches for: `I need 3 cobblestone … for a stone axe — I have 3 sticks.`, then a crafted stone axe.
     There should be no `I don't know how to craft stone axe`.
   - Pass when: both happen.
-- [ ] **A scene that mentions you plays in full (1.1.223)**
+- [x] **A scene that mentions you plays in full (1.1.223)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 scenes mentioning RotiWokeman played in full: 20:01:06 4/4, 20:05:21 4/4, 20:06:49 3/3. The one `owner-address cut` (20:12:56) was Jake speaking TO RotiWokeman mid-scene. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with Bob and Jake near each other and banter on, let a few idle scenes play; a Rate… slider at
     about 70 speeds this up.
   - Claude watches for: `[souls] banter routingId=… seed="Stay on one subject:…"`. There should be no
@@ -1955,26 +2003,33 @@ Claude runs this in the mcp-sandbox with `tools/sandbox/gototest.py` (a copy of 
 
 Observed across several scenes; collect as the session runs.
 
-- [ ] **Change-driven cues lead (1.1.196)**
+- [x] **Change-driven cues lead (1.1.196)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 thunder (`weather_thunder` 20:03:04), the next scene's cue 20:04:40 "the thunder just stopped". See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: force a change — wait out rain stopping, cross a biome, let night fall.
   - Pass when: the second scene after the change leads with it.
-- [ ] **Speech acts rotate (1.1.196)**
+- [x] **Speech acts rotate (1.1.196)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 cue verbs 20:06:05-20:17:42: needles, voices a worry, points out, share a joke, make a plan, asks, voices a worry, needles, recall, make a plan, asks, joke, points out, needles. No two in a row the same (read from the tap; ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: `act=` on consecutive fired lines.
   - Pass when: consecutive scenes show different `act=` values.
 - [ ] **First sightings fire once (1.1.196, 1.1.198)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 "the first wolf any of you have seen" in the cue at 20:52:15; after the 21:04 relaunch (no rollover in between) the cue at 21:08:27 said it again. "the first horse" (20:01:06) did not come back: a rollover at 20:14 had saved ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: "the first wolves any of you have seen" appears once, never again — and survives a restart (the `seen` registry is now persisted per bot in `mind.json`).
 - [ ] **No player-as-animal, no raw fact leakage (1.1.197)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 cues "took a beating from a on fire" (19:35:34) and "remember when took a beating from a in wall" (20:01:06, 20:16:08), Jake's day memory phrase "took a beating from a in wall", Bob then said "the in-wall took a bite out of ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: no "the first player x2", and events read as `started woodcutting` / `slew a zombie`, never `started a task (skill:sleep, skill)`.
 - [ ] **Open threads (1.1.198)**
   - Bradley does: let a bot ask him a question and **ignore it** for 10+ min; separately, answer one.
   - Claude watches for: an `OPEN THREADS` influence — the expired one should produce a one-shot seed anchor ("Bob never got an answer about …").
   - Pass when: expiry raises exasperation and surfaces the anchor; answering clears the thread.
-- [ ] **Stance shows in the prompt (1.1.198)**
+- [x] **Stance shows in the prompt (1.1.198)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S6 Jake's player stance seeded (exasperation 4, curiosity 5): CURRENT STATE 21:07:02 "sulking at being ignored, full of questions for RotiWokeman". See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: stance clauses ("wary of Roti", "fed up with being ignored", "full of questions for Roti") appear as behaviour over the session.
-- [ ] **Day memories from consolidation (1.1.198)**
+- [x] **Day memories from consolidation (1.1.198)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 `[19:59:45] mind consolidated bot=2af3f0a5... day=2 memories=7` (three day-2 memories), no `day consolidation failed` all session. events.jsonl 98 and 58 lines, under 200, so the trim was not exercised. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: `[souls] mind consolidated bot=… day=… memories=…`; also `[souls] day consolidation failed for bot … day …` must NOT appear.
   - Pass when: up to 3 memories per day are formed and `events.jsonl` is trimmed to 200 records.
-- [ ] **Sleep is not journaled (1.1.199)**
+- [x] **Sleep is not journaled (1.1.199)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 the 21:01 sleep wrote one `SLEEP` event per bot and nothing else. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: a night's sleep does not write four events.
 
 ---
@@ -2006,20 +2061,25 @@ Observed across several scenes; collect as the session runs.
 
 ## Phase 9 — Day rollover and memory digest (1.1.201) — do this near the end
 
-- [ ] **Tell Jake three things**
+- [x] **Tell Jake three things**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 four DMs 19:58:21-19:59:00: goats on a farm, spicy pumpkin soup, scared of deep ocean water, brother Theo. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: DM Jake three distinct, memorable, factual things about himself across the session (≥4 player lines total — `MIN_PLAYER_LINES` is 4).
   - Pass when: at least four substantive player lines exist before the rollover.
-- [ ] **Sleep through a night**
+- [x] **Sleep through a night**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 `[19:59:45] memory digest bot=2af3f0a5... channel=DIRECT outcome=ok kept=5 lines=12`, no digest failure line. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: sleep, or let midnight pass with a bot that never sleeps.
   - Claude watches for: `[souls] memory digest bot=… player=… channel=… outcome=… kept=… lines=…`; also `[souls] memory digest failed bot=… player=… :` and `[souls] memory digest sweep failed bot=… :` must NOT appear.
   - Pass when: a digest runs with `kept=` ≥ 1 for Jake.
-- [ ] **`mind.json` inspection**
+- [x] **`mind.json` inspection**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 Jake `playerMemories` 9 to 14 (the five facts), DIRECT cursor 22 to 48. PARTY `too-few` (lines=1) kept its cursor at 43 (deferred, not an empty or failed digest). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: after the rollover, open `saves/<world>/souls/v1/<jake>/mind.json`.
   - Pass when: `playerMemories` holds the facts and `digestCursors` has advanced. Cursors advance on **every** outcome except cancellation — an empty or failed digest must still move them.
-- [ ] **`/bot soul memory Jake`**
+- [x] **`/bot soul memory Jake`**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 20:00:52 "day 2 · salience 10 · RotiWokeman has three goats named Pip, Pop, and Pud." and the rest, day 2 first, then day 1. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: run it.
   - Pass when: output is `day N · salience S · fact`, newest day first — or the empty-state string `"Jake doesn't remember anything about you yet."` if nothing was kept.
-- [ ] **Recall in banter**
+- [x] **Recall in banter**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 cues 20:05:21 and 20:09:31 "RotiWokeman once said: RotiWokeman mentioned a chest is full." (memory:said), Bob's two memories `lastRecalledDay` -1 to 2. Their salience was already at the cap of 10, so the +3 bump could not show. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: keep playing near both bots after the rollover.
   - Claude watches for: a scene whose topic is `memory:said` (player-memory anchors feed `SoulBanterSeed` at weight 4).
   - Pass when: a memory is recalled aloud, and the recall bumps salience (+3, cap 10).
@@ -2027,9 +2087,11 @@ Observed across several scenes; collect as the session runs.
   - Bradley does: with the **second player** present, run a "bots, …" party scene where both players say something factual.
   - Pass when: each fact ends up in the right player's memories — a fact said by the other player must not appear under Bradley's, and vice versa.
 - [ ] **Present truth beats memory (1.1.201 Task 6)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: not run. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: state something that contradicts a stored memory and ask about it.
   - Pass when: the bot goes with present, authoritative state — the `ABOUT <Player>` block sits after it in the prompt and is framed as untrusted conversational content.
-- [ ] **`/bot soul digest off` is not amnesia**
+- [x] **`/bot soul digest off` is not amnesia**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 `/bot soul digest off` 20:19:45, status "Memory digest is OFF", four new DMs, rollover: Jake's `playerMemories` 14 to 14, every salience down by 1, cursors unchanged. Turned back on 20:22. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul digest off`, then let another rollover pass.
   - Pass when: no **new** memories form, but existing ones still render and still decay. `/bot soul digest status` reports OFF. Turn it back on afterwards.
 - [ ] **Privacy guard on `memory`**
@@ -2041,16 +2103,20 @@ Observed across several scenes; collect as the session runs.
 ## Phase 10 — Destructive (last)
 
 - [ ] **Reset during a running digest (added at final review)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S7 four DMs, then `/time add 24000` and `/bot soul reset Jake` 0.3 s apart (21:25:34-35): "Archived your conversation with Jake, new epoch 1.", no DIRECT digest for Jake ran (the reset landed first), memories stayed empty, no ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: trigger a rollover and run `/bot soul reset Jake` **while the digest is in flight**.
   - Claude watches for: `outcome=superseded` on the digest line; `[souls] memory archive failed for bot … player …` and `memory archive submit failed` must NOT appear.
   - Pass when: memories stay **empty** — the in-flight digest must not resurrect what the reset just archived.
-- [ ] **`/bot soul reset Jake`**
+- [x] **`/bot soul reset Jake`**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S7 21:25:35 reset: `/bot soul memory Jake` "Jake doesn't remember anything about you yet."; `mind.json` `playerMemories` 0, `archivedPlayerMemories` 22, `digestCursors` {}. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: run it, then `/bot soul memory Jake`, then re-open `mind.json`.
   - Pass when: the memory list is empty, `archivedPlayerMemories` holds them, and that caller's `digestCursors` entries are dropped.
-- [ ] **`/bot soul reset party` mid-banter**
+- [x] **`/bot soul reset party` mid-banter**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S7 scene 72cfdd67 line 1 at 21:28:35, `/bot soul reset party` the same second: `scene-playback ... outcome=cancelled delivered=1/3`, "Archived your group conversation, new epoch 2.", archive file `epoch-1-...jsonl`; the epoch-0 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: run it while a banter scene is playing.
   - Pass when: the actor's own party epoch is archived, local + group + banter records archived alongside, no crash, playback ends cleanly.
 - [ ] **Toggle everything off**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S7 `/bot soul banter off` + `local off` 21:29:3x, two salient unaddressed lines, 2 min: no `[souls] local` line, but the Active lane kept evaluating (`banter lane=ACTIVE outcome=vetoed:not-quiet`, `vetoed:nobody-working`). Active ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul banter off`, `/bot soul local off`.
   - Pass when: both directors go fully dark — nothing matching `[souls] banter` or `[souls] local` for the remainder.
 

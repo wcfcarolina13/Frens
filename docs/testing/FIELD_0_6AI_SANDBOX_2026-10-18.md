@@ -32,6 +32,17 @@ so the prompt checks (contract, BELIEFS, CURRENT STATE) could be read. The sandb
 - `frens_1_1_271_6q_6aa_supply_cmds_and_drops.zip` (19:07-19:12): supply commands (chat only), the sapling on the leaves, then two trees felled by Jake at 19:11:3x-19:12:25 (good felling footage).
 - `frens_1_1_271_6f_fishing_spot_memory.zip` (19:12-19:20): Jake casting into the pond under the overhang.
 
+### Pass 3 sessions (1.1.271, same jar, md5 ec6d16a7...)
+
+A third session took the sandbox lock (`field-0-6ai-pass3`) for the 99 items that pass 2 did not reach, then 6ak-6bi and 7-10.
+Souls ran on `llama3.1:8b` through `ollama_tap.py` again, Piper as before, structured output on, Idle banter rate 70.
+
+| Session | Save | Used for | Replay (in `mcp-sandbox/minecraft/flashback/replays/`) |
+|---|---|---|---|
+| S5 (19:28-21:03) | `Sweep Souls3`, copy of `Sweep Souls` (its `mind.json` files carried over), commands on, party moved to a snowy plain at -60, -60 | 3B vs 8B, three woodcuts then a rollover (beliefs, digest), banter x40, novelty, relations, group lines, local chat, danger, mount and wolf lines, beds, Phase 7 and 9 | A `frens_1_1_271_souls_A_banter_beliefs_digest.zip`. Good moments: 19:43:24 Jake's woodcut finishes; 20:16:54 Bob "You're good at woodcut"; 20:53:49 "Hey, leave the dog alone"; 21:01:37 both bots go to bed |
+| S6 (21:04-21:15) | `Sweep Souls3` again; Active banter on and Scripted rate 100 set in config; Jake's stance seeded in `mind.json` | Active lane, two-lane quiet period, stance clauses, Rate... screen; ended by finding 15 | B `frens_1_1_271_souls_B_active_lane_save_config_kick.zip` (recovered after the disconnect). 21:06:55 the WORK scene while Jake fells a tree |
+| S7 (21:17-21:42) | `Sweep Souls3`, config trimmed (finding 15), Bob's `mind.json` stripped of the 1.1.212/1.1.213 keys | Scripted rate 0, old-mind load, first-sighting restart check, Phase 10 resets; then muting and masters in Bot Controls | C `frens_1_1_271_souls_C_rate_oldminds_reset.zip` (21:28:35 the party reset cuts a scene), D `frens_1_1_271_6_6n_6o_muting_masters.zip` (21:38 masters off, scenes still play) |
+
 ## Findings (backlog for a fix build)
 
 Severity: high = a feature stops working for the session, medium = wrong or slow behaviour a player notices, minor = wording or rare.
@@ -79,6 +90,46 @@ Each finding is a hypothesis for the scoper, not a diagnosis.
     `LAST_KNOWN_CRAFTING_TABLE` entry is the suspect.
 14. **The fishing spot search takes 18.7 s (minor).** S4 `/bot fish 1` beside a 7x7 pond: `Fishing spot search took 18729ms` before the first cast
     (the remembered spot on later runs is instant).
+
+Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
+
+15. **A settings change kicks the player once the config is bigger than 32 KB (high).** S6 21:15:43, moving the Scripted slider on
+    the Rate... screen: `EncoderException: String too big (was 34859 characters, max 32767)` in `StringCodec.encode` for the
+    `frens:save_config` payload, then "Connection Lost" and the world closed (singleplayer). The sandbox `settings.json5` had grown to
+    72 KB compact: `botControlsByWorld` 36 KB and `botSpawnPointsByWorld` 16 KB over 45 bots times every world copy. Nirn's file is 10 KB
+    today, so Nirn is safe for now, but these maps only grow with bots and worlds. After trimming the sandbox file to Jake/Bob/Silas
+    (backup `config/settings.json5.bak-pass3-bloat`) the same slider saved fine.
+16. **A reply that is only the `##FRENS` line costs the scene (medium).** S5 20:33:09, "bots, what should we do next?" with
+    structured output on: `llama3.1:8b` answered with nothing but `##FRENS {"stance":...,"facts":[...]}`, so `accepted=false`,
+    `failed:MALFORMED`, and the player got no answer. That was the only tail the 8B model wrote in about 30 scenes.
+17. **Ambient chatter ignores the speech floor and the Scripted rate (medium).** `BotAmbientChatter` ("If you need me, I'm listening.",
+    "teeth itch", weather and idle lines) never consults `SpeechFloorService` or `DialoguePacing`; only pet and context reactions do. In S5
+    those lines landed inside soul scenes (20:04:49, 20:05:30, 20:06:06, 20:07:36), in the second a scene fired (20:05:59, 20:06:50),
+    and within 4 s of another bot's line 27 times (two bots in the same second at 20:21:49). At Scripted rate 0 (S7) Jake and Bob still
+    said 10 ambient lines in 4 min. Behind four FAILs and the PARTIAL on the Rate slider.
+18. **The local danger veto does not see a zombie beside the bot (medium).** S5 easy, zombies summoned 2 and 8 blocks from Bob:
+    local fired (`score=5`) at 20:41:52 and 20:42:46 and the zombie is absent from that scene's prompt, while Jake's combat code
+    reacted to it 9 s later. Summoned zombies were invulnerable (so the bots would not kill them first); a natural mob may differ.
+19. **Novelty can empty a player scene (medium).** S5 20:34:29 "bots, what should we do next?": the model repeated its previous answer
+    word for word, `novelty dropped ... reason=exact` for both bots, `lines=0 delivered=0/0`, and the player's question went unanswered.
+    A banter scene losing its lines is fine; a PLAYER scene should keep at least one line (or re-ask).
+20. **First sightings are saved only at the rollover (minor).** S5/S6: "the first wolf any of you have seen" in a cue at 20:52:15 and,
+    after a quit and relaunch with no rollover in between, again at 21:08:27. The horse (seen before a rollover) did not repeat.
+21. **Raw ids in cues, memories and state (minor).** Damage sources render as "took a beating from a on fire" and "from a in wall"
+    (cues, Jake's day memory, then Bob says "the in-wall took a bite out of us"); CURRENT STATE says "busy with skill:woodcut". Phase 7's
+    "no raw fact leakage" item.
+22. **The DM prompt carries the player's line twice, and Jake answers "you said that already" (medium, quality).** S5 tap of the 20:39:01
+    DM: the line is in RELEVANT KNOWLEDGE (`RotiWokeman told you: "the snow is pretty"`) and again as the final user turn; earlier facts
+    also sit in both ABOUT and the history. Jake replied "You mentioned that already" / "Roti's already said that" to four brand-new
+    lines (19:58:26, 19:59:00, 20:37:23, 20:39:07). Witnessed-event lines are also duplicated (each `DIRECT_CONVERSATION` 8 times).
+23. **A threat resumes a woodcut that finished 45 minutes earlier (minor).** S5 20:42:55 an idle Jake (hobbies off, last woodcut
+    `COMPLETED` 19:57:44) said "Terminating all current tasks due to threat detections", and at 20:43:05 "Resuming 'woodcut' for Jake.
+    Hostiles cleared." and started a new woodcut. Suffocation (`in_wall`) damage is also journaled as `COMBAT_STARTED`.
+
+Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
+same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
+after the S6 trim, the shelved bots Ash, Birch and Cedar came back on the next launch as lowercase `ash`, `birch`, `cedar` at world
+spawn, probably a side effect of trimming their name-keyed entries, not a mod bug until reproduced.
 
 Not a finding but worth a look: Streaming first-word latency is about 5-7 s with `llama3.1:8b` (Ollama `promptEvalMs` 1.7-4.4 s
 plus Piper 0.5 s), over the ~3 s target. The 1.1.226 auto-spawn reserve no longer leaves a bot out now that auto-spawn waits for
@@ -167,6 +218,79 @@ the host (7 bots + host = 8/8 spawned fine), so that item's "6 bots" text may be
 | 6ae | Leaves drop saplings, teardown uses hands (1.1.233) | PASS | S3 Jake with stone pickaxe, iron axe, shears and 32 dirt woodcut two trees with a 2-step dirt pillar: the dirt teardown was mined `with minecraft:dirt` in hand, stone pickaxe `damage 0` before and after (shears also 0). Plank scaffold was not part of this run. |
 | 6af | Drop sweep, return and craft feedback (1.1.234) | FAIL | S3 drops spread around Jake, `/bot skill drop_sweep Jake`: chat "Picked up 27 items.", but the skill's own summary says `collected: 20` and Jake's bag (cleared before) holds 21 items (13 saplings, 5 logs, 2 apples, 1 stick). No fast-travel error, no return trip. Finding 11. |
 
+
+### Pass 3 verdicts (1.1.271)
+
+Evidence names the session (S5-S...) and the Flashback replay (A, B, ...: see Pass 3 sessions).
+
+| Phase | Item | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Streaming first-word latency (1.1.175, still open) | FAIL | S5 by log: `llama3.1:8b` providerMs 8019/5476/4255 for three DMs (19:31:56-19:32:39), Piper 74-148 ms a segment; `llama3.2:3b` 2090/1896 ms after a 4829 ms load. Still over ~3 s on 8B, inside it on 3B. Replay A. |
+| 1 | llama3.2:3b speed vs llama3.1:8b (1.1.175, still open) | PASS | S5 three DMs each: 8B median 5.5 s, 3B median 2.1 s (`Soul model set to 'llama3.2:3b'` 19:33:11, back 19:37:06). Two 3B banter scenes 4/4 lines, no MALFORMED (roster of two; roster of one not run). By speed 3B; the quality call is Bradley's. Replay A 19:31-19:37. |
+| 1 | Failed generation retries (1.1.184) | PASS | S5 `gpt-oss:20b` returns empty content (its reasoning uses the whole reply): `failed:MALFORMED` 20:29:51, then a fresh `banter ... outcome=fired` 20:31:54 with no input (2 min); again 20:32:06. Replay A. |
+| 2 | ~1/3 of banter ends addressed to the player (1.1.181) | PASS | S5 tap: 11 of 37 scene prompts carried "One of you may end by saying one short thing to RotiWokeman" (30 %). `addressPlayer=` is not logged at INFO, so counted from the prompts. |
+| 2 | Active lane fires on work (1.1.188) | PASS | S6 Active on in config, `/bot skill woodcut Jake`: `banter lane=ACTIVE outcome=fired` 21:06:55 (about 2 min in), scene `kind=WORK` 4 lines, Bob "Oh, nice piece of wood!"; again 21:12:35. Replay B 21:06:55. |
+| 2 | Pacing sliders (1.1.188) | PARTIAL | S6 Rate... after a restart showed Scripted 100 and Idle 70 (set in config, persisted). At 100: 31 voiced scripted lines in 5.9 min vs 2.9/min at 50 in S5. S7 Scripted 0 through the slider (saved, `dialogueScriptedRate: 0`): Jake and Bob still spoke 10 ambient lines in 4 min. Ambient chatter never reads the rate (finding 17). The first slider move in S6 disconnected the client (finding 15). Replays B, C. |
+| 2 | Walking away / bystander earshot (1.1.176) | PASS | S5 scene 9d50eb8a 20:44:25, Bob teleported 150 blocks after line 1: `listeners=3` then 2, then 1 on Bob's own line 3 (not shown to the player), then 2. No error. No `skipped-speaker-gone` because Bob stayed online, and the far line still counts in `delivered=4/4`. Replay A 20:44:25. |
+| 2 | Cooldown spacing over the session | PARTIAL | S5 natural fires were banter only (20:52:09, 20:57:49, 21:03:19, about 5.5 min apart at Idle 70); local never fired unprompted (lines `vetoed:salience`), so banter/local alternation could not be judged. |
+| 3 | Addressing a bot mid-window closes it | PASS | S5 20:38:53 Jake's solo remark to the player, 20:38:55 "Jake, hold that thought." (routed as a DM), 20:39:01 unaddressed "the snow is pretty": `dm follow-up routed`, no `[souls] local ... fired` continuation. Replay A 20:38:53. |
+| 3 | Danger veto | FAIL | S5 easy difficulty, zombies summoned 2 and 8 blocks from Bob, `/bot soul local now`, a salient line: `local outcome=fired score=5` at 20:41:52 and 20:42:46, never `vetoed:danger`. The zombie is not in that scene's prompt, though Jake reacted to it 9 s later. Finding 18. Replay A 20:42:46. |
+| 3 | Server-thread cost under load (1.1.178, never measured) | PASS | S5 five soul bots in earshot (Jake, Bob, Ash, Birch, Cedar), 16 unaddressed lines in about 30 s (21:00): no `Can't keep up`, no `local capture failed`; the earshot scan ran on every line (it comes before the cooldown gate). |
+| 3 | Roster-lost backoff (1.1.179) | NOT REACHED | `vetoed:roster-lost` only fires when the snapshot capture throws; no way to force one from the game. The code pushes the cooldown 120 s on it (SoulLocalDirector, the roster-lost branch). |
+| 4 | "bots, …" two-bot scene | PARTIAL | S5 on 1.1.271: "everyone, should we build a shelter..." 20:33:41 both bots spoke, one line each. "bots, what should we do next?" twice: 20:33:09 `failed:MALFORMED` (the 8B reply was only a `##FRENS` line, finding 16) and 20:34:29 `lines=0` (novelty dropped both repeated lines, finding 19). Replay A. |
+| 4 | A group scene resets the banter timer | PASS | S5 banter status 68 s left (20:32:57), then after the PARTY scene 328 s (20:33:36), 333 s after the next one. Pushed out each time. |
+| 6 | Category-muting round-trip (1.1.175) | PARTIAL | S7 Ambient Chatter unticked in both Adv menus (config `mutedTextCategories`/`mutedVoiceCategories: ["ambient_chatter"]`): no ambient line reached chat, no GENERAL fallback. The voice half is not visible in the log: `Played sound` is logged before the per-listener mute and the `muted` count is DEBUG. Needs an ear (added to the guided doc). Replay D 21:33-21:37. |
+| 6 | The separation proof (1.1.182) | PASS | S7 ambient muted in both menus, `/bot soul banter now`: scene a37da787 21:33:43 played 4/4 `text=true voiced=true`. Replay D 21:33:43. |
+| 6 | `vetoed:muted` only in the right condition (1.1.182) | CRITERION OUT OF DATE | Since the 1.1.193 lane split the banter/local surface is open whenever Soul Chat or Soul Voice is on (SoulRuntime ambientTextOpen/ambientVoiceOpen); the scripted Text and Voice masters no longer reach it. With Soul Chat off the pipeline is down first, so `vetoed:muted` is close to unreachable. S7 scripted Text+Voice off: scenes fired, no `vetoed:muted`. Needs Bradley's ruling on the new rule. |
+| 6 | Two lanes, two masters (1.1.193) | PASS | S7 Scripted Text and Voice OFF in Bot Controls (21:38), Soul Voice on: Jake's DM reply spoken (`tts ... outcome=spoken-all-1seg` 21:39:15), scene lines `voiced=true`, no `Played sound` scripted line in 4 min. Replay D 21:38-21:41. |
+| 6 | Live-settings apply (1.1.184) | PASS | S7 `/bot soul disable Bob` 21:41:16: "Bob's soul communication is now disabled", the next "Bob, can you hear me?" got no turn; `/bot soul enable Bob` 21:41:27 "Bob is now speaking as Bob.", the next DM answered 21:41:37. Bot Controls toggles (21:38) applied with no restart. |
+| 6 | At most one bot comments on the same thing (1.1.184) | PASS | S5 parrot beside both bots from 19:31:47: one `parrot_nearby_nice_bird` (Jake), none from Bob in the next 30 min. Only one parrot event, so a thin sample. |
+| 6j | Novelty fires and does not gag the bots (1.1.211) | FAIL | S5 drops happen and banter survives them (20:06:49 trigram drop, scene still 3 lines). But PLAYER scene b489440f "bots, what should we do next?" 20:34:29: the model repeated its previous answer, `novelty dropped bot=Jake reason=exact` and `bot=Bob reason=exact`, `lines=0 delivered=0/0`: the player got no answer. Finding 19. |
+| 6j | Silas stays laconic (1.1.211) | PASS | S5 Silas in the roster for four scenes 20:11-20:14: no novelty drop for Silas at all (so never `trigram`). Replay A 20:11. |
+| 6j | Quoted short idiom is not a repeat (1.1.211) | PASS | S5 the only trigram drops were real near-repeats of long lines: 20:06:49 Jake "RotiWokeman grew up on a farm, didn't he? Maybe he knows something about dealing with...other things." after 20:05:37 "...about finding food in the wild."; 20:35:01 the same with the 20:33:41 line. |
+| 6j | Toggle off is silent (1.1.211) | PASS | S5 `/bot soul novelty off` 20:09:19, scenes 20:09:31 and 20:10:16: no `novelty` line, both 4/4. |
+| 6k | Old minds load clean (1.1.212) | PASS | S7 simulated: Bob's `mind.json` saved without the `peerStances` and `relations` keys (game closed), launch, rollover 21:23:44 `mind consolidated bot=6a00845c... day=8`: the file now has `"peerStances": {}` and `"relations": []`, no Jackson warning. (No real pre-1.1.212 file in the sandbox.) |
+| 6k | Peer clause reaches the prompt (1.1.212) | PASS | S6 Jake's peer curiosity for Bob seeded to 5 in `mind.json` (game closed): WORK scene 21:07:02 CURRENT STATE for Jake ends "..., curious about Bob" (16 chars, Bob in that roster). Replay B 21:07:02. |
+| 6k | Day rollover decays toward baseline (1.1.212) | PASS | S5 rollover 19:59:40 (day 1 to 2): Bob's peer entry for Jake (trust 4, curiosity 3) is gone from `peerStances`: trust stepped to 3, so it reached baseline and was dropped. Jake's map was already empty. Completes the S2 PARTIAL. |
+| 6l | Old minds load clean (1.1.213) | PASS | S7 same simulated file as 6k: consolidation 21:23:44 wrote `"relations": []`, no Jackson warning. |
+| 6l | SEEN fact forms from repeated completions (1.1.213) | PASS | S5 three finished `/bot skill woodcut Jake` on day 0 (19:43:24, 19:53:44, 19:57:44), rollover: `[19:59:45] relations bot=Jake added=1 total=1` once; `/bot soul beliefs Jake` "Jake is good at woodcut (conf 0.4, SEEN, day 2, salience 5)". Replay A 19:40-19:59. |
+| 6l | BELIEFS block reaches the prompt (1.1.213) | PASS | S5 tap, scene 20:01:06: "BELIEFS (claims the bots hold, not world truth)\nJake believes:\n- Jake is good at woodcut" right after the ABOUT RotiWokeman block, about 80 chars; no "Bob believes" (Bob has no facts). |
+| 6l | Relation anchor fires and goes on cooldown (1.1.213) | PASS | S5 day 5, four `banter now`: the third cue (20:16:54) "one of you points out I am good at woodcut", Bob "You're good at woodcut, though. I've seen you make quick work of those trees."; the fact's day 2 to 5 and salience 4 to 7; scene four on another topic. The cue's "points out I am good at" is first person (cosmetic). Replay A 20:16:54. |
+| 6l | Toggle off is inert (1.1.213) | PASS | S5 `/bot soul relations off` 20:19:45, rollover to day 6: no `relations` line, the fact kept (salience 7 to 6); scenes 20:21:03 and 20:22:10 have no BELIEFS block and no relation cue. |
+| 6m | A malformed tail never costs a scene (1.1.214) | FAIL | S5 20:33:09 PLAYER scene: the 8B reply was only `##FRENS {"stance":...,"facts":[...]}` with no dialogue: `accepted=false rawChars=241`, `outcome=failed:MALFORMED`. Finding 16. |
+| 6m | A model fact lands as INFERRED at ≤0.6 (1.1.214) | NOT REACHED | no side-channel line was ever applied (the one tail came with no dialogue and failed the scene; banter replies never carried one). |
+| 6m | Model stance delta is peers-only and once per day (1.1.214) | NOT REACHED | same: no applied side-channel line. |
+| 6n | No two bots talk over each other (1.1.216) | FAIL | S5 273 voiced scripted lines (`Played sound`), 27 pairs under 4 s, several from two bots in the same second (20:21:49 Bob `wildlife_pig_nearby` + Jake `ambient_blame_terrain`; 20:45:28 `idle_here_if_needed` + `animal_quality`). Ambient chatter is not on the speech floor (finding 17). |
+| 6n | Scripted lines do not interleave with a soul scene (1.1.216) | FAIL | S5 voiced ambient lines between scene lines: 20:04:49 `context_listening` (scene e0caee4c, lines 3-4), 20:05:30 and 20:05:34 (8b3eaa9a), 20:06:06 (0f9ba089), 20:07:36 `weather_sunny` (69bbfde8), 20:58:09. Finding 17. Replay A 20:05:21-20:05:37. |
+| 6n | A scene still gets through a scripted floor (1.1.216) | PARTIAL | S5 every requested scene fired; the only `vetoed:speech-floor` lines were `armedBy=scene-end` (6). Ambient lines never arm the floor (finding 17), so the scripted-floor preemption itself was not exercised. |
+| 6n | The two banter lanes respect one quiet period (1.1.216) | PASS | S6 ACTIVE scene finished 21:12:49, IDLE `vetoed:speech-floor armedBy=scene-end` 21:13:05, IDLE fired 21:13:10 (21 s). S5 IDLE-to-IDLE gaps 20-24 s. |
+| 6n | Muting scripted dialogue does not mute souls (1.1.216) | PASS | S7 Scripted Text and Voice masters OFF: scenes bac71e99 (21:38:31) and c99432c7 (21:39:47) played 4/4 `text=true voiced=true`, no `vetoed:speech-floor` from the scripted lane. Replay D 21:38:31. |
+| 6n | Mount and animal lines stop repeating (1.1.216) | PARTIAL | S5 five minutes riding a tamed saddled horse beside cows, a sheep and a tamed wolf (20:54:39-20:59:39): no "Nice horse." / "That's a quality animal." / "I respect a well-behaved animal." at all, so no repeat (each fired once earlier, 20:01:45 and 20:45:28). Other animal lines did repeat: `cute_animal_so_cute` after 68 s (20:45:41, 20:46:49), `wolf_nearby_love_dogs` at 20:57:49 and 21:02:49. |
+| 6n | A hurt wolf still gets an answer (1.1.216) | PASS | S5 tamed wolf beside both bots, `/damage` 20:53:49 then 20:54:05 (16 s): `wolf_leave_alone` at 20:53:49 and again at 20:54:05. Replay A 20:53:49. |
+| 6o | Scripted lines hold off while a scene is generating (1.1.217) | FAIL | S5 20:06:44 banter fired, 20:06:50 `weather_sunny` with line 1; 20:05:59 `ambient_my_job` in the fire second. Pet and context lines do respect the reservation, ambient chatter does not (finding 17). |
+| 6o | Scripted logs tell the truth (1.1.217) | PASS | S7 Scripted Text OFF 21:38-21:41: `Scripted chat suppressed (text off) category=reactions bot=Bob` (21:39:29, 21:39:40) and Jake (21:40:20), no `Sending chat message` for a bot line. |
+| 6o | Model switch keeps voices alive (1.1.217, Codex 7a663785) | PASS | S5 `/bot soul model` 8B to 3B (19:33:11), back (19:37:06), to gpt-oss and back: one `tts engine started` (19:30:07), none after any switch; the next replies were voiced. Switched by command, the menu's "Selected" label not read. |
+| 6o | Group-chat hint appears once (1.1.217, Codex 43bd5474) | PARTIAL | S5 seen file deleted before launch; rewritten once at 19:30:07 when two soul bots were in earshot; mtime unchanged after the 21:04 and 21:17 relaunches, so it did not come back. The on-screen hint and "Open guide" were not captured. |
+| 6q | Handled lines don't become DMs (1.1.219) | PASS | S5 night, two beds: "Jake, it's getting dark out here." 21:01:27, reply 21:01:33; "zzz" 21:01:35: both bots `Task 'sleep' started` and slept (21:01:37-38), no `dm follow-up routed`. Replay A 21:01:35. |
+| 6u | A scene that mentions you plays in full (1.1.223) | PASS | S5 scenes mentioning RotiWokeman played in full: 20:01:06 4/4, 20:05:21 4/4, 20:06:49 3/3. The one `owner-address cut` (20:12:56) was Jake speaking TO RotiWokeman mid-scene. |
+| 7 | Change-driven cues lead (1.1.196) | PASS | S5 thunder (`weather_thunder` 20:03:04), the next scene's cue 20:04:40 "the thunder just stopped". |
+| 7 | Speech acts rotate (1.1.196) | PASS | S5 cue verbs 20:06:05-20:17:42: needles, voices a worry, points out, share a joke, make a plan, asks, voices a worry, needles, recall, make a plan, asks, joke, points out, needles. No two in a row the same (read from the tap; `act=` is not logged at INFO). |
+| 7 | First sightings fire once (1.1.196, 1.1.198) | FAIL | S5 "the first wolf any of you have seen" in the cue at 20:52:15; after the 21:04 relaunch (no rollover in between) the cue at 21:08:27 said it again. "the first horse" (20:01:06) did not come back: a rollover at 20:14 had saved it. The seen set is persisted only at consolidation (finding 20). |
+| 7 | No player-as-animal, no raw fact leakage (1.1.197) | FAIL | S5 cues "took a beating from a on fire" (19:35:34) and "remember when took a beating from a in wall" (20:01:06, 20:16:08), Jake's day memory phrase "took a beating from a in wall", Bob then said "the in-wall took a bite out of us"; S6 CURRENT STATE "busy with skill:woodcut". Finding 21. |
+| 7 | Stance shows in the prompt (1.1.198) | PASS | S6 Jake's player stance seeded (exasperation 4, curiosity 5): CURRENT STATE 21:07:02 "sulking at being ignored, full of questions for RotiWokeman". |
+| 7 | Day memories from consolidation (1.1.198) | PASS | S5 `[19:59:45] mind consolidated bot=2af3f0a5... day=2 memories=7` (three day-2 memories), no `day consolidation failed` all session. events.jsonl 98 and 58 lines, under 200, so the trim was not exercised. |
+| 7 | Sleep is not journaled (1.1.199) | PASS | S5 the 21:01 sleep wrote one `SLEEP` event per bot and nothing else. |
+| 9 | Tell Jake three things | PASS | S5 four DMs 19:58:21-19:59:00: goats on a farm, spicy pumpkin soup, scared of deep ocean water, brother Theo. |
+| 9 | Sleep through a night | PASS | S5 `[19:59:45] memory digest bot=2af3f0a5... channel=DIRECT outcome=ok kept=5 lines=12`, no digest failure line. |
+| 9 | `mind.json` inspection | PASS | S5 Jake `playerMemories` 9 to 14 (the five facts), DIRECT cursor 22 to 48. PARTY `too-few` (lines=1) kept its cursor at 43 (deferred, not an empty or failed digest). |
+| 9 | `/bot soul memory Jake` | PASS | S5 20:00:52 "day 2 · salience 10 · RotiWokeman has three goats named Pip, Pop, and Pud." and the rest, day 2 first, then day 1. |
+| 9 | Recall in banter | PASS | S5 cues 20:05:21 and 20:09:31 "RotiWokeman once said: RotiWokeman mentioned a chest is full." (memory:said), Bob's two memories `lastRecalledDay` -1 to 2. Their salience was already at the cap of 10, so the +3 bump could not show. |
+| 9 | Present truth beats memory (1.1.201 Task 6) | NOT REACHED | not run. |
+| 9 | `/bot soul digest off` is not amnesia | PASS | S5 `/bot soul digest off` 20:19:45, status "Memory digest is OFF", four new DMs, rollover: Jake's `playerMemories` 14 to 14, every salience down by 1, cursors unchanged. Turned back on 20:22. |
+| 10 | Reset during a running digest (added at final review) | PARTIAL | S7 four DMs, then `/time add 24000` and `/bot soul reset Jake` 0.3 s apart (21:25:34-35): "Archived your conversation with Jake, new epoch 1.", no DIRECT digest for Jake ran (the reset landed first), memories stayed empty, no `memory archive failed`. `outcome=superseded` was not hit. |
+| 10 | `/bot soul reset Jake` | PASS | S7 21:25:35 reset: `/bot soul memory Jake` "Jake doesn't remember anything about you yet."; `mind.json` `playerMemories` 0, `archivedPlayerMemories` 22, `digestCursors` {}. |
+| 10 | `/bot soul reset party` mid-banter | PASS | S7 scene 72cfdd67 line 1 at 21:28:35, `/bot soul reset party` the same second: `scene-playback ... outcome=cancelled delivered=1/3`, "Archived your group conversation, new epoch 2.", archive file `epoch-1-...jsonl`; the epoch-0 archive holds 71 HEARD, 175 SPOKEN, 7 FAILURE records. Next banter fired 21:28:56. Replay C 21:28:35. |
+| 10 | Toggle everything off | PARTIAL | S7 `/bot soul banter off` + `local off` 21:29:3x, two salient unaddressed lines, 2 min: no `[souls] local` line, but the Active lane kept evaluating (`banter lane=ACTIVE outcome=vetoed:not-quiet`, `vetoed:nobody-working`). Active has its own toggle; whether `banter off` should silence it is Bradley's call. |
 
 ## Items without a verdict
 
