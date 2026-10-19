@@ -197,8 +197,10 @@ public class AutoFaceEntity {
             setBotExecutingTask(false);
             broadcastDangerAlert(bot);
             BotFleeService.captureInterruptedSurvival(bot);
-            SkillManager.requestSkillPause(bot, "§cPausing current task for incoming phantom dive.");
-            SkillResumeService.requestAutoResume(bot);
+            // Resume later only a task this pause actually stopped (finding 23).
+            if (SkillManager.requestSkillPause(bot, "§cPausing current task for incoming phantom dive.")) {
+                SkillResumeService.requestAutoResume(bot);
+            }
         }
 
         if (BotEventHandler.updateBehavior(bot, server, nearbyEntities, hostileEntities)) {
@@ -250,8 +252,11 @@ public class AutoFaceEntity {
                     isBotMoving = false;
                     setBotExecutingTask(false);
                     broadcastDangerAlert(bot);
-                    SkillManager.requestSkillPause(bot, null);
-                    SkillResumeService.requestAutoResume(bot);
+                    // isBotMoving is shared across bots, so "busy" can be true for an idle bot:
+                    // ask for a resume only when the pause stopped a running task (finding 23).
+                    if (SkillManager.requestSkillPause(bot, null)) {
+                        SkillResumeService.requestAutoResume(bot);
+                    }
                 }
 
                 if (BotEventHandler.isRegisteredBot(bot)) {
@@ -292,8 +297,9 @@ public class AutoFaceEntity {
             if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
                 LOGGER.debug("Stopping movement since danger zone is detected.");
                 broadcastDangerAlert(bot);
-                SkillManager.requestSkillPause(bot, null);
-                SkillResumeService.requestAutoResume(bot);
+                if (SkillManager.requestSkillPause(bot, null)) {
+                    SkillResumeService.requestAutoResume(bot);
+                }
                 BotActions.stop(bot);
                 isBotMoving = false;
                 setBotExecutingTask(false);
@@ -324,7 +330,8 @@ public class AutoFaceEntity {
                 if (BotFleeService.isSurfaceRecoveryActive(bot.getUuid())) {
                     return;
                 }
-                SkillResumeService.tryAutoResume(bot);
+                // Hostiles cleared: resume a threat-paused task only within 10 min of the pause.
+                SkillResumeService.tryAutoResumeAfterThreat(bot);
             }
         }
     }

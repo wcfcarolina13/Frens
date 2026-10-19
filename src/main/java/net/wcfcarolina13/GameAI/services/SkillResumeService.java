@@ -23,7 +23,9 @@ public final class SkillResumeService {
     private static final Map<UUID, PendingSkill> LAST_SKILL_BY_BOT = new ConcurrentHashMap<>();
     private static final Map<Object, PendingSkill> PENDING_BY_RESPONDER = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> AWAITING_DECISION = new ConcurrentHashMap<>();
-    private static final Set<UUID> AUTO_RESUME_PENDING = ConcurrentHashMap.newKeySet();
+    /** Bots a threat paused, mapped to the wall-clock time of the pause (see {@link ResumeFreshnessPolicy}). */
+    private static final Map<UUID, Long> AUTO_RESUME_PENDING = new ConcurrentHashMap<>();
+    private static final java.util.concurrent.atomic.AtomicLong EXECUTION_IDS = new java.util.concurrent.atomic.AtomicLong();
     private static final Set<UUID> RESUME_INTENT = ConcurrentHashMap.newKeySet();
     /** Bots whose last pending skill was paused for a protected-zone refusal — Resume should grant a 60s zone override. */
     private static final Set<UUID> ZONE_OVERRIDE_PENDING = ConcurrentHashMap.newKeySet();
@@ -44,24 +46,58 @@ public final class SkillResumeService {
 
     private SkillResumeService() {}
 
-    public static void recordExecution(ServerPlayerEntity bot, String skillName, String rawArgs, ServerCommandSource source) {
+    /**
+     * Records a {@code /bot skill} start as the bot's resumable task.
+     *
+     * @return this run's id; pass it to {@link #handleCompletion} when the run finishes
+     */
+    public static long recordExecution(ServerPlayerEntity bot, String skillName, String rawArgs, ServerCommandSource source) {
         UUID botUuid = bot.getUuid();
         PendingSkill prior = LAST_SKILL_BY_BOT.get(botUuid);
         if (prior != null) {
             notifyDecision(prior, false);
         }
 
-        PendingSkill pending = new PendingSkill(botUuid, bot.getGameProfile().name(), skillName, rawArgs, source);
+        long executionId = EXECUTION_IDS.incrementAndGet();
+        PendingSkill pending = new PendingSkill(botUuid, bot.getGameProfile().name(), skillName, rawArgs, source, executionId);
         LAST_SKILL_BY_BOT.put(botUuid, pending);
         AWAITING_DECISION.remove(botUuid);
         AUTO_RESUME_PENDING.remove(botUuid);
         PENDING_BY_RESPONDER.values().removeIf(ps -> ps.botUuid().equals(botUuid));
+        return executionId;
     }
 
-    public static void handleCompletion(UUID botUuid, boolean success) {
-        if (success || (!isAwaiting(botUuid) && !AUTO_RESUME_PENDING.contains(botUuid))) {
-            clear(botUuid);
+    /**
+     * A {@code /bot skill} run finished (any outcome). Drops the bot's resume record unless something
+     * still means to resume it: a threat pause waiting for hostiles to clear, a continue? prompt, or a
+     * sunset stop held for sunrise. Success does not matter: a run the threat paused keeps its record
+     * whatever it returned, and a run that ended on its own (done, failed, refused) leaves nothing to
+     * resume. Only the run that owns the record clears it, so a run that unwinds after a newer one
+     * started (or after it re-recorded itself at sunset) changes nothing. Never touches the sunrise
+     * record itself.
+     */
+    public static void handleCompletion(UUID botUuid, long executionId, boolean success) {
+        if (botUuid == null) {
+            return;
         }
+        PendingSkill current = LAST_SKILL_BY_BOT.get(botUuid);
+        boolean sameRun = current != null && current.executionId() == executionId;
+        if (!ResumeFreshnessPolicy.shouldClearOnCompletion(sameRun, AUTO_RESUME_PENDING.containsKey(botUuid),
+                isAwaiting(botUuid), isHeldForSunrise(botUuid))) {
+            return;
+        }
+        LAST_SKILL_BY_BOT.remove(botUuid, current);
+        AWAITING_DECISION.remove(botUuid);
+        ZONE_OVERRIDE_PENDING.remove(botUuid);
+        PENDING_BY_RESPONDER.values().removeIf(ps -> ps.botUuid().equals(botUuid));
+        LOGGER.debug("Cleared resume record for {} after '{}' finished (success={})",
+                current.alias(), current.skillName(), success);
+    }
+
+    private static boolean isHeldForSunrise(UUID botUuid) {
+        return SUNRISE_RESUME_BY_BOT.containsKey(botUuid)
+                || HuntSessionService.hasSession(botUuid)
+                || FishingSessionService.hasSession(botUuid);
     }
 
     public static void clear(UUID botUuid) {
@@ -145,16 +181,20 @@ public final class SkillResumeService {
         if (uuid == null || !LAST_SKILL_BY_BOT.containsKey(uuid)) {
             return;
         }
-        AUTO_RESUME_PENDING.add(uuid);
+        AUTO_RESUME_PENDING.put(uuid, System.currentTimeMillis());
         AWAITING_DECISION.remove(uuid);
     }
 
+    /**
+     * Sunrise path (hunt/fishing sessions): resumes the pending task however long ago it stopped,
+     * since a night is longer than the threat window.
+     */
     public static void tryAutoResume(ServerPlayerEntity bot) {
         if (bot == null) {
             return;
         }
         UUID uuid = bot.getUuid();
-        if (!AUTO_RESUME_PENDING.remove(uuid)) {
+        if (AUTO_RESUME_PENDING.remove(uuid) == null) {
             return;
         }
         PendingSkill pending = LAST_SKILL_BY_BOT.get(uuid);
@@ -163,6 +203,39 @@ public final class SkillResumeService {
         }
         resume(pending, true, pending.source());
         clear(uuid);
+    }
+
+    /**
+     * Hostiles-cleared path: resumes the task a threat paused, but only within
+     * {@link ResumeFreshnessPolicy#AUTO_RESUME_WINDOW_MS} of the pause. A stale request is dropped
+     * (logged once); the task record itself stays for a manual Resume, and a request a sunset stop
+     * holds for sunrise is left to the sunrise path.
+     */
+    public static void tryAutoResumeAfterThreat(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        UUID uuid = bot.getUuid();
+        Long pausedAtMs = uuid != null ? AUTO_RESUME_PENDING.get(uuid) : null;
+        if (pausedAtMs == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (!ResumeFreshnessPolicy.shouldAutoResume(pausedAtMs, now, ResumeFreshnessPolicy.AUTO_RESUME_WINDOW_MS)) {
+            if (isHeldForSunrise(uuid)) {
+                return;
+            }
+            if (AUTO_RESUME_PENDING.remove(uuid, pausedAtMs)) {
+                PendingSkill pending = LAST_SKILL_BY_BOT.get(uuid);
+                LOGGER.info("Not auto-resuming '{}' for {}: paused {} s ago, past the {} s window",
+                        pending != null ? pending.skillName() : "?",
+                        pending != null ? pending.alias() : uuid,
+                        (now - pausedAtMs) / 1000L,
+                        ResumeFreshnessPolicy.AUTO_RESUME_WINDOW_MS / 1000L);
+            }
+            return;
+        }
+        tryAutoResume(bot);
     }
 
     public static void saveSunriseResume(UUID botUuid, String skillName, String rawArgs,
@@ -272,7 +345,7 @@ public final class SkillResumeService {
         return new DebugSnapshot(
                 LAST_SKILL_BY_BOT.containsKey(botUuid),
                 isAwaiting(botUuid),
-                AUTO_RESUME_PENDING.contains(botUuid),
+                AUTO_RESUME_PENDING.containsKey(botUuid),
                 RESUME_INTENT.contains(botUuid)
         );
     }
@@ -380,7 +453,8 @@ public final class SkillResumeService {
         ServerPlayNetworking.send(player, new ResumeDecisionPayload(active, pending.alias()));
     }
 
-    private record PendingSkill(UUID botUuid, String alias, String skillName, String rawArgs, ServerCommandSource source) {
+    private record PendingSkill(UUID botUuid, String alias, String skillName, String rawArgs, ServerCommandSource source,
+                                long executionId) {
         PendingSkill {
             Objects.requireNonNull(alias, "alias");
             Objects.requireNonNull(skillName, "skillName");

@@ -440,7 +440,30 @@ public final class SoulEventObserver {
         }
     }
 
-    /** Records the bot's own damage and starts (or refreshes) its combat window. */
+    /**
+     * Damage-type ids {@link #classifySource} returns for hurt with no attacker that is the world,
+     * not a fight: suffocation, falls, drowning, hunger, fire, lava, cactus, berries, freezing,
+     * cramming, elytra crashes, and the like. {@code ""} and {@code "environment"} are the
+     * classifier's own no-source / no-key fallbacks.
+     */
+    private static final java.util.Set<String> ENVIRONMENTAL_DAMAGE = java.util.Set.of(
+            "", "environment",
+            "in_wall", "fall", "drown", "starve", "cactus", "freeze",
+            "on_fire", "in_fire", "lava", "hot_floor", "campfire",
+            "sweet_berry_bush", "cramming", "fly_into_wall",
+            "stalagmite", "falling_stalactite", "falling_block", "falling_anvil",
+            "dry_out", "out_of_world", "outside_border", "lightning_bolt");
+
+    /** Whether a classified damage source is the environment (no combat), not an attacker. */
+    static boolean isEnvironmentalDamage(String source) {
+        return ENVIRONMENTAL_DAMAGE.contains(nullToEmpty(source));
+    }
+
+    /**
+     * Records the bot's own damage and, for a hit with an attacker or a hostile source, starts (or
+     * refreshes) its combat window. Environmental damage is journaled but is not combat: it neither
+     * opens nor extends the window (so a fire tick after a blaze hit does not prolong the fight).
+     */
     void noteBotDamage(UUID botId, String dimension, String biome, float amount, String source, long worldTick) {
         if (botId == null || !sink.accepts(botId)) {
             return;
@@ -448,6 +471,9 @@ public final class SoulEventObserver {
         Map<String, String> facts = factMap("amount", formatAmount(amount), "source", nullToEmpty(source));
         emit(botId, SoulTypes.EventType.BOT_DAMAGE, dimension, biome, facts, SoulTypes.Witness.SELF,
                 worldTick, SoulTypes.Salience.NORMAL, List.of());
+        if (isEnvironmentalDamage(source)) {
+            return;
+        }
 
         boolean wasActive = combatDeadlineTicks.containsKey(botId);
         combatDeadlineTicks.put(botId, worldTick + combatQuietTicks);

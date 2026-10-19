@@ -6022,8 +6022,9 @@ public class modCommandRegistry {
         // Kill any active sunset-return session so the auto-return doesn't re-trigger
         // within seconds of the stop command.
         net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.clearSession(bot.getUuid());
-        // Ensure follow state is cleared so the bot truly stops.
-        net.wcfcarolina13.GameAI.BotEventHandler.stopFollowing(bot);
+        // Ensure follow state is cleared so the bot truly stops. Silent: "<bot> has stopped." from
+        // executeStopTargets is the only chat line (finding 27: "Stopping follow command." doubled it).
+        net.wcfcarolina13.GameAI.BotEventHandler.stopFollowing(bot, false);
         // With Carpet, /bot walk drives the bot through Carpet's persistent action pack, which
         // BotActions.stop(bot) below does not reset. Clear it with "/player <bot> stop", sent from
         // the bot's own silent source (same as BotStopTask) so no error ever reaches the player.
@@ -7771,7 +7772,7 @@ public class modCommandRegistry {
         }
         
         // Record skill execution for resume capability
-        SkillResumeService.recordExecution(bot, skillName, rawArgs, source);
+        final long resumeExecutionId = SkillResumeService.recordExecution(bot, skillName, rawArgs, source);
         
         // Capture command issuer's look direction (raycast) for directional skills.
         // IMPORTANT: Skip on resume so we don't overwrite stored/locked work directions.
@@ -7822,11 +7823,16 @@ public class modCommandRegistry {
                             + skillName + " bot=" + bot.getGameProfile().name()
                             + " success=" + (result != null && result.success())
                             + " msg=" + (result != null ? result.message() : "null"));
+                    // Drop the resume record unless a threat pause / continue? prompt / sunrise hold
+                    // still wants it (finding 23: this call was lost in 1296ae05, so a threat resumed
+                    // skills that had finished long before).
+                    SkillResumeService.handleCompletion(botUuid, resumeExecutionId, result != null && result.success());
                     if (StopFeedbackPolicy.shouldEchoSkillResult(result.message())) {
                         source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
                     }
                 } catch (Exception e) {
                     LOGGER.error("An unexpected error occurred in /bot skill " + skillName, e);
+                    SkillResumeService.handleCompletion(botUuid, resumeExecutionId, false);
                     net.wcfcarolina13.GameAI.services.DebugFileLogger.log("Command.runSkill error name="
                             + skillName + " bot=" + bot.getGameProfile().name()
                             + " err=" + e.getClass().getSimpleName());
@@ -7851,6 +7857,7 @@ public class modCommandRegistry {
             net.wcfcarolina13.GameAI.services.DebugFileLogger.log("Command.runSkill submit-rejected name="
                     + skillName + " bot=" + bot.getGameProfile().name()
                     + " err=" + e.getClass().getSimpleName());
+            SkillResumeService.handleCompletion(botUuid, resumeExecutionId, false);
             ChatUtils.sendSystemMessage(source,
                     "§cSkill executor unavailable. Please fully restart Minecraft. (Skill commands break after exit-to-title + reload in the same session.)");
         }

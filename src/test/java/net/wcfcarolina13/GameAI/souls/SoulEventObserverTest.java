@@ -54,6 +54,57 @@ class SoulEventObserverTest {
     }
 
     @Test
+    void environmentalDamageIsJournaledButIsNotCombat() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteBotDamage(bot, "minecraft:overworld", "plains", 1.0F, "in_wall", 10L);
+        observer.tickCombat(bot, "minecraft:overworld", "plains", 500L);
+
+        assertEquals(List.of(BOT_DAMAGE), sink.events().stream().map(SoulTypes.SoulEvent::type).toList());
+    }
+
+    @Test
+    void attackerDamageStillStartsCombat() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteBotDamage(bot, "minecraft:overworld", "plains", 1.0F, "in_wall", 10L);
+        observer.noteBotDamage(bot, "minecraft:overworld", "plains", 3.0F, "zombie", 20L);
+
+        assertEquals(List.of(BOT_DAMAGE, BOT_DAMAGE, COMBAT_STARTED),
+                sink.events().stream().map(SoulTypes.SoulEvent::type).toList());
+    }
+
+    @Test
+    void environmentalDamageDoesNotExtendAFight() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+
+        observer.noteBotDamage(bot, "minecraft:overworld", "plains", 3.0F, "blaze", 10L);
+        observer.noteBotDamage(bot, "minecraft:overworld", "plains", 1.0F, "on_fire", 90L);
+        observer.tickCombat(bot, "minecraft:overworld", "plains", 110L);
+
+        assertEquals(List.of(BOT_DAMAGE, COMBAT_STARTED, BOT_DAMAGE, COMBAT_ENDED),
+                sink.events().stream().map(SoulTypes.SoulEvent::type).toList());
+    }
+
+    @Test
+    void environmentalDamageClassification() {
+        for (String id : List.of("in_wall", "fall", "drown", "starve", "cactus", "freeze", "on_fire",
+                "in_fire", "lava", "sweet_berry_bush", "cramming", "fly_into_wall", "", "environment")) {
+            assertTrue(SoulEventObserver.isEnvironmentalDamage(id), id);
+        }
+        assertTrue(SoulEventObserver.isEnvironmentalDamage(null));
+        for (String id : List.of("zombie", "skeleton", "player", "creeper", "arrow", "mob_attack")) {
+            assertFalse(SoulEventObserver.isEnvironmentalDamage(id), id);
+        }
+    }
+
+    @Test
     void firstObservationSeedsWithoutEmittingTransitions() {
         CapturingSink sink = new CapturingSink();
         SoulEventObserver observer = new SoulEventObserver(sink, 100L);
