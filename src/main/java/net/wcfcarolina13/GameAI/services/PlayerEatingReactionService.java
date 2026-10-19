@@ -94,7 +94,7 @@ public final class PlayerEatingReactionService {
             Integer prevRotten = LAST_ROTTEN_FLESH_COUNT.put(pid, rottenCount);
             if (prevRotten != null && rottenCount > prevRotten) {
                 long lastReact = LAST_ROTTEN_REACTION_TICK.getOrDefault(pid, Long.MIN_VALUE);
-                if (nowTick - lastReact >= COOLDOWN_TICKS) {
+                if (TickIntervals.elapsed(nowTick, lastReact, COOLDOWN_TICKS)) {
                     tryReactFromNearbyBot(server, player, bots, ROTTEN_FLESH_LINES, "rotten-flesh", nowTick);
                     LAST_ROTTEN_REACTION_TICK.put(pid, nowTick);
                 }
@@ -105,7 +105,7 @@ public final class PlayerEatingReactionService {
             Integer prevStew = LAST_SUSPICIOUS_STEW_COUNT.put(pid, stewCount);
             if (prevStew != null && stewCount > prevStew) {
                 long lastReact = LAST_STEW_REACTION_TICK.getOrDefault(pid, Long.MIN_VALUE);
-                if (nowTick - lastReact >= COOLDOWN_TICKS) {
+                if (TickIntervals.elapsed(nowTick, lastReact, COOLDOWN_TICKS)) {
                     tryReactFromNearbyBot(server, player, bots, SUSPICIOUS_STEW_LINES, "suspicious-stew", nowTick);
                     LAST_STEW_REACTION_TICK.put(pid, nowTick);
                 }

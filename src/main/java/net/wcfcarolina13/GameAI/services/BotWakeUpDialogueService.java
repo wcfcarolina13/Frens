@@ -98,7 +98,7 @@ public final class BotWakeUpDialogueService {
 
             // Bot just woke up. Check cooldown.
             long lastLine = LAST_WAKE_LINE_TICK.getOrDefault(botId, Long.MIN_VALUE);
-            if (nowTick - lastLine < COOLDOWN_TICKS) {
+            if (!TickIntervals.elapsed(nowTick, lastLine, COOLDOWN_TICKS)) {
                 continue;
             }
 
@@ -266,7 +266,7 @@ public final class BotWakeUpDialogueService {
                         continue;
                     }
                     long lastQueued = CO_SLEEP_QUEUED_TICK.getOrDefault(botId, Long.MIN_VALUE);
-                    if (retryTick - lastQueued < CO_SLEEP_COOLDOWN_TICKS) continue;
+                    if (!TickIntervals.elapsed(retryTick, lastQueued, CO_SLEEP_COOLDOWN_TICKS)) continue;
                     double distSq = bot.squaredDistanceTo(retryPlayer);
                     if (!BotSleepProximityPolicy.isWithinCommanderSleepRadius(distSq)) continue;
                     if (bot.getEntityWorld() instanceof ServerWorld sw) {

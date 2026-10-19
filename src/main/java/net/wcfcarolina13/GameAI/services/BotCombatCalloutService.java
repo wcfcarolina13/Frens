@@ -1023,7 +1023,8 @@ public final class BotCombatCalloutService {
     public static boolean wasRecentlyDamagedByHostile(ServerPlayerEntity bot, long currentTick, int tickWindow) {
         if (bot == null) return false;
         long last = LAST_HOSTILE_DAMAGE_TICK.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
-        return (currentTick - last) <= tickWindow;
+        // Never hit (MIN_VALUE) is not recent: the plain subtraction overflowed and read as true.
+        return TickIntervals.within(currentTick, last, tickWindow);
     }
     
     /**

@@ -596,7 +596,7 @@ public final class SurvivalRecruitmentService {
             boolean shouldShow = false;
             if (enabled && !recruited) {
                 long lastCheck = LAST_CHECK_TICK.getOrDefault(id, Long.MIN_VALUE);
-                if (nowTick - lastCheck >= CHECK_INTERVAL_TICKS) {
+                if (TickIntervals.elapsed(nowTick, lastCheck, CHECK_INTERVAL_TICKS)) {
                     boolean eligible = isEligibleForRecruitment(player, nowTick);
                     LAST_IN_VILLAGE.put(id, eligible);
                     LAST_CHECK_TICK.put(id, nowTick);
@@ -703,7 +703,7 @@ public final class SurvivalRecruitmentService {
 
         // Must have interacted with something village-related recently.
         long lastInteract = LAST_INTERACTION_TICK.getOrDefault(id, Long.MIN_VALUE);
-        boolean interactedRecently = nowTick - lastInteract <= INTERACTION_WINDOW_TICKS;
+        boolean interactedRecently = TickIntervals.within(nowTick, lastInteract, INTERACTION_WINDOW_TICKS);
         if (!interactedRecently) {
             return false;
         }
@@ -803,8 +803,8 @@ public final class SurvivalRecruitmentService {
         int villagers = countNearbyVillagers(world, player.getBoundingBox());
         int golems = countNearbyGolems(world, player.getBoundingBox());
 
-        boolean tradedRecently = nowTick - LAST_TRADED_TICK.getOrDefault(id, Long.MIN_VALUE) <= RECENT_EVENT_TICKS;
-        boolean sleptRecently = nowTick - LAST_SLEPT_TICK.getOrDefault(id, Long.MIN_VALUE) <= RECENT_EVENT_TICKS;
+        boolean tradedRecently = TickIntervals.within(nowTick, LAST_TRADED_TICK.getOrDefault(id, Long.MIN_VALUE), RECENT_EVENT_TICKS);
+        boolean sleptRecently = TickIntervals.within(nowTick, LAST_SLEPT_TICK.getOrDefault(id, Long.MIN_VALUE), RECENT_EVENT_TICKS);
 
         BlockPos center = player.getBlockPos();
         boolean bellNearby = isBellNearby(world, center);
