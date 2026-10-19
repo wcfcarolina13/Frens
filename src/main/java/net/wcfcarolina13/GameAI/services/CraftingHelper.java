@@ -576,10 +576,8 @@ public final class CraftingHelper {
         if (bot == null || source == null) {
             return 0;
         }
-        if (!ensureCraftingStation(bot, source)) {
-            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft a bed.");
-            return 0;
-        }
+        // Wool and planks are checked before the crafting table: string -> wool and logs -> planks
+        // are 2x2 recipes, and a table placed for a bed the bot cannot make is litter.
         // Choose a color based on available wool stacks (3 required per bed).
         record BedRecipe(net.minecraft.item.Item wool, net.minecraft.item.Item bed, Identifier recipeId) {}
         List<BedRecipe> recipes = List.of(
@@ -650,6 +648,13 @@ public final class CraftingHelper {
                     "Beds need 3 planks per bed.");
             return 0;
         }
+
+        if (!ensureCraftingStation(bot, source)) {
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft a bed.");
+            return 0;
+        }
+        // Crafting the table may have used planks the check above counted; top them back up.
+        ensurePlanksAvailable(bot, source, 3 * amount);
 
         int desiredWool = 3 * amount;
         Item woolItem = chosen.wool();
