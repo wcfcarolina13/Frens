@@ -2,6 +2,8 @@ package net.wcfcarolina13.GameAI.souls;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.entity.Entity;
+import net.wcfcarolina13.GameAI.services.BotThreatService;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy;
 import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService;
@@ -249,6 +251,27 @@ public final class SoulLocalDirector {
         SoulTypes.GroundingSnapshot bestSnapshot = null;
         int bestScore = -1;
         if (candidateBot != null) {
+            // Finding 18 (1.1.273): the capture below grounds only the chosen speaker, so a
+            // zombie 2 blocks from another bot in earshot (or from the player) never reached the
+            // danger veto and the scene fired mid-fight. Check every nearby actor first, with no
+            // line-of-sight requirement: a hostile behind a tree is still a hostile.
+            List<ServerPlayerEntity> actors = new ArrayList<>(near.size() + 1);
+            actors.add(player);
+            actors.addAll(near);
+            List<Integer> hostileCounts = new ArrayList<>(actors.size());
+            for (ServerPlayerEntity actor : actors) {
+                hostileCounts.add(hostilesWithin(actor, ACTOR_DANGER_RADIUS));
+            }
+            int endangered = firstEndangeredActor(hostileCounts);
+            if (endangered >= 0) {
+                LOGGER.info("[souls] local player={} danger seen by {} ({} hostile(s) within {})",
+                        playerId, actors.get(endangered).getName().getString(),
+                        hostileCounts.get(endangered), (int) ACTOR_DANGER_RADIUS);
+                recordVerdict(playerId, "vetoed:danger");
+                lastScore.put(playerId, candidatePhase1Score);
+                nextEligibleAtMs.merge(playerId, now + RETRY_AFTER_VETO_MS, Math::max);
+                return;
+            }
             try {
                 bestSnapshot = SoulSnapshotBuilder.capture(server, candidateBot, player,
                         SoulTypes.Reachability.LOCAL);
@@ -636,6 +659,38 @@ public final class SoulLocalDirector {
      */
     static boolean captureCouldReachThreshold(int phase1Score) {
         return phase1Score + SoulLocalSalience.WEIGHT_TOPIC_OVERLAP >= SoulLocalSalience.THRESHOLD;
+    }
+
+    /** Radius of the per-actor hostile scan that runs before the capture (finding 18). */
+    static final double ACTOR_DANGER_RADIUS = 16.0D;
+
+    /**
+     * Index of the first actor (the player, then each bot in earshot) with at least one hostile
+     * nearby, or {@code -1} when none is endangered. Any one endangered actor vetoes the scene:
+     * the speaker chatting while a zombie closes on its neighbour reads as oblivious.
+     */
+    static int firstEndangeredActor(List<Integer> hostileCountsPerActor) {
+        if (hostileCountsPerActor == null) {
+            return -1;
+        }
+        for (int i = 0; i < hostileCountsPerActor.size(); i++) {
+            Integer count = hostileCountsPerActor.get(i);
+            if (count != null && count > 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** Hostiles within a true {@code radius} sphere of {@code actor} (the helper's box is a cube). */
+    private static int hostilesWithin(ServerPlayerEntity actor, double radius) {
+        int count = 0;
+        for (Entity hostile : BotThreatService.findHostilesAround(actor, radius)) {
+            if (hostile.isAlive() && hostile.squaredDistanceTo(actor) <= radius * radius) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /** Post-capture danger veto — identical rule to banter's. */

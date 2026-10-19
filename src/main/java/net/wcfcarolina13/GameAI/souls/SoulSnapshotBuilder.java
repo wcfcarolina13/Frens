@@ -47,6 +47,8 @@ import net.wcfcarolina13.GameAI.services.MountPersistenceService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.PlayerUtils.BlockDistanceLimitedSearch;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -69,6 +71,8 @@ import java.util.stream.Collectors;
  * plain unit tests without a running Minecraft server.
  */
 public final class SoulSnapshotBuilder {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("frens.souls");
 
     /** At most this many armor-stand lines reach a soul prompt. */
     static final int MAX_ARMOR_STANDS = 3;
@@ -532,6 +536,12 @@ public final class SoulSnapshotBuilder {
                 enchantments, contents, wear);
     }
 
+    /** Debug line naming the situation probe that threw (finding 18): failures stay non-fatal but visible. */
+    private static void logProbeFailure(String probe, ServerPlayerEntity bot, Throwable failure) {
+        LOGGER.debug("[souls] snapshot probe {} threw for bot {}: {}", probe,
+                bot.getName().getString(), failure.toString());
+    }
+
     /**
      * Reads live danger/entity/combat/survival/companion/mount/base/hunt/hobby state on the
      * server thread and projects it into plain {@link SituationInputs}, then hands off to the
@@ -565,7 +575,14 @@ public final class SoulSnapshotBuilder {
             enclosed = environmentSnapshot.enclosed();
             hasHeadroom = environmentSnapshot.hasHeadroom();
             hasEscapeRoute = environmentSnapshot.hasEscapeRoute();
+        } catch (Throwable probeFailure) {
+            logProbeFailure("environment", bot, probeFailure);
+        }
 
+        // Each probe has its own try (finding 18, 1.1.273): one shared try let a throw in the
+        // environment or hazard probe leave the entity list empty, silently disarming the
+        // hostile danger veto.
+        try {
             // Lava/cliff distance separately rather than DangerZoneDetector.detectDangerZone's
             // lavaDistance+cliffDistance sum (meaningless once both hazards are present); take the
             // nearer of whichever hazard(s) are actually detected.
@@ -580,7 +597,11 @@ public final class SoulSnapshotBuilder {
             } else if (cliffPresent) {
                 dangerDistance = cliffDistance;
             }
+        } catch (Throwable probeFailure) {
+            logProbeFailure("hazards", bot, probeFailure);
+        }
 
+        try {
             // Radius 16 (not the shared AutoFaceEntity/BotEventHandler default of 10) so ambient
             // fliers (parrots, bats) and distant animals are visible to the soul prompt even when
             // outside the bot's own combat-scan range -- this capture is the only caller widened.
@@ -616,8 +637,9 @@ public final class SoulSnapshotBuilder {
                 appendShoulderPets(collected, player, player.getName().getString() + "'s shoulder");
             }
             entities = collected;
-        } catch (Throwable ignored) {
+        } catch (Throwable probeFailure) {
             // Danger/entity/enclosure state is best-effort context, never load-bearing for capture.
+            logProbeFailure("entities", bot, probeFailure);
         }
 
         String behaviorMode = "";

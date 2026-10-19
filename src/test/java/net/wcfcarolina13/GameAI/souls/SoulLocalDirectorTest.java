@@ -59,6 +59,36 @@ class SoulLocalDirectorTest {
         assertTrue(SoulLocalDirector.groundingDangerous(withHostiles()));
     }
 
+    // === Finding 18 (1.1.273): any nearby actor with a hostile vetoes, not only the speaker. ===
+
+    @Test
+    void noActorEndangeredWhenEveryCountIsZero() {
+        assertEquals(-1, SoulLocalDirector.firstEndangeredActor(List.of(0, 0, 0)));
+        assertEquals(-1, SoulLocalDirector.firstEndangeredActor(List.of()));
+        assertEquals(-1, SoulLocalDirector.firstEndangeredActor(null));
+    }
+
+    @Test
+    void playerWithAHostileVetoes() {
+        assertEquals(0, SoulLocalDirector.firstEndangeredActor(List.of(1, 0)));
+    }
+
+    @Test
+    void nonSpeakerBotWithAHostileVetoes() {
+        // The chosen speaker (index 1) is clear; a zombie is on its neighbour (index 2).
+        assertEquals(2, SoulLocalDirector.firstEndangeredActor(List.of(0, 0, 8, 3)));
+    }
+
+    @Test
+    void nullCountsAreTreatedAsClear() {
+        assertEquals(1, SoulLocalDirector.firstEndangeredActor(java.util.Arrays.asList(null, 2)));
+    }
+
+    @Test
+    void actorDangerRadiusMatchesTheSnapshotScan() {
+        assertEquals(16.0, SoulLocalDirector.ACTOR_DANGER_RADIUS);
+    }
+
     @Test
     void replyWindowConstantsAreTheSpecValues() {
         assertEquals(30_000L, SoulLocalDirector.REPLY_WINDOW_MS);
