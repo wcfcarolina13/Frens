@@ -495,4 +495,43 @@ class SoulGroupResponseValidatorTest {
         assertFalse(parse.accepted());
         assertEquals(2, parse.dropped().size());
     }
+
+    @Test
+    void mergeSpeakerRunsJoinsOneSpeakerAfterTheMiddleLineIsDropped() {
+        // Jake, Bob, Jake with Bob dropped by novelty: one Jake turn, not two (finding 3)
+        List<SoulGroupTypes.SceneLine> afterNovelty = List.of(
+                new SoulGroupTypes.SceneLine(0, "Morning."),
+                new SoulGroupTypes.SceneLine(0, "Still here."));
+        var merged = SoulGroupResponseValidator.mergeSpeakerRuns(afterNovelty, false);
+        assertEquals(1, merged.size());
+        assertEquals(0, merged.get(0).participantIndex());
+        assertEquals("Morning. Still here.", merged.get(0).text());
+
+        List<SoulGroupTypes.SceneLine> mixed = List.of(
+                new SoulGroupTypes.SceneLine(0, "A."),
+                new SoulGroupTypes.SceneLine(1, "B."),
+                new SoulGroupTypes.SceneLine(1, "C."),
+                new SoulGroupTypes.SceneLine(0, "D."));
+        var mixedMerged = SoulGroupResponseValidator.mergeSpeakerRuns(mixed, false);
+        assertEquals(3, mixedMerged.size());
+        assertEquals("B. C.", mixedMerged.get(1).text());
+    }
+
+    @Test
+    void mergeSpeakerRunsCapsTheMergedLineLength() {
+        String longLine = "word ".repeat(70).strip() + ".";
+        var merged = SoulGroupResponseValidator.mergeSpeakerRuns(List.of(
+                new SoulGroupTypes.SceneLine(0, longLine),
+                new SoulGroupTypes.SceneLine(0, longLine)), false);
+        assertEquals(1, merged.size());
+        assertTrue(merged.get(0).text().length() <= SoulGroupTypes.MAX_LINE_CHARS);
+    }
+
+    @Test
+    void mergeSpeakerRunsLeavesSoloScenesAlone() {
+        List<SoulGroupTypes.SceneLine> solo = List.of(
+                new SoulGroupTypes.SceneLine(0, "Hm."),
+                new SoulGroupTypes.SceneLine(0, "Rain again."));
+        assertEquals(solo, SoulGroupResponseValidator.mergeSpeakerRuns(solo, true));
+    }
 }

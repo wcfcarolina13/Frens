@@ -254,7 +254,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             return;
         }
 
-        List<SoulGroupTypes.SceneLine> lines = applyNovelty(turn, parse.lines());
+        // Finding 3: novelty can drop the line between two lines of one speaker; merge them
+        // again so the same voice never plays twice in a row. Solo scenes keep their breaks.
+        List<SoulGroupTypes.SceneLine> lines = SoulGroupResponseValidator.mergeSpeakerRuns(
+                applyNovelty(turn, parse.lines()), rosterNames.size() <= 1);
         applySideChannel(turn, correlationId, privateSeedOwner, rosterNames, parse.sideChannelRaw());
 
         sceneResults.put(correlationId, result);

@@ -457,6 +457,31 @@ public final class SoulGroupResponseValidator {
         return (cut > 0 ? window.substring(0, cut) : window).strip();
     }
 
+    /**
+     * Merges adjacent lines from one speaker into a single turn, the same way {@link #parse}
+     * does for multi-speaker scenes. Needed again after the novelty filter: dropping the middle
+     * line of "Jake, Bob, Jake" leaves two Jake lines side by side (finding 3, 1.1.274). Solo
+     * scenes are returned unchanged, since there the line breaks are deliberate pacing
+     * (1.1.197 ruling).
+     */
+    static List<SoulGroupTypes.SceneLine> mergeSpeakerRuns(List<SoulGroupTypes.SceneLine> lines,
+                                                           boolean soloRoster) {
+        if (soloRoster || lines == null || lines.size() < 2) {
+            return lines;
+        }
+        List<SoulGroupTypes.SceneLine> merged = new ArrayList<>(lines.size());
+        for (SoulGroupTypes.SceneLine line : lines) {
+            int last = merged.size() - 1;
+            if (last >= 0 && merged.get(last).participantIndex() == line.participantIndex()) {
+                merged.set(last, new SoulGroupTypes.SceneLine(line.participantIndex(),
+                        truncateLine(merged.get(last).text() + " " + line.text())));
+            } else {
+                merged.add(line);
+            }
+        }
+        return merged;
+    }
+
     private static SceneParse reject(String reason) {
         return new SceneParse(false, List.of(), SoulTypes.FailureCode.MALFORMED, reason);
     }

@@ -300,6 +300,23 @@ class SoulGroupConversationServiceTest {
         assertEquals(0, player.enqueued.get(1).lines().size(), "banter keeps the zero-delivery path");
     }
 
+    @Test
+    void noveltyDroppingTheMiddleLineMergesTheSpeakerAgain() throws Exception {
+        // Finding 3: Jake, Sara, Jake with Sara's repeat dropped must play as one Jake turn.
+        SoulGroupConversationService novel = noveltyService("Sara: Fishing is safer.", 1);
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED,
+                novel.submit(banterTurn("seed one")).get(2, SECONDS));
+        provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(true,
+                "Jake: Mining tonight.\nSara: Fishing is safer.\nJake: Bring torches.",
+                null, "test", "test-model", 5L, null, null, null)));
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED,
+                novel.submit(banterTurn("seed two")).get(2, SECONDS));
+        List<SoulGroupTypes.SceneLine> lines = player.enqueued.get(1).lines();
+        assertEquals(1, lines.size());
+        assertEquals(0, lines.get(0).participantIndex());
+        assertEquals("Mining tonight. Bring torches.", lines.get(0).text());
+    }
+
     // === Fakes ===
 
     @Test
