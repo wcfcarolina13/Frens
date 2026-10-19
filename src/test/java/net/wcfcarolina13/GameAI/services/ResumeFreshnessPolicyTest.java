@@ -70,4 +70,51 @@ class ResumeFreshnessPolicyTest {
     void anOlderRunNeverClearsANewerRecord() {
         assertFalse(ResumeFreshnessPolicy.shouldClearOnCompletion(false, false, false, false));
     }
+
+    @Test
+    void freshThreatClearResumes() {
+        assertEquals(ResumeFreshnessPolicy.ThreatClearedAction.RESUME,
+                ResumeFreshnessPolicy.onThreatCleared(PAUSED, PAUSED + 60_000L, AUTO_RESUME_WINDOW_MS, false, false));
+        assertEquals(ResumeFreshnessPolicy.ThreatClearedAction.RESUME,
+                ResumeFreshnessPolicy.onThreatCleared(PAUSED, PAUSED + 60_000L, AUTO_RESUME_WINDOW_MS, true, true));
+    }
+
+    @Test
+    void staleThreatClearDropsTheRecordSoALaterThreatCannotReviveIt() {
+        // Finding 23 again: a 12-minute-old woodcut pause must not leave a record to re-arm.
+        assertEquals(ResumeFreshnessPolicy.ThreatClearedAction.DROP_REQUEST_AND_RECORD,
+                ResumeFreshnessPolicy.onThreatCleared(PAUSED, PAUSED + 12L * 60_000L, AUTO_RESUME_WINDOW_MS, false, false));
+    }
+
+    @Test
+    void staleThreatClearLeavesASunriseHoldAlone() {
+        assertEquals(ResumeFreshnessPolicy.ThreatClearedAction.LEAVE_FOR_SUNRISE,
+                ResumeFreshnessPolicy.onThreatCleared(PAUSED, PAUSED + 12L * 60_000L, AUTO_RESUME_WINDOW_MS, true, false));
+        assertEquals(ResumeFreshnessPolicy.ThreatClearedAction.LEAVE_FOR_SUNRISE,
+                ResumeFreshnessPolicy.onThreatCleared(PAUSED, PAUSED + 12L * 60_000L, AUTO_RESUME_WINDOW_MS, true, true));
+    }
+
+    @Test
+    void staleThreatClearKeepsTheRecordWhileThePlayerIsAsked() {
+        assertEquals(ResumeFreshnessPolicy.ThreatClearedAction.DROP_REQUEST_KEEP_RECORD,
+                ResumeFreshnessPolicy.onThreatCleared(PAUSED, PAUSED + 12L * 60_000L, AUTO_RESUME_WINDOW_MS, false, true));
+    }
+
+    @Test
+    void pauseArmsOnlyTheRecordedSkill() {
+        assertTrue(ResumeFreshnessPolicy.pausedTaskOwnsRecord("skill:woodcut", false, "woodcut"));
+        assertFalse(ResumeFreshnessPolicy.pausedTaskOwnsRecord("skill:hangout", false, "woodcut"),
+                "a threat pausing an unrelated task must not re-arm an old woodcut");
+        assertFalse(ResumeFreshnessPolicy.pausedTaskOwnsRecord("skill:woodcut", true, "woodcut"),
+                "a woodcut hobby is not the recorded /bot skill woodcut");
+        assertFalse(ResumeFreshnessPolicy.pausedTaskOwnsRecord("woodcut", false, "woodcut"));
+        assertFalse(ResumeFreshnessPolicy.pausedTaskOwnsRecord("post_task_return", false, "woodcut"));
+    }
+
+    @Test
+    void pauseArmsNothingWithoutATaskOrARecord() {
+        assertFalse(ResumeFreshnessPolicy.pausedTaskOwnsRecord(null, false, "woodcut"));
+        assertFalse(ResumeFreshnessPolicy.pausedTaskOwnsRecord("skill:woodcut", false, null));
+        assertFalse(ResumeFreshnessPolicy.pausedTaskOwnsRecord("skill:", false, ""));
+    }
 }

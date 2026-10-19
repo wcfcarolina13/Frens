@@ -1744,10 +1744,11 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.Entity.AutoFaceEntity.isBotMoving = false;
             net.wcfcarolina13.Entity.AutoFaceEntity.setBotExecutingTask(false);
             net.wcfcarolina13.GameAI.services.BotFleeService.captureInterruptedSurvival(bot);
-            if (net.wcfcarolina13.GameAI.skills.SkillManager.requestSkillPause(
-                    bot, net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.PAUSE_MESSAGE)) {
+            // Arms the resume before the pause so a worker finishing in between cannot lose it.
+            if (net.wcfcarolina13.GameAI.services.SkillResumeService.pauseWithAutoResume(bot,
+                    () -> net.wcfcarolina13.GameAI.skills.SkillManager.requestSkillPause(
+                            bot, net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.PAUSE_MESSAGE))) {
                 net.wcfcarolina13.GameAI.services.RangedThreatPausePolicy.notePause(bot.getUuid(), now);
-                net.wcfcarolina13.GameAI.services.SkillResumeService.requestAutoResume(bot);
                 LOGGER.info("Bot {} paused task for ranged hit: shooter={} ranged={} distance={}",
                         bot.getName().getString(),
                         typeId,

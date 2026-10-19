@@ -173,6 +173,11 @@ public final class SkillResumeService {
         return true;
     }
 
+    /**
+     * Arms the auto-resume of the bot's recorded task with no check of what is running. For
+     * callers that are not pausing a task (sunset hunt/fishing, the break-free after a tactical
+     * shelter). A threat that pauses a task goes through {@link #pauseWithAutoResume} instead.
+     */
     public static void requestAutoResume(ServerPlayerEntity bot) {
         if (bot == null) {
             return;
@@ -183,6 +188,48 @@ public final class SkillResumeService {
         }
         AUTO_RESUME_PENDING.put(uuid, System.currentTimeMillis());
         AWAITING_DECISION.remove(uuid);
+    }
+
+    /**
+     * A threat pauses the bot's task and, only if the pause stopped it, asks for the task to be
+     * auto-resumed once hostiles clear.
+     * <p>
+     * The resume is armed before {@code pause} runs: the skill's worker can reach
+     * {@link #handleCompletion} the moment the pause lands, and an unarmed record would be cleared
+     * there before a resume request made afterwards. It is armed only when the task being paused is
+     * the recorded {@code /bot skill} (not a hobby, not some other task), so a pause of an unrelated
+     * task cannot re-arm an old record. If the pause is refused the arm is undone, restoring any
+     * earlier request; if the run already finished in that window, the record it left for this arm
+     * is dropped as {@link #handleCompletion} would have.
+     *
+     * @param pause requests the pause (normally {@code SkillManager.requestSkillPause}); true when it stopped a task
+     * @return what {@code pause} returned
+     */
+    public static boolean pauseWithAutoResume(ServerPlayerEntity bot, java.util.function.BooleanSupplier pause) {
+        UUID uuid = bot != null ? bot.getUuid() : null;
+        PendingSkill record = uuid != null ? LAST_SKILL_BY_BOT.get(uuid) : null;
+        TaskService.ActiveTaskInfo active = uuid != null ? TaskService.getActiveTaskInfo(uuid).orElse(null) : null;
+        boolean owns = record != null && active != null && ResumeFreshnessPolicy.pausedTaskOwnsRecord(
+                active.name(), active.origin() == TaskService.Origin.AMBIENT, record.skillName());
+        if (!owns) {
+            return pause.getAsBoolean();
+        }
+        long armedAt = System.currentTimeMillis();
+        Long previous = AUTO_RESUME_PENDING.put(uuid, armedAt);
+        boolean paused = pause.getAsBoolean();
+        if (paused) {
+            AWAITING_DECISION.remove(uuid);
+            return true;
+        }
+        AUTO_RESUME_PENDING.compute(uuid, (k, v) -> v != null && v == armedAt ? previous : v);
+        if (previous == null && TaskService.getActiveTaskInfo(uuid).isEmpty()
+                && ResumeFreshnessPolicy.shouldClearOnCompletion(true, false, isAwaiting(uuid), isHeldForSunrise(uuid))
+                && LAST_SKILL_BY_BOT.remove(uuid, record)) {
+            // The run finished between the arm and the pause and kept its record for this arm.
+            ZONE_OVERRIDE_PENDING.remove(uuid);
+            PENDING_BY_RESPONDER.values().removeIf(ps -> ps.botUuid().equals(uuid));
+        }
+        return false;
     }
 
     /**
@@ -208,8 +255,10 @@ public final class SkillResumeService {
     /**
      * Hostiles-cleared path: resumes the task a threat paused, but only within
      * {@link ResumeFreshnessPolicy#AUTO_RESUME_WINDOW_MS} of the pause. A stale request is dropped
-     * (logged once); the task record itself stays for a manual Resume, and a request a sunset stop
-     * holds for sunrise is left to the sunrise path.
+     * (logged once) together with its task record, so a later threat pausing some other task cannot
+     * re-arm it; the record stays only while the player is being asked about it. A request a sunset
+     * stop holds for sunrise is left to the sunrise path, and the sunrise record and zone override
+     * are never touched here.
      */
     public static void tryAutoResumeAfterThreat(ServerPlayerEntity bot) {
         if (bot == null) {
@@ -221,21 +270,27 @@ public final class SkillResumeService {
             return;
         }
         long now = System.currentTimeMillis();
-        if (!ResumeFreshnessPolicy.shouldAutoResume(pausedAtMs, now, ResumeFreshnessPolicy.AUTO_RESUME_WINDOW_MS)) {
-            if (isHeldForSunrise(uuid)) {
-                return;
-            }
-            if (AUTO_RESUME_PENDING.remove(uuid, pausedAtMs)) {
+        ResumeFreshnessPolicy.ThreatClearedAction action = ResumeFreshnessPolicy.onThreatCleared(
+                pausedAtMs, now, ResumeFreshnessPolicy.AUTO_RESUME_WINDOW_MS,
+                isHeldForSunrise(uuid), isAwaiting(uuid));
+        switch (action) {
+            case RESUME -> tryAutoResume(bot);
+            case LEAVE_FOR_SUNRISE -> { }
+            case DROP_REQUEST_KEEP_RECORD, DROP_REQUEST_AND_RECORD -> {
+                if (!AUTO_RESUME_PENDING.remove(uuid, pausedAtMs)) {
+                    return;
+                }
                 PendingSkill pending = LAST_SKILL_BY_BOT.get(uuid);
-                LOGGER.info("Not auto-resuming '{}' for {}: paused {} s ago, past the {} s window",
+                boolean dropRecord = action == ResumeFreshnessPolicy.ThreatClearedAction.DROP_REQUEST_AND_RECORD
+                        && pending != null && LAST_SKILL_BY_BOT.remove(uuid, pending);
+                LOGGER.info("Not auto-resuming '{}' for {}: paused {} s ago, past the {} s window{}",
                         pending != null ? pending.skillName() : "?",
                         pending != null ? pending.alias() : uuid,
                         (now - pausedAtMs) / 1000L,
-                        ResumeFreshnessPolicy.AUTO_RESUME_WINDOW_MS / 1000L);
+                        ResumeFreshnessPolicy.AUTO_RESUME_WINDOW_MS / 1000L,
+                        dropRecord ? "; dropped its resume record" : "");
             }
-            return;
         }
-        tryAutoResume(bot);
     }
 
     public static void saveSunriseResume(UUID botUuid, String skillName, String rawArgs,

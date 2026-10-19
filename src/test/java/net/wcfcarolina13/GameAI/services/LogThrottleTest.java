@@ -71,4 +71,34 @@ class LogThrottleTest {
         assertTrue(LogThrottle.due(m, "bot|Dirt|2", 1L, 200L), "a new block still speaks");
         assertFalse(LogThrottle.due(m, "bot|Stone|1", 2L, 200L));
     }
+    @Test
+    void dueRacingCallersGetExactlyOneSlot() throws Exception {
+        Map<String, Long> m = new ConcurrentHashMap<>();
+        int threads = 16;
+        for (int round = 0; round < 200; round++) {
+            m.clear();
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicInteger dueCount = new java.util.concurrent.atomic.AtomicInteger();
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+            try {
+                java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+                for (int i = 0; i < threads; i++) {
+                    futures.add(pool.submit(() -> {
+                        start.await();
+                        if (LogThrottle.due(m, "k", 1_000L, 200L)) {
+                            dueCount.incrementAndGet();
+                        }
+                        return null;
+                    }));
+                }
+                start.countDown();
+                for (java.util.concurrent.Future<?> f : futures) {
+                    f.get();
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+            assertEquals(1, dueCount.get(), "round " + round);
+        }
+    }
 }

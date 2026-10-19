@@ -313,7 +313,7 @@ public class FarmSkill implements Skill {
                 return SkillExecutionResult.failure("Missing hoe.");
             }
 
-            if (!ensureHoeInHotbar(bot)) {
+            if (!ensureHoeInHotbarOnServer(bot)) {
                 ChatUtils.sendSystemMessage(source, "I need a hoe in my hotbar to till.");
                 return SkillExecutionResult.failure("Hoe not accessible.");
             }

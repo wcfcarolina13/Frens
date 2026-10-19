@@ -176,4 +176,13 @@ public final class CraftingStationPolicy {
     public static int plankEquivalent(int planks, int logs) {
         return Math.max(0, planks) + 4 * Math.max(0, logs);
     }
+
+    /**
+     * Planks a bed craft must have before anything is crafted or placed: 3 per bed, plus the 4 a
+     * crafting table takes when no table is reachable and one has to be crafted first. Counting the
+     * table up front stops it from eating the bed's planks after the check passed.
+     */
+    public static int bedPlanksNeeded(int beds, boolean tableMustBeCrafted) {
+        return 3 * Math.max(1, beds) + (tableMustBeCrafted ? TABLE_PLANKS : 0);
+    }
 }

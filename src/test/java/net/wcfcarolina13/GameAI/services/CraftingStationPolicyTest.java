@@ -465,4 +465,14 @@ class CraftingStationPolicyTest {
         assertEquals(6, CraftingStationPolicy.plankEquivalent(2, 1));
         assertEquals(4, CraftingStationPolicy.plankEquivalent(-1, 1));
     }
+
+    @Test
+    void bedPlanksCountTheTableWhenOneMustBeCrafted() {
+        // Finding 4 follow-up: one log is 4 planks; that passes 3 but not 3 + a 4-plank table.
+        assertEquals(7, CraftingStationPolicy.bedPlanksNeeded(1, true));
+        assertEquals(3, CraftingStationPolicy.bedPlanksNeeded(1, false));
+        assertEquals(10, CraftingStationPolicy.bedPlanksNeeded(2, true));
+        assertEquals(6, CraftingStationPolicy.bedPlanksNeeded(2, false));
+        assertTrue(CraftingStationPolicy.bedPlanksNeeded(1, true) > 4);
+    }
 }

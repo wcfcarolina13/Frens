@@ -37,4 +37,48 @@ public final class ResumeFreshnessPolicy {
                                                   boolean awaitingDecision, boolean heldForSunrise) {
         return sameRun && !autoResumePending && !awaitingDecision && !heldForSunrise;
     }
+
+    /** What the hostiles-cleared path does with a threat's pending auto-resume. */
+    public enum ThreatClearedAction {
+        /** Within the window: resume the paused task. */
+        RESUME,
+        /** Past the window, but a sunset stop holds the task for sunrise: leave everything to that path. */
+        LEAVE_FOR_SUNRISE,
+        /** Past the window while the player is being asked (death, protected zone): drop the request, keep the record for that answer. */
+        DROP_REQUEST_KEEP_RECORD,
+        /**
+         * Past the window: drop the request and the task record, so a later threat that pauses some
+         * other task cannot re-arm this one and revive a long-finished job (finding 23).
+         */
+        DROP_REQUEST_AND_RECORD
+    }
+
+    public static ThreatClearedAction onThreatCleared(long pausedAtMs, long nowMs, long windowMs,
+                                                      boolean heldForSunrise, boolean awaitingDecision) {
+        if (shouldAutoResume(pausedAtMs, nowMs, windowMs)) {
+            return ThreatClearedAction.RESUME;
+        }
+        if (heldForSunrise) {
+            return ThreatClearedAction.LEAVE_FOR_SUNRISE;
+        }
+        return awaitingDecision ? ThreatClearedAction.DROP_REQUEST_KEEP_RECORD
+                : ThreatClearedAction.DROP_REQUEST_AND_RECORD;
+    }
+
+    /**
+     * Whether a threat pause of the bot's active task may arm the auto-resume of its recorded
+     * {@code /bot skill}. Only when the task being paused is that skill (ticket {@code "skill:" + name})
+     * and not an idle hobby running under the same skill name: a pause of anything else must not
+     * re-arm an old record.
+     *
+     * @param activeTaskName the active ticket's name, or null when the bot has no task
+     * @param activeIsAmbient the active ticket is an idle hobby
+     * @param recordSkillName the recorded skill, or null when there is no record
+     */
+    public static boolean pausedTaskOwnsRecord(String activeTaskName, boolean activeIsAmbient, String recordSkillName) {
+        if (activeTaskName == null || recordSkillName == null || recordSkillName.isEmpty() || activeIsAmbient) {
+            return false;
+        }
+        return activeTaskName.equals("skill:" + recordSkillName);
+    }
 }

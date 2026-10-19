@@ -641,11 +641,17 @@ public final class CraftingHelper {
             return 0;
         }
 
-        if (!ensurePlanksAvailable(bot, source, 3 * amount)) {
+        // With no table to use, ensureCraftingStation crafts one from these same planks: count its
+        // 4 up front so one log (4 planks) is not turned into a table and then "need planks".
+        boolean tableMustBeCrafted = !tableAvailableWithoutCrafting(bot, source);
+        int planksNeeded = CraftingStationPolicy.bedPlanksNeeded(amount, tableMustBeCrafted);
+        if (!ensurePlanksAvailable(bot, source, planksNeeded)) {
             reportMissing(source, "bed",
-                    Map.of("planks", 3 * Math.max(1, amount)),
+                    Map.of("planks", planksNeeded),
                     Map.of("planks", countPlanks(bot)),
-                    "Beds need 3 planks per bed.");
+                    tableMustBeCrafted
+                            ? "Beds need 3 planks per bed, plus 4 for a crafting table."
+                            : "Beds need 3 planks per bed.");
             return 0;
         }
 
@@ -654,7 +660,13 @@ public final class CraftingHelper {
             return 0;
         }
         // Crafting the table may have used planks the check above counted; top them back up.
-        ensurePlanksAvailable(bot, source, 3 * amount);
+        if (!ensurePlanksAvailable(bot, source, 3 * amount)) {
+            reportMissing(source, "bed",
+                    Map.of("planks", 3 * Math.max(1, amount)),
+                    Map.of("planks", countPlanks(bot)),
+                    "Beds need 3 planks per bed.");
+            return 0;
+        }
 
         int desiredWool = 3 * amount;
         Item woolItem = chosen.wool();
@@ -1969,6 +1981,54 @@ public final class CraftingHelper {
     }
 
     /** Whether a station call runs on the server thread: asks the source's server, else the bot's. */
+    /**
+     * Whether {@link #ensureCraftingStation} would find a table without crafting one: a table held,
+     * or one its scan would accept (remembered or in the scan box, in reach on the server thread,
+     * not a far one under the reach-failure cooldown). A read-only pre-check so a craft can count
+     * the table's planks before anything is crafted; a miss only means 4 extra planks are asked for.
+     */
+    private static boolean tableAvailableWithoutCrafting(ServerPlayerEntity bot, ServerCommandSource source) {
+        if (bot == null || source == null) {
+            return false;
+        }
+        if (findItemInInventory(bot, Items.CRAFTING_TABLE) != -1) {
+            return true;
+        }
+        boolean onServerThread = isServerThreadCall(source, bot);
+        Long lastFail = CRAFT_TABLE_REACH_FAILURE.get(bot.getUuid());
+        boolean reachCooldownActive = CraftingStationPolicy.mayWalk(onServerThread)
+                && lastFail != null && (System.currentTimeMillis() - lastFail) < CRAFT_TABLE_FAILURE_COOLDOWN_MS;
+        ServerWorld world = source.getWorld();
+        BlockPos botPos = bot.getBlockPos();
+        WorldPos remembered = LAST_KNOWN_CRAFTING_TABLE.get(bot.getUuid());
+        if (remembered != null && remembered.worldKey() != null && remembered.worldKey().equals(world.getRegistryKey())) {
+            BlockPos pos = remembered.pos();
+            if (pos != null && botPos.getSquaredDistance(pos) <= MAX_REMEMBERED_TABLE_DIST_SQ
+                    && usableTableForCraft(bot, world, botPos, pos, onServerThread, reachCooldownActive)) {
+                return true;
+            }
+        }
+        int radius = CraftingStationPolicy.scanHorizontal(onServerThread);
+        int ySpan = CraftingStationPolicy.scanVertical(onServerThread);
+        for (BlockPos pos : BlockPos.iterate(botPos.add(-radius, -ySpan, -radius), botPos.add(radius, ySpan, radius))) {
+            if (usableTableForCraft(bot, world, botPos, pos, onServerThread, reachCooldownActive)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean usableTableForCraft(ServerPlayerEntity bot, ServerWorld world, BlockPos botPos, BlockPos pos,
+                                               boolean onServerThread, boolean reachCooldownActive) {
+        if (!world.isChunkLoaded(pos) || !world.getBlockState(pos).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+            return false;
+        }
+        if (!CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
+            return false;
+        }
+        return !(reachCooldownActive && botPos.getSquaredDistance(pos) > STATION_REACH_SQ);
+    }
+
     private static boolean isServerThreadCall(ServerCommandSource source, ServerPlayerEntity bot) {
         MinecraftServer server = source != null ? source.getServer() : null;
         if (server == null && bot != null && bot.getCommandSource() != null) {

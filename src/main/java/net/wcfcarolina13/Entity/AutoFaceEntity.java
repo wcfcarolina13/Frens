@@ -198,9 +198,8 @@ public class AutoFaceEntity {
             broadcastDangerAlert(bot);
             BotFleeService.captureInterruptedSurvival(bot);
             // Resume later only a task this pause actually stopped (finding 23).
-            if (SkillManager.requestSkillPause(bot, "§cPausing current task for incoming phantom dive.")) {
-                SkillResumeService.requestAutoResume(bot);
-            }
+            SkillResumeService.pauseWithAutoResume(bot,
+                    () -> SkillManager.requestSkillPause(bot, "§cPausing current task for incoming phantom dive."));
         }
 
         if (BotEventHandler.updateBehavior(bot, server, nearbyEntities, hostileEntities)) {
@@ -254,9 +253,7 @@ public class AutoFaceEntity {
                     broadcastDangerAlert(bot);
                     // isBotMoving is shared across bots, so "busy" can be true for an idle bot:
                     // ask for a resume only when the pause stopped a running task (finding 23).
-                    if (SkillManager.requestSkillPause(bot, null)) {
-                        SkillResumeService.requestAutoResume(bot);
-                    }
+                    SkillResumeService.pauseWithAutoResume(bot, () -> SkillManager.requestSkillPause(bot, null));
                 }
 
                 if (BotEventHandler.isRegisteredBot(bot)) {
@@ -297,9 +294,7 @@ public class AutoFaceEntity {
             if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
                 LOGGER.debug("Stopping movement since danger zone is detected.");
                 broadcastDangerAlert(bot);
-                if (SkillManager.requestSkillPause(bot, null)) {
-                    SkillResumeService.requestAutoResume(bot);
-                }
+                SkillResumeService.pauseWithAutoResume(bot, () -> SkillManager.requestSkillPause(bot, null));
                 BotActions.stop(bot);
                 isBotMoving = false;
                 setBotExecutingTask(false);
