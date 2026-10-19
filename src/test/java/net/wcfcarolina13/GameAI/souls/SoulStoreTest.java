@@ -655,6 +655,33 @@ class SoulStoreTest {
     }
 
     @Test
+    void preloadIndexLoadsMindsSoFirstSightingsSurviveARelaunch() throws Exception {
+        // Finding 20: cachedMind must answer after preload, not only after a mind write.
+        UUID bot = UUID.randomUUID();
+        SoulTypes.SoulMind saved = store.updateMind(bot,
+                m -> SoulMindOps.withSeen(m, java.util.Set.of("mob:zombie"))).get(2, SECONDS);
+        SoulStore relaunched = new SoulStore(worldRoot, executor);
+        assertTrue(relaunched.cachedMind(bot).isEmpty(), "nothing cached before preload");
+        relaunched.preloadIndex().join();
+        assertEquals(saved, relaunched.cachedMind(bot).orElseThrow());
+        assertTrue(relaunched.cachedMind(bot).orElseThrow().seen().contains("mob:zombie"));
+    }
+
+    @Test
+    void preloadIndexToleratesMissingAndCorruptMinds() throws Exception {
+        UUID noMind = UUID.randomUUID();
+        UUID corrupt = UUID.randomUUID();
+        store.bindProfile(noMind, "frens:jake").get(2, SECONDS);
+        Files.createDirectories(botDir(corrupt));
+        Files.writeString(botDir(corrupt).resolve("mind.json"), "{not json");
+        SoulStore relaunched = new SoulStore(worldRoot, executor);
+        relaunched.preloadIndex().get(2, SECONDS);
+        assertTrue(relaunched.cachedState(noMind).isPresent(), "soul.json still loads");
+        assertTrue(relaunched.cachedMind(noMind).isEmpty());
+        assertTrue(relaunched.cachedMind(corrupt).isEmpty());
+    }
+
+    @Test
     void eventsSinceAndTrim() throws Exception {
         UUID bot = UUID.randomUUID();
         for (int i = 0; i < 5; i++) {

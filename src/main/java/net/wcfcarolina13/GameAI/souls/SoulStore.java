@@ -34,6 +34,9 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Crash-tolerant, world-local persistence for the soul-communication domain.
  *
@@ -49,6 +52,8 @@ import java.util.stream.Stream;
  * Minecraft/Fabric imports — so it can be unit tested and reused off the server thread.
  */
 public final class SoulStore {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("frens.souls");
 
     private static final DateTimeFormatter TIMESTAMP_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssSSS").withZone(ZoneOffset.UTC);
@@ -786,7 +791,26 @@ public final class SoulStore {
                 if (Files.exists(soulJson)) {
                     cachedStates.put(botId, mapper.readValue(soulJson.toFile(), SoulTypes.SoulState.class));
                 }
+                preloadMind(botId, botDir.resolve("mind.json"));
             }
+        }
+    }
+
+    /**
+     * Finding 20 (1.1.274): minds load with the index, so {@link #cachedMind} answers right after
+     * a relaunch. Without this the seen-registry stayed empty until something wrote the mind, and
+     * every bot greeted old sights as first sightings again. {@code putIfAbsent}: a mind already
+     * loaded or saved in this process is newer than the file. A missing file is the normal
+     * fresh-bot case; a corrupt one is skipped here and left to {@link #loadMind} as before.
+     */
+    private void preloadMind(UUID botId, Path mindJson) {
+        if (!Files.exists(mindJson)) {
+            return;
+        }
+        try {
+            cachedMinds.putIfAbsent(botId, mapper.readValue(mindJson.toFile(), SoulTypes.SoulMind.class));
+        } catch (IOException corrupt) {
+            LOGGER.warn("[souls] mind.json unreadable at preload bot={} reason={}", botId, corrupt.toString());
         }
     }
 
