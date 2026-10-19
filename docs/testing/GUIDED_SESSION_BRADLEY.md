@@ -386,9 +386,9 @@ Bradley hosts a sandbox world over LAN (H), the second account joins (G). G is n
 | A: screens at Bradley's window size | 3 |
 | B: souls and voices by ear | 14 (+1 appended) |
 | C: Nirn | 7 (+1 appended) |
-| D: second human on LAN | 29 (+1 appended) |
+| D: second human on LAN | 29 (+2 appended) |
 | Needs a decision | 2 (+3 appended, 1 ruled 2026-10-19) |
-| **Total for Bradley** | **61** (55 + 5 appended by pass 3 + 2 by pass 4, 1 ruled) |
+| **Total for Bradley** | **62** (55 + 5 appended by pass 3 + 2 by pass 4 + 1 by 1.1.272, 1 ruled) |
 | Maybe Claude can do it | 6 |
 
 Split items are counted once, in the block that holds Bradley's half. Tick an item in `FIELD_SESSION_1.1.202.md` only when every half named in its Prep line has passed.
