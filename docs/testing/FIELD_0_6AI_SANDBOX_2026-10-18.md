@@ -83,6 +83,8 @@ JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (
 
 ## Findings (backlog for a fix build)
 
+**Fixed in 1.1.274** (2026-10-19, sandbox-checked, replays `frens_1_1_274_6bl_fix_checks.zip`, `frens_1_1_274_6bl_fix_checks_minds_relaunch.zip` and `frens_1_1_274_6bl_fix_checks_chest_registry.zip`, `tools/sandbox/fix274.py`; Phase 6bl): 7, 13, 20, 21, 26 (for the save that owns the chests; see finding 40), plus the 1.1.273 axe re-equip (the AutoFaceEntity cliff loadout) and the idle leather-armor fallback. Not fixed: 14 (the search still takes 11.6 s, finding 39). Partial: the farm no-hoe line on a half-planted farm (the start gate answers when there is no hoe at all; the half-planted path is a field item). Not checked: 3 (merged scene speakers), the idle cobblestone-tools fallback, the re-poll timeout extension. Finding 37 repro: still 16 lines a minute. Still open: 3, 14, 37, 38, 39-42.
+
 **Fixed in 1.1.273** (2026-10-19, sandbox-checked for 4, 9, 11, 17 (short run), 18, 23, 27 and the re-poll swap, all pass, replays `frens_1_1_273_6bk_fix_checks.zip` and `frens_1_1_273_6bk_fix_checks_rate0.zip`, `tools/sandbox/fix273.py`; not checked there: 10, 24, 28, 29, 34, 36 and the tree-punch line; field items in Phase 6bk): 4, 9, 10, 11, 17, 18, 23, 24, 27, 28, 29, 34, 36, plus the two 1.1.272-check minors (the "Time to punch some trees." line after a chest axe, and the stone axe / oak log re-poll swap). Still open: 3, 7, 13, 14, 20, 21, 26.
 
 **Fixed in 1.1.272** (2026-10-19, sandbox-checked, replay `frens_1_1_272_6bj_fix_checks.zip`): 1, 5, 6, 8, 15, 25, 30 (key and Admin worlds; the ritual is a field item), 31, 32, 33, 35. Souls 2, 16 (contract line only), 19, 22 shipped, field items in Phase 6bj. New minors from that check: the voiced "Time to punch some trees." still plays after a chest axe was taken; on stone a stone axe and an oak log tie at speed 1.0 and the mining re-poll swaps axe → log every second against woodcut's re-equip (53 lines); a wool give-up prints two lines ("I'm stuck ... stopping wool." and "Stuck: could not reach any sheep."); the guard pillar escape took 60 s for 2 blocks; one `Mining ... with minecraft:bundle` on an already-mined block during the bundle pull.
@@ -231,6 +233,27 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     minecraft:cobblestone` (the soil under the trunk, placed by the test, not by the bot) and `fallback sweep removed 1 extra items`.
     1.1.273 kept dirt sweepable on purpose (bots pillar with dirt), so on natural ground every felled tree without a replant may leave a
     1-block hole. The next bot standing there fell into it.
+39. **The fishing spot search still takes 11.6 s, and not in A* (medium).** 1.1.274 sandbox 2026-10-19, `/bot fish 1` beside a 7x7
+    pond dug into a stone deck: `Fishing spot search: columns=49 evaluated=5 stands=0 aStar=0 cacheHits=0 found=true elapsed=11745ms`
+    (17:15:58), and 11561 ms at a fresh pond 80 blocks away (17:18:03). No stand was A*-checked, so the time is outside the part
+    1.1.274 capped: the reachability snapshot, the two 48-block chest scans (round the bot and round its home) or the column/stand probes.
+    The cast follows; the bot just stands for 11 s first. Finding 14's fix moved the budget start after the chest scan, so a slow scan
+    no longer shows up as a budget stop, but the player still waits.
+40. **The chest registry adoption goes to the first save that loads with the level name, even when the chests are not in it (minor).**
+    1.1.274 sandbox 2026-10-19 17:08:36: the first launch after the upgrade was "Sweep Souls3", a copy whose level name is also
+    "New World": `Adopted legacy chest registry 'New World/minecraft:overworld' as 'New World#3644a587:minecraft:overworld'`. The block at
+    smokey's chest (68, 72, 225) is leaf litter there; the chests are in "AB R1", which then starts empty (`legacyWorldClaims` already
+    held). With the pre-upgrade file restored and AB R1 loaded first, the adoption is correct. In the sandbox every sweep save is named
+    "New World"; for a player it bites when a copied or second default-named save loads first. The zone store already asks
+    `legacyBelongsToThisSave` (`WorldStoreKeyPolicy.decideZoneStore`); the chest registry could check that a recorded chest block exists
+    in this save before adopting.
+41. **A one-tree woodcut ends with "Repeated failures reaching remaining targets" (minor, wording).** 1.1.274 sandbox 2026-10-19
+    17:10:57, Axer felled the only tree ("Got 9 logs from that tree."), three relocations found nothing, and chat said "Stopped after
+    cutting 1 tree(s). Repeated failures reaching remaining targets (path/LOS/inventory)." with `success=false` and the task ABORTED,
+    while the end summary says `pathFailures=0 ... finalReason=NO_TARGET`. Nothing was left to reach.
+42. **"Desperate food: eating rotten flesh" logs every tick while a bot suffocates (minor, log).** 1.1.274 sandbox 2026-10-19
+    17:09:32-17:09:39: Jake and Bob entombed in stone (by the test's deck fill) logged it 147 times in 7 s, with "Bot X is stuck!"
+    each second, until they died. `HealingService` line 478, no throttle.
 
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
