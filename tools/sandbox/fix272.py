@@ -13,6 +13,11 @@ floating stone platform far from the base so terrain never varies; the player is
                                Pass: 'with minecraft:diamond_pickaxe'.
   fix272.py wool               finding 35: Shep with shears, no sheep anywhere reachable (a sheep 20 blocks up in a glass box).
                                Pass: the give-up chat line within about a minute, no flood (sb_flood).
+  fix272.py lodestone <bot>    finding 31: the bot (holding a lodestone compass whose lodestone is far away, e.g. Jake's
+                               "Home" in "Sweep Old3") is fed and sent with /bot compass travel. Pass: departs and arrives
+                               (bot_state pos at the lodestone), never "no longer points to a valid lodestone".
+  fix272.py travelwait <bot>   finding 32: right after a travel (cooldown running), bag filled with dirt, chest 4 blocks
+                               away, travel again. Pass: 'travel-wait ... chest=yes ... -> OFFLOAD_EXISTING'.
   fix272.py clean <bot>        despawn a stage's bot
 Flashback: tools/sandbox/rec.py start / stop frens_1_1_272_<topic>.
 """
@@ -111,6 +116,22 @@ elif st == "wool":
     m = mark()
     chat("/bot skill wool Shep", 2)
     watch(m, 120, r"Shep.*(stuck|sheep|wool)|Exploration stuck|stopping wool", stop=r"stopping wool")
+elif st == "lodestone":
+    bot = sys.argv[2]
+    chat(f"/give {bot} cooked_beef 16", 1)
+    m = mark()
+    chat(f"/bot compass travel {bot}", 2)
+    watch(m, 240, r"compass|lodestone|has departed|arrived|cannot travel", stop=r"has arrived|no longer points|cannot travel")
+    print(cmd(cmd="bot_state", name=bot)[:200])
+elif st == "travelwait":
+    bot = sys.argv[2]
+    platform(); chat(f"/tp @p {X+4} {Y} {Z}")
+    chat(f"/tp {bot} {X} {Y} {Z}", 2)
+    chat(f"/setblock {X} {Y} {Z+4} chest", 1)
+    chat(f"/give {bot} dirt 2112", 1)
+    m = mark()
+    chat(f"/bot compass travel {bot}", 2)
+    watch(m, 60, r"travel-wait", stop=r"OFFLOAD_EXISTING|TRAVEL_NOW")
 elif st == "clean":
     chat(f"/bot despawn {sys.argv[2]}", 3)
 else:
