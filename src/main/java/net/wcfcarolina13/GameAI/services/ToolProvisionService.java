@@ -914,6 +914,11 @@ public final class ToolProvisionService {
         return false;
     }
 
+    /** True if the bot carries any tool of the given type (axe excludes pickaxes), any tier. */
+    public static boolean hasAnyTool(ServerPlayerEntity bot, String toolKeyword) {
+        return hasTool(bot, toolKeyword);
+    }
+
     /**
      * Returns true if the bot has the given tool type but ONLY at wooden tier.
      * Used to decide if a stone upgrade is worthwhile.

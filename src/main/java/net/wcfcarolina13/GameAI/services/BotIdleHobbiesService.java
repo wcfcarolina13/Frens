@@ -89,6 +89,9 @@ public final class BotIdleHobbiesService {
 
     private static final Map<UUID, Long> NEXT_LEATHER_ARMOR_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> NEXT_COBBLESTONE_TOOLS_TICK = new ConcurrentHashMap<>();
+    // Separate from NEXT_COBBLESTONE_TOOLS_TICK: the stone upgrade runs first in the idle pass, so
+    // a shared cooldown it re-arms each time would starve the wooden pickaxe/shovel fallback.
+    private static final Map<UUID, Long> NEXT_STONE_UPGRADE_TICK = new ConcurrentHashMap<>();
 
     /**
      * Backoff key (in the per-hobby maps below) for the wooden fallback's chest asks, separate from
@@ -160,6 +163,7 @@ public final class BotIdleHobbiesService {
         LAST_WOODEN_FALLBACK_PROBE_TICK.clear();
         NEXT_LEATHER_ARMOR_TICK.clear();
         NEXT_COBBLESTONE_TOOLS_TICK.clear();
+        NEXT_STONE_UPGRADE_TICK.clear();
         HOBBY_NEXT_ALLOWED_TICK.clear();
         HOBBY_FAILURE_COUNT.clear();
         HOBBY_BACKOFF_LOGGED_FOR.clear();
@@ -456,6 +460,12 @@ public final class BotIdleHobbiesService {
                 continue;
             }
 
+            // Stone upgrades run before the wooden fallback: that fallback returns true while it
+            // cools down and after "no safe woodcut target", so anything after it never runs for a
+            // bot with no axe. This one has its own cooldown and only acts when cobble is at hand.
+            if (maybeHandleIdleStoneToolUpgrades(server, bot, world, nowTick)) {
+                continue;
+            }
             if (maybeHandleIdleWoodenFallback(server, bot, world, nowTick)) {
                 continue;
             }
@@ -463,9 +473,6 @@ public final class BotIdleHobbiesService {
                 continue;
             }
             if (maybeHandleIdleCobblestoneToolsFallback(server, bot, world, nowTick)) {
-                continue;
-            }
-            if (maybeHandleIdleStoneToolUpgrades(server, bot, world, nowTick)) {
                 continue;
             }
             if (maybeHandleIdleWoodcutForResources(server, bot, world, nowTick)) {
@@ -1567,18 +1574,28 @@ public final class BotIdleHobbiesService {
         if (server == null || bot == null || world == null || bot.getCommandSource() == null) return false;
         if (bot.getHungerManager().getFoodLevel() <= WOODEN_FALLBACK_STARVING_HUNGER) return false;
 
-        boolean canUpgradePickaxe = ToolProvisionService.hasOnlyWoodenTool(bot, "pickaxe");
-        boolean canUpgradeSword   = ToolProvisionService.hasOnlyWoodenTool(bot, "sword");
-        boolean canUpgradeAxe     = ToolProvisionService.hasOnlyWoodenTool(bot, "axe");
-        boolean canUpgradeShovel  = ToolProvisionService.hasOnlyWoodenTool(bot, "shovel");
+        // A missing axe or sword counts too: a stone one is what the bot needs, and crafting it
+        // clears the wooden fallback's needAxe/needWeapon. Pickaxe and shovel stay wooden-only;
+        // the cobblestone-tools fallback provisions a missing one.
+        boolean canUpgradePickaxe = StoneUpgradePolicy.wants(ToolProvisionService.hasOnlyWoodenTool(bot, "pickaxe"), false);
+        boolean canUpgradeSword   = StoneUpgradePolicy.wants(ToolProvisionService.hasOnlyWoodenTool(bot, "sword"),
+                !ToolProvisionService.hasAnyTool(bot, "sword"));
+        boolean canUpgradeAxe     = StoneUpgradePolicy.wants(ToolProvisionService.hasOnlyWoodenTool(bot, "axe"),
+                !ToolProvisionService.hasAnyTool(bot, "axe"));
+        boolean canUpgradeShovel  = StoneUpgradePolicy.wants(ToolProvisionService.hasOnlyWoodenTool(bot, "shovel"), false);
         if (!canUpgradePickaxe && !canUpgradeSword && !canUpgradeAxe && !canUpgradeShovel) return false;
 
         // Cooldown before the chest scan: both just return false, and the scan (three materials
         // across every chest in range) is not free every tick.
-        long nextAllowed = NEXT_COBBLESTONE_TOOLS_TICK.getOrDefault(bot.getUuid(), 0L);
+        long nextAllowed = NEXT_STONE_UPGRADE_TICK.getOrDefault(bot.getUuid(), 0L);
         if (nowTick < nextAllowed) return false;
 
-        if (!ToolProvisionService.hasStoneMaterialsAvailable(bot, world)) return false;
+        if (!ToolProvisionService.hasStoneMaterialsAvailable(bot, world)) {
+            // Runs ahead of the wooden fallback now, so a toolless bot with no cobble would rescan
+            // every chest each pass without this wait.
+            NEXT_STONE_UPGRADE_TICK.put(bot.getUuid(), nowTick + 200L);
+            return false;
+        }
 
         ServerCommandSource source = bot.getCommandSource().withSilent();
         ServerPlayerEntity commander = resolveWoodenFallbackHistoryOwner(bot);
@@ -1592,10 +1609,10 @@ public final class BotIdleHobbiesService {
 
         if (crafted) {
             CombatInventoryManager.ensureCombatLoadout(bot);
-            LOGGER.info("Idle stone upgrade: {} upgraded wooden tools to stone", bot.getName().getString());
+            LOGGER.info("Idle stone upgrade: {} crafted stone tools (wooden or missing before)", bot.getName().getString());
         }
         long failureWait = idleCraftFailureWaitTicks(bot.getUuid(), CRAFT_STONE_TOOLS_KEY, crafted, 2400L);
-        NEXT_COBBLESTONE_TOOLS_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : failureWait));
+        NEXT_STONE_UPGRADE_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : failureWait));
         return crafted;
     }
 
