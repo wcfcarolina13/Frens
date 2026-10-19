@@ -181,6 +181,117 @@ class SupplyPullPolicyTest {
 
     // ── a pass ───────────────────────────────────────────────────────────────────────────────
 
+    // ── finding 25: policy refusals defer a flat minute ─────────────────────────────────────
+
+    @Test
+    void onlyFacadeChestAndTargetRefusalsArePolicyRefusals() {
+        assertTrue(SupplyPullPolicy.isPolicyRefusal(Kind.REFUSED, Scope.TARGET, "RESERVE_EXHAUSTED"));
+        assertTrue(SupplyPullPolicy.isPolicyRefusal(Kind.REFUSED, Scope.CHEST, "DENIED"));
+        assertTrue(SupplyPullPolicy.isPolicyRefusal(Kind.REFUSED, Scope.TARGET, null), "an unnamed facade refusal");
+        for (String own : List.of(SupplyPullPolicy.NOT_CHEST, SupplyPullPolicy.NO_MATCH, SupplyPullPolicy.UNREACHABLE)) {
+            assertFalse(SupplyPullPolicy.isPolicyRefusal(Kind.REFUSED, Scope.CHEST, own), own);
+            assertFalse(SupplyPullPolicy.isPolicyRefusal(Kind.REFUSED, Scope.TARGET, own), own);
+        }
+        for (Scope scope : List.of(Scope.ITEM, Scope.BOT, Scope.BUSY, Scope.OWNER_ABSENT, Scope.INVENTORY_FULL,
+                Scope.NONE)) {
+            assertFalse(SupplyPullPolicy.isPolicyRefusal(Kind.REFUSED, scope, "RESERVE_EXHAUSTED"), scope.name());
+        }
+        assertFalse(SupplyPullPolicy.isPolicyRefusal(Kind.REFUSED, null, "RESERVE_EXHAUSTED"));
+        for (Kind kind : List.of(Kind.MOVED, Kind.WAITING, Kind.READY)) {
+            assertFalse(SupplyPullPolicy.isPolicyRefusal(kind, Scope.TARGET, "RESERVE_EXHAUSTED"), kind.name());
+        }
+        assertFalse(SupplyPullPolicy.isPolicyRefusal(null, Scope.TARGET, "RESERVE_EXHAUSTED"));
+    }
+
+    @Test
+    void theReasonAwareFoldMarksPolicyRefusalsOnly() {
+        Pull p = SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.TARGET, "RESERVE_EXHAUSTED");
+        assertEquals(new Pull(0, false, false, false, false, false, false, true), p);
+        assertEquals(Pull.NOTHING, SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.TARGET),
+                "the 4-arg fold never marks a refusal (HarvestCropSkill keeps its old reading)");
+        assertEquals(Pull.NOTHING,
+                SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.CHEST, SupplyPullPolicy.NO_MATCH));
+        assertEquals(Pull.NOTHING,
+                SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.ITEM, "NOT_ALLOWLISTED"));
+        // The mark sticks through later answers and through plus().
+        Pull later = SupplyPullPolicy.fold(p, Kind.REFUSED, 0, Scope.ITEM, "NO_NEED");
+        assertTrue(later.refused());
+        assertTrue(Pull.NOTHING.plus(p).refused());
+        assertFalse(Pull.NOTHING.plus(Pull.NOTHING).refused());
+        // Everything else folds as the 4-arg fold does.
+        for (Kind kind : Kind.values()) {
+            for (Scope scope : scopesAndNull()) {
+                Pull four = SupplyPullPolicy.fold(Pull.NOTHING, kind, 2, scope);
+                Pull five = SupplyPullPolicy.fold(Pull.NOTHING, kind, 2, scope, "X");
+                assertEquals(four.moved(), five.moved());
+                assertEquals(four.held(), five.held());
+                assertEquals(four.missed(), five.missed());
+                assertEquals(four.full(), five.full());
+                assertEquals(four.ownerAway(), five.ownerAway());
+                assertEquals(four.halted(), five.halted());
+            }
+        }
+    }
+
+    @Test
+    void anIdlePassThatOnlyMetAReserveDefersAFlatMinute() {
+        // Finding 25: the reserve answers the same every pass; without the defer an idle bot re-asked every 5 s.
+        Pull p = SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.TARGET, "RESERVE_EXHAUSTED");
+        p = SupplyPullPolicy.fold(p, Kind.REFUSED, 0, Scope.CHEST, "DENIED");
+        assertTrue(SupplyPullPolicy.refusalDefers(p));
+        assertFalse(SupplyPullPolicy.ownerAwayDefers(p));
+        assertEquals(Backoff.OWNER_AWAY, SupplyPullPolicy.idleBackoff(p));
+        for (int misses = 0; misses <= 6; misses++) {
+            assertEquals(SupplyPullPolicy.OWNER_AWAY_PAUSE_MS, SupplyPullPolicy.retrievalPauseMs(p, misses),
+                    "flat, whatever the misses");
+            assertEquals(misses, SupplyPullPolicy.nextMissCount(misses, p), "never a miss");
+        }
+    }
+
+    @Test
+    void aRefusalDefersOnlyWhenNothingElseHappened() {
+        Pull refused = SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.TARGET, "RESERVE_EXHAUSTED");
+        Pull moved = SupplyPullPolicy.fold(refused, Kind.MOVED, 1, Scope.NONE, null);
+        assertFalse(SupplyPullPolicy.refusalDefers(moved));
+        assertEquals(Backoff.SUCCESS, SupplyPullPolicy.idleBackoff(moved));
+        assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(moved, 2));
+
+        Pull held = SupplyPullPolicy.fold(refused, Kind.WAITING, 0, Scope.NONE, null);
+        assertFalse(SupplyPullPolicy.refusalDefers(held));
+        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(held));
+        assertEquals(SupplyPullPolicy.WAITING_RECHECK_MS, SupplyPullPolicy.retrievalPauseMs(held, 2));
+
+        Pull busy = SupplyPullPolicy.fold(refused, Kind.REFUSED, 0, Scope.BUSY, "BUSY");
+        assertFalse(SupplyPullPolicy.refusalDefers(busy));
+        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(busy));
+
+        Pull missed = SupplyPullPolicy.fold(refused, Kind.REFUSED, 0, Scope.BOT, "OWNER_DECLINED");
+        assertFalse(SupplyPullPolicy.refusalDefers(missed));
+        assertEquals(Backoff.FAILURE, SupplyPullPolicy.idleBackoff(missed));
+        assertEquals(SupplyPullPolicy.missPauseMs(1), SupplyPullPolicy.retrievalPauseMs(missed, 1));
+
+        Pull full = SupplyPullPolicy.fold(refused, Kind.REFUSED, 0, Scope.INVENTORY_FULL, "NO_ROOM");
+        assertFalse(SupplyPullPolicy.refusalDefers(full));
+        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(full), "the idle pull does not back off on full");
+
+        assertFalse(SupplyPullPolicy.refusalDefers(null));
+        assertFalse(SupplyPullPolicy.refusalDefers(Pull.NOTHING));
+        // A chest with nothing matching (ChestStoreService's own NO_MATCH) is still "nothing found".
+        Pull noMatch = SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.CHEST, SupplyPullPolicy.NO_MATCH);
+        assertEquals(Backoff.NONE, SupplyPullPolicy.idleBackoff(noMatch));
+        assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(noMatch, 0));
+        Pull unreachable =
+                SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.CHEST, SupplyPullPolicy.UNREACHABLE);
+        assertEquals(0L, SupplyPullPolicy.retrievalPauseMs(unreachable, 0));
+    }
+
+    @Test
+    void theSevenArgPullConstructorRecordsNoRefusal() {
+        assertFalse(new Pull(0, false, false, false, false, false, false).refused());
+        assertEquals(new Pull(3, true, false, true, false, true, true, false),
+                new Pull(3, true, false, true, false, true, true));
+    }
+
     @Test
     void aPullTalliesMovesHoldsMissesOwnerAwayAndStops() {
         Pull p = SupplyPullPolicy.fold(Pull.NOTHING, Kind.REFUSED, 0, Scope.ITEM);

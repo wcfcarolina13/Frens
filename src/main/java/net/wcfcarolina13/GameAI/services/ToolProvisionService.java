@@ -1156,7 +1156,7 @@ public final class ToolProvisionService {
             }
             SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, group.pos, group.sample, left, left,
                     purpose, SupplyWithdrawals.WaitMode.NONE, null);
-            pull = SupplyPullPolicy.fold(pull, result.kind(), result.moved(), result.scope());
+            pull = SupplyPullPolicy.fold(pull, result.kind(), result.moved(), result.scope(), result.reason());
             switch (SupplyPullPolicy.next(result.kind(), result.scope())) {
                 case SKIP_ITEM -> skippedItems.add(group.sample);
                 case SKIP_CHEST, OWNER_AWAY -> {
@@ -1424,6 +1424,47 @@ public final class ToolProvisionService {
         return out;
     }
 
+    /**
+     * The chests near {@code origin} ({@link #scanContainers}: {@link #CONTAINER_RADIUS}, y±{@link
+     * #CONTAINER_YSPAN}, registered or not) holding a tool {@code stackPredicate} accepts (the same
+     * test the take applies at the chest) and {@code snapshotFilter} accepts as a snapshot, one
+     * entry per chest half with its best tool by {@code comparator} and its other half, for
+     * {@link ToolChestCandidatePolicy#merge}. Reads the world: server thread.
+     */
+    private static List<ToolChestCandidatePolicy.Candidate<ItemSnapshot>> scanNearbyToolChests(
+            ServerWorld world,
+            BlockPos origin,
+            Predicate<ItemSnapshot> snapshotFilter,
+            Predicate<ItemStack> stackPredicate,
+            Comparator<ItemSnapshot> comparator) {
+        Map<BlockPos, ItemSnapshot> best = new HashMap<>();
+        List<BlockPos> order = new ArrayList<>();
+        for (ContainerSlot slot : scanContainers(world, origin)) {
+            if (!stackPredicate.test(slot.stack)) {
+                continue;
+            }
+            ItemSnapshot snap = new ItemSnapshot(Registries.ITEM.getId(slot.stack.getItem()).toString(),
+                    slot.stack.getCount());
+            if (!snapshotFilter.test(snap)) {
+                continue;
+            }
+            ItemSnapshot prior = best.get(slot.pos);
+            if (prior == null) {
+                order.add(slot.pos);
+                best.put(slot.pos, snap);
+            } else if (comparator.compare(snap, prior) < 0) {
+                best.put(slot.pos, snap);
+            }
+        }
+        List<ToolChestCandidatePolicy.Candidate<ItemSnapshot>> out = new ArrayList<>(order.size());
+        for (BlockPos pos : order) {
+            BlockPos partner = ChestStoreService.otherChestHalf(world, pos);
+            out.add(new ToolChestCandidatePolicy.Candidate<>(pos.asLong(),
+                    partner == null ? null : partner.asLong(), best.get(pos), origin.getSquaredDistance(pos)));
+        }
+        return out;
+    }
+
     /** One non-empty chest slot, read-only: no chest handle is kept, so nothing can move items through it. */
     private record ContainerSlot(BlockPos pos, int slot, ItemStack stack) {}
 
@@ -1539,8 +1580,12 @@ public final class ToolProvisionService {
     /**
      * Walk to a registered chest and retrieve one tool matching the given criteria, through the
      * supply facade ({@link ChestStoreService#withdrawMatchingWalkOnly}): the owner is asked before
-     * the bot walks, and nothing is taken without their permission or a standing one.
-     * Runs on a worker thread; the registry snapshot refresh hops through {@link SupplyServerHop}.
+     * the bot walks, and nothing is taken without their permission or a standing one. An
+     * {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} search (Woodcut's start) also asks the
+     * chests near the bot it never registered ({@link #scanNearbyToolChests}, finding 8), merged
+     * with the registry by {@link ToolChestCandidatePolicy#merge}, and logs one
+     * {@code [supply] tool scan} line either way.
+     * Runs on a worker thread; the registry snapshot refresh and the scan hop through {@link SupplyServerHop}.
      *
      * <p>Chests are tried best tool first, then nearest, until one gives a tool, an answer stops
      * the search ({@link SupplyPullPolicy#next}: a prompt open or a grant waiting, a busy answer,
@@ -1549,8 +1594,8 @@ public final class ToolProvisionService {
      * so any other answer is final for that chest, and its other half is skipped. After a search
      * that took nothing, this bot's {@link SupplyWithdrawals.WaitMode#NONE} searches pause
      * ({@link SupplyPullPolicy#retrievalPauseMs}: 5 s after a search that held, 60 s doubling to
-     * 10 min per miss, a flat 60 s when only the owner's absence stood in the way, none when
-     * nothing was found), because Woodcut calls this before every log while it has no axe and
+     * 10 min per miss, a flat 60 s when only the owner's absence or chest and target refusals
+     * stood in the way, none when nothing was found), because Woodcut calls this before every log while it has no axe and
      * would otherwise re-prompt the owner as fast as it mines. An
      * {@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED} search (Woodcut's start: the owner is
      * there to answer) is never paused. A search looking again after one that held leaves the
@@ -1587,23 +1632,31 @@ public final class ToolProvisionService {
         // abort latch, so a per-chest read would find no task and go on (SupplyPullPolicy#stopsToolSearch).
         boolean inTaskAtStart = TaskService.hasActiveTask(botUuid);
 
+        // Woodcut's start (UNTIL_ANSWERED) also asks the chests near the bot that it never
+        // registered, such as a player's base chest (finding 8, Bradley 2026-10-19): the facade
+        // still decides every take (allowlist, Always, reserve, owner in range).
+        List<ToolChestCandidatePolicy.Candidate<ItemSnapshot>> scanned = List.of();
         if (!relook) {
-            // Refresh snapshots on the server thread (block entities must be read there).
-            Boolean refreshed = SupplyServerHop.call(server, () -> {
+            // Refresh snapshots, and scan nearby chests, on the server thread (block entities must be read there).
+            List<ToolChestCandidatePolicy.Candidate<ItemSnapshot>> hopped = SupplyServerHop.call(server, () -> {
                 BotChestRegistryService.refreshAllSnapshots(bot, world);
-                return Boolean.TRUE;
-            }, SNAPSHOT_HOP_TIMEOUT_MS, Boolean.FALSE);
-            if (!Boolean.TRUE.equals(refreshed)) {
+                return waitsForAnswer
+                        ? scanNearbyToolChests(world, bot.getBlockPos(), snapshotFilter, stackPredicate,
+                                snapshotComparator)
+                        : List.<ToolChestCandidatePolicy.Candidate<ItemSnapshot>>of();
+            }, SNAPSHOT_HOP_TIMEOUT_MS, null);
+            if (hopped == null) {
                 LOGGER.debug("Chest tool retrieval: snapshot refresh failed/timed out for {}",
                         bot.getName().getString());
                 return false;
             }
+            scanned = hopped;
         }
 
-        // Get all registered chests for this bot/owner
+        // Registered chests for this bot/owner
         List<BotChestRegistryService.ChestRecord> allChests =
                 BotChestRegistryService.listChestsForOwner(bot, world);
-        if (allChests.isEmpty()) {
+        if (allChests.isEmpty() && !waitsForAnswer) {
             recordToolSearch(botUuid, paused, SupplyPullPolicy.Pull.NOTHING);
             return false;
         }
@@ -1611,10 +1664,8 @@ public final class ToolProvisionService {
         double maxDistSq = (double) maxRange * maxRange;
         BlockPos botPos = bot.getBlockPos();
 
-        // Build candidate list: chests within range whose snapshots contain matching items
-        record ChestCandidate(BlockPos pos, ItemSnapshot bestMatch, double distSq) {}
-        List<ChestCandidate> candidates = new ArrayList<>();
-
+        // Registry candidates: chests within range whose snapshots contain matching items
+        List<ToolChestCandidatePolicy.Candidate<ItemSnapshot>> registered = new ArrayList<>();
         for (var record : allChests) {
             if (record.destroyed) continue;
             BlockPos pos = record.toBlockPos();
@@ -1633,7 +1684,25 @@ public final class ToolProvisionService {
                 }
             }
             if (bestMatch != null) {
-                candidates.add(new ChestCandidate(pos.toImmutable(), bestMatch, distSq));
+                registered.add(new ToolChestCandidatePolicy.Candidate<>(pos.asLong(), null, bestMatch, distSq));
+            }
+        }
+
+        // One entry per chest (both halves of a double chest count once), best tool first, then nearest
+        List<ToolChestCandidatePolicy.Candidate<ItemSnapshot>> merged =
+                ToolChestCandidatePolicy.merge(registered, scanned, snapshotComparator);
+        List<BlockPos> candidates = new ArrayList<>(merged.size());
+        for (var c : merged) {
+            candidates.add(BlockPos.fromLong(c.pos()));
+        }
+
+        if (waitsForAnswer) {
+            if (candidates.isEmpty()) {
+                LOGGER.info("[supply] tool scan for {}: registered=0 nearby=0, no chest holds a tool within {} blocks (nearby: {})",
+                        bot.getName().getString(), maxRange, CONTAINER_RADIUS);
+            } else {
+                LOGGER.info("[supply] tool scan for {}: registered={} nearby={} ({} chest(s) to ask)",
+                        bot.getName().getString(), registered.size(), scanned.size(), candidates.size());
             }
         }
 
@@ -1643,11 +1712,6 @@ public final class ToolProvisionService {
             recordToolSearch(botUuid, paused, SupplyPullPolicy.Pull.NOTHING);
             return false;
         }
-
-        // Sort: best tool tier first, then nearest
-        candidates.sort(Comparator
-                .<ChestCandidate, ItemSnapshot>comparing(c -> c.bestMatch, snapshotComparator)
-                .thenComparingDouble(c -> c.distSq));
 
         if (relook) {
             LOGGER.debug("Chest tool retrieval: looking again at {} candidate chest(s) for {} within {} blocks",
@@ -1661,7 +1725,7 @@ public final class ToolProvisionService {
         SupplyPullPolicy.Pull search = SupplyPullPolicy.Pull.NOTHING;
         Set<BlockPos> skippedHalves = new HashSet<>();
         SupplyWithdrawals.Result last = null;
-        for (ChestCandidate candidate : candidates) {
+        for (BlockPos candidatePos : candidates) {
             // A stop request ends the search here, before the next chest is asked or walked to
             // (an ABORTED answer already stops it as busy). Only the stop of the task the search
             // began under (inTaskAtStart, read before the loop): DurabilityFallbackService also
@@ -1670,17 +1734,17 @@ public final class ToolProvisionService {
             if (SupplyPullPolicy.stopsToolSearch(inTaskAtStart, TaskService.isAbortRequested(botUuid))) {
                 break;
             }
-            if (skippedHalves.contains(candidate.pos)) {
+            if (skippedHalves.contains(candidatePos)) {
                 continue;
             }
             SupplyWithdrawals.Result result = ChestStoreService.withdrawMatchingWalkOnly(
-                    source, bot, candidate.pos, 1, stackPredicate, "chest-tool", mode);
+                    source, bot, candidatePos, 1, stackPredicate, "chest-tool", mode);
             last = result;
-            search = SupplyPullPolicy.fold(search, result.kind(), result.moved(), result.scope());
+            search = SupplyPullPolicy.fold(search, result.kind(), result.moved(), result.scope(), result.reason());
             if (search.movedAny()) {
                 TOOL_RETRIEVAL_PAUSES.remove(botUuid);
                 LOGGER.info("Chest tool retrieval: withdrew tool from chest at {} for {}",
-                        candidate.pos.toShortString(), bot.getName().getString());
+                        candidatePos.toShortString(), bot.getName().getString());
                 return true;
             }
             SupplyPullPolicy.Next next = SupplyPullPolicy.next(result.kind(), result.scope());
@@ -1689,12 +1753,12 @@ public final class ToolProvisionService {
             }
             // SKIP_ITEM, SKIP_CHEST, SKIP_TARGET or OWNER_AWAY: the ask read the chest's merged
             // view and tried each matching stack, so its other half would answer the same.
-            BlockPos otherHalf = ChestStoreService.otherChestHalf(world, candidate.pos);
+            BlockPos otherHalf = ChestStoreService.otherChestHalf(world, candidatePos);
             if (otherHalf != null) {
                 skippedHalves.add(otherHalf);
             }
             LOGGER.debug("Chest tool retrieval: chest at {} gave nothing for {} ({} {} {})",
-                    candidate.pos.toShortString(), bot.getName().getString(), result.kind(), result.reason(),
+                    candidatePos.toShortString(), bot.getName().getString(), result.kind(), result.reason(),
                     result.scope());
         }
 

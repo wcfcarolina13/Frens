@@ -35,7 +35,13 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
  *       ({@link #retrievalPauseMs}); the idle pull does not back off.
  *       {@code MutualAidChestFoodPolicy} alone makes room, once.</li>
  * </ul>
- * A pass that met only item, chest and target refusals ends as "nothing found": no pause, no miss.
+ * A pass that met only item, chest and target refusals ends as "nothing found": no pause, no miss,
+ * except that a chest or target refusal the facade gave after asking (a reserve exhausted, a chest
+ * denied; {@link #isPolicyRefusal}), with nothing moved, held, full or missed, waits the flat
+ * {@link #OWNER_AWAY_PAUSE_MS} ({@link #refusalDefers}, finding 25): those answers repeat on every
+ * pass, so without it an idle bot re-asked every few seconds. Only the reason-aware
+ * {@link #fold(Pull, Kind, int, Scope, String)} marks them; ChestStoreService's own
+ * {@link #NOT_CHEST}, {@link #NO_MATCH} and {@link #UNREACHABLE} never do.
  *
  * <p>No Minecraft types: {@link Kind}, {@link WaitMode} and {@link Scope} are plain nested enums,
  * and loading one does not load its outer class.
@@ -236,17 +242,26 @@ public final class SupplyPullPolicy {
      * @param missed    at least one answer was a miss ({@link #isMiss})
      * @param ownerAway an answer found the owner away ({@link #isOwnerAway})
      * @param halted    an answer stopped the pull ({@link Next#stopsPass()}); later items were not asked
+     * @param refused   the facade asked and refused for a chest or a target ({@link #isPolicyRefusal});
+     *                  set only by the reason-aware {@link #fold(Pull, Kind, int, Scope, String)}
      */
     public record Pull(int moved, boolean waiting, boolean busy, boolean full, boolean missed, boolean ownerAway,
-                       boolean halted) {
-        public static final Pull NOTHING = new Pull(0, false, false, false, false, false, false);
+                       boolean halted, boolean refused) {
+        public static final Pull NOTHING = new Pull(0, false, false, false, false, false, false, false);
+
+        /** A pull with no policy refusal recorded. */
+        public Pull(int moved, boolean waiting, boolean busy, boolean full, boolean missed, boolean ownerAway,
+                    boolean halted) {
+            this(moved, waiting, busy, full, missed, ownerAway, halted, false);
+        }
 
         public Pull plus(Pull other) {
             if (other == null) {
                 return this;
             }
             return new Pull(moved + other.moved, waiting || other.waiting, busy || other.busy, full || other.full,
-                    missed || other.missed, ownerAway || other.ownerAway, halted || other.halted);
+                    missed || other.missed, ownerAway || other.ownerAway, halted || other.halted,
+                    refused || other.refused);
         }
 
         public boolean movedAny() {
@@ -262,7 +277,7 @@ public final class SupplyPullPolicy {
         }
     }
 
-    /** Folds one answer into a pull's tally. */
+    /** Folds one answer into a pull's tally; never marks {@link Pull#refused} (no reason to tell by). */
     public static Pull fold(Pull tally, Kind kind, int moved, Scope scope) {
         Pull t = tally == null ? Pull.NOTHING : tally;
         int took = kind == Kind.MOVED ? Math.max(0, moved) : 0;
@@ -272,7 +287,47 @@ public final class SupplyPullPolicy {
                 t.full() || isFull(kind, scope),
                 t.missed() || isMiss(kind, scope),
                 t.ownerAway() || isOwnerAway(kind, scope),
-                t.halted() || next(kind, scope).stopsPass());
+                t.halted() || next(kind, scope).stopsPass(),
+                t.refused());
+    }
+
+    /**
+     * {@link #fold(Pull, Kind, int, Scope)}, and also marks {@link Pull#refused} when the answer is a
+     * policy refusal ({@link #isPolicyRefusal}): the idle pull and the chest tool search.
+     */
+    public static Pull fold(Pull tally, Kind kind, int moved, Scope scope, String reason) {
+        Pull p = fold(tally, kind, moved, scope);
+        if (p.refused() || !isPolicyRefusal(kind, scope, reason)) {
+            return p;
+        }
+        return new Pull(p.moved(), p.waiting(), p.busy(), p.full(), p.missed(), p.ownerAway(), p.halted(), true);
+    }
+
+    /**
+     * Whether an answer is the facade's own chest or target refusal after it asked (a reserve
+     * exhausted, a chest denied, no stock left in that chest): {@link Scope#CHEST} or
+     * {@link Scope#TARGET}, and not one of ChestStoreService's {@link #NOT_CHEST}, {@link #NO_MATCH}
+     * (never asked) or {@link #UNREACHABLE} (walked and could not reach: a path problem, not an
+     * answer). Item refusals are not: they say the item is never wanted or granted at all.
+     */
+    public static boolean isPolicyRefusal(Kind kind, Scope scope, String reason) {
+        if (kind != Kind.REFUSED || scope == null) {
+            return false;
+        }
+        if (scope != Scope.CHEST && scope != Scope.TARGET) {
+            return false;
+        }
+        return !NOT_CHEST.equals(reason) && !NO_MATCH.equals(reason) && !UNREACHABLE.equals(reason);
+    }
+
+    /**
+     * Whether a finished pass earns the flat wait ({@link #OWNER_AWAY_PAUSE_MS}) because the facade
+     * asked and only refused for chests or targets (finding 25: a reserve exhausted repeats on every
+     * pass): nothing moved, nothing held, no full inventory and no miss, as {@link #ownerAwayDefers}.
+     */
+    public static boolean refusalDefers(Pull pass) {
+        return pass != null && pass.refused() && !pass.movedAny() && !pass.held() && !pass.full()
+                && !pass.missed();
     }
 
     /**
@@ -293,7 +348,10 @@ public final class SupplyPullPolicy {
         SUCCESS,
         /** The owner's answer ended it (a miss): one more failure on the ladder. */
         FAILURE,
-        /** The owner is away and nothing else happened: wait the flat {@link #OWNER_AWAY_PAUSE_MS}, the failure count untouched. */
+        /**
+         * The owner is away, or the facade only refused for chests or targets ({@link #refusalDefers}),
+         * and nothing else happened: wait the flat {@link #OWNER_AWAY_PAUSE_MS}, the failure count untouched.
+         */
         OWNER_AWAY,
         /**
          * Leave it: nothing was asked or only nothing was found, the inventory was full, or the
@@ -306,7 +364,8 @@ public final class SupplyPullPolicy {
     /**
      * A held pass outranks everything (an open prompt's grant must stay redeemable, and a busy
      * answer is retried soon); then a miss (the owner decided); then a move; then the owner being
-     * away (so a bot left alone does not climb the ladder and keep a returning owner waiting). A
+     * away (so a bot left alone does not climb the ladder and keep a returning owner waiting), or
+     * only chest or target refusals after asking ({@link #refusalDefers}), both the flat wait. A
      * pass a full inventory stopped is none of these: {@link Backoff#NONE} unless it moved first.
      */
     public static Backoff idleBackoff(Pull pull) {
@@ -319,7 +378,7 @@ public final class SupplyPullPolicy {
         if (pull.movedAny()) {
             return Backoff.SUCCESS;
         }
-        return ownerAwayDefers(pull) ? Backoff.OWNER_AWAY : Backoff.NONE;
+        return ownerAwayDefers(pull) || refusalDefers(pull) ? Backoff.OWNER_AWAY : Backoff.NONE;
     }
 
     /**
@@ -347,8 +406,9 @@ public final class SupplyPullPolicy {
      * (come back soon to redeem a grant, or to retry a busy answer); {@link #missPauseMs} after a
      * miss; the flat {@link #OWNER_AWAY_PAUSE_MS} when the inventory was full (the facade answers
      * a full bot READY, so without it Woodcut would walk to the chest for NO_ROOM before every log;
-     * never a miss) or when the owner was away and nothing else happened; and 0 when it asked
-     * nothing or found nothing.
+     * never a miss), when the owner was away and nothing else happened, or when the facade only
+     * refused for chests or targets ({@link #refusalDefers}); and 0 when it asked nothing or found
+     * nothing.
      */
     public static long retrievalPauseMs(Pull search, int priorMisses) {
         if (search == null || search.movedAny()) {
@@ -363,7 +423,7 @@ public final class SupplyPullPolicy {
         if (search.full()) {
             return OWNER_AWAY_PAUSE_MS;
         }
-        return ownerAwayDefers(search) ? OWNER_AWAY_PAUSE_MS : 0L;
+        return ownerAwayDefers(search) || refusalDefers(search) ? OWNER_AWAY_PAUSE_MS : 0L;
     }
 
     /**
