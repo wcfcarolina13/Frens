@@ -20,27 +20,33 @@ Nothing has been field-tested since 1.1.184. This is the merged, deduplicated ch
 
 ## Phase 0 — Setup (once, at world start)
 
-- [ ] **World up on 1.1.202, souls master on**
+- [x] **World up on 1.1.202, souls master on**
+  - Sandbox 2026-10-18: PASS: S1 `[16:49:57] [souls] runtime started; masterEnabled=true settingsValid=true` (the old `-PaiEnabled` line is gone since 1.1.250, by design). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: launch the `1.21.11` instance, load the test save, confirm the JAR version in the mod list.
   - Claude watches for: `[souls] runtime started; masterEnabled=true settingsValid=true`; the benign `[Frens] LLM runtime not available (build without -PaiEnabled?)` line is expected (that is the CLASSIC DJL path, souls run on Ollama).
   - Pass when: runtime started with `masterEnabled=true settingsValid=true`.
-- [ ] **Ollama reachable**
+- [x] **Ollama reachable**
+  - Sandbox 2026-10-18: PASS: S1+S2 whole sessions: no `ollama not reachable` and no `non-local Ollama host` line (host 127.0.0.1, via the loopback tap). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: nothing; check chat for errors.
   - Claude watches for: absence of `[souls] ollama not reachable at {}` and of `[souls] Soul conversations will be sent to non-local Ollama host`.
   - Pass when: neither line appears.
-- [ ] **Bind both bots**
+- [x] **Bind both bots**
+  - Sandbox 2026-10-18: PASS: S1 `/bot soul enable Jake` then `Bob`: chat "Jake is now speaking as Jake." and "Bob is now speaking as Bob." (16:50:29-31); `/bot soul status` shows `Bob ... profile=frens:bob`. The pre-1.1.184 `frens:jake` binding ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul enable Jake` then `/bot soul enable Bob` (Bob **must** be re-enabled once — his pre-1.1.184 binding was `frens:jake`).
   - Claude watches for: `"Bob is now speaking as Bob."`; `[souls] rebound {} from frens:jake to its own profile {}` if the 100-tick legacy migration fires instead.
   - Pass when: Bob reports his own profile, not Jake's.
-- [ ] **Toggles on**
+- [x] **Toggles on**
+  - Sandbox 2026-10-18: PASS: S1 16:50:33-39: "Companion banter set to on", "Companion local chat set to on", "Memory digest is ON. Runs at each Minecraft day rollover for soul-bound bots.", "Soul voice enabled.". See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul banter on`, `/bot soul local on`, `/bot soul digest status` (expect ON by default; `/bot soul digest on` if not), `/bot soul voice on`.
   - Claude watches for: `"Memory digest is ON. Runs at each Minecraft day rollover for soul-bound bots."`
   - Pass when: all four report ON.
-- [ ] **Voice engine chosen**
+- [x] **Voice engine chosen**
+  - Sandbox 2026-10-18: PASS: S1 Piper (Nirn's installed Piper folder copied into the sandbox config, read-only): `[16:50:40] [souls] tts engine started pid=17837 model=en_US-lessac-medium.onnx`, no `tts engine unavailable`. Engine set in config, ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: Bot Control → Soul Voice → Eng… → pick the engine for this session (Piper / Dreamsleeve / Pocket). Note which one in the bundle.
   - Claude watches for: `[souls] tts engine started pid=…` — one of `model={}`, `(dreamsleeve warm server)`, `(pocket-tts serve :{})`.
   - Pass when: an engine pid line appears and no `[souls] tts engine unavailable, voice disabled:`.
-- [ ] **Baseline status snapshot**
+- [x] **Baseline status snapshot**
+  - Sandbox 2026-10-18: PASS: S1 16:50:54-58: soul status (`system=on settingsValid=true ready=true provider=ollama model=llama3.1:8b providerHealthy=true queueDepth=0`), banter status (`Idle: last verdict: vetoed:cooldown, cooldown: 123s ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul status`, `/bot soul banter status`, `/bot soul local status`.
   - Claude watches for: the live veto reason and cooldown printed by banter status.
   - Pass when: all three print without error; snapshot pasted into the bundle as the baseline.
@@ -51,19 +57,23 @@ Nothing has been field-tested since 1.1.184. This is the merged, deduplicated ch
 
 Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 
-- [ ] **Solo remark delivers (1.1.181, 1.1.184)**
+- [x] **Solo remark delivers (1.1.181, 1.1.184)**
+  - Sandbox 2026-10-18: PASS: S2 Bob despawned, `/bot soul banter now`: `[16:58:18] banter routingId=b605e996 ... rosterCount=1`, `scene ... rosterSize=1 ... lines=1`, Jake to the player "We should take a look at the nearby cave system...", ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: stand quiet near Jake for 90 s after `/bot soul banter now`; if nothing, wait out the 4–8 min grace.
   - Claude watches for: `[souls] scene correlationId=… rosterSize=1 … outcome=` and a delivery line; NOT `outcome=failed:MALFORMED`.
   - Pass when: a remark addressed to Bradley is delivered within 4–8 min of world start (8–15 min thereafter), `rosterSize=1`, delivered.
-- [ ] **Exactly one continuation (1.1.181)**
+- [x] **Exactly one continuation (1.1.181)**
+  - Sandbox 2026-10-18: PASS: S2 player answered unaddressed 22 s later: `[16:59:01] [souls] local ... outcome=fired routingId=8bfdcc55 score=3`, one LOCAL line from Jake, then nothing for the next 40 s. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: answer the remark within 30 s.
   - Claude watches for: one further scene, then nothing; no chain.
   - Pass when: exactly one continuation, no third line.
-- [ ] **Ignored window lapses silently**
+- [x] **Ignored window lapses silently**
+  - Sandbox 2026-10-18: PASS: S2 remark a0e5e62a at 17:00:35 left unanswered: next souls line is `vetoed:cooldown`, no error or retry in the following 2 min. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: let the next remark go unanswered.
   - Claude watches for: no error, no retry storm.
   - Pass when: the window closes with nothing logged as a failure.
 - [ ] **Streaming first-word latency (1.1.175, still open)**
+  - Sandbox 2026-10-18: FAIL: S2 by log (not by ear): DM sent 17:01:17, Ollama answer at 17:01:23 (`promptEvalMs=4386`), first segment synthesised `synthMs=545` at 17:01:24, about 7 s. Second DM 17:01:33 to first segment 17:01:38, about 5 s. ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: send Jake a DM and start a stopwatch at Enter.
   - Claude watches for: `[souls] tts correlationId=… outcome=… synthMs=… bytes=… chunks=…` and the scene's `elapsedMs=`.
   - Pass when: first audible word inside ~3 s; record the number either way.
@@ -80,22 +90,27 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 
 ## Phase 2 — Two-bot banter and pacing (1.1.176, 1.1.177, 1.1.181, 1.1.188)
 
-- [ ] **Banter fires with 2 bots**
+- [x] **Banter fires with 2 bots**
+  - Sandbox 2026-10-18: PASS: S1 `[16:51:13] [souls] banter routingId=24e11327... outcome=fired rosterCount=2`, playback 4/4, Jake and Bob each spoke twice. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: bring Bob back, stand near both, keep chat quiet, wait out the 4–8 min grace; `/bot soul banter status` while waiting.
   - Claude watches for: `[souls] banter lane=… player=… outcome=fired routingId=… roster=… seedChars=… act=… topic="…"` and the veto reason changing as the wait proceeds.
   - Pass when: a two-bot scene fires and both bots speak.
-- [ ] **Distinct display names keep the scene coherent (1.1.176)**
+- [x] **Distinct display names keep the scene coherent (1.1.176)**
+  - Sandbox 2026-10-18: PASS: S1 routingId 24e11327: each `scene-playback ... speaker=` UUID matches the chat name (Jake 2af3f0a5, Bob 6a00845c), no dropped unknown speaker. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: speaker attribution in `scene-playback … speaker=`.
   - Pass when: no line is attributed to the wrong bot; no unknown speaker dropped.
 - [ ] **No same-speaker-twice runs (1.1.197)**
+  - Sandbox 2026-10-18: FAIL: S2 banter 7fe07d6f (17:40:48-54): `line=1/2 speaker=2af3f0a5` then `line=2/2 speaker=2af3f0a5`, Jake twice in a row, not merged. Other scenes alternated. Finding 3. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: consecutive `scene-playback … line=n/N speaker=` with the same speaker.
   - Pass when: multi-speaker scenes alternate; runs are merged into one turn.
-- [ ] **Nobody answers for the player (1.1.195)**
+- [x] **Nobody answers for the player (1.1.195)**
+  - Sandbox 2026-10-18: PASS: S2 the model wrote lines as "RotiWokeman:" in 4 scenes (tap); each was cut before playback: `dropped rawLine=4 reason=OWNER_TAGGED` (17:18:16), two more at 17:21:18, one at 17:21:48. No delivered line speaks for the ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: no bot line puts words in Bradley's mouth or credits him with bot events.
 - [ ] **~1/3 of banter ends addressed to the player (1.1.181)**
   - Claude watches for: `addressPlayer=true` on the fired line.
   - Pass when: across the session roughly 2/3 plain, 1/3 player-addressed.
-- [ ] **`/bot soul banter now` primes both lanes (1.1.182, 1.1.188)**
+- [x] **`/bot soul banter now` primes both lanes (1.1.182, 1.1.188)**
+  - Sandbox 2026-10-18: PASS: S1 `/bot soul banter now` at 16:51:11, `[16:51:13] banter lane=IDLE ... outcome=fired`; banter status lists both the Idle and Active lanes. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul banter now`, stand quiet 90 s.
   - Pass when: a scene inside ~10 s of eligibility; status shows both IDLE and ACTIVE lanes.
 - [ ] **Active lane fires on work (1.1.188)**
@@ -105,7 +120,8 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 - [ ] **Pacing sliders (1.1.188)**
   - Bradley does: Banter row → **Rate…** → set Scripted to 100, play a few minutes; then 0; leave Idle at 50. Restart the client once mid-session to check persistence.
   - Pass when: 100 → denser pet/scripted remarks, 0 → near-silent, values survive restart.
-- [ ] **Combat aborts a scene (1.1.177)**
+- [x] **Combat aborts a scene (1.1.177)**
+  - Sandbox 2026-10-18: PASS: S2 zombies summoned as banter 31cbc3eb fired: `[17:43:41] scene-playback routingId=31cbc3eb... outcome=ambient-combat-abort`, `outcome=cancelled delivered=0/1`. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: pick a fight mid-scene.
   - Claude watches for: `scene-playback routingId=… outcome=ambient-combat-abort`.
   - Pass when: the scene stops.
@@ -127,11 +143,13 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 
 ## Phase 3 — Local chat (1.1.178, 1.1.179)
 
-- [ ] **Toggle off is fully dark**
+- [x] **Toggle off is fully dark**
+  - Sandbox 2026-10-18: PASS: S2 `/bot soul local off` (17:25:41), three unaddressed lines over 35 s: zero `[souls] local` lines. DM replies kept working all session (e.g. 17:30:54). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul local off`, chat unaddressed lines for a minute.
   - Claude watches for: nothing matching `[souls] local`.
   - Pass when: zero local lines, and DM replies unchanged.
-- [ ] **Salience moves with the line**
+- [x] **Salience moves with the line**
+  - Sandbox 2026-10-18: PASS: S2 `/bot soul local now` before each line: "the sky is grey" `vetoed:hard-reject` score 0, "I found diamonds and a skeleton spawner..." `vetoed:salience` score 1, "does anyone know where we can find iron around ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul local on`; alternate deliberately boring and deliberately salient unaddressed lines, running `/bot soul local status` between them.
   - Claude watches for: `[souls] local player=… outcome=` with the score, and the veto reason moving (`vetoed:salience` vs firing).
   - Pass when: the score and veto track the content.
@@ -139,7 +157,8 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
   - Bradley does: needs a **second player** standing nearby.
   - Claude watches for: `[souls] local player=… bot=… outcome=fired routingId=… score=…`.
   - Pass when: the bystander hears it, not just the speaker.
-- [ ] **One continuation, then nothing**
+- [x] **One continuation, then nothing**
+  - Sandbox 2026-10-18: PASS: S2 the 16:59 reply drew exactly one LOCAL line (8bfdcc55); the 17:00:35 remark left unanswered lapsed with no line, error or retry. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: answer inside 30 s; on the next one, let it lapse.
   - Pass when: exactly one continuation; lapse is silent.
 - [ ] **Addressing a bot mid-window closes it**
@@ -161,6 +180,7 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 ## Phase 4 — Group chat / PARTY (1.1.176)
 
 - [ ] **"bots, …" two-bot scene**
+  - Sandbox 2026-10-18: FAIL: S2 three "bots,/everyone" lines with both bots eligible (`scene-routing ... candidates=2 eligible=2`, 17:04:58, 17:15:05, 17:44:45): each PARTY scene had `lines=1`, one bot spoke. The tap shows the model ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `bots, what should we do next?` with both near.
   - Claude watches for: `[souls] scene-routing routingId=… player=… outcome=… candidates=… eligible=… routingMs=…` then a PARTY scene.
   - Pass when: both bots contribute, ≤2 lines each.
@@ -171,6 +191,7 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
   - Bradley does: `/bot soul voice off`, run a group scene, then voice back on.
   - Pass when: lines still pace sensibly with no synth.
 - [ ] **A group scene resets the banter timer**
+  - Sandbox 2026-10-18: PARTIAL: S2 banter status before the PARTY scene: next-eligible about 17:56:22; after it (17:45:12): "592s remaining", about 17:55:04. The timer was re-armed (it jumped) but landed earlier, not later. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: banter's next-eligible pushes out after the scene.
 - [x] **`soulPartyEnabled=false` → legacy loop** — closed 2026-10-18 by triage: SUPERSEDED, the legacy loop was deleted in 1.1.250 (04032600); covered by 6q "Guys" and "everyone" reach both bots (1.1.219)
   - Bradley does: toggle it off in settings, one "bots, …" line, toggle back on.
@@ -180,18 +201,21 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 
 ## Phase 5 — Voices (1.1.190, 1.1.192, 1.1.198)
 
-- [ ] **Catalogue and bindings**
+- [x] **Catalogue and bindings**
+  - Sandbox 2026-10-18: PASS: S1 `/bot soul voice list`: Piper voices folder lists en_US-lessac-medium and en_US-ryan-medium, catalogue marks ryan `[installed]`, and the bot-keyed view lists `Bob [frens:bob] → global voice`, `Jake [frens:jake] → ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul voice list`.
   - Pass when: lessac shows installed, each **spawned bot** is listed with its bound profile and effective voice (the 1.1.192 bot-keyed view), Jake and Bob both on the global voice.
 - [ ] **Install a voice**
   - Bradley does: `/bot soul voice install en_US-ryan-medium`.
   - Claude watches for: 25/50/75/100 % progress lines; `[souls] piper installed: binary=… voice=…`.
   - Pass when: it completes and is size/sha256 verified.
-- [ ] **Per-bot assignment actually separates the voices (the 1.1.190 → 1.1.192 bug)**
+- [x] **Per-bot assignment actually separates the voices (the 1.1.190 → 1.1.192 bug)**
+  - Sandbox 2026-10-18: PASS: S2 `/bot soul voice assign bob en_US-ryan-medium`: "Bob → voice en_US-ryan-medium", Bob's next DM started a second engine `[17:30:54] tts engine started pid=27979 model=en_US-ryan-medium.onnx`, no `not found ... ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul voice assign bob en_US-ryan-medium`, then get Bob to speak.
   - Claude watches for: no `[souls] tts voice '{}' for {} not found under {} — using the default voice`.
   - Pass when: Bob's next line is a different voice **and Jake's is unchanged**.
-- [ ] **Revert**
+- [x] **Revert**
+  - Sandbox 2026-10-18: PASS: S2 `/bot soul voice assign bob default`: "Bob now uses the global voice.", Bob's next line spoke at once (17:31:33) with no engine start or reload. By log, not by ear. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul voice assign bob default`.
   - Pass when: Bob returns to the global voice, next line, no reload.
 - [ ] **Bob still shares Jake's Dreamsleeve clone (known open, 1.1.184)**
@@ -210,7 +234,8 @@ Run this with **Bob dismissed or out of earshot** so the roster is genuinely 1.
 - [ ] **Pocket voice quality vs Piper**
   - Bradley does: same line through both engines.
   - Pass when: a subjective verdict is recorded (this is the reason Pocket exists).
-- [ ] **Unknown engine id fails loudly (1.1.198)**
+- [x] **Unknown engine id fails loudly (1.1.198)**
+  - Sandbox 2026-10-18: PASS: S1+S2: every `tts engine started` line is the configured Piper (`model=en_US-lessac-medium.onnx`, ryan after the assign), no fallback line. An unknown engine id was not set on purpose. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: no silent fallback to Piper is observed anywhere in the session.
 
 ---
@@ -313,13 +338,15 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
     (should not happen — the host is op).
   - Pass when: the **bot inventory** screen opens already on the Spells tab both times, Enchant/Anvil
     buttons behave as before, and the old standalone spells popup never appears.
-- [ ] **Crafting with planks only inside a bundle (1.1.204)**
+- [x] **Crafting with planks only inside a bundle (1.1.204)**
+  - Sandbox 2026-10-18: PASS: S3 Jake holding only a bundle of 12 oak planks and 2 sticks, `/bot craft wooden_pickaxe`: "Crafted 1 Wooden Pickaxe.", no planks refusal; after it the bundle is empty and 9 planks sit loose (all 12 extracted first, 3 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: put all of Jake's planks into a bundle (nothing loose), give a task that needs
     planks (e.g. `/bot skill woodcut` with no axe → it crafts one, or ask for a crafting table).
   - Claude watches for: no `no planks` / crafting refusal; the planks reappear as a loose stack
     (extract-first) right before the craft.
   - Pass when: the craft succeeds; the bundle is lighter by exactly what was used.
-- [ ] **Bundled food counts (1.1.204)**
+- [x] **Bundled food counts (1.1.204)**
+  - Sandbox 2026-10-18: PASS: S3 Jake's only food 5 bread in a bundle, `/bot set hunger 6 Jake`: within 15 s food 20 and 3 bread loose beside the bundle, no `Can't keep up`. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: bag Jake's only food in a bundle, `/bot set hunger 6 Jake`.
   - Claude watches for: the eat path pulling food out of the bundle (one stack becomes loose) then
     eating; **no** 2 s stall on the tick thread (TPS steady).
@@ -332,6 +359,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Pass when: he answers in the laconic omen-reading register, mentions Jake or Bob by name in at
     least one banter line, and never breaks into Jake's voice/persona.
 - [ ] **Wedged bot: pillar reason + 30 s back-off (1.1.204, P1 escape)**
+  - Sandbox 2026-10-18: FAIL: S3 fresh bot Wedge guarding in a 1x1x2 hole with 16 cobblestone, player 60 blocks away, day: every 30 s `pillar recovery placed no blocks reason=aborted steps=6` (x3), then `Guard escape: Wedge failed — cooldown ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: dig a 1×1×2 hole under a guarding/patrolling bot with cobblestone in inventory;
     cover the top with a block so pillaring is impossible.
   - Claude watches for: `pillar recovery placed no blocks reason=<x>` (x names the actual break —
@@ -372,6 +400,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
     recovery` then a successful pillar (no `placed no blocks`).
   - Pass when: he pillars out; the bundle is lighter by the stacks used.
 - [ ] **Hand-bundled better pickaxe gets pulled (1.1.205)**
+  - Sandbox 2026-10-18: FAIL: S3 stone pickaxe loose, diamond pickaxe in a bundle, `/bot skill mining` into a placed stone block: every `Mining ... with minecraft:stone_pickaxe` (6 blocks), the diamond pickaxe stayed in the bundle. Finding 6. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: give Jake a stone pickaxe loose and a diamond pickaxe INSIDE a bundle; `/bot skill
     mining` on stone.
   - Pass when: the diamond pickaxe appears loose and is the one in hand within the first few blocks;
@@ -410,7 +439,8 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
 
 ## Phase 6e — Follow-ups (1.1.206): on-thread tool swaps, hotbar target, offload latch
 
-- [ ] **Mining first-swing hitch is one tick, not more (1.1.206)**
+- [x] **Mining first-swing hitch is one tick, not more (1.1.206)**
+  - Sandbox 2026-10-18: PASS: S3 only an iron pickaxe, in main inventory slot 11: the first swing already logs `Mining ... with minecraft:iron_pickaxe` and the pickaxe ends in hotbar slot 0; no `server-thread hop failed`, `on-thread step failed` ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot skill mining` with the best pickaxe OUTSIDE the hotbar.
   - Claude watches for: `Swapping best tool from main inventory slot N to hotbar slot M` once; no
     `Tool select: server-thread hop failed` / `on-thread step failed`; TPS steady.
@@ -439,9 +469,11 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Bradley does: open the bot inventory → Actions tab ("Orders & Travel"), then the Spells tab.
   - Pass when: Regroup appears only on Spells (Movement) and works from there.
 - [ ] **`/bot direction reset` is the real name (1.1.207)**
+  - Sandbox 2026-10-18: PARTIAL: S3 `/bot direction reset Jake` exists and answers "Jake has no stored work direction." Setting a direction and the next strip mine were not run. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: set a strip-mine direction by standing behind him, then `/bot direction reset`.
   - Pass when: the command exists and the next strip mine uses his facing again (README now matches).
 - [ ] **Crafting refusal says exactly what's missing (1.1.207)**
+  - Sandbox 2026-10-18: FAIL: S3 Jake with 1 white wool and 10 planks, `/bot craft bed`: in the Spawn base it crafted a crafting table, failed to place it (`claim-denied protected-zone`) and said only "I crafted a crafting table but couldn't ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: give Jake 1 white wool + 10 planks, `/bot craft bed`; then 2 sticks and no coal,
     `/bot craft torch 4`.
   - Claude watches for: chat `Can't craft bed: need 2 more white wool`; `Can't craft torch: need 2 more
@@ -449,6 +481,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Pass when: the numbers match the shortfall, the bot crafts nothing, and no old generic line
     ("Beds need 3 wool…") appears.
 - [ ] **Unknown craft name speaks once per 30 s (1.1.207)**
+  - Sandbox 2026-10-18: FAIL: S3 `/bot craft spaceship Jake` three times in 6 s, then once 40 s later: "I don't know how to craft spaceship." all four times. Finding 7. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot craft spaceship` three times in ten seconds, then once more after 40 s.
   - Pass when: `I don't know how to craft spaceship.` appears at the 1st and 4th attempt only.
 - [ ] **Remembered fishing spot (1.1.207)**
@@ -498,7 +531,8 @@ fail, even an improvement — note it and move on.
   - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: `/bot skill collect_dirt` where he digs a shaft deep enough to need ladders.
   - Pass when: the ladder column goes in on the same support side as before and he climbs out.
-- [ ] **Home data survives a normal quit (1.1.208, debounce)**
+- [x] **Home data survives a normal quit (1.1.208, debounce)**
+  - Sandbox 2026-10-18: PASS: S3 `/bot base set QuitBase` then save-and-quit within the same second: `bot_home_data.json` mtime moved to the quit second and holds QuitBase, no `frens-bot-home-writer` exception; after relaunch `/bot base list` ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: change something BotHomeService owns (set a base or sleep in a new bed), then quit
     to title within 2 s.
   - Claude watches for: no `frens-bot-home-writer` exception; file mtime updated at shutdown.
@@ -590,7 +624,8 @@ Regression checks only: carving must behave exactly as on 1.1.209. Watch the log
 Off by default — nothing in this phase happens until the toggle is on. Grep:
 `grep -n "novelty" latest.log` (drops print as `[souls] novelty dropped bot=<name> reason=trigram|exact`).
 
-- [ ] **Toggle defaults off and round-trips (1.1.211)**
+- [x] **Toggle defaults off and round-trips (1.1.211)**
+  - Sandbox 2026-10-18: PASS: S2 `/bot soul novelty status` "Novelty rejection is OFF", `on`, status "is ON", settings.json5 `"soulNoveltyRejectionEnabled": true`. Singleplayer only; the LAN/dedicated sync half was not run. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul novelty status` on the fresh config, then `/bot soul novelty on`, then
     `status` again; on a dedicated-server/LAN client also confirm the value arrives after config sync.
   - Claude watches for: the status line reading off, then on; no `UnrecognizedProperty` in the log.
@@ -630,7 +665,8 @@ Mind files: `config/frens/souls/<botId>/mind.json` (or wherever `[souls] mind co
     `UnrecognizedProperty` / `InvalidDefinition` warning.
   - Pass when: consolidation succeeds and each rewritten file contains `"peerStances": {}` (or a
     populated map) — never a missing key or a null.
-- [ ] **Peer entry appears after shared scenes (1.1.212)**
+- [x] **Peer entry appears after shared scenes (1.1.212)**
+  - Sandbox 2026-10-18: PASS: S1/S2 `peer stance bot=Jake peer=Bob trust=4 exasperation=0 curiosity=3` and the Bob mirror (16:51:47). mind.json: Jake's `peerStances` has one entry keyed `6a00845c...` (Bob's UUID), Bob's keyed `2af3f0a5...` ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with Jake and Bob together and quiet, let two banter scenes fire in which both speak.
   - Claude watches for: `[souls] peer stance bot=Jake peer=Bob …` and the mirror line for Bob.
   - Pass when: both files hold one `peerStances` entry keyed by the other bot's UUID, all three values
@@ -644,12 +680,14 @@ Mind files: `config/frens/souls/<botId>/mind.json` (or wherever `[souls] mind co
     "thick as thieves with Bob".
   - Pass when: the clause names the other bot, is ≤50 chars, and only appears for bots present in
     that roster.
-- [ ] **Bumps are once per day per pair (1.1.212)**
+- [x] **Bumps are once per day per pair (1.1.212)**
+  - Sandbox 2026-10-18: PASS: S2 day 0: Jake's trust moved once (16:51:47) and curiosity once (3 to 4 at 17:23:00); scenes at 17:18, 17:20, 17:21, 17:22 logged no `peer stance` line. The next change came after the day-1 rollover (`lastTrustDay: 1`). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul banter now` ×3 within one Minecraft day with both bots speaking.
   - Claude watches for: `peer stance` lines after scene 1 vs 2 vs 3.
   - Pass when: trust changed at most once and curiosity/exasperation each at most once that day
     (no `peer stance` line at all for scenes 2–3 is the expected outcome).
 - [ ] **Day rollover decays toward baseline (1.1.212)**
+  - Sandbox 2026-10-18: PARTIAL: S2 the day-1 rollover ran (`mind consolidated bot=... day=1`, 17:23:58/17:24:06). After it both peer entries read `trust 4, curiosity 3` with `lastTrustDay: 1`: Jake's curiosity 4 moved to 3 (one step), trust was ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: sleep through a night after the entries exist; read both `mind.json` files.
   - Claude watches for: `[souls] mind consolidated` and the peer values.
   - Pass when: every peer axis moved exactly one step toward 3/0/3, and an entry that reached exact
@@ -664,7 +702,8 @@ Toggle-gated: `/bot soul relations on` first — until then no BELIEFS block, no
 `grep -n "\[souls\] relations" latest.log` (lines print as
 `[souls] relations bot=<name> added=<n> total=<n>` at day rollover). Audit view: `/bot soul beliefs <Bot>`.
 
-- [ ] **Toggle default and round trip (1.1.213)**
+- [x] **Toggle default and round trip (1.1.213)**
+  - Sandbox 2026-10-18: PASS: S2 "Relation facts are OFF", `on`, "Relation facts are ON", settings.json5 `"soulRelationsEnabled": true`. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul relations status`, then `/bot soul relations on`, `status` again.
   - Claude watches for: nothing in the log; chat replies.
   - Pass when: first status reads off on a fresh config, second reads on, and `config/frens/*.json5`
@@ -711,17 +750,20 @@ Grep: `grep -n "\[souls\] side-channel" latest.log` (lines print as
 `[souls] side-channel unparsed correlationId=<id> chars=<n>`). Absent tail = no line at all (expected).
 Requires `/bot soul relations on` for facts to be visible via `/bot soul beliefs <Bot>`.
 
-- [ ] **Toggle default and round trip (1.1.214)**
+- [x] **Toggle default and round trip (1.1.214)**
+  - Sandbox 2026-10-18: PASS: S2 "Structured output is OFF", `on`, "Structured output is ON", settings.json5 `"soulStructuredOutputEnabled": true`. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul structured status`, then `/bot soul structured on`, `status` again.
   - Claude watches for: nothing in the log; chat replies.
   - Pass when: first status reads off on a fresh config, second reads on, and `config/frens/*.json5`
     holds `soulStructuredOutputEnabled: true` after the save.
-- [ ] **Contract reaches the prompt only when enabled (1.1.214)**
+- [x] **Contract reaches the prompt only when enabled (1.1.214)**
+  - Sandbox 2026-10-18: PASS: S2 loopback tap (`tools/sandbox/ollama_tap.py`): the 19 requests before the toggle (16:51-17:16) have no `##FRENS` paragraph, the first scene after it (17:18:15) has "You may end your reply with one extra line ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with the toggle off fire one scene (`/bot soul banter now`), turn it on, fire another.
   - Claude watches for: the request's system contract (diagnostic logging) carrying
     `You may end your reply with one extra line starting with ##FRENS`.
   - Pass when: the paragraph is absent from the first request and present in the second.
 - [ ] **Side channel is emitted at all (1.1.214)**
+  - Sandbox 2026-10-18: FAIL: S2 structured on, "Jake, I hate the Nether" then 6 banter scenes (17:18-17:24, llama3.1:8b): no `[souls] side-channel` line, and the tap shows no reply ending in a `##FRENS` line. The 8B model ignores the optional ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with the toggle on, tell Jake something opinionated ("I hate the Nether") and let
     five scenes fire (Jake + Bob together).
   - Claude watches for: `[souls] side-channel` INFO lines — applied or `unparsed` — per correlationId.
@@ -734,7 +776,8 @@ Requires `/bot soul relations on` for facts to be visible via `/bot soul beliefs
     `correlationId`.
   - Pass when: each scene with an unparsed tail still delivered its lines; zero `outcome=failed:MALFORMED`
     attributable to a sentinel.
-- [ ] **`##FRENS` is never spoken (1.1.214)**
+- [x] **`##FRENS` is never spoken (1.1.214)**
+  - Sandbox 2026-10-18: PASS: S2 structured on, 6 scenes: 0 chat lines contain `##FRENS` (the model never wrote a tail either, see the side-channel item). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: read chat and listen during those scenes.
   - Claude watches for: the literal `##FRENS` in a delivered line or in TTS text.
   - Pass when: it never appears in chat or audio.
@@ -748,7 +791,8 @@ Requires `/bot soul relations on` for facts to be visible via `/bot soul beliefs
   - Claude watches for: `stance=` applied counts, and `peerStances` values before/after.
   - Pass when: `playerStance` never moves on a side-channel line; each peer axis moved at most one step
     that day; values stay within 0..6.
-- [ ] **Toggle off is inert (1.1.214)**
+- [x] **Toggle off is inert (1.1.214)**
+  - Sandbox 2026-10-18: PASS: S2 `/bot soul structured off` (17:44:38): the next two requests (17:44:49, 17:46:26) carry no `##FRENS` contract (tap), no `side-channel` line. No INFERRED fact existed to check storage. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot soul structured off`, fire two scenes.
   - Claude watches for: `side-channel` lines and the contract paragraph in the prompt.
   - Pass when: neither appears; earlier INFERRED facts remain in `mind.json` (the toggle stops
@@ -831,7 +875,8 @@ toggles: the floor and the backoff are always on.
 From the five unreviewed 1.1.216 sessions (2026-09-07/08). No new toggles. Includes the Codex work shipped in this build
 (voice-preserving model switch, group-chat guide topic, one-time group-chat hint).
 
-- [ ] **Voices are warm before the first scene (1.1.217)**
+- [x] **Voices are warm before the first scene (1.1.217)**
+  - Sandbox 2026-10-18: PASS: S2 `[16:57:40] tts prewarm voices=2` and `tts engine started pid=19661` 2 s after the bots spawned, 40 s before the first scene. Line 1 vs line 2 speed not judged by ear. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: load the world with Jake + Bob soul-enabled and voice on; wait ~10 s, then `/bot soul banter now`.
   - Claude watches for: `[souls] tts prewarm voices=N` within ~5 s of the bots being online, and `[souls] tts engine
     started pid=…` lines BEFORE the scene's `scene correlationId=… outcome=scene-started`.
@@ -860,7 +905,8 @@ From the five unreviewed 1.1.216 sessions (2026-09-07/08). No new toggles. Inclu
   - Bradley does: toggle scripted Text off for a minute, then on.
   - Claude watches for: `Scripted chat suppressed (text off)` while off, `Scripted chat delivered … part=0` while on.
   - Pass when: no `Sending chat message` line appears while Text is off.
-- [ ] **Ollama usage is logged (1.1.217)**
+- [x] **Ollama usage is logged (1.1.217)**
+  - Sandbox 2026-10-18: PASS: S2 32 `[souls] ollama usage model=llama3.1:8b promptTokens=... evalTokens=...` lines, one per call. Largest `promptTokens=1731` (digest), `numCtx=8192`, no `nearCtxLimit=true`. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: nothing extra — any soul reply or scene.
   - Claude watches for: `[souls] ollama usage model=… promptTokens=… evalTokens=…`.
   - Pass when: the line appears per call; note the largest `promptTokens` seen (sizing input for `NUM_CTX`), and flag any
@@ -881,7 +927,8 @@ From the five unreviewed 1.1.216 sessions (2026-09-07/08). No new toggles. Inclu
 Bradley's report: the bot builds a house and gets stuck inside trying to reach the far side of a corner instead of
 walking out the doorway. Needs a flat, open build site; give the bot enough materials. No toggles.
 
-- [ ] **Schematic builder leaves through the doorway (1.1.218)**
+- [x] **Schematic builder leaves through the doorway (1.1.218)**
+  - Sandbox 2026-10-18: PASS: S3 `/bot skill build small_hut` (with 8 torches, which it requires): `[egress] ... door=121,-61 src=DESIGNED_GAP waypoints=3 ... outcome=ok` twice, no `outcome=failed`. The site was on a tree canopy, so only 37/86 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot build small_hut` (then `small_shelter`) with the bot starting inside the footprint area once the
     walls are half up — or just watch a full build.
   - Claude watches for: `[egress] bot=… door=x,z src=DESIGNED_GAP … outcome=ok` when a stance is outside.
@@ -913,27 +960,32 @@ The chat addressee rules and the 30 s DM follow-up window came out of the 2026-0
 opens only after a soul DM reply is actually delivered, and only while no other human is online. Souls on, Jake + Bob
 nearby, solo. Supplies Phase 2 is dormant: bots can't ask for chest items yet, so only the groundwork is checked here.
 
-- [ ] **A follow-up without a name reaches the same bot (1.1.219)**
+- [x] **A follow-up without a name reaches the same bot (1.1.219)**
+  - Sandbox 2026-10-18: PASS: S2 "Jake, how is the mining going?" then "ok, and after that?" 16 s later: `[17:01:33] [souls] dm follow-up routed player=RotiWokeman bot=Jake ageMs=10169`, Jake answered in the same thread, no "Processing your ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: "Jake, how is the mining going?" — wait for Jake's reply — then within 30 s a follow-up with no name
     ("why that?", "ok, and after that?").
   - Claude watches for: `[souls] dm follow-up routed player=… bot=Jake ageMs=…` (ageMs < 30000), then Jake's reply.
   - Pass when: Jake answers the follow-up in the same conversation; no "Processing your message" line; no refusal
     notice.
-- [ ] **The window closes after 30 s and on a new address (1.1.219)**
+- [x] **The window closes after 30 s and on a new address (1.1.219)**
+  - Sandbox 2026-10-18: PASS: S2 an unaddressed line 64 s after Jake's reply got only `local ... vetoed:cooldown`, no `dm follow-up routed`. Then "Bob, hi" and an unnamed line 14 s later: `[17:03:25] dm follow-up routed ... bot=Bob ageMs=9048`. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: after Jake replies, wait ~40 s and type an unaddressed line; then DM Bob ("Bob, hi"), wait for Bob,
     and send another unaddressed line.
   - Claude watches for: no `dm follow-up routed` for the late line; the last line routed with `bot=Bob`.
   - Pass when: the stale window never catches the late line, and the follow-up goes to the bot that answered last.
 - [ ] **"Guys" and "everyone" reach both bots (1.1.219)**
+  - Sandbox 2026-10-18: PARTIAL: S2 "hey guys, what's the plan?" `scene-routing ... candidates=2 eligible=2 outcome=submitted` (17:04:15, 17:14:22), no "Processing your message". Only Bob spoke (`lines=1`, finding 2). The party-OFF half was not run. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with party chat on, "hey guys, what's the plan?" and "everyone follow me".
   - Claude watches for: `[souls] scene-routing … outcome=…` with both bots as candidates.
   - Pass when: both bots take part. With the party toggle OFF, the same line produces nothing: no "Processing your
     message", no legacy LLM call.
-- [ ] **A named bot beats a soft word (1.1.219)**
+- [x] **A named bot beats a soft word (1.1.219)**
+  - Sandbox 2026-10-18: PASS: S2 "hey guys, Jake come here" (17:10:44): one `[souls] routing ... bot=2af3f0a5` (Jake), no scene-routing line, only Jake answered ("I'm here. What's up?"). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: "hey guys, Jake come here".
   - Claude watches for: a single-bot DM routing line for Jake, no scene-routing line.
   - Pass when: only Jake responds.
-- [ ] **Trailing name and comma lists (1.1.219)**
+- [x] **Trailing name and comma lists (1.1.219)**
+  - Sandbox 2026-10-18: PASS: S2 "where did Bob put the torches, Jake?" routed to Jake only (17:11:27); "Jake, Bob come here" gave `scene-routing ... candidates=2 eligible=2` (17:15:47, after Bob was rebound); "Bob, Jake says the chest is full" ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: "where did Bob put the torches, Jake?" then "Jake, Bob come here" then "Bob, Jake says the chest is full".
   - Claude watches for: the routing lines' bot names.
   - Pass when: the first goes to Jake only; the second reaches both; the third goes to Bob only.
@@ -1000,6 +1052,7 @@ says otherwise.
 Grep: `[supply] request`, `[supply] answer`, `[supply] transfer`, `[supply] withdraw`.
 
 - [ ] **Do this first: mark your supply chest Always (1.1.221)**
+  - Sandbox 2026-10-18: PARTIAL: S3 Always works for food: `choice=always result=GRANTED_ALWAYS` (18:12:53), the next take `outcome=COVERED_BY_ALWAYS ... MOVED` with no prompt. The axe case never prompted: `/bot skill woodcut` with no axe beside a ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Why: an idle bot far from you can no longer fetch a tool unless the chest has an Always.
   - Bradley does: take Jake's axe (let him keep his sword), then put 2 stone axes in a chest beside him while he
     idles. Click
@@ -1007,14 +1060,16 @@ Grep: `[supply] request`, `[supply] answer`, `[supply] transfer`, `[supply] with
   - Claude watches for: `[supply] request … outcome=OPENED id=…`, then `[supply] answer … result=GRANTED_ALWAYS`,
     then `[supply] withdraw … result=MOVED moved=1`.
   - Pass when: exactly one prompt appears, Jake takes one axe, and one axe stays in the chest.
-- [ ] **Allow once really lets him take it (1.1.221)**
+- [x] **Allow once really lets him take it (1.1.221)**
+  - Sandbox 2026-10-18: PASS: S3 (bread, not the axe/sword kit): `answer ... choice=once result=GRANTED_ONCE` at 18:07:02, `withdraw ... result=MOVED moved=2` at 18:07:08 (6 s), no second prompt for it. Also planks for a craft: once at 18:16:55, ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: at a chest with no Always, holding 2 wooden axes and 1 wooden sword, take Jake's axe and sword.
     Click **[Allow once]** on the first prompt.
   - Claude watches for: `result=GRANTED_ONCE`, then `[supply] withdraw … result=MOVED` for that item.
   - Pass when: the approved item moves within ~10 s (he may take an axe as his weapon; the lone sword stays, it is
     the chest's spare) and the same item is never prompted a second time. In this build's pre-review commits, only
     Always worked.
-- [ ] **No means no (1.1.221)**
+- [x] **No means no (1.1.221)**
+  - Sandbox 2026-10-18: PASS: S3 `food 10 no 70`: `choice=no result=REJECTED`, then `withdraw ... REFUSED reason=NOT_PERMITTED`, and 68 s later `request ... outcome=REJECT_COOLDOWN` with no new prompt. Nothing moved. Three minutes later the same ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: at a chest with no Always, answer **[No]** to a prompt.
   - Claude watches for: `result=REJECTED`, then no `[supply] withdraw … result=MOVED` for that chest and item.
   - Pass when: nothing moves, and Jake doesn't ask about that chest again for at least a minute.
@@ -1025,14 +1080,16 @@ Grep: `[supply] request`, `[supply] answer`, `[supply] transfer`, `[supply] with
     chests are near him. On `/bot woodcut`, a prompt within seconds.
   - Pass when: the woodcut prompts as soon as you are back. It must not fail with "no axe" for minutes after you
     return.
-- [ ] **A hungry bot asks for food above the reserve (1.1.221, reserve 8 since 1.1.268)**
+- [x] **A hungry bot asks for food above the reserve (1.1.221, reserve 8 since 1.1.268)**
+  - Sandbox 2026-10-18: PASS: S3 `tools/sandbox/supplytest.py food 10`: `[18:07:00] [supply] request bot=Jake ... item=minecraft:bread qty=2 ... outcome=OPENED`, answered once, `withdraw ... result=MOVED moved=2`, 8 left. `food 8`: no request ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot set hunger 10 Jake` beside a chest holding 10 bread. Then repeat with a chest holding only 8
     bread.
   - Claude watches for: a food prompt at 10 bread (`item=minecraft:bread`), then `withdraw … MOVED` for at most 2.
     No request line for the 8-bread chest.
   - Pass when: he eats from the 10 and leaves 8, and leaves the 8-bread chest alone (Bradley 2026-10-18: food keeps 8,
     other materials 16).
-- [ ] **A full inventory never freezes the game (1.1.221)**
+- [x] **A full inventory never freezes the game (1.1.221)**
+  - Sandbox 2026-10-18: PASS: S3 Jake holding 36 stacks of cobblestone, Always chest with 24 bread: `transfer ... status=NO_ROOM`, `Dropped 64x Cobblestone to free inventory space.`, `MOVED moved=2`, `Mutual aid: Jake took 2x Bread`, all in the ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: fill Jake's inventory with junk, set hunger 10, and stand beside an Always chest with 20+ bread.
   - Claude watches for: `NO_ROOM` then a dropped cheap stack, then `MOVED`. No "Can't keep up!" line in the log.
   - Pass when: he drops something cheap, takes the bread, and the game never stutters.
@@ -1042,6 +1099,7 @@ Grep: `[supply] request`, `[supply] answer`, `[supply] transfer`, `[supply] with
   - Claude watches for: `outcome=OPENED`, not `DENIED(DENY_UNKNOWN)`.
   - Pass when: you get the normal prompt.
 - [ ] **Crafting and seeds from a chest (1.1.221, new behaviour)**
+  - Sandbox 2026-10-18: PARTIAL: S3 craft half: the first `/bot craft stick` asked (`purpose=craft-planks ... WAITING`) and answered "Sticks need 2 planks per craft."; after [Allow once] the second run `withdraw ... MOVED moved=2` then "Crafted 4 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: put 20 oak planks in a chest beside Jake, empty his planks and sticks, and run `/bot craft` for
     sticks. Click [Allow once], then run the same `/bot craft` again within a minute. Then put 20 wheat seeds in a
     chest and run `/bot harvest` on a field with empty farmland.
@@ -1055,7 +1113,8 @@ Grep: `[supply] request`, `[supply] answer`, `[supply] transfer`, `[supply] with
     an axe.
   - Claude watches for: no `[supply] request` for those items.
   - Pass when: nothing is taken and nothing is prompted. Hand him the items yourself.
-- [ ] **Revoke all (1.1.221)**
+- [x] **Revoke all (1.1.221)**
+  - Sandbox 2026-10-18: PASS: S3 after an Always: `[18:14:14] [supply] revoke-all owner=RotiWokeman removed=1 grants=0`, chat "Revoked 1 standing permission(s)...", and the next hunger take prompted again (`outcome=OPENED` 18:14:24). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/frens supply revoke all`, then repeat the first check.
   - Claude watches for: `[supply] revoke-all owner=… removed=1`.
   - Pass when: the reply counts what it removed, and the next take prompts again.
@@ -1077,6 +1136,7 @@ Freeze detector for every item: no `Can't keep up!` line in the log.
 Grep: `craft-station tick-side`, `Idle stone upgrade`, `to free inventory space`, `mutual-aid make-room`.
 
 - [ ] **Idle stone upgrade with a table in reach (1.1.222)**
+  - Sandbox 2026-10-18: PARTIAL: S3 with the item's kit (wooden pickaxe and shovel, 3 cobblestone, 2 sticks, table 2 blocks away, idle hobbies on) nothing crafted in 100 s: every 12 s `Idle wooden fallback: Jake blocked — no safe woodcut target near ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: give Jake a wooden pickaxe and a wooden shovel (no other pickaxe or shovel), 3 cobblestone and 2
     sticks, with no planks or logs. Without the shovel he goes off to cut wood for one, which is a different hobby.
     Put a crafting table 2 blocks from him and let him idle.
@@ -1153,7 +1213,8 @@ Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilCl
   - Claude watches for: any `nudgeTowardUntilClose on the server thread` WARN, and records the caller it names.
     The expected candidates are return-base door and escape.
   - Pass when: none appear. If one does, it's a known deferral: log the caller in the handoff.
-- [ ] **`/bot craft stone_axe` names what's missing (1.1.223)**
+- [x] **`/bot craft stone_axe` names what's missing (1.1.223)**
+  - Sandbox 2026-10-18: PASS: S3 3 sticks only: "I need 3 cobblestone and 2 sticks for a stone axe. I have 3 sticks."; with 3 cobblestone added: "Crafted 1 Stone Axe.", no "I don't know how to craft". See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: give Jake 3 sticks and nothing else, then `/bot craft stone_axe 1 Jake`. Then give him 3
     cobblestone and run it again.
   - Claude watches for: `I need 3 cobblestone … for a stone axe — I have 3 sticks.`, then a crafted stone axe.
@@ -1181,6 +1242,7 @@ Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilCl
 Grep: `[bot-access] denied`, `[PermCheck]`, `scene privacy stop`, `[legacy-chat] denied`, `sqlite-vec`, `Downloading`, `NLP model`.
 
 - [ ] **Startup permission mode (1.1.224)**
+  - Sandbox 2026-10-18: FAIL: S2/S3 every launch: `[PermCheck] operator-permission mode=permission-all-mapped-fallback class=net.minecraft.class_12096 field=ALL/field_63208`, never `leveled-mapped ... OWNERS`. Known since 1.1.232 (checklist note ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): the library half is closed (sqlite-vec, xattr, the NLP model and the legacy stack were deleted in 1.1.243-1.1.251, and the 1.1.270 sandbox log has none of those lines). Only the permission check is left.
   - Found 2026-10-18: every log from 1.1.232 to 1.1.270 showed `mode=permission-all-mapped-fallback`. Cause: a static-init order bug (the field list was still null when the lookup ran). Fixed in 1.1.271. The old fallback was harmless (ALL grants everything OWNERS does in vanilla and Carpet), see the 1.1.271 changelog.
   - Claude watches for (startup, no play needed; any 1.1.271+ launch): `[PermCheck] operator-permission mode=leveled-mapped class=net.minecraft.class_12086 field=OWNERS/field_63185`.
@@ -1194,7 +1256,8 @@ Grep: `[bot-access] denied`, `[PermCheck]`, `scene privacy stop`, `[legacy-chat]
     5. Answer a sunset return prompt.
   - Claude watches for: no `[bot-access] denied` lines.
   - Pass when: everything opens, and the remote screen stays open at a distance.
-- [ ] **Diagnostics switch (1.1.224)**
+- [x] **Diagnostics switch (1.1.224)**
+  - Sandbox 2026-10-18: PASS: S2 `/bot config diagnostics off` with Jake following: 0 `Follow status:` lines in 30 s (0 in the whole log before it). `on`: 25 lines in the next 40 s. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot config diagnostics off`, follow for 30 s, then `/bot config diagnostics on`.
   - Claude watches for: `Follow status:` lines disappearing, then returning.
   - Pass when: both switches take effect.
@@ -1275,7 +1338,8 @@ Grep: `[ai-setup]`, `Ollama not detected`, `Ollama is not reachable`, `Processin
     - Both screens say "Runs on the server host".
     - A model not installed on the server shows "Pull it on the server machine: ollama pull <tag>" and no Download button.
     - The bot's next reply uses the new model, and the Soul Chat toggle takes effect without a restart.
-- [ ] **Scene logs carry no private text (1.1.225)**
+- [x] **Scene logs carry no private text (1.1.225)**
+  - Sandbox 2026-10-18: PASS: S2 diagnostics on, after the "I hate the Nether" DM: banter, scene and playback lines show only ids, counts, `seedChars=`, `privateSeedCount=`, `dropped rawLine=N reason=... chars=`. The only log line with the DM ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: let 2–3 group scenes play after a DM to Jake, with diagnostics on.
   - Claude watches for: `latest.log` banter-seed, scene-output and dropped-line lines. They should show counts, lengths, reasons and `correlationId=`, with no dialogue text at INFO.
   - Pass when: no DM fact or scene line text appears in the log at INFO.
@@ -1286,11 +1350,13 @@ Grep: `[ai-setup]`, `Ollama not detected`, `Ollama is not reachable`, `Processin
 
 Grep: `Auto-spawn deferred until the first real player joins`, `Auto-spawn skipped for`, `Auto-spawn skipped`.
 
-- [ ] **Auto-spawn after the host joins (1.1.226)**
+- [x] **Auto-spawn after the host joins (1.1.226)**
+  - Sandbox 2026-10-18: PASS: S2 reopening Sweep Souls with Jake and Bob saved: `[16:57:35] Auto-spawn deferred until the first real player joins (integrated server).`, then `RotiWokeman[local] logged in` (16:57:38) and only after it `Spawned new ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: in a singleplayer world with 2–3 saved bots, quit to title, then reopen the world.
   - Claude watches for: `Auto-spawn deferred until the first real player joins (integrated server).` at world load, then the bots' spawn lines only after Bradley's own join line.
   - Pass when: Bradley gets in, and the saved bots appear a moment later where they were.
 - [ ] **Too many saved bots never lock the host out (1.1.226)**
+  - Sandbox 2026-10-18: PARTIAL: S3 7 saved bots (Jake, Ash, Birch, Cedar, Dale, Elm, Fir), quit and reopen: host joined with no "server is full", `Auto-spawn deferred until the first real player joins`, then all 7 spawned at 18:51:50 (8/8). No ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: in a throwaway singleplayer world, `/bot spawn` 7 bots (8 players with Bradley), quit to title, reopen the world.
   - Claude watches for: one `Auto-spawn skipped for <bot>: 7/8 players and 1 slot(s) kept free` line, and `Auto-spawn skipped 1 companion(s); world allows 8 players`.
   - Pass when: Bradley joins without "server is full", 6 bots auto-spawn, and chat shows "1 companion was not auto-spawned … Use /bot spawn to bring one in." `/bot spawn` of the 7th still works.
@@ -1335,7 +1401,8 @@ Grep: `Unknown or incomplete command`, `No recipient resolved`, `Stopped by the 
 
 Best on a brand-new Survival world (the `frens-fresh` instance or a new world on Nirn) with a bot that has an empty inventory.
 
-- [ ] **Woodcut from nothing (1.1.229)**
+- [x] **Woodcut from nothing (1.1.229)**
+  - Sandbox 2026-10-18: PASS: S3 Jake empty in the forest, `/bot skill woodcut`: `Woodcut axe bootstrap: Jake has no axe, punching logs bare-handed`, chat "No axe yet, so I'll punch a tree first.", first punch about 4 s later, `has enough wood ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: on a new world, give a fresh bot no items, stand by a tree near spawn and order woodcut.
   - Claude watches for: `Woodcut axe bootstrap: <bot> has no axe, punching logs bare-handed`, then `has enough wood (logs=… planks=… sticks=…), crafting an axe`, then `crafted an axe, back to normal woodcut`. No `protection=admin-zone` or `protection=base-radius` rejects for trees near the Spawn base. No `A* pathfinding timed out` with the same from and to.
   - Pass when: the bot says "No axe yet, so I'll punch a tree first.", punches a few logs, places a table, makes a wooden axe and keeps chopping. First chop within ~10 s of the order with trees adjacent.
@@ -1343,11 +1410,13 @@ Best on a brand-new Survival world (the `frens-fresh` instance or a new world on
   - Bradley does: on Nirn, order woodcut while standing inside your own base radius with trees around.
   - Claude watches for: `protection=base-radius` rejects for those trees, same as 1.1.228.
   - Pass when: the bot does not fell trees inside your base.
-- [ ] **Follow comes back after a task, no "Busy" (1.1.229)**
+- [x] **Follow comes back after a task, no "Busy" (1.1.229)**
+  - Sandbox 2026-10-18: PASS: S3 Jake following, `/bot skill woodcut 4 Jake` ran four trees and ended: `[18:34:53] [FollowAssert] task-resume bot=Jake mode=follow ... resumed=true result='Now following RotiWokeman.'`, no "Busy with another task" ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with a bot following, order a short skill (woodcut one tree, or any task) and let it finish without stopping it.
   - Claude watches for: `[FollowAssert] task-resume bot=… mode=follow … resumed=true`. No "Busy with another task right now." and no "Stopping follow command." in chat. If the task ended underground, no post-task trip home while it follows.
   - Pass when: the bot follows you again after the task, with no wrong lines.
-- [ ] **No axe wear on dirt (1.1.229)**
+- [x] **No axe wear on dirt (1.1.229)**
+  - Sandbox 2026-10-18: PASS: S3 two woodcut runs with an axe and dirt: every dirt pillar and bridge block came down `with minecraft:dirt` in hand (300-750 ms), never the axe. Note: plank bridge blocks were also mined with planks in hand, some at ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: give a bot a copper or stone axe and a hotbar with dirt, let it woodcut a tall tree that needs a dirt pillar, and watch the pillar teardown.
   - Claude watches for: `MiningTool` lines on dirt with `bare-hands` (or a shovel), never an axe. Plank bridge retracts using the axe (well under 3 s per plank).
   - Pass when: the axe's durability doesn't drop during teardown.
@@ -1437,7 +1506,8 @@ Run after Phase 6ac's first item. Items 1 and 6-7 are single-player; 2-5 need a 
   - Sandbox 2026-10-17: PARTIAL: toggle gone from Admin tab and Player Permissions; guest half not testable, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: open the Admin tab and the per-player admin settings.
   - Pass when: no "allow everyone to change skins" toggle anywhere, and a guest reskinning the host's bot still gets "You can only change the skin of your own bot." (also when the host's bot is offline).
-- [ ] **Leaves drop saplings, teardown uses hands (1.1.233)**
+- [x] **Leaves drop saplings, teardown uses hands (1.1.233)**
+  - Sandbox 2026-10-18: PASS: S3 Jake with stone pickaxe, iron axe, shears and 32 dirt woodcut two trees with a 2-step dirt pillar: the dirt teardown was mined `with minecraft:dirt` in hand, stone pickaxe `damage 0` before and after (shears also ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-17: FAIL: shears still mine leaves during felling and pillarUp (bug A); stone scaffold pass, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: give a bot shears and a pickaxe in the hotbar, run woodcut on a tree that needs scaffold, then watch the cleanup and a fortify/shelter scaffold teardown.
   - Bradley's ruling 2026-10-18 (triage): open only for the part never tested: dirt and plank scaffold comes down without the pickaxe losing durability.
@@ -1478,6 +1548,7 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
   - Sandbox 2026-10-17: FAIL: right sentence, 1 s on bare ground but 127 s in forest (bug B), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Pass when: with nothing to clean, woodcut cleanup ends within a few seconds with "Nothing left to clean up here." (no `minedLogs=` stats in chat).
 - [ ] **Drop sweep, return and craft feedback (1.1.234)**
+  - Sandbox 2026-10-18: FAIL: S3 drops spread around Jake, `/bot skill drop_sweep Jake`: chat "Picked up 27 items.", but the skill's own summary says `collected: 20` and Jake's bag (cleared before) holds 21 items (13 saplings, 5 logs, 2 apples, 1 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-17: FAIL: no-wood craft answers with two lines (bug C); sweep counts stacks, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: drop a few items, run a drop sweep. Then `/bot craft` an axe with no wood anywhere.
   - Bradley's ruling 2026-10-18 (triage): the craft half passed (bug C fixed in 1.1.266). Open only for the sweep count.
