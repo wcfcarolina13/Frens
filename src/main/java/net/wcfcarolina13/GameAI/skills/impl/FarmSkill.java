@@ -485,16 +485,22 @@ public class FarmSkill implements Skill {
             }
             abortIfRequested(bot);
 
-            int tilled = tillPlots(bot, world, source, farmCenter, seedCount);
+            TillOutcome firstTill = tillPlots(bot, world, source, farmCenter, seedCount);
+            int tilled = firstTill.tilled();
+            boolean hoeAvailable = firstTill.hoeAvailable();
             int planted = plantSeeds(bot, world, source, farmCenter, seedCount);
             if (!reuseExistingIrrigation) {
                 secureIrrigationContainment(bot, world, source, farmCenter);
             }
-            repairDamagedPlots(bot, world, source, farmCenter, protectedStillWater);
+            PlotRepairCounts repairs = repairDamagedPlots(bot, world, source, farmCenter, protectedStillWater);
+            tilled += repairs.retilled();
+            planted += repairs.replanted();
             // After repairs, try to use remaining seeds on any newly leveled plots
             int remainingSeeds = countSeeds(inventory);
             if (remainingSeeds > 0) {
-                tilled += tillPlots(bot, world, source, farmCenter, remainingSeeds);
+                TillOutcome secondTill = tillPlots(bot, world, source, farmCenter, remainingSeeds);
+                tilled += secondTill.tilled();
+                hoeAvailable = secondTill.hoeAvailable();
                 planted += plantSeeds(bot, world, source, farmCenter, remainingSeeds);
             }
 
@@ -503,6 +509,15 @@ public class FarmSkill implements Skill {
 
             finalTopOffBuckets(bot, world, source, farmCenter, refillSource);
             cleanupTemporaryFarmAccess(bot, world, source, footprint, temporaryFarmAccess);
+
+            int standingCrops = countStandingCrops(world, farmCenter);
+            String failure = FarmOutcomePolicy.failureReason(tilled, planted, standingCrops, hoeAvailable);
+            if (failure != null) {
+                LOGGER.warn("[FarmIrrigation] farm run did nothing: tilled={} planted={} standingCrops={} hoeAvailable={}",
+                        tilled, planted, standingCrops, hoeAvailable);
+                ChatUtils.sendSystemMessage(source, failure);
+                return SkillExecutionResult.failure(failure);
+            }
 
             return SkillExecutionResult.success(
                     "Prepared a hydrated farm and planted " + planted + " seeds (tilled " + tilled + ")."
@@ -2086,12 +2101,24 @@ public class FarmSkill implements Skill {
         return false;
     }
 
-    private static int tillPlots(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, int seedLimit) {
+    /** Result of a tilling pass: plots tilled and whether the hoe stayed reachable (finding 34). */
+    private record TillOutcome(int tilled, boolean hoeAvailable) {}
+
+    private static TillOutcome tillPlots(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, int seedLimit) {
         List<BlockPos> plots = farmPlots(center);
         int tilled = 0;
+        // The start-of-run hotbar check is long gone by now: bucket, seed and tool swaps
+        // evict the selected slot, which is often where the hoe sat (finding 34).
+        boolean hoeAvailable = ensureHoeInHotbarOnServer(bot);
+        if (!hoeAvailable) {
+            LOGGER.warn("[FarmTill] no hoe reachable in the hotbar before tilling; skipping till pass");
+        }
 
         for (BlockPos plot : plots) {
             abortIfRequested(bot);
+            if (!hoeAvailable) {
+                break;
+            }
             if (tilled >= seedLimit) {
                 break; // Do not till more than we can plant
             }
@@ -2121,7 +2148,20 @@ public class FarmSkill implements Skill {
             LookController.faceBlock(bot, plot);
             sleep(ACTION_DELAY_MS);
 
-            if (BotActions.useHoe(bot, plot)) {
+            boolean used = BotActions.useHoe(bot, plot);
+            if (!used && !hasHoeInHotbar(bot.getInventory())) {
+                // The hoe left the hotbar during this pass (tool swap while clearing, etc.).
+                // One re-ensure per failed block. If the hoe is truly gone, stop tilling.
+                if (ensureHoeInHotbarOnServer(bot)) {
+                    LOGGER.info("[FarmTill] hoe was out of the hotbar at {}; moved it back and retrying", plot.toShortString());
+                    LookController.faceBlock(bot, plot);
+                    used = BotActions.useHoe(bot, plot);
+                } else {
+                    LOGGER.warn("[FarmTill] hoe no longer reachable at {}; stopping till pass", plot.toShortString());
+                    hoeAvailable = false;
+                }
+            }
+            if (used) {
                 tilled++;
                 sleep(120);
             }
@@ -2129,8 +2169,8 @@ public class FarmSkill implements Skill {
 
         BotActions.sneak(bot, false);
 
-        LOGGER.info("Tilled {} plots (limit set by {} seeds)", tilled, seedLimit);
-        return tilled;
+        LOGGER.info("Tilled {} plots (limit set by {} seeds, hoeAvailable={})", tilled, seedLimit, hoeAvailable);
+        return new TillOutcome(tilled, hoeAvailable);
     }
 
     private static int plantSeeds(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, int seedLimit) {
@@ -3694,8 +3734,24 @@ public class FarmSkill implements Skill {
         }
     }
 
-    private static void repairDamagedPlots(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, Set<BlockPos> protectedStillWater) {
+    /** Plots the repair pass re-tilled and replanted, counted into the run's totals (finding 34). */
+    private record PlotRepairCounts(int retilled, int replanted) {}
+
+    /** Farm plots that are farmland with something (a crop) standing on them. */
+    private static int countStandingCrops(ServerWorld world, BlockPos center) {
+        int standing = 0;
+        for (BlockPos plot : farmPlots(center)) {
+            if (world.getBlockState(plot).isOf(Blocks.FARMLAND) && !world.isAir(plot.up())) {
+                standing++;
+            }
+        }
+        return standing;
+    }
+
+    private static PlotRepairCounts repairDamagedPlots(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, Set<BlockPos> protectedStillWater) {
         List<BlockPos> plots = farmPlots(center);
+        // Re-tilling needs the hoe in the hotbar too; the plant pass may have evicted it.
+        ensureHoeInHotbarOnServer(bot);
         int dirtAvailable = 0;
         for (Item item : DIRT_BLOCK_PREFERENCE) {
             dirtAvailable += countItem(bot.getInventory(), item);
@@ -3791,6 +3847,7 @@ public class FarmSkill implements Skill {
         BotActions.sneak(bot, false);
 
         LOGGER.info("Repair pass complete: retilled={}, replanted={}, dirtLeft={}", retilled, replanted, dirtAvailable);
+        return new PlotRepairCounts(retilled, replanted);
     }
 
     private static void adjustPlotHeight(ServerPlayerEntity bot, ServerWorld world, BlockPos plot, int targetY) {
@@ -4114,12 +4171,48 @@ public class FarmSkill implements Skill {
         return false;
     }
 
-    private static boolean ensureHoeInHotbar(ServerPlayerEntity bot) {
-        PlayerInventory inventory = bot.getInventory();
+    private static boolean hasHoeInHotbar(PlayerInventory inventory) {
         for (int i = 0; i < 9; i++) {
             if (inventory.getStack(i).getItem() instanceof HoeItem) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    /**
+     * {@link #ensureHoeInHotbar} run on the server thread (it may swap stacks). Runs inline
+     * when already on the server thread or when no server is available, and falls back to
+     * {@code false} on timeout or interruption.
+     */
+    private static boolean ensureHoeInHotbarOnServer(ServerPlayerEntity bot) {
+        var server = bot.getCommandSource().getServer();
+        if (server == null || server.isOnThread()) {
+            return ensureHoeInHotbar(bot);
+        }
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(ensureHoeInHotbar(bot));
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            return future.get(3, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            LOGGER.warn("[FarmTill] ensureHoeInHotbar on server thread failed: {}", e.toString());
+            return false;
+        }
+    }
+
+    private static boolean ensureHoeInHotbar(ServerPlayerEntity bot) {
+        PlayerInventory inventory = bot.getInventory();
+        if (hasHoeInHotbar(inventory)) {
+            return true;
         }
         for (int i = 9; i < inventory.size(); i++) {
             if (inventory.getStack(i).getItem() instanceof HoeItem) {
