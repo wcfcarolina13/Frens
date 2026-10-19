@@ -4,7 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-19 (1.1.272) — next session starts here
+## Session Handoff 2026-10-19 (1.1.273) — next session starts here
+
+**State:** main = origin/main @ 1.1.273. Suite 3010 green. Deployed to Nirn only (the sandbox still has 1.1.272). Not checked in game or the sandbox yet. Phase 6bk: 4 field items; checklist 127 open.
+**1.1.273** (changelog entry has rulings and costs): second fix build from the 0-6ai sweep: 17 ambient chatter waits for the speech floor and follows the Scripted rate ("Time to punch some trees" only without an axe), 18 local director vetoes when any nearby actor is in danger, 23 a threat only resumes a task it paused within 10 min and finished skills clear their record (lost in `1296ae05`), environmental damage is not combat, 27 one stop line, 34 farm without a hoe fails, 24/28/29/36 log and chat floods, 10 bridge teardown tool, mining re-poll keeps progress on an equal-speed swap, woodcut cleanup leaves natural stone, 9 idle stone upgrade, 11 pickup count, 4 bed craft checks ingredients first. Fable review (two reviewers), one fix wave (`4ae67198`), clean re-review. The session hit a usage limit mid-build and was resumed from the CLI.
+**Public release:** 1.1.272 was the candidate; 1.1.273 supersedes it once its sandbox checks pass. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Needs Bradley:** the three 1.1.272 questions still stand (Spells key migration, chest axe before crafting, shared-server chest scan).
+**Deferred (reasons in the changelog):** farm hoe lost on a half-planted farm still reports success (needs an untilled-plot count); leather-armor and cobblestone-tools idle fallbacks never run (fix the wooden fallback returning true when it did nothing); what re-equips the axe between mining re-polls (suspect `CombatInventoryManager`); a slower re-poll swap can still time out; resume arm/undo token is millisecond time; banter director never scans around the player; group prompt hostile line is count-only.
+**Next fix build (from findings 1-36, not in 1.1.272/273):** 13 craft after a failed table reach, 3 same speaker twice, 7/14/20/21/26 minors, plus the deferrals above.
+**Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-19 (1.1.272) — superseded
 
 **State:** main = origin/main @ 1.1.272. Suite 2947 green. Deployed to Nirn and the mcp-sandbox. **Sandbox checks all pass** for 15, 5, 8, 6, 35, 31, 32, 30 (key) and 1 (replay `frens_1_1_272_6bj_fix_checks.zip`, changelog entry has the log lines), so no high finding is open: by Bradley's rule 1.1.272 is the next public release, pending his OK on the notes. Phase 6bj: 3 field items. Checklist 123 open.
 **1.1.272** (changelog entry has rulings and costs): all four high findings of the 0-6ai sweep (15 settings save past 32 KB, 31 lodestone travel to an unloaded chunk, 32 travel-wait probe overflow, 35 wool spin), plus 5 (wedged guard escape, stale abort latch), 30 (Spells key, spellbook and resurrection with Questing off, default key `[`), 8 (woodcut asks unregistered nearby chests for an axe before punching), 25, 6, 1, 33, souls 2/16a/19/22, and a `Long.MIN_VALUE` sweep (`TickIntervals`; the combat callout read a never-hit bot as just hit). Fable review (two reviewers), one fix wave (`0c62d973`).
