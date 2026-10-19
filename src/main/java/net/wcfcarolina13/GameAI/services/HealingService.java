@@ -50,6 +50,10 @@ public final class HealingService {
     private static final Map<UUID, Long> LAST_HUNGER_WARNING = new ConcurrentHashMap<>();
     private static final Map<UUID, Integer> LAST_WARNED_LEVEL = new ConcurrentHashMap<>();
     private static final long WARNING_COOLDOWN_MS = 30000; // 30 seconds
+
+    // Desperate eating (finding 42): one try per bot every 2 s, one log line per 10 s.
+    private static final Map<UUID, Long> LAST_DESPERATE_ATTEMPT = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_DESPERATE_LOG = new ConcurrentHashMap<>();
     
     // Foods with negative effects to avoid
     private static final Set<String> FORBIDDEN_FOODS = Set.of(
@@ -254,8 +258,13 @@ public final class HealingService {
         if (foodSlot.isEmpty()) {
             // Last resort: eat rotten flesh if starving or hurt with no other food.
             // Hunger debuff is annoying but better than starving to death.
+            // autoEat runs every tick; when the eat never starts, retrying each tick floods the
+            // log and makes callers (AutoFaceEntity) skip their own work (finding 42).
             if (emergency || missingHealth) {
-                foodSlot = findDesperateFood(inv);
+                if (!DesperateEatPolicy.attemptDue(LAST_DESPERATE_ATTEMPT, bot.getUuid(), System.currentTimeMillis())) {
+                    return false;
+                }
+                foodSlot = findDesperateFood(bot.getUuid(), inv);
             }
             if (foodSlot.isEmpty()) {
                 return false;
@@ -288,7 +297,7 @@ public final class HealingService {
             }
             if (slot.isEmpty()) {
                 // Desperate: try rotten flesh but only as the first bite
-                if (eaten == 0) slot = findDesperateFood(inv);
+                if (eaten == 0) slot = findDesperateFood(bot.getUuid(), inv);
                 if (slot.isEmpty()) break;
             }
 
@@ -466,7 +475,7 @@ public final class HealingService {
      * precious foods (golden apple, golden carrot — valuable but edible).
      * Still excludes truly dangerous items (spider eye, pufferfish, poisonous potato).
      */
-    private static OptionalInt findDesperateFood(PlayerInventory inventory) {
+    private static OptionalInt findDesperateFood(UUID botId, PlayerInventory inventory) {
         // First pass: rotten flesh (cheap, acceptable in desperation)
         for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
             ItemStack stack = inventory.getStack(i);
@@ -475,7 +484,9 @@ public final class HealingService {
             if (food == null) continue;
             String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
             if (itemId.contains("rotten_flesh")) {
-                LOGGER.info("Desperate food: eating rotten flesh (slot {})", i);
+                if (DesperateEatPolicy.logDue(LAST_DESPERATE_LOG, botId, System.currentTimeMillis())) {
+                    LOGGER.info("Desperate food: eating rotten flesh (slot {})", i);
+                }
                 return OptionalInt.of(i);
             }
         }
@@ -487,7 +498,9 @@ public final class HealingService {
             if (food == null) continue;
             String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
             if (PRECIOUS_FOODS.stream().anyMatch(itemId::contains)) {
-                LOGGER.info("Desperate food: eating precious food {} (slot {})", itemId, i);
+                if (DesperateEatPolicy.logDue(LAST_DESPERATE_LOG, botId, System.currentTimeMillis())) {
+                    LOGGER.info("Desperate food: eating precious food {} (slot {})", itemId, i);
+                }
                 return OptionalInt.of(i);
             }
         }
@@ -521,7 +534,11 @@ public final class HealingService {
     }
     
     /**
-     * Consume food from the given slot
+     * Consume food from the given slot.
+     *
+     * @return true only when the eat actually started ({@code isUsingItem} after the use), so
+     *         callers don't skip their own work for an eat that a slot reselect or a refused use
+     *         cancelled (finding 42)
      */
     private static boolean consumeFood(ServerPlayerEntity bot, int slot) {
         if (bot.isUsingItem()) {
@@ -548,9 +565,10 @@ public final class HealingService {
         BotActions.selectHotbarSlot(bot, targetSlot);
         BotActions.useSelectedItem(bot);
         inv.markDirty();
-        
-        LOGGER.debug("Bot {} consuming food from slot {}", bot.getName().getString(), targetSlot);
-        return true;
+
+        boolean started = bot.isUsingItem();
+        LOGGER.debug("Bot {} consuming food from slot {} (started={})", bot.getName().getString(), targetSlot, started);
+        return started;
     }
     
     private static FoodComponent getFoodComponent(ItemStack stack) {
@@ -585,5 +603,7 @@ public final class HealingService {
     public static void clearWarnings(UUID botUuid) {
         LAST_HUNGER_WARNING.remove(botUuid);
         LAST_WARNED_LEVEL.remove(botUuid);
+        LAST_DESPERATE_ATTEMPT.remove(botUuid);
+        LAST_DESPERATE_LOG.remove(botUuid);
     }
 }
