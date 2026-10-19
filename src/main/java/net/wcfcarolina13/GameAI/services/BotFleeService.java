@@ -3604,11 +3604,21 @@ public final class BotFleeService {
      */
     public static void escapeToSurface(ServerPlayerEntity bot, ServerWorld world)
             throws InterruptedException {
+        escapeToSurface(bot, world, false);
+    }
+
+    /**
+     * @param gatesAlreadyApplied true for a guard/patrol escape whose gates
+     *                            {@link GuardEscapePolicy} already applied: skip the linger tree
+     */
+    private static void escapeToSurface(ServerPlayerEntity bot, ServerWorld world,
+                                        boolean gatesAlreadyApplied)
+            throws InterruptedException {
         if (shouldAbortSurvival(bot) || world == null) return;
         if (isAtSurface(bot, world)) return; // already at surface
 
         // Evaluate the full underground linger decision tree
-        if (shouldSuppressSurfaceRecovery(bot, world)) {
+        if (!gatesAlreadyApplied && shouldSuppressSurfaceRecovery(bot, world)) {
             return;
         }
 
@@ -3713,15 +3723,35 @@ public final class BotFleeService {
      * simply needs to reach surface to start a hobby — not a survival decision.
      */
     public static boolean ensureAtSurfaceForHobby(ServerPlayerEntity bot, ServerWorld world) {
-        return ensureAtSurface(bot, world, true);
+        return ensureAtSurface(bot, world, SurfaceCaller.HOBBY);
+    }
+
+    /**
+     * Surface escape for a wedged guarding or patrolling bot. The caller has already applied
+     * {@link GuardEscapePolicy} (manual-stop hold, stale latch, night and inside-base gates), so
+     * this skips the hobby safety check and the linger decision tree: the guard order is an owner
+     * command, so commander-nearby and post-task grace do not keep the bot in its hole.
+     */
+    public static boolean ensureAtSurfaceForGuard(ServerPlayerEntity bot, ServerWorld world) {
+        return ensureAtSurface(bot, world, SurfaceCaller.GUARD);
     }
 
     public static boolean ensureAtSurface(ServerPlayerEntity bot, ServerWorld world) {
-        return ensureAtSurface(bot, world, false);
+        return ensureAtSurface(bot, world, SurfaceCaller.SURVIVAL);
+    }
+
+    /** Who asked for surface recovery; decides which suppression gates apply. */
+    private enum SurfaceCaller {
+        /** Idle/survival: full linger decision tree. */
+        SURVIVAL,
+        /** Hobby: lightweight {@link #shouldSuppressHobbyEscape} check. */
+        HOBBY,
+        /** Guard/patrol: gates already applied by the caller via {@link GuardEscapePolicy}. */
+        GUARD
     }
 
     private static boolean ensureAtSurface(ServerPlayerEntity bot, ServerWorld world,
-                                           boolean skipLingerCheck) {
+                                           SurfaceCaller caller) {
         if (bot == null || world == null) {
             return false;
         }
@@ -3749,12 +3779,15 @@ public final class BotFleeService {
         }
 
         // Suppress surface recovery based on context:
-        // - Hobby/guard callers (skipLingerCheck=true): lightweight safety check only
+        // - Hobby callers: lightweight safety check only
         //   (commander nearby, nighttime, post-task grace).
+        // - Guard/patrol callers: none here — GuardEscapePolicy already ran at the call site.
         // - Idle/survival callers: full linger decision tree (hunger timers, chest food, etc.).
         // - Skill callers (hasActiveTask=true): bypass entirely — they need staging/pillar
         //   paths and have their own suppression inside escapeToSurface().
-        if (skipLingerCheck) {
+        if (caller == SurfaceCaller.GUARD) {
+            // gates applied by the caller
+        } else if (caller == SurfaceCaller.HOBBY) {
             if (shouldSuppressHobbyEscape(bot, world)) {
                 LOGGER.info("ensureAtSurface: {} suppressed by hobby-escape safety check",
                         bot.getName().getString());
@@ -3825,7 +3858,7 @@ public final class BotFleeService {
             }
 
             try {
-                escapeToSurface(bot, world);
+                escapeToSurface(bot, world, caller == SurfaceCaller.GUARD);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;

@@ -57,6 +57,7 @@ import net.wcfcarolina13.GameAI.services.BotStuckService;
 import net.wcfcarolina13.GameAI.services.BotCombatCalloutService;
 import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.GuardEscapePolicy;
 import net.wcfcarolina13.GameAI.services.BotAutoHuntService;
 import net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService;
 import net.wcfcarolina13.GameAI.services.BotMutualAidService;
@@ -2946,30 +2947,7 @@ public class BotEventHandler {
         long currentTick = server != null ? server.getTicks() : 0L;
         if (GuardPatrolService.isStuck(bot.getUuid(), currentTick)) {
             if (bot.getEntityWorld() instanceof ServerWorld sw && !BotFleeService.isAtSurface(bot, sw)) {
-                GuardPatrolService.setEscapeInProgress(bot.getUuid(), true);
-                LOGGER.info("Guard escape: {} starting surface escape", bot.getName().getString());
-                CompletableFuture.runAsync(() -> {
-                    try {
-                        boolean escaped = BotFleeService.ensureAtSurfaceForHobby(bot, sw);
-                        boolean atSurfaceNow = BotFleeService.isAtSurface(bot, sw);
-                        if (net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy
-                                .shouldApplyEscapeCooldown(escaped, atSurfaceNow)) {
-                            if (!escaped) {
-                                LOGGER.warn("Guard escape: {} failed — cooldown 30s", bot.getName().getString());
-                            } else {
-                                String reason = BotFleeService
-                                        .getRecentSurfaceRecoveryFailureReason(bot.getUuid());
-                                LOGGER.info("[guard-escape] {} still below surface after recovery; cooldown 30s reason={}",
-                                        bot.getName().getString(), reason);
-                            }
-                            GuardPatrolService.startEscapeCooldown(bot.getUuid(), server.getTicks());
-                        } else {
-                            LOGGER.info("Guard escape: {} succeeded", bot.getName().getString());
-                        }
-                    } finally {
-                        GuardPatrolService.setEscapeInProgress(bot.getUuid(), false);
-                    }
-                });
+                startGuardSurfaceEscape(bot, sw, server, "Guard");
                 return true;
             }
             // At surface but stuck — reset and let normal movement retry.
@@ -2990,6 +2968,77 @@ public class BotEventHandler {
 
         BotActions.stop(bot);
         return true;
+    }
+
+    /** Bots whose guard escape is holding on a manual stop; the hold is logged once per episode. */
+    private static final java.util.Set<UUID> GUARD_ESCAPE_HOLD_LOGGED = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Surface escape for a wedged guarding or patrolling bot, on a worker thread (finding 5).
+     * {@link GuardEscapePolicy} runs first: a manual stop holds, a stale abort latch (a guard bot
+     * has no task ticket to clear it) is cleared so the pillar and walk steps stop aborting at step
+     * 0, and only the night and inside-base gates can suppress. Commander-nearby and post-task
+     * grace do not apply to a guard order.
+     */
+    private static void startGuardSurfaceEscape(ServerPlayerEntity bot, ServerWorld sw,
+                                                MinecraftServer server, String label) {
+        UUID botId = bot.getUuid();
+        String name = bot.getName().getString();
+        GuardPatrolService.setEscapeInProgress(botId, true);
+        CompletableFuture.runAsync(() -> {
+            try {
+                boolean latched = TaskService.isAbortRequested(botId);
+                String latchReason = latched ? TaskService.getCancelReason(botId).orElse("") : null;
+                boolean hasDayCycle = !sw.getDimension().hasFixedTime();
+                boolean nightOrStorm = (hasDayCycle && !sw.isDay()) || sw.isThundering();
+                int food = bot.getHungerManager().getFoodLevel();
+                boolean insideBase = server != null
+                        && BotHomeService.findBaseNearPosition(server, sw, bot.getBlockPos()).isPresent();
+                GuardEscapePolicy.Decision decision = GuardEscapePolicy.decide(
+                        latched, latchReason, TaskService.hasActiveTask(botId), nightOrStorm, food, insideBase);
+                if (decision == GuardEscapePolicy.Decision.HOLD) {
+                    if (GUARD_ESCAPE_HOLD_LOGGED.add(botId)) {
+                        LOGGER.info("[guard-escape] {} hold reason={}", name, latchReason);
+                    }
+                    return;
+                }
+                GUARD_ESCAPE_HOLD_LOGGED.remove(botId);
+                if (decision == GuardEscapePolicy.Decision.SUPPRESS_NIGHT
+                        || decision == GuardEscapePolicy.Decision.SUPPRESS_BASE) {
+                    LOGGER.info("[guard-escape] {} suppressed {} (food={}); cooldown 30s",
+                            name, decision == GuardEscapePolicy.Decision.SUPPRESS_NIGHT
+                                    ? "night or storm" : "underground inside a registered base", food);
+                    if (server != null) {
+                        GuardPatrolService.startEscapeCooldown(botId, server.getTicks());
+                    }
+                    return;
+                }
+                if (decision == GuardEscapePolicy.Decision.CLEAR_AND_PROCEED) {
+                    TaskService.clearAbortLatch(botId);
+                    LOGGER.info("[guard-escape] {} cleared stale latch reason={}", name, latchReason);
+                }
+                LOGGER.info("{} escape: {} starting surface escape", label, name);
+                boolean escaped = BotFleeService.ensureAtSurfaceForGuard(bot, sw);
+                boolean atSurfaceNow = BotFleeService.isAtSurface(bot, sw);
+                if (net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy
+                        .shouldApplyEscapeCooldown(escaped, atSurfaceNow)) {
+                    String reason = BotFleeService.getRecentSurfaceRecoveryFailureReason(botId);
+                    if (!escaped) {
+                        LOGGER.warn("[guard-escape] {} failed reason={}; cooldown 30s", name, reason);
+                    } else {
+                        LOGGER.info("[guard-escape] {} still below surface after recovery; cooldown 30s reason={}",
+                                name, reason);
+                    }
+                    if (server != null) {
+                        GuardPatrolService.startEscapeCooldown(botId, server.getTicks());
+                    }
+                } else {
+                    LOGGER.info("{} escape: {} succeeded", label, name);
+                }
+            } finally {
+                GuardPatrolService.setEscapeInProgress(botId, false);
+            }
+        });
     }
 
     private static boolean handlePatrol(ServerPlayerEntity bot, BotCommandStateService.State state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
@@ -3027,30 +3076,7 @@ public class BotEventHandler {
         long currentTick = server != null ? server.getTicks() : 0L;
         if (GuardPatrolService.isStuck(bot.getUuid(), currentTick)) {
             if (bot.getEntityWorld() instanceof ServerWorld sw && !BotFleeService.isAtSurface(bot, sw)) {
-                GuardPatrolService.setEscapeInProgress(bot.getUuid(), true);
-                LOGGER.info("Patrol escape: {} starting surface escape", bot.getName().getString());
-                CompletableFuture.runAsync(() -> {
-                    try {
-                        boolean escaped = BotFleeService.ensureAtSurfaceForHobby(bot, sw);
-                        boolean atSurfaceNow = BotFleeService.isAtSurface(bot, sw);
-                        if (net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy
-                                .shouldApplyEscapeCooldown(escaped, atSurfaceNow)) {
-                            if (!escaped) {
-                                LOGGER.warn("Patrol escape: {} failed — cooldown 30s", bot.getName().getString());
-                            } else {
-                                String reason = BotFleeService
-                                        .getRecentSurfaceRecoveryFailureReason(bot.getUuid());
-                                LOGGER.info("[guard-escape] {} still below surface after recovery; cooldown 30s reason={}",
-                                        bot.getName().getString(), reason);
-                            }
-                            GuardPatrolService.startEscapeCooldown(bot.getUuid(), server.getTicks());
-                        } else {
-                            LOGGER.info("Patrol escape: {} succeeded", bot.getName().getString());
-                        }
-                    } finally {
-                        GuardPatrolService.setEscapeInProgress(bot.getUuid(), false);
-                    }
-                });
+                startGuardSurfaceEscape(bot, sw, server, "Patrol");
                 return true;
             }
             // At surface but stuck — reset tracker and pick a new patrol target.
