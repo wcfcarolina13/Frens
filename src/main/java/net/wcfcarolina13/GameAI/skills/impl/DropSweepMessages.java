@@ -29,16 +29,23 @@ public final class DropSweepMessages {
     }
 
     /**
-     * Items picked up over a sweep: the larger of what the sweep counted itself and how far the
-     * pile in range shrank. The sweep does not see drops taken by plain pickup (already in reach,
-     * walked over, nearby-drop collection), so its own count alone undercounts.
+     * Items picked up over a sweep: what the sweep counted itself, raised to how far the pile in
+     * range shrank but never past what the bag actually gained. The sweep does not see drops taken
+     * by plain pickup (already in reach, walked over, nearby-drop collection), so its own count
+     * alone undercounts; the shrink alone overcounts, because the range is measured around the
+     * start position first and around the end position (with a grown radius) last, so drops that
+     * merely fell out of range look picked up. The bag gain caps that. It can undercount when the
+     * sweep stores into or drops at a chest mid-run, which is why the sweep's own count stays the
+     * floor.
      *
      * @param initialInRange items lying in range when the sweep started
      * @param remaining      items still lying in range at the end
      * @param counted        items the sweep counted as picked up
+     * @param bagGain        bag item total after the sweep minus before it
      */
-    public static int pickedUpCount(int initialInRange, int remaining, int counted) {
-        return Math.max(Math.max(0, counted), Math.max(0, initialInRange) - Math.max(0, remaining));
+    public static int pickedUpCount(int initialInRange, int remaining, int counted, int bagGain) {
+        int shrink = Math.max(0, initialInRange) - Math.max(0, remaining);
+        return Math.max(Math.max(0, counted), Math.min(shrink, Math.max(0, bagGain)));
     }
 
     /** The bot stopped because its inventory is full and nothing could be stored or dropped. */

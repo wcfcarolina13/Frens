@@ -75,8 +75,9 @@ public SkillExecutionResult execute(SkillContext context) {
         int remaining = countItemsInRange(world, bot, effectiveRadius, effectiveVertical);
         // Items lying in range at the start: drops already in pickup reach, collectNearbyDrops
         // and vanilla pickups while walking are never counted by the sweep, so the summary
-        // uses whichever of the two counts is larger.
+        // raises its own count to the pile shrink, capped by what the bag actually gained.
         int initialInRange = remaining;
+        int bagBefore = countBagItems(bot);
 
         if (noOffload) {
             DropSweeper.setNoOffload(bot.getUuid(), true);
@@ -166,12 +167,22 @@ public SkillExecutionResult execute(SkillContext context) {
             }
         }
 
+        int bagGain = countBagItems(bot) - bagBefore;
         String detail = String.format(Locale.ROOT,
-                "Swept drops within radius %.1f (%.1f vertical) across %d pass(es). Remaining items: %d, collected: %d",
-                effectiveRadius, effectiveVertical, pass + 1, Math.max(remaining, 0), collectedCount);
+                "Swept drops within radius %.1f (%.1f vertical) across %d pass(es). Remaining items: %d, collected: %d, in range at start: %d, bag gain: %d",
+                effectiveRadius, effectiveVertical, pass + 1, Math.max(remaining, 0), collectedCount, initialInRange, bagGain);
         LOGGER.info("drop_sweep completed: {}", detail);
         return SkillExecutionResult.success(DropSweepMessages.summary(
-                DropSweepMessages.pickedUpCount(initialInRange, remaining, collectedCount), remaining));
+                DropSweepMessages.pickedUpCount(initialInRange, remaining, collectedCount, bagGain), remaining));
+}
+
+/** Items (stack counts) across the bot's whole inventory. */
+private static int countBagItems(ServerPlayerEntity bot) {
+    int total = 0;
+    for (int i = 0; i < bot.getInventory().size(); i++) {
+        total += bot.getInventory().getStack(i).getCount();
+    }
+    return total;
 }
 
 /** Items (stack counts) still lying within the sweep range. */
