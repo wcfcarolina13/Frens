@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import java.util.random.RandomGenerator;
@@ -553,10 +554,43 @@ final class SoulBanterSeed {
         return reason.isEmpty() ? "" : " (" + reason + ")";
     }
 
+    /**
+     * " from a zombie" for an attacker; for environmental damage the cause in words (" from a
+     * fall", " from being stuck in a wall") instead of the raw id, which read as "took a beating
+     * from a in wall" (finding 21, 1.1.274). No suffix when the event names no source at all.
+     */
     private static String fromSuffix(SoulTypes.SoulEvent event, String key) {
-        String source = humanFact(event, key, "");
-        return source.isEmpty() ? "" : " from a " + source;
+        String raw = event.facts().getOrDefault(key, "").trim().toLowerCase(Locale.ROOT);
+        if (raw.isEmpty()) {
+            return "";
+        }
+        if (SoulEventObserver.isEnvironmentalDamage(raw)) {
+            return " from " + ENVIRONMENTAL_CAUSES.getOrDefault(raw, "the world");
+        }
+        return " from a " + raw.replace('_', ' ');
     }
+
+    /** Environmental damage ids as a noun phrase that reads after "from". */
+    private static final Map<String, String> ENVIRONMENTAL_CAUSES = Map.ofEntries(
+            Map.entry("in_wall", "being stuck in a wall"),
+            Map.entry("on_fire", "fire"),
+            Map.entry("in_fire", "fire"),
+            Map.entry("campfire", "a campfire"),
+            Map.entry("hot_floor", "a hot floor"),
+            Map.entry("fall", "a fall"),
+            Map.entry("drown", "drowning"),
+            Map.entry("lava", "lava"),
+            Map.entry("starve", "hunger"),
+            Map.entry("cactus", "a cactus"),
+            Map.entry("sweet_berry_bush", "a berry bush"),
+            Map.entry("freeze", "the cold"),
+            Map.entry("lightning_bolt", "lightning"),
+            Map.entry("falling_block", "a falling block"),
+            Map.entry("falling_anvil", "a falling anvil"),
+            Map.entry("falling_stalactite", "a falling stalactite"),
+            Map.entry("stalagmite", "a stalagmite"),
+            Map.entry("fly_into_wall", "flying into a wall"),
+            Map.entry("out_of_world", "the void"));
 
     /** Caps a raw phrase at {@link #MAX_PHRASE_CHARS}, same bound as {@link #phraseFor}. */
     private static String truncatePhrase(String phrase) {

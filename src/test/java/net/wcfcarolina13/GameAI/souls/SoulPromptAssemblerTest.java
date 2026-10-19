@@ -80,6 +80,26 @@ class SoulPromptAssemblerTest {
     }
 
     @Test
+    void activeTaskLineNamesTheTaskInWords() {
+        // Finding 21: the raw "skill:woodcut" id never reaches the prompt.
+        SoulTypes.BotSnapshot busyBot = new SoulTypes.BotSnapshot(
+                UUID.fromString("11111111-1111-1111-1111-111111111111"), "Jake",
+                "minecraft:overworld", "plains", 0, 64, 0, true,
+                "day", "clear", 20.0F, 20.0F, 18, 4, "iron_pickaxe",
+                8, 36, List.of("oak_log x32"), "content", "idle", "skill:woodcut", "RUNNING",
+                "Workshop", "Player", true, 2, false, java.util.Optional.empty());
+        SoulTypes.GroundingSnapshot busy = new SoulTypes.GroundingSnapshot(
+                SoulTypes.Reachability.LOCAL, busyBot, java.util.Optional.of(localPlayer), Instant.EPOCH);
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, busy,
+                priorHistory, recentEvents, "What are you doing?", Duration.ofSeconds(60));
+        String all = request.messages().stream().map(SoulTypes.Message::content)
+                .reduce("", (a, b) -> a + "\n" + b);
+        assertTrue(all.contains("active task: woodcutting (RUNNING)"), all);
+        assertFalse(all.contains("skill:woodcut"), all);
+    }
+
+    @Test
     void presentMomentIncludesDynamicRightNowLineReflectingGrounding() {
         SoulTypes.ProviderRequest request = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile, grounding,

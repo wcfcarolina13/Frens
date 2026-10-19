@@ -219,7 +219,7 @@ public final class SoulPromptAssembler {
           .append(" slots occupied, resources: ").append(String.join(", ", bot.resourceSummary()))
           .append('\n');
         sb.append("Mood: ").append(bot.mood()).append(", behavior: ").append(bot.behaviorMode())
-          .append(", active task: ").append(bot.activeTask()).append(" (").append(bot.taskState()).append(')')
+          .append(", active task: ").append(SoulGroupPromptAssembler.humanizeTask(bot.activeTask())).append(" (").append(bot.taskState()).append(')')
           .append('\n');
         sb.append("Home: ").append(bot.homeName()).append(", owner: ").append(bot.ownerName())
           .append(", recruited: ").append(bot.recruited())

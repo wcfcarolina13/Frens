@@ -283,6 +283,28 @@ class SoulBanterSeedTest {
     }
 
     @Test
+    void environmentalDamageIsNamedInWords() {
+        // Finding 21: "took a beating from a in wall" / "from a on fire".
+        assertEquals("took a beating from being stuck in a wall", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.BOT_DAMAGE, SoulTypes.Salience.NORMAL, 1,
+                Map.of("amount", "1.0", "source", "in_wall"))));
+        assertEquals("took a beating from fire", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.BOT_DAMAGE, SoulTypes.Salience.NORMAL, 1,
+                Map.of("amount", "1.0", "source", "on_fire"))));
+        assertEquals("died recently from a fall", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.DEATH, SoulTypes.Salience.HIGH, 1, Map.of("source", "fall"))));
+        assertEquals("took a beating from the world", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.BOT_DAMAGE, SoulTypes.Salience.NORMAL, 1,
+                Map.of("amount", "1.0", "source", "environment"))));
+        assertEquals("took a beating from a zombie", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.BOT_DAMAGE, SoulTypes.Salience.NORMAL, 1,
+                Map.of("amount", "3.0", "source", "zombie"))));
+        assertEquals("took a beating from a cave spider", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.BOT_DAMAGE, SoulTypes.Salience.NORMAL, 1,
+                Map.of("amount", "3.0", "source", "cave_spider"))));
+    }
+
+    @Test
     void sleepTasksRotateUnderTheSleepTopicNotTheWork() {
         assertEquals("sleep", SoulBanterSeed.topicOf(event(SoulTypes.EventType.TASK_STARTED,
                 SoulTypes.Salience.LOW, 1, Map.of("task", "skill:sleep", "category", "skill"))));

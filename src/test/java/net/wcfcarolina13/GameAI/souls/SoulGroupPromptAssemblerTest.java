@@ -80,6 +80,19 @@ class SoulGroupPromptAssemblerTest {
     }
 
     @Test
+    void stateLineNamesTheTaskInWords() {
+        // Finding 21: "busy with skill:woodcut" put a raw id in front of the model.
+        SoulTypes.ProviderRequest request = assembler.assemble(UUID.randomUUID(), "m",
+                turn("what are you up to"),
+                List.of(profile("frens:jake", "Jake"), profile("frens:jake", "Jake")),
+                List.of(), Duration.ofSeconds(60));
+        String all = request.messages().stream().map(SoulTypes.Message::content)
+                .reduce("", (a, b) -> a + "\n" + b);
+        assertTrue(all.contains("busy with woodcutting"), all);
+        assertFalse(all.contains("skill:woodcut"), all);
+    }
+
+    @Test
     void twoBotPlayerSceneGetsATurnTakingDirectiveJustBeforeTheOwnerLine() {
         SoulTypes.ProviderRequest request = assembler.assemble(UUID.randomUUID(), "m",
                 turn("what should we do tonight"),

@@ -335,8 +335,9 @@ public final class SoulGroupPromptAssembler {
             if (!bot.mood().isEmpty()) {
                 state.append(", mood ").append(bot.mood());
             }
-            if (!bot.activeTask().isEmpty()) {
-                state.append(", busy with ").append(bot.activeTask());
+            String task = humanizeTask(bot.activeTask());
+            if (!task.isEmpty()) {
+                state.append(", busy with ").append(task); // "woodcutting", never "skill:woodcut" (finding 21)
             } else if (!bot.behaviorMode().isEmpty()) {
                 state.append(", ").append(bot.behaviorMode().toLowerCase(java.util.Locale.ROOT));
             }
