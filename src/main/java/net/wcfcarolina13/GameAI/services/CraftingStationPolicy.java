@@ -195,4 +195,14 @@ public final class CraftingStationPolicy {
     public static boolean skipForReachCooldown(long failedPosLong, long candidatePosLong, long ageMs, long cooldownMs) {
         return failedPosLong == candidatePosLong && ageMs >= 0 && ageMs < cooldownMs;
     }
+
+    /**
+     * Throttle key for a player's "I don't know how to craft X" line: one slot per bot and item
+     * name, case-insensitive (finding 7, 1.1.274). {@code unknownCraftKey(bot, "")} is the prefix
+     * every key of that bot starts with.
+     */
+    public static String unknownCraftKey(String botId, String label) {
+        String item = label == null ? "" : label.trim().toLowerCase(java.util.Locale.ROOT);
+        return botId + "|" + item;
+    }
 }

@@ -116,6 +116,9 @@ public final class CraftingHelper {
     // as soon as any craftGeneric call succeeds, so the map does not grow unbounded.
     private static final Map<UUID, Long> UNKNOWN_CRAFT_MSG_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long UNKNOWN_CRAFT_MSG_COOLDOWN_MS = 30_000L;
+    // A player's /bot craft gets the same line at most once per 30 s per bot and item name
+    // (finding 7, 1.1.274), keyed CraftingStationPolicy.unknownCraftKey; evicted with the map above.
+    private static final Map<String, Long> UNKNOWN_CRAFT_EXPLICIT_MSG = new ConcurrentHashMap<>();
 
     // Cooldown after crafting a new table — prevents spam-crafting when placement/reach keeps failing.
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
@@ -267,7 +270,8 @@ public final class CraftingHelper {
 
     /**
      * A player's own {@code /bot craft} in progress, keyed by bot: its table and materials lines
-     * skip the 30 s throttle (once per call instead), and it ends with "I couldn't craft X." when
+     * skip the 30 s throttle (once per call instead), its unknown-item line is throttled per item
+     * name instead of per bot, and it ends with "I couldn't craft X." when
      * it made nothing and said nothing. Skill sub-step and server-thread crafts never register.
      */
     private static final class ExplicitCraftCall {
@@ -348,17 +352,31 @@ public final class CraftingHelper {
         say(source, msg);
     }
 
-    /** Send an "I don't know how to craft X" message at most once per cooldown period per bot (always for a player's own craft). */
+    /**
+     * Send an "I don't know how to craft X" message at most once per cooldown period per bot; for a
+     * player's own craft, once per cooldown per bot and item name, and a held-back line still
+     * counts as an answer so the "I couldn't craft X." fallback does not replace it.
+     */
     private static void sendUnknownCraftNameOnce(ServerPlayerEntity bot, ServerCommandSource source, String item) {
         if (source == null) return;
         String label = (item == null || item.isBlank()) ? "that" : item.replace('_', ' ').trim();
         String msg = "I don't know how to craft " + label + ".";
-        if (bot == null || explicitCall(bot) != null) {
+        if (bot == null) {
             say(source, msg);
             return;
         }
-        Long last = UNKNOWN_CRAFT_MSG_COOLDOWN.get(bot.getUuid());
         long now = System.currentTimeMillis();
+        ExplicitCraftCall call = explicitCall(bot);
+        if (call != null) {
+            String key = CraftingStationPolicy.unknownCraftKey(bot.getUuidAsString(), label);
+            if (LogThrottle.due(UNKNOWN_CRAFT_EXPLICIT_MSG, key, now, UNKNOWN_CRAFT_MSG_COOLDOWN_MS)) {
+                say(source, msg);
+            } else {
+                call.saidAnything = true;
+            }
+            return;
+        }
+        Long last = UNKNOWN_CRAFT_MSG_COOLDOWN.get(bot.getUuid());
         if (last != null && (now - last) < UNKNOWN_CRAFT_MSG_COOLDOWN_MS) return;
         UNKNOWN_CRAFT_MSG_COOLDOWN.put(bot.getUuid(), now);
         say(source, msg);
@@ -420,6 +438,8 @@ public final class CraftingHelper {
             // Any successful craft clears the unknown-name message cooldown for this bot,
             // which is also the only eviction path for that map.
             UNKNOWN_CRAFT_MSG_COOLDOWN.remove(bot.getUuid());
+            String prefix = CraftingStationPolicy.unknownCraftKey(bot.getUuidAsString(), "");
+            UNKNOWN_CRAFT_EXPLICIT_MSG.keySet().removeIf(k -> k.startsWith(prefix));
         }
         return crafted;
     }

@@ -484,6 +484,29 @@ class CraftingStationPolicyTest {
     }
 
     @Test
+    void unknownCraftKeyIsOnePerBotAndItemAndSharesTheBotPrefix() {
+        // Finding 7: /bot craft spaceship repeated the line on every call.
+        String a = CraftingStationPolicy.unknownCraftKey("bot-a", "spaceship");
+        assertEquals(a, CraftingStationPolicy.unknownCraftKey("bot-a", " Spaceship "));
+        assertFalse(a.equals(CraftingStationPolicy.unknownCraftKey("bot-a", "rocket")));
+        assertFalse(a.equals(CraftingStationPolicy.unknownCraftKey("bot-b", "spaceship")));
+        String prefix = CraftingStationPolicy.unknownCraftKey("bot-a", "");
+        assertTrue(a.startsWith(prefix));
+        assertFalse(CraftingStationPolicy.unknownCraftKey("bot-ab", "x").startsWith(prefix));
+    }
+
+    @Test
+    void aPlayersUnknownCraftLineIsThrottledAndAHeldBackLineStillCountsAsAnAnswer() throws IOException {
+        String body = bodyOf(craftingHelperSource(), "private static void sendUnknownCraftNameOnce(");
+        int due = body.indexOf("LogThrottle.due(UNKNOWN_CRAFT_EXPLICIT_MSG");
+        assertTrue(due >= 0, "the explicit branch goes through LogThrottle.due");
+        int elseAt = body.indexOf("} else {", due);
+        assertTrue(elseAt > due && body.substring(elseAt, body.indexOf('}', elseAt + 8)).contains("call.saidAnything = true"),
+                "a suppressed line must still mark the call answered, or the fallback line replaces it");
+        assertFalse(body.contains("explicitCall(bot) != null) {\n            say("), "no unthrottled explicit branch");
+    }
+
+    @Test
     void plankEquivalentCountsFourPlanksPerLog() {
         assertEquals(0, CraftingStationPolicy.plankEquivalent(0, 0));
         assertEquals(3, CraftingStationPolicy.plankEquivalent(3, 0));
