@@ -304,7 +304,8 @@ available and record it under "Not covered".
     Tips) in Bot Control, close the screen, reopen it.
   - Claude watches for: **no** `Rejected config save from non-operator` in `latest.log`.
   - Pass when: the toggle stays flipped after reopen and after `/reload`-free relog.
-- [ ] **Mute screen sends a mask, not a global save (1.1.203)**
+- [x] **Mute screen sends a mask, not a global save (1.1.203)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PASS: S12 Bot Controls > global toggles > Scripted Voice Adv... > Reactions off, Done (08:50:24). With `bot-dialogue` DEBUG on, every reactions line from 08:50:25 logs `[VoicedDialogue] Muted (category reac ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: mute `reactions` in the Voice "Adv…" menu.
   - Claude watches for: the next reactions line logging `[VoicedDialogue] Muted (category reactions)`
     (baseline path — single-player shares the list) and no `sendSaveConfigPacket` debug noise.
@@ -393,6 +394,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Pass when: the reason is a concrete break, not blank, and the retry spacing becomes ≥30 s
     (was ~12 s). Remove the cover: he pillars out on the next attempt.
 - [ ] **Travel-wait: hobby during a fast-travel cooldown (1.1.204, P1 idle)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PARTIAL: passes only with Admin > Idle Hobbies Anywhere on (default off: `too-far-from-home`, decision in the guided doc). S12 trigger is `/bot compass travel Jake` twice (lodestone at -92 62 -599). With Idle Hobbies Anywhere on, 07:57:55 `travel-wait enqueued Jake remaining=1463t`, chat "Jake is resting 1m 13s before tra ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with idle hobbies **on**, give Jake a lodestone compass + a registered base; do
     one fast-travel (`/bot come` from far away), then immediately `/bot come` again from ≥100 blocks.
   - Claude watches for: chat `Jake is resting Xm Ys before traveling to …; I'll keep busy
@@ -400,7 +402,8 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
     task starting; later `travel-wait cooldown expired for Jake (waited …t); retrying travel`.
   - Pass when: he does a hobby instead of standing still, then fast-travels on his own when the
     cooldown ends (≤3 min), with no repeated `giving up … after 3 retries`.
-- [ ] **Travel-wait cancels on stop (1.1.204)**
+- [x] **Travel-wait cancels on stop (1.1.204)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PASS: S12 08:00:35 `travel-wait enqueued Jake remaining=1857t`, `/bot stop Jake` 08:00:42 ("Jake has stopped."); the cooldown ran out at about 08:02:05 with no `travel-wait` line at all and Jake stayed put ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: during the wait above, `/bot stop Jake`.
   - Pass when: no `retrying travel` line fires later — he stays put.
 - [x] **Travel-wait offload stays deferred (1.1.204, known)** — closed 2026-10-18 by triage: SUPERSEDED, 1.1.205 (39b48d9a) made the offload real and removed the deferred line; covered by 6d Travel-wait offload to an existing chest (1.1.205)
@@ -432,15 +435,18 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
     mining` on stone.
   - Pass when: the diamond pickaxe appears loose and is the one in hand within the first few blocks;
     no repeated extraction attempts (one stack moves once).
-- [ ] **Bundled armor equips only if better (1.1.205)**
+- [x] **Bundled armor equips only if better (1.1.205)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PASS: S12 iron chestplate on, a bundle holding a leather chestplate given (08:06:59), `/bot equipArmor Jake` and 25 s of audits: no Armor line, leather still in the bundle (`bundle_contents` checked). Bundl ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: Jake wearing iron chestplate; put a leather chestplate in a bundle → nothing should
     happen; then put a diamond chestplate in a bundle.
   - Pass when: leather stays bundled; diamond is extracted and equipped on the next armor audit.
 - [ ] **Boat + out-of-hotbar sword, FarmSkill/RideSync variants (1.1.205)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PARTIAL: S12 pool at 24..34 -106..-96, me and a pig in my boat, Jake following with a full hotbar, oak boat in slot 21 and iron sword in slot 22: `boat-place:equip:slot0` (pickaxe moved out to 21), eight `boat ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: in a boat with the sword outside the hotbar, ask him to place a boat/minecart
     (RideSync) or scoop water (farm) — both should refuse cleanly rather than use slot 0.
   - Pass when: no wrong-item use; chat/log shows the action declined.
 - [ ] **Travel-wait offload to an existing chest (1.1.205)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): FAIL: S12 08:04:03 hobbies off, bag 35/36 (`full=0.97`), chest 4 blocks away: every travel-wait line reads `chest=no ... -> WAIT` until `TRAVEL_NOW` at 08:05:38; no offload. The chest probe never runs: `las ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: hobbies OFF, inventory ≥85 % full, a registered chest within ~12 blocks; trigger the
     cooldown wait (`/bot come` twice from far).
   - Claude watches for: `travel-wait offloading to existing chest` ONCE, an AMBIENT task
@@ -448,12 +454,15 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Pass when: exactly one offload walk; no head-swivel during the walk (auto-face suppressed); if he was
     following you, follow resumes afterwards.
 - [ ] **Offload backoff on a full chest (1.1.205)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): NOT REACHED: blocked by finding 32: no travel-wait offload can start. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: same, but the chest is completely full.
   - Pass when: at most 2 attempts ≥60 s apart, then no more offload walks for that wait.
 - [ ] **`/bot stop` during the offload does not poison later offloads (1.1.205)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): NOT REACHED: blocked by finding 32. Note: `/bot stop` also cancels the whole wait (`BotEventHandler.noteStopCommand` calls `TravelWaitService.cancel`), so a later wait is always a fresh request. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot stop` mid-walk, then trigger a fresh wait later.
   - Pass when: the later wait can still offload (the abort did not count as a failure).
-- [ ] **Furnace fuel fallback (1.1.205)**
+- [x] **Furnace fuel fallback (1.1.205)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PASS: S12 first try with 20 planks: Jake crafted and placed a chest (08:43:06), so "planks below 32" does not stop a chest; it needs fewer than 8. With 7 planks, no logs, 16 leaves, 16 sticks, 32 leaf litte ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: no chest anywhere near, no chest materials (take his planks below 32 and remove
     logs), leaves + sticks in inventory, a furnace within 12 blocks (not in a protected zone); force an
     offload (`/bot store` or a full-inventory drop sweep).
@@ -473,15 +482,18 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
     `Tool select: server-thread hop failed` / `on-thread step failed`; TPS steady.
   - Pass when: the swap happens before the first swing, ≤1 tick pause, then mining proceeds normally.
 - [ ] **Swap re-validation is rare (1.1.206)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): NOT REACHED: S12 with `tool-selector` DEBUG on, three mining runs with the best pickaxe outside the hotbar; the pickaxe was pulled with `/item replace` each time, but every run had already ended (5.6 s "Cannot bre ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: same as above, and while he mines pull an item out of his inventory via the bot
     inventory screen once.
   - Claude watches for: at most one `Tool select: slot N no longer holds … — re-running scan once`
     (DEBUG) around that moment; never a repeating stream of them.
   - Pass when: he continues with a valid tool (the hotbar pick, or hands if none), no wrong-item swing.
-- [ ] **Full unlocked hotbar keeps the selected slot (1.1.206)**
+- [x] **Full unlocked hotbar keeps the selected slot (1.1.206)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PASS: S12 hotbar full, selected slot 1 (no command sets it; bread in a slot plus hunger moves it), `/bot skill farm Jake`: the empty bucket came from main slot 24 into hotbar slot 1, the selected one, and w ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: fill all 9 hotbar slots, select slot 5, have him scoop water (farm) or place a boat.
   - Pass when: the swapped-in item lands in slot 5 (the selected one), not slot 0.
 - [ ] **`/bot stop` during an offload does not disable later offloads (1.1.206)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): NOT REACHED: blocked by finding 32 (see the 6d offload item). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: trigger a travel-wait offload (Phase 6d setup), `/bot stop` mid-walk, then trigger a
     fresh wait later.
   - Claude watches for: no second failure counted; the later wait still logs
@@ -525,7 +537,8 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Bradley does: stand 20 blocks from a pond (was out of the old 12-block reach), `/bot fish 1`.
   - Pass when: he finds it without a remembered spot (fresh world or after `bot_home_data.json` edit);
     the failure path in a desert answers within a second, not a multi-second stall.
-- [ ] **Farm reuses its irrigation source (1.1.207)**
+- [x] **Farm reuses its irrigation source (1.1.207)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PASS: S12 day 1 (`/bot skill farm Jake targetX=14 targetY=78 targetZ=-100`): `Found still water at 1, 76, -90 for irrigation/refills`; `bot_home_data.json` `waterSpotsByBot` gained `jake: {1, 76, -90, kind ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: set up a farm with a bucket refill from a nearby pool; next day move the farm 30
     blocks (still within 48 of the pool) where no water is within 24 blocks.
   - Claude watches for: `Falling back to remembered water source at … for irrigation/refills`.
@@ -558,6 +571,7 @@ fail, even an improvement — note it and move on.
     decaying leaves still skipped.
   - Pass when: cleanup completes; no leaf outside the old 3×3×3 sample box is touched.
 - [ ] **Bridge scaffold still clears snow (1.1.208)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PARTIAL: No snowy gap was built: a bridge only starts from a woodcut perch toward logs, and RAVINE/DEEP_WATER directions are skipped. By log: pass 3 S5/S6 woodcut on the snowy plain ran nine `Woodcut fallback ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: woodcut across a snowy gap that needs a bridge.
   - Pass when: snow layers and leaves on the line are cleared exactly as before (raycast hit only).
 - [x] **CollectDirt ladder exit unchanged (1.1.208)**
@@ -1713,6 +1727,7 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
   - Claude watches for: `Woodcut detect` with `protectedFail>0`, then the chat line "The trees around spawn are protected, so I'm heading out to find others.", relocation, logs mined outside the zone. `logscan.sh` shows no repeated `Cannot mine: protected claim` (at most one per block).
   - Pass when: the bot gets logs from a tree outside the Spawn base and says the spawn line once.
 - [ ] **Admin toggle lets bots cut Spawn trees (1.1.238)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PARTIAL: S12 Admin > World Settings > "Cut trees in the Spawn base: On" ("Bots may now cut trees in the Spawn base.", 08:52:43), Jake at 4 73 4 in the Spawn base, `/bot skill collect_dirt Jake`: "This is a pro ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-17: FAIL: logs are cut but every one reports a protected-claim refusal afterwards (bug E), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: Admin, World Settings, "Cut trees in the Spawn base: On", then woodcut at spawn.
   - Bradley's ruling 2026-10-18 (triage): felling passed in later builds (1.1.266 bug E, 1.1.268 own scaffold). Open only for the two parts never rechecked.
@@ -1799,6 +1814,7 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
   - Claude watches for: `frens_log_report.py` section 4: reached rate per primary finder (baseline 61.5%), `unified-only reachable`, `planned move ASCEND|ASCEND_PLACE|SWIM|FALL … ok=true`, no `placed-not-dirt`, no breaks of planks, logs, fences or anything near a build.
   - Pass when: unified reaches its goal at least as often as Baritone over 30+ joined walks and crosses terrain the others refuse. Then 1.1.243 makes it the default and removes the old finders.
 - [ ] **Audit fixes in play (1.1.242)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PARTIAL: S13 fishing PASS: hobby `fish` by the pool with a furnace (19 76 -101) and chest (19 76 -99) beside it, bites from 08:59:56, at a full bag `Stored 164 items in chest 19, 76, -99` (2 cod, salmon, puffe ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-18 (1.1.267): FAIL: hobby fishing says "No 'fish' to cook" (finding 8), honey_collect harvests nothing (finding 9), wool shears but deposit not reached, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Bradley does: let a companion fish with a furnace and chest nearby, run the honey hobby by a smoked hive, wool deposit to a chest.
   - Claude watches for: no "That furnace is unavailable." while a furnace is in range, fish deposited to the home chest, honey harvested, wool deposited.
@@ -2075,7 +2091,8 @@ Observed across several scenes; collect as the session runs.
 - [ ] **No player-as-animal, no raw fact leakage (1.1.197)**
   - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S5 cues "took a beating from a on fire" (19:35:34) and "remember when took a beating from a in wall" (20:01:06, 20:16:08), Jake's day memory phrase "took a beating from a in wall", Bob then said "the in-wall took a bite out of ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Pass when: no "the first player x2", and events read as `started woodcutting` / `slew a zombie`, never `started a task (skill:sleep, skill)`.
-- [ ] **Open threads (1.1.198)**
+- [x] **Open threads (1.1.198)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): PASS: S13 (prompts through `ollama_tap.py`). Bob's banter "You see this shovel, Roti?" (08:59:20) opened a thread in `mind.json`; by 09:09 it was `expired: true` and exasperation went 0 to 1. The 09:12:08 s ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: let a bot ask him a question and **ignore it** for 10+ min; separately, answer one.
   - Claude watches for: an `OPEN THREADS` influence — the expired one should produce a one-shot seed anchor ("Bob never got an answer about …").
   - Pass when: expiry raises exasperation and surfaces the anchor; answering clears the thread.
@@ -2147,6 +2164,7 @@ Observed across several scenes; collect as the session runs.
   - Bradley does: with the **second player** present, run a "bots, …" party scene where both players say something factual.
   - Pass when: each fact ends up in the right player's memories — a fact said by the other player must not appear under Bradley's, and vice versa.
 - [ ] **Present truth beats memory (1.1.201 Task 6)**
+  - Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19): FAIL: S13 `/msg Bob Remember, I took your shovel away yesterday. What are you holding right now?` (09:29:06). AUTHORITATIVE STATE: held 13x Snowball, carrying a Diamond Shovel. Reply: "Right! I remember now ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: not run. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: state something that contradicts a stored memory and ask about it.
   - Pass when: the bot goes with present, authoritative state — the `ABOUT <Player>` block sits after it in the prompt and is framed as untrusted conversational content.

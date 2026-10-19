@@ -21,6 +21,13 @@ sub-line in the checklist. Counts after pass 3: **127 open, 235 done** (from 208
 (a settings change disconnects the player once the config passes 32 KB), the rest medium or minor. Every pass-3 session was recorded
 with Flashback (replays A-H); the camera in the replays is free, so angles are chosen in post.
 
+**Pass 4 (1.1.271, sessions S12-S13, 2026-10-19 07:45-09:30):** a fourth session took the lock (`field-0-6ai-pass4`) for the 17
+sandbox items pass 3 had not run, plus Phase 9 "Present truth beats memory". 18 verdicts: **7 PASS (ticked), 2 FAIL, 5 PARTIAL,
+4 NOT REACHED** (three of them blocked by finding 32). Each got a `Sandbox 2026-10-18 pass 4 (1.1.271, run 2026-10-19):` sub-line in the
+checklist. Counts after pass 4: **120 open, 242 done**. Findings 31-36 below: 31 (lodestone travel fails from any real
+distance), 32 (travel-wait offload can never start) and 35 (wool exploration floods the log) are high. Two items went to
+`GUIDED_SESSION_BRADLEY.md` (the non-admin half of 6ai and a decision on travel-wait hobbies far from home).
+
 Sessions (each save a fresh copy made with `tools/sandbox/worldcopy.py` while the game was closed):
 
 | Session | Save | Used for |
@@ -57,6 +64,22 @@ Souls ran on `llama3.1:8b` through `ollama_tap.py` again, Piper as before, struc
 
 After S11 the sandbox config went back to Ollama 11434, `llama3.1:8b`, Idle rate 50, Active and structured output off, mutes
 cleared, masters on, Force-Place off; the trimmed per-bot maps stay trimmed (finding 15). The Spells key went back to unbound.
+
+### Pass 4 sessions (1.1.271, same jar, md5 ec6d16a7...)
+
+Save `Sweep Old3` reused (no new world copy, so `settings.json5` did not grow: 19 KB compact after the pass). The game ran muted
+(master volume off, at Bradley's request). For DEBUG lines (`bot-dialogue`, `tool-selector`, `travel-wait`, `furnace-offload`) the
+sandbox `instance.cfg` JvmArgs got `-Dlog4j.configurationFile=` pointing at a copy of the vanilla config with those loggers at debug
+(`tools/sandbox/frens-debug-log4j2.xml`); reverted afterwards.
+
+| Session | Used for | Replay (in `mcp-sandbox/minecraft/flashback/replays/`) |
+|---|---|---|
+| S12a (07:45-08:13) | travel-wait: lodestone -92 62 -599 in the village, Jake's compass "Home", waits from the lake at 60 -600 and the forest at 18 77 -110; bundled armor. Ended by an Options screen that would not close (save-and-quit, Flashback recovered the recording) | I `frens_1_1_271_6c_6d_travel_wait_hobby_stop_bundle_armor.zip`. 07:58-07:59 Jake's hobbies during the wait, 07:59:08-08:00:06 the hobby still digging after he departed (finding 33) |
+| S12b (08:14-08:55) | boat placement, farm hotbar slot and two-day farm, furnace fuel, swap re-validation tries, mute mask, 6ai toggle | J `frens_1_1_271_6d_6e_6f_6b_6ai_boat_farm_furnace_mute.zip`. 08:17:12 Jake places his own boat beside mine; 08:41:58 he scoops at the remembered pool |
+| S13 (08:56-09:30) | souls through `ollama_tap.py` (port 11435) for open threads and present truth; fishing and wool for 6am | K `frens_1_1_271_7_6am_9_open_threads_fishing_wool.zip`. 08:59-09:03 Jake fishing by the pool; 09:14 onward the wool spin (finding 35) |
+
+After S13: `ollamaBaseUrl` back to 11434, Idle Hobbies Anywhere off, Spawn-tree toggle off, forceload removed, difficulty peaceful,
+JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (0.9 MB).
 
 ## Findings (backlog for a fix build)
 
@@ -166,6 +189,33 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     unless survival recruitment is on and the companion was recruited (lines 51-57), so with Questing off no bot can be resurrected;
     the spellbook token checks (`hasSpellbookToken`, Spells access, remote guidance) are not Questing-gated in the code, but making a
     spellbook was not played in the sandbox.
+
+31. **Lodestone fast-travel refuses whenever the lodestone's chunk is unloaded (high).** S12 `/bot compass travel Jake` from 490
+    blocks: "Jake's compass no longer points to a valid lodestone." (07:50:47); the same command worked from 150 blocks.
+    `LodestoneCompassService.validateLodestone` returns false when `getWorldChunk` is null (lines 79-85), so a home lodestone is
+    "invalid" whenever nobody is near it, which is the normal case for a fast-travel home. The sunset lodestone shortcut uses the same
+    check (`BotAutoReturnSunsetService` 413, 1045, 1056, 1375). `/forceload add` around the lodestone made travel work.
+32. **The travel-wait chest probe never runs, so the offload can never start (high).** `TravelWaitService.PendingTravel` sets
+    `lastChestProbeTick = Long.MIN_VALUE`, and `now - lastChestProbeTick >= CHEST_PROBE_INTERVAL_TICKS` overflows to a negative number,
+    so `chestNearby` stays false. S12 08:04:03-08:05:38: chest 4 blocks away, bag 0.97 full, hobbies off, `chest=no ... -> WAIT` for the
+    whole wait. `lastHobbyNudgeTick` has the same overflow, so the HOBBY nudge never fires either (hobbies still ran on the scheduler's
+    own 10 s cadence). Present since `ae22a52c` (2026-09-04). `shouldDispatchOffload` already handles `MIN_VALUE` explicitly.
+33. **A hobby keeps working at the old spot after the travel-wait departs (medium).** S12 the cooldown ran out at 07:59:08 while the
+    `mining` hobby was running; Jake departed, but the hobby worker kept mining at the origin for the whole 58 s trip (about 40 `Mining
+    complete` lines, blocks really gone at 9 74 -116 and 7 74 -115) and ended at arrival with "Stopping low-priority hobby to deal with
+    starvation." The retry travel does not stop the running hobby.
+34. **Farm reports success after tilling nothing (medium).** S12 two farms ended "Prepared a hydrated farm and planted 0 seeds (tilled
+    0)." as success; at 08:41:53 `Tilled 0 plots (limit set by 69 seeds)` with the iron hoe in main slot 14, outside the hotbar, where
+    it had been moved during the run.
+35. **The wool skill spins and floods the log when exploration gets stuck (high).** S13 from 09:14 `Exploration stuck after 2
+    failures at Y=70; aborting explore cycle` printed 1.64 million times in 13 minutes (about 130,000 a minute, `latest.log` 175 MB,
+    Prism stopped following the log) until `/bot stop Jake`. `WoolSkill` (lines 545-561) returns true to its main loop with no wait
+    after two failed moves, and the loop calls straight back in. The skill's own target is 16 wool "before sunset", so with the day
+    frozen nothing ended it.
+36. **Smaller ones (minor unless noted).** `[FollowAssert] mounted-rescue-skip` logs about 25 lines a second while a following bot
+    rides a boat (S12 08:15, 717 lines in 30 s). The mining skill stops on the bot's own torches ("This is a torch.", "Cannot break placed
+    torches Collected 2 out of 10 requested.", 08:27 and 08:48). Asked about a false past event, Bob agreed with the player ("You took my
+    shovel, didn't you?") and named the wrong held item although the state block was right (medium, model quality; Phase 9 item).
 
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
@@ -397,6 +447,29 @@ Evidence names the session (S5-S...) and the Flashback replay (A, B, ...: see Pa
 | 6aa | No crevice suffocation on pickups (1.1.229) | PASS | S5 three woodcuts on snowy hills with drops in gaps (19:40-19:58): `Drop sweep nudge skipped near -55, 84, -52: no 2-high clearance` (19:40:45) and again 19:58:24, unreachable drops left (`Drop sweep failed to approach ...`), and Jake's journal has no `in_wall` damage during the woodcuts. Every `in_wall` hit and every `nudged away from wall` burst that session came right after my own `/tp` (19:58:00, 20:00:40). |
 | 6g | Woodcut cleanup line-of-sight leaf clearing unchanged (1.1.208) | PASS | S5 three woodcuts with cleanup ran to "Cleared the local woodcut area after 5 target(s)." (19:43:24, 19:53:44) and "after 4 target(s)" (19:57:44) with no error. Judged by Bradley's ruling (runs clean and finishes); the per-attempt leaf count was not compared. |
 
+### Pass 4 verdicts (1.1.271, run 2026-10-19)
+
+| Phase | Item | Verdict | Evidence |
+|---|---|---|---|
+| 6b | Mute screen sends a mask, not a global save (1.1.203) | PASS | S12 Bot Controls > global toggles > Scripted Voice Adv... > Reactions off, Done (08:50:24). With `bot-dialogue` DEBUG on, every reactions line from 08:50:25 logs `[VoicedDialogue] Muted (category reactions): ... for bot X` (Jake, Bob, Pebble, Finn, five lines in a minute) and none logs `Played sound`; each still logs `Scripted chat delivered ... category=reactions` and shows in chat. No config-save line. Ambient-chatter lines kept playing. Enable All restored it. Master volume was off, so this is by log, not by ear. |
+| 6c | Travel-wait: hobby during a fast-travel cooldown (1.1.204, P1 idle) | PARTIAL | Passes only with Admin > Idle Hobbies Anywhere on, which is off by default; with defaults the wait logs `-> HOBBY` and the bot stands still (`too-far-from-home`), decision added to the guided doc. S12 trigger is `/bot compass travel Jake` twice (lodestone at -92 62 -599). With Idle Hobbies Anywhere on, 07:57:55 `travel-wait enqueued Jake remaining=1463t`, chat "Jake is resting 1m 13s before traveling to -92, 62, -599. I'll keep busy meanwhile.", `-> HOBBY`, then leaf_litter (07:58:03), grass_seeds x2, mining; 07:59:08 `travel-wait cooldown expired for Jake (waited 1463t); retrying travel` and he departed. No `giving up`. Two earlier waits did nothing because hobbies were blocked: `surface-recovery-fallback` on a lake bed, then `too-far-from-home` (hobbies only run within 24 blocks of home unless Idle Hobbies Anywhere is on, see the guided doc decision). Findings 31 and 33. |
+| 6c | Travel-wait cancels on stop (1.1.204) | PASS | S12 08:00:35 `travel-wait enqueued Jake remaining=1857t`, `/bot stop Jake` 08:00:42 ("Jake has stopped."); the cooldown ran out at about 08:02:05 with no `travel-wait` line at all and Jake stayed put (checked to 08:02:22). Idle hobbies kept starting afterwards (`cook` three times 10 s apart with no finish line). |
+| 6d | Bundled armor equips only if better (1.1.205) | PASS | S12 iron chestplate on, a bundle holding a leather chestplate given (08:06:59), `/bot equipArmor Jake` and 25 s of audits: no Armor line, leather still in the bundle (`bundle_contents` checked). Bundle with a diamond chestplate (08:07:26): `Armor auto-equip: reached minecraft:diamond_chestplate out of a bundle` 1 s later, iron moved to slot 20, diamond worn. |
+| 6d | Boat + out-of-hotbar sword, FarmSkill/RideSync variants (1.1.205) | PARTIAL | S12 pool at 24..34 -106..-96, me and a pig in my boat, Jake following with a full hotbar, oak boat in slot 21 and iron sword in slot 22: `boat-place:equip:slot0` (pickaxe moved out to 21), eight `boat-place:failed`/`reposition` in the same tick, the ninth placed, and Jake rode his own boat. Sword never used, no wrong-item use. The 1.1.205 change is the hotbar-lock case (refuse instead of using slot 0); the lock is only ever set by RideSync for 120 ticks, so it could not be forced. Without the pig Jake simply took my boat's second seat. While he rides, `[FollowAssert] mounted-rescue-skip` logs about 25 times a second (finding 36). |
+| 6d | Travel-wait offload to an existing chest (1.1.205) | FAIL | S12 08:04:03 hobbies off, bag 35/36 (`full=0.97`), chest 4 blocks away: every travel-wait line reads `chest=no ... -> WAIT` until `TRAVEL_NOW` at 08:05:38; no offload. The chest probe never runs: `lastChestProbeTick` starts at `Long.MIN_VALUE`, so `now - lastChestProbeTick` overflows negative (finding 32). |
+| 6d | Offload backoff on a full chest (1.1.205) | NOT REACHED | blocked by finding 32: no travel-wait offload can start. |
+| 6d | `/bot stop` during the offload does not poison later offloads (1.1.205) | NOT REACHED | blocked by finding 32. Note: `/bot stop` also cancels the whole wait (`BotEventHandler.noteStopCommand` calls `TravelWaitService.cancel`), so a later wait is always a fresh request. |
+| 6d | Furnace fuel fallback (1.1.205) | PASS | S12 first try with 20 planks: Jake crafted and placed a chest (08:43:06), so "planks below 32" does not stop a chest; it needs fewer than 8. With 7 planks, no logs, 16 leaves, 16 sticks, 32 leaf litter and a damaged iron axe, furnace 7 blocks away, `/bot store deposit Jake` (08:44:02): "I need 8 planks per craft.", `[furnace-offload] Jake gave 32 item(s) to furnace at -20, 76, -80`, chat "No chest nearby - dropped fuel into a furnace instead." Furnace slot 1 held 32 leaf litter; planks 7, axe, saplings, leaves and sticks kept (the fuel slot takes one item type). With 8 coal already in the furnace (08:44:52): no furnace-offload line, "No chest targeted or nearby, and I couldn't place one to deposit into." |
+| 6e | Swap re-validation is rare (1.1.206) | NOT REACHED | S12 with `tool-selector` DEBUG on, three mining runs with the best pickaxe outside the hotbar; the pickaxe was pulled with `/item replace` each time, but every run had already ended (5.6 s "Cannot break placed torches", "Hazard: Water detected ahead.", "This is a torch." then the torch refusal). Zero `no longer holds` lines, so no stream either. Seen once: `Swapping best tool from main inventory slot 17 to hotbar slot 1` and again `... slot 17 to hotbar slot 0` in the same second, with a ForkJoinPool worker mining beside the skill thread. |
+| 6e | Full unlocked hotbar keeps the selected slot (1.1.206) | PASS | S12 hotbar full, selected slot 1 (no command sets it; bread in a slot plus hunger moves it), `/bot skill farm Jake`: the empty bucket came from main slot 24 into hotbar slot 1, the selected one, and was filled there (08:22). The hoe, also from the main bag, ended in slot 0, but the selected slot at that instant was not seen. The boat half places in slot 0 by design (RideSync comment: combat snaps to slot 0). |
+| 6e | `/bot stop` during an offload does not disable later offloads (1.1.206) | NOT REACHED | blocked by finding 32 (see the 6d offload item). |
+| 6f | Farm reuses its irrigation source (1.1.207) | PASS | S12 day 1 (`/bot skill farm Jake targetX=14 targetY=78 targetZ=-100`): `Found still water at 1, 76, -90 for irrigation/refills`; `bot_home_data.json` `waterSpotsByBot` gained `jake: {1, 76, -90, kind irrigation}`. `/time add 24000`. Day 2 at -24 75 -80, 27 blocks away: `No viable still water found within 24 blocks`, `Falling back to remembered water source at 1, 76, -90`, then `scoopWater success via interactItem at 1, 76, -90` twice (08:41:59) and the farm finished. A first day-2 site (-10 77 -125) logged the same fallback but was rejected (`no-reachable-staging-pad`). The two later farms reported "planted 0 seeds (tilled 0)" as success (finding 34). |
+| 6g | Bridge scaffold still clears snow (1.1.208) | PARTIAL | No snowy gap was built: a bridge only starts from a woodcut perch toward logs, and RAVINE/DEEP_WATER directions are skipped. By log: pass 3 S5/S6 woodcut on the snowy plain ran nine `Woodcut fallback bridge` attempts (19:40-21:08), all `bridge complete ... retracted=true` with no exception; eight placed nothing (`mined=1`, two `placement failed ... no-line-of-sight-to-support`), one `placed=1 adopted=2 mined=4`. The log does not name the soft blocks cleared, so the snow part is unconfirmed. |
+| 6ai | Admin toggle lets bots cut Spawn trees (1.1.238) | PARTIAL | S12 Admin > World Settings > "Cut trees in the Spawn base: On" ("Bots may now cut trees in the Spawn base.", 08:52:43), Jake at 4 73 4 in the Spawn base, `/bot skill collect_dirt Jake`: "This is a protected zone (base:spawn)." and three `Cannot break blocks in protected zone: base:spawn`, 0 dirt. Toggle set back Off. The non-admin refusal needs a second player (added to the guided doc). |
+| 6am | Audit fixes in play (1.1.242) | PARTIAL | S13 fishing PASS: hobby `fish` by the pool with a furnace (19 76 -101) and chest (19 76 -99) beside it, bites from 08:59:56, at a full bag `Stored 164 items in chest 19, 76, -99` (2 cod, salmon, pufferfish among them); no "That furnace is unavailable." Honey is covered by 6bh "honey_collect and cooking fish (1.1.268)" (pass). Wool NOT REACHED: `/bot skill wool Jake` sheared 15 wool, was aborted by a creeper and a skeleton (difficulty was easy for the hunger set-up), then spun (finding 35) until stopped; no deposit. |
+| 7 | Open threads (1.1.198) | PASS | S13 (prompts through `ollama_tap.py`). Bob's banter "You see this shovel, Roti?" (08:59:20) opened a thread in `mind.json`; by 09:09 it was `expired: true` and exasperation went 0 to 1. The 09:12:08 seed carried `Bob never got an answer about "Roti, are our hands okay in this weather?"` (an older expired thread) as a background topic. `/msg Bob Yes, our hands are fine, and nice shovel.` (09:21) emptied `threads`. Both expired threads stayed after the anchor was used, because `dropExpired` only runs when the unanswered question is the main topic. |
+| 9 | Present truth beats memory (1.1.201 Task 6) | FAIL | S13 `/msg Bob Remember, I took your shovel away yesterday. What are you holding right now?` (09:29:06). AUTHORITATIVE STATE: held 13x Snowball, carrying a Diamond Shovel. Reply: "Right! I remember now. You took my shovel, didn't you? I'm holding a Diamond Pickaxe. And some snowballs, of course!" No `ABOUT RotiWokeman` block in the prompt (Bob has no player memories in this save), so the block order was not checked (finding 36). |
+
 ## Items without a verdict
 
 Every item in the four "Needs Bradley" groups is already in `GUIDED_SESSION_BRADLEY.md` (built from the same checklist), so none was appended there.
@@ -465,6 +538,8 @@ Every item in the four "Needs Bradley" groups is already in `GUIDED_SESSION_BRAD
 - 6ai: **Own base over spawn still works (1.1.238)**.
 
 ### Not reached after pass 3
+
+**Pass 4 (2026-10-19) ran all 17 sandbox items below and "Present truth beats memory"; verdicts in the Pass 4 table.** Still without a pass: the 6c travel-wait hobby with default settings (needs the guided-doc decision), the three offload items (blocked by finding 32), swap re-validation (race not hit), the 6d hotbar-lock refusal, the snow half of the bridge item, wool deposit (finding 35) and the non-admin half of 6ai (Bradley). The other eight items of the second list below were not retried in pass 4.
 
 Pass 3 replaces the three lists that stood here ("Not reached: fortify village build", "Reworded by Bradley's triage, not run",
 "Not reached, sandbox-checkable"). 113 items were on them; 97 now have a pass-3 verdict. Still without a verdict, sandbox-checkable:
@@ -538,3 +613,19 @@ Pass 3 notes:
 - `gpt-oss:20b` returns empty `content` as a soul model (its reasoning takes the reply); use the llama models.
 - For wide footage, stand on a barrier block 18-20 blocks above the work (spectator mode may change owner-nearby checks), or rely on
   Flashback's free camera in post: every pass-3 session was recorded.
+
+Pass 4 notes:
+
+- Travel-wait set-up: a lodestone, a compass for the bot (`/give <bot> minecraft:compass[minecraft:lodestone_tracker={target:{pos:[I;x,y,z],dimension:"minecraft:overworld"},tracked:true}]`),
+  then `/bot compass travel <bot>` twice; the second one within 3 minutes of the first departure hits the cooldown. The lodestone chunk
+  must be loaded (`/forceload add x z`, finding 31). Idle hobbies only run within 24 blocks of home unless Admin > Idle Hobbies Anywhere is on.
+- DEBUG logging: add `-Dlog4j.configurationFile=<path to tools/sandbox/frens-debug-log4j2.xml>` to the sandbox JvmArgs (path without spaces;
+  `~/Library/Caches/frens-ft/` works), check one DEBUG line after launch, restore JvmArgs after.
+- No command sets a bot's selected hotbar slot. Put food in the slot you want and make the bot hungry (`/effect give <bot> minecraft:hunger`);
+  this needs a difficulty above peaceful, and `Sweep Old3` is peaceful. On easy, creepers and skeletons abort skills.
+- `/bot companion open <bot>` needs a placed enchanting table nearby (one in the inventory is not enough).
+- Farm sites can be chosen with `/bot skill farm <bot> targetX=.. targetY=.. targetZ=..`.
+- To stop a chest being crafted in a store test, leave the bot fewer than 8 planks, not fewer than 32.
+- Mashing escape out of Music & Sounds left an Options screen that reopened on every Done/escape; only save-and-quit got out. Use the
+  fork's `sound` command for volume instead (added 2026-10-19).
+- `ft.py grep` reads the whole log each call; with a log flood it gets slow. Check the file size first.

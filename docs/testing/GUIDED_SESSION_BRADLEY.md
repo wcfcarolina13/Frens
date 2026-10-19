@@ -386,9 +386,9 @@ Bradley hosts a sandbox world over LAN (H), the second account joins (G). G is n
 | A: screens at Bradley's window size | 3 |
 | B: souls and voices by ear | 14 (+1 appended) |
 | C: Nirn | 7 (+1 appended) |
-| D: second human on LAN | 29 |
-| Needs a decision | 2 (+2 appended, 1 ruled 2026-10-19) |
-| **Total for Bradley** | **59** (55 + 5 appended by pass 3, 1 ruled) |
+| D: second human on LAN | 29 (+1 appended) |
+| Needs a decision | 2 (+3 appended, 1 ruled 2026-10-19) |
+| **Total for Bradley** | **61** (55 + 5 appended by pass 3 + 2 by pass 4, 1 ruled) |
 | Maybe Claude can do it | 6 |
 
 Split items are counted once, in the block that holds Bradley's half. Tick an item in `FIELD_SESSION_1.1.202.md` only when every half named in its Prep line has passed.
@@ -419,3 +419,13 @@ From the 0-6ai sweep pass 3 (1.1.271, 2026-10-18, `FIELD_0_6AI_SANDBOX_2026-10-1
   - Bradley does: `/bot soul banter off`, `/bot soul local off`.
   - Pass when: both directors go fully dark — nothing matching `[souls] banter` or `[souls] local` for the remainder.
   - Prep: Decision first. Pass 3 S7: local went dark, but the Active lane (its own toggle) kept logging `banter lane=ACTIVE outcome=vetoed:...`. Should `banter off` also silence Active, or does the item mean Idle only?
+
+From the 0-6ai sweep pass 4 (1.1.271, 2026-10-19, `FIELD_0_6AI_SANDBOX_2026-10-18.md`):
+
+- [ ] **Phase 6ai: Admin toggle refuses a non-admin (1.1.238)** (joins Block D)
+  - Bradley does: as the second (non-admin) player, open World Settings and try "Cut trees in the Spawn base".
+  - Pass when: the non-admin gets a refusal in chat and the toggle does not change.
+  - Prep: Pass 4 S12 passed the other half (dirt in the Spawn base still refused with the toggle On). Toggle Off before and after.
+- [ ] **Phase 6c: Travel-wait hobbies far from home (1.1.204)** (joins "Needs a decision")
+  - Pass when: the item's rule is settled: should a bot waiting out a fast-travel cooldown run a hobby where it stands, even far from home?
+  - Prep: Decision first. Idle hobbies only run within 24 blocks of home unless Admin > Idle Hobbies Anywhere is on, so a wait far from home logs `-> HOBBY` but the scheduler answers `too-far-from-home` and the bot stands still (pass 4 S12). With Anywhere on it worked. Claude's pick: let the travel-wait nudge bypass the home radius for that wait only.
