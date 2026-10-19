@@ -57,4 +57,45 @@ public final class BundleReachPolicy {
         }
         return bestBundledScore > bestDirectScore;
     }
+
+    /** Bare-hands mining speed: a bundled item that does not beat it is never worth extracting. */
+    public static final float HAND_SPEED = 1.0f;
+
+    /**
+     * Tool-selection upgrade rule (finding 6): pull a hand-bundled tool out of its bundle when it
+     * mines the block strictly faster than the best direct-slot tool, even when that direct tool
+     * already works. Same rule as armor and weapons since 1.1.205.
+     *
+     * <p>{@code bestBundledSpeed} must already exclude stacks the durability policy refuses
+     * ({@code DurabilityPolicyService.shouldAvoid}), exactly as the direct-slot scan does, so a
+     * worn preserved pickaxe in a bundle is never the reason for a reach.
+     *
+     * @param bestDirectSpeed  fastest direct-slot (hotbar + main inventory) speed, {@code 0} when none
+     * @param bestBundledSpeed fastest usable bundled speed, {@code 0} when none
+     * @param rateLimited      true while this bot's tool-reach cooldown has not elapsed
+     * @return true iff not rate-limited and the bundled tool beats both bare hands and the best
+     *         direct tool
+     */
+    public static boolean shouldUpgradeFromBundle(float bestDirectSpeed, float bestBundledSpeed, boolean rateLimited) {
+        if (rateLimited || Float.isNaN(bestDirectSpeed) || Float.isNaN(bestBundledSpeed)) {
+            return false;
+        }
+        return bestBundledSpeed > HAND_SPEED && bestBundledSpeed > bestDirectSpeed;
+    }
+
+    /**
+     * Per-bot cooldown check shared by the tick-driven bundle reaches.
+     *
+     * @param now           current world time in ticks
+     * @param lastReachTick world time of this bot's last reach attempt, or {@code null} when never
+     * @param cooldownTicks minimum ticks between attempts
+     * @return true while the cooldown is still running; a clock that went backwards (world change)
+     *         never blocks
+     */
+    public static boolean isCoolingDown(long now, Long lastReachTick, long cooldownTicks) {
+        if (lastReachTick == null) {
+            return false;
+        }
+        return now >= lastReachTick && now - lastReachTick < cooldownTicks;
+    }
 }

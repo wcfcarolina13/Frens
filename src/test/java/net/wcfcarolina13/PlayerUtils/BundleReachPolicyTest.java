@@ -77,4 +77,56 @@ class BundleReachPolicyTest {
         assertFalse(BundleReachPolicy.shouldReachForBetter(10, 99, true));
         assertFalse(BundleReachPolicy.shouldReachForBetter(-1, 99, true));
     }
+
+    @Test
+    @DisplayName("finding 6: bundled diamond pickaxe beats a working loose stone pickaxe -> reach")
+    void upgradeEvenWhenDirectToolWorks() {
+        // stone pickaxe 4.0 on stone, diamond 8.0
+        assertTrue(BundleReachPolicy.shouldUpgradeFromBundle(4.0f, 8.0f, false));
+    }
+
+    @Test
+    @DisplayName("old behaviour kept: nothing direct beats hands, bundled tool does -> reach")
+    void upgradeWhenNoDirectTool() {
+        assertTrue(BundleReachPolicy.shouldUpgradeFromBundle(0.0f, 4.0f, false));
+        assertTrue(BundleReachPolicy.shouldUpgradeFromBundle(1.0f, 2.0f, false));
+    }
+
+    @Test
+    @DisplayName("equal or slower bundled tool never churns the inventory")
+    void noUpgradeWhenNotStrictlyBetter() {
+        assertFalse(BundleReachPolicy.shouldUpgradeFromBundle(8.0f, 8.0f, false));
+        assertFalse(BundleReachPolicy.shouldUpgradeFromBundle(8.0f, 4.0f, false));
+    }
+
+    @Test
+    @DisplayName("a bundled item no faster than bare hands is never reached")
+    void noUpgradeAtHandSpeed() {
+        assertFalse(BundleReachPolicy.shouldUpgradeFromBundle(0.0f, 1.0f, false));
+        assertFalse(BundleReachPolicy.shouldUpgradeFromBundle(0.0f, 0.0f, false));
+    }
+
+    @Test
+    @DisplayName("rate-limited bot does not reach even for a strictly better tool")
+    void noUpgradeWhenRateLimited() {
+        assertFalse(BundleReachPolicy.shouldUpgradeFromBundle(4.0f, 8.0f, true));
+        assertFalse(BundleReachPolicy.shouldUpgradeFromBundle(0.0f, 8.0f, true));
+    }
+
+    @Test
+    @DisplayName("NaN speeds never trigger a reach")
+    void noUpgradeOnNaN() {
+        assertFalse(BundleReachPolicy.shouldUpgradeFromBundle(Float.NaN, 8.0f, false));
+        assertFalse(BundleReachPolicy.shouldUpgradeFromBundle(4.0f, Float.NaN, false));
+    }
+
+    @Test
+    @DisplayName("cooldown: never reached, inside window, at boundary, clock went backwards")
+    void cooldownWindow() {
+        assertFalse(BundleReachPolicy.isCoolingDown(500L, null, 100L));
+        assertTrue(BundleReachPolicy.isCoolingDown(500L, 500L, 100L));
+        assertTrue(BundleReachPolicy.isCoolingDown(599L, 500L, 100L));
+        assertFalse(BundleReachPolicy.isCoolingDown(600L, 500L, 100L));
+        assertFalse(BundleReachPolicy.isCoolingDown(10L, 500L, 100L));
+    }
 }

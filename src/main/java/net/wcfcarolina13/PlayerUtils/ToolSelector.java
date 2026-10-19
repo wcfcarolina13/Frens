@@ -24,11 +24,21 @@ public class ToolSelector {
         return selectBestToolForBlock(bot, blockState, true, true);
     }
 
+    /** Minimum world ticks between tool bundle-reach attempts, per bot (MiningTool re-polls every 20). */
+    private static final long BUNDLE_REACH_COOLDOWN_TICKS = 100L;
+    private static final java.util.Map<java.util.UUID, Long> LAST_BUNDLE_REACH_TICK =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
-     * @param allowBundleReach when true and no direct-slot tool beats bare hands, a strictly better
-     *                         tool sitting inside a bundle is pulled into a direct slot
-     *                         ({@code BundleService.reachFirst}, which hops to the server thread as
-     *                         needed) and the scan is retried exactly once. Mining callers run on
+     * @param allowBundleReach when true and a tool sitting inside a bundle mines the block strictly
+     *                         faster than every direct-slot tool (and beats bare hands), it is pulled
+     *                         into a direct slot and the scan is retried exactly once, all in one
+     *                         server-thread unit. This fires even when a direct tool already works
+     *                         (finding 6: a loose stone pickaxe no longer hides a bundled diamond one),
+     *                         matching the armor and weapon upgrades since 1.1.205. Bundled stacks the
+     *                         durability policy refuses are skipped like loose ones, and attempts are
+     *                         rate-limited to one per {@value #BUNDLE_REACH_COOLDOWN_TICKS} ticks per
+     *                         bot so a failing reach cannot spin. Mining callers run on
      *                         {@code MiningTool}'s worker executor.
      * @param allowRevalidationRetry when true and the on-thread re-validation of the scanned slot
      *                         fails (another actor moved the stack between scan and swap), the scan
@@ -76,6 +86,30 @@ public class ToolSelector {
                 highestSpeed = speed;
                 bestTool = item;
                 bestMainSlot = i;
+            }
+        }
+
+        // Bundled tools are invisible to the direct-slot scans above. Score them here (read-only) so
+        // a strictly faster bundled tool is reached even when a direct one already works.
+        if (allowBundleReach) {
+            float bestBundledSpeed = bestBundledSpeed(bot, blockState);
+            // Score check first: the rate-limit gate stamps the cooldown, and burning it on a
+            // candidate the score check rejects would block a genuinely better tool for 100 ticks.
+            if (BundleReachPolicy.shouldUpgradeFromBundle(highestSpeed, bestBundledSpeed, false)
+                    && !bundleReachRateLimited(bot)) {
+                final float directSpeed = highestSpeed;
+                // The extraction and the rescan (which may itself swap into the hotbar) have to be
+                // one atomic server-thread unit, or another actor can move the reached stack between them.
+                ItemStack reached = callOnServer(bot, () -> {
+                    if (reachBetterBundledTool(bot, blockState, directSpeed).isEmpty()) {
+                        return ItemStack.EMPTY;
+                    }
+                    return selectBestToolForBlock(bot, blockState, false, false);
+                }, ItemStack.EMPTY);
+                if (!reached.isEmpty()) {
+                    return reached;
+                }
+                // Reach failed or the inventory changed: carry on with the direct-slot result.
             }
         }
 
@@ -128,22 +162,7 @@ public class ToolSelector {
 
         // If no tool with speed > 1.0 was found, use current selection
         if (highestSpeed <= 1.0f) {
-            // Bundle-aware last resort: a usable tool may be sitting inside a bundle, invisible to the
-            // direct-slot scans above. Extract it only when it is strictly better than what we found.
-            if (allowBundleReach) {
-                final float directSpeed = highestSpeed;
-                // The extraction and the rescan (which may itself swap into the hotbar) have to be
-                // one atomic server-thread unit, or another actor can move the reached stack between them.
-                ItemStack reached = callOnServer(bot, () -> {
-                    if (reachBetterBundledTool(bot, blockState, directSpeed).isEmpty()) {
-                        return ItemStack.EMPTY;
-                    }
-                    return selectBestToolForBlock(bot, blockState, false, false);
-                }, ItemStack.EMPTY);
-                if (!reached.isEmpty()) {
-                    return reached;
-                }
-            }
+            // (A bundled tool that beats hands was already reached above, before the swap.)
             // If the reason nothing was found is that a preserved tool is below threshold,
             // request fallback refresh for the appropriate category.
             ItemStack held = hotBarUtils.getSelectedHotbarItemStack(bot);
@@ -209,6 +228,46 @@ public class ToolSelector {
     }
 
     /**
+     * Read-only: the fastest bundled (non-direct) tool speed for {@code blockState}, skipping weapons
+     * and stacks {@link DurabilityPolicyService#shouldAvoid} refuses, same filters as the direct scan.
+     * Bundle contents are immutable components, so this is as safe off the server thread as the
+     * direct-slot scan. {@code 0} when nothing usable is bundled.
+     */
+    private static float bestBundledSpeed(ServerPlayerEntity bot, BlockState blockState) {
+        if (bot == null || blockState == null) {
+            return 0.0f;
+        }
+        float best = 0.0f;
+        for (var ref : InventoryIterator.stream(bot).toList()) {
+            if (ref.isDirect()) {
+                continue;
+            }
+            ItemStack stack = ref.stack();
+            if (stack.isEmpty() || isWeaponOnlyItem(stack)) continue;
+            if (DurabilityPolicyService.shouldAvoid(bot, stack)) continue;
+            best = Math.max(best, stack.getMiningSpeedMultiplier(blockState));
+        }
+        return best;
+    }
+
+    /**
+     * Per-bot cooldown gate for the tool bundle reach. Consumes the cooldown when it returns false
+     * (a reach may proceed). Same shape as {@code CombatInventoryManager.bundleReachRateLimited}.
+     */
+    private static boolean bundleReachRateLimited(ServerPlayerEntity bot) {
+        if (bot == null || bot.getEntityWorld() == null) {
+            return true;
+        }
+        long now = bot.getEntityWorld().getTime();
+        java.util.UUID id = bot.getUuid();
+        if (BundleReachPolicy.isCoolingDown(now, LAST_BUNDLE_REACH_TICK.get(id), BUNDLE_REACH_COOLDOWN_TICKS)) {
+            return true;
+        }
+        LAST_BUNDLE_REACH_TICK.put(id, now);
+        return false;
+    }
+
+    /**
      * Looks for a bundled tool that mines {@code blockState} strictly faster than {@code bestDirectSpeed}
      * and, if found, pulls it into a direct inventory slot. Bundled stacks yielded by
      * {@link InventoryIterator} are read-only views — they are never selected or equipped directly.
@@ -234,12 +293,12 @@ public class ToolSelector {
                 bestBundled = stack;
             }
         }
-        if (bestBundled.isEmpty() || bestBundledSpeed <= 1.0f) {
+        if (bestBundled.isEmpty()) {
             return ItemStack.EMPTY;
         }
-        // Compare on a common integer scale so the decision itself stays unit-testable.
-        if (!BundleReachPolicy.shouldReachForBetter(
-                Math.round(bestDirectSpeed * 100.0f), Math.round(bestBundledSpeed * 100.0f), false)) {
+        // On-thread re-check of the live bundle contents. Not rate-limited here: the caller already
+        // passed (and stamped) bundleReachRateLimited for this attempt.
+        if (!BundleReachPolicy.shouldUpgradeFromBundle(bestDirectSpeed, bestBundledSpeed, false)) {
             return ItemStack.EMPTY;
         }
         final ItemStack wanted = bestBundled;
