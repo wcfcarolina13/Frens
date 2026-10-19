@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -165,7 +166,20 @@ public final class SoulGenerationScheduler implements AutoCloseable {
      */
     public int cancelForPlayer(UUID playerId) {
         Objects.requireNonNull(playerId, "playerId");
+        return cancelMatching(key -> playerId.equals(key.playerId()));
+    }
 
+    /**
+     * Death-time cancellation for a bot: same contract as {@link #cancelForPlayer}, but matches
+     * conversations whose {@link SoulTypes.ConversationKey#botId()} is {@code botId}, so no
+     * reply the bot was generating before it died is delivered after its respawn.
+     */
+    public int cancelForBot(UUID botId) {
+        Objects.requireNonNull(botId, "botId");
+        return cancelMatching(key -> botId.equals(key.botId()));
+    }
+
+    private int cancelMatching(Predicate<SoulTypes.ConversationKey> matches) {
         List<SoulModelProvider.Call> callsToCancel = new ArrayList<>();
         List<CompletableFuture<SoulTypes.ProviderResult>> queuedFutures = new ArrayList<>();
         synchronized (lock) {
@@ -173,14 +187,14 @@ public final class SoulGenerationScheduler implements AutoCloseable {
                 return 0;
             }
             for (ActiveJob active : activeCalls.values()) {
-                if (playerId.equals(active.key().playerId())) {
+                if (matches.test(active.key())) {
                     callsToCancel.add(active.call());
                 }
             }
             Iterator<QueuedJob> it = queue.iterator();
             while (it.hasNext()) {
                 QueuedJob job = it.next();
-                if (playerId.equals(job.key().playerId())) {
+                if (matches.test(job.key())) {
                     it.remove();
                     queuedFutures.add(job.future());
                 }

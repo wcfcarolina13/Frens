@@ -79,6 +79,38 @@ class SoulProviderSchedulerTest {
         scheduler.close();
     }
 
+    // === Own coverage: cancelForBot — the bot-death cancellation surface (finding 1) ===
+
+    @Test
+    void cancelForBotCancelsOnlyThatBotsActiveAndQueuedWork() {
+        SoulGenerationScheduler scheduler = new SoulGenerationScheduler(2, 8);
+        UUID deadBot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey activeKey = new SoulTypes.ConversationKey(
+                deadBot, player, SoulTypes.Channel.DIRECT);
+        SoulTypes.ConversationKey otherBotKey = new SoulTypes.ConversationKey(
+                UUID.randomUUID(), player, SoulTypes.Channel.DIRECT);
+        SoulTypes.ConversationKey queuedKey = new SoulTypes.ConversationKey(
+                deadBot, UUID.randomUUID(), SoulTypes.Channel.DIRECT);
+
+        AtomicBoolean activeCancelled = new AtomicBoolean();
+        CompletableFuture<SoulTypes.ProviderResult> otherResult = new CompletableFuture<>();
+        scheduler.submit(activeKey, 0L,
+                () -> new SoulModelProvider.Call(new CompletableFuture<>(), () -> activeCancelled.set(true)));
+        scheduler.submit(otherBotKey, 0L,
+                () -> new SoulModelProvider.Call(otherResult, () -> otherResult.cancel(false)));
+        CompletableFuture<SoulTypes.ProviderResult> queued = scheduler.submit(queuedKey, 0L,
+                () -> new SoulModelProvider.Call(new CompletableFuture<>(), () -> {}));
+
+        assertEquals(2, scheduler.cancelForBot(deadBot));
+        assertTrue(activeCancelled.get(), "the dead bot's active call must be cancelled");
+        assertEquals(SoulTypes.FailureCode.CANCELLED, queued.join().failureCode(),
+                "the dead bot's queued job must complete CANCELLED");
+        assertFalse(otherResult.isDone(), "another bot's call with the same player must be untouched");
+
+        scheduler.close();
+    }
+
     // === Mandated tests (verbatim from the task brief) ===
 
     @Test

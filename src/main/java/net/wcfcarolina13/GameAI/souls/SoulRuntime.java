@@ -1611,6 +1611,20 @@ public final class SoulRuntime {
     }
 
     /**
+     * Death-time hook for a bot: cancels its queued and active soul generations without
+     * touching its profile, so no line it was generating survives into the respawn while the
+     * bot keeps its soul (finding 1). {@link #cancelBot} is the separate deactivation, run on
+     * death only when {@link SoulDeathPolicy#deactivateOnDeath} says so.
+     */
+    public void cancelBotGenerations(UUID botId) {
+        Objects.requireNonNull(botId, "botId");
+        int cancelled = pipelineRef.get().scheduler().cancelForBot(botId);
+        if (cancelled > 0) {
+            LOGGER.info("[souls] cancelBotGenerations bot={} cancelledGenerations={}", botId, cancelled);
+        }
+    }
+
+    /**
      * Disconnect-time hook for a real player: cancels the player's queued and active soul
      * generations so no GPU time (or LoadGoverner stage floor, via
      * {@link #activeGenerations()}) is spent finishing a reply that can no longer be delivered.

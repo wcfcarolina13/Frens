@@ -614,6 +614,29 @@ class SoulRuntimeTest {
         verify(store).setActive(bot, false);
     }
 
+    /**
+     * Finding 1: the death-with-Auto-Respawn path cancels the bot's generations but leaves its
+     * profile active (no setActive(false)), so the respawned bot is still in souls.
+     */
+    @Test
+    void deathWithAutoRespawnCancelsGenerationsButKeepsTheProfileActive() {
+        SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), store,
+                mock(SoulModelProvider.class), scheduler, conversationService);
+        UUID bot = UUID.randomUUID();
+        when(store.cachedState(bot)).thenReturn(Optional.of(
+                new SoulTypes.SoulState(1, bot, "frens:jake", true, Map.of())));
+        when(scheduler.cancelForBot(bot)).thenReturn(1);
+
+        runtime.cancelBotGenerations(bot);
+        if (SoulDeathPolicy.deactivateOnDeath(true)) {
+            runtime.cancelBot(bot);
+        }
+
+        verify(scheduler).cancelForBot(bot);
+        verify(store, never()).setActive(any(), org.mockito.ArgumentMatchers.anyBoolean());
+        assertTrue(runtime.hasActiveProfile(bot));
+    }
+
     @Test
     void cancelPlayerNeverTouchesTheProvider() {
         SoulModelProvider provider = mock(SoulModelProvider.class);

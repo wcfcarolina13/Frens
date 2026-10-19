@@ -234,8 +234,12 @@ public final class SoulEventObserver {
         }
     }
 
-    /** Records the bot's death, then invalidates its soul profile before any respawn can fire. */
-    public static void onBotDeath(ServerPlayerEntity bot, DamageSource source) {
+    /**
+     * Records the bot's death and cancels its pending generations before any respawn can fire.
+     * The profile is deactivated only when {@code autoRespawn} is off (the bot is shelved);
+     * with Auto Respawn on the bot keeps its soul (finding 1, {@link SoulDeathPolicy}).
+     */
+    public static void onBotDeath(ServerPlayerEntity bot, DamageSource source, boolean autoRespawn) {
         if (bot == null) {
             return;
         }
@@ -246,7 +250,12 @@ public final class SoulEventObserver {
         }
         // Deliberately after noteDeath: cancelBot deactivates the profile that noteDeath's
         // accepts() check just relied on to actually record the event.
-        SoulRuntime.current().ifPresent(runtime -> runtime.cancelBot(bot.getUuid()));
+        SoulRuntime.current().ifPresent(runtime -> {
+            runtime.cancelBotGenerations(bot.getUuid());
+            if (SoulDeathPolicy.deactivateOnDeath(autoRespawn)) {
+                runtime.cancelBot(bot.getUuid());
+            }
+        });
     }
 
     /** Records a bot's respawn and clears its stale session baseline. */

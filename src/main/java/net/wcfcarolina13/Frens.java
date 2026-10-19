@@ -1195,14 +1195,11 @@ public class Frens implements ModInitializer {
                         net.wcfcarolina13.GameAI.services.BotCombatCalloutService.resetCombatState(serverPlayer.getUuid());
                         net.wcfcarolina13.GameAI.services.BotFleeService.reset(serverPlayer.getUuid());
 
-                        // Journal the bot's death, then invalidate its soul profile so no
-                        // pending delivery survives into the respawn.
-                        net.wcfcarolina13.GameAI.souls.SoulEventObserver.onBotDeath(serverPlayer, damageSource);
-
                         // Auto-respawn gate: if the user disabled auto-respawn for this bot,
                         // skip the forced respawn and remove the entity so it can be brought
                         // back manually with /bot spawn.  Inventory is wiped by vanilla death
                         // processing in BotPersistenceService.onBotDeath below regardless.
+                        // Read before the soul hook, which needs it (finding 1).
                         try {
                             net.minecraft.server.MinecraftServer srv = serverPlayer.getCommandSource().getServer();
                             String alias = serverPlayer.getName().getString();
@@ -1213,6 +1210,12 @@ public class Frens implements ModInitializer {
                                 shouldAutoRespawn = ctrl.isAutoRespawnOnDeath();
                             }
                         } catch (Throwable ignored) {}
+
+                        // Journal the bot's death and cancel its pending soul lines so none
+                        // survives into the respawn. The soul profile is deactivated only when
+                        // Auto Respawn is off (the bot is shelved); otherwise it keeps its soul.
+                        net.wcfcarolina13.GameAI.souls.SoulEventObserver.onBotDeath(
+                                serverPlayer, damageSource, shouldAutoRespawn);
 
                         if (shouldAutoRespawn) {
                             BotEventHandler.ensureRespawnHandled(serverPlayer);
