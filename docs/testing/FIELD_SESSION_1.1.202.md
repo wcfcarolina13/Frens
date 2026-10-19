@@ -353,6 +353,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
 (three bots), otherwise run it here.
 
 - [ ] **Spells key opens the inventory Spells tab (1.1.204)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): CRITERION OUT OF DATE: S8 the Spells keybind ships unbound (`GLFW_KEY_UNKNOWN`); bound to K in the sandbox's options, looking at Jake, pressed: nothing opened, no log. `handleSpellsContextKey` returns unless survival recruitment is on and completed, ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: look at Jake, press the Spells keybind; then press it from the radial (slot 3).
   - Claude watches for: nothing in the log on success; `Out of range or wrong dimension` in chat = fail
     (should not happen — the host is op).
@@ -378,7 +379,8 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
     profile-not-found warnings.
   - Pass when: he answers in the laconic omen-reading register, mentions Jake or Bob by name in at
     least one banter line, and never breaks into Jake's voice/persona.
-- [ ] **Wedged bot: pillar reason + 30 s back-off (1.1.204, P1 escape)**
+- [x] **Wedged bot: pillar reason + 30 s back-off (1.1.204, P1 escape)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 on 1.1.271 fresh bot Pebble guarding in a 1x1x2 hole, player 150 blocks away, day. Bedrock lid: every try `pillar recovery placed no blocks reason=overhead-mine-failed`, then `Guard escape: Pebble failed — cooldown 30s` ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-18: FAIL: S3 fresh bot Wedge guarding in a 1x1x2 hole with 16 cobblestone, player 60 blocks away, day: every 30 s `pillar recovery placed no blocks reason=aborted steps=6` (x3), then `Guard escape: Wedge failed — cooldown ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: dig a 1×1×2 hole under a guarding/patrolling bot with cobblestone in inventory;
     cover the top with a block so pillaring is impossible.
@@ -404,7 +406,8 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
     wait — not one per tick.
   - Pass when: the line appears once and the bot travels when the cooldown ends. (Real offload is a
     follow-up; this item just proves the log isn't spamming.)
-- [ ] **Hotbar-lock combat honesty (1.1.204, side effect)**
+- [x] **Hotbar-lock combat honesty (1.1.204, side effect)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 Jake in an oak boat on land, hotbar planks/dirt/sticks, iron sword in the main inventory, easy, zombie 4 blocks away (21:47:40): Jake moved the sword into hotbar slot 0 (planks pushed to slot 14) and held it; no swing with ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: put Jake in a boat with his sword outside the hotbar, spawn a zombie nearby.
   - Pass when: he does not swing a random item; either he dismounts and fights or stays passive —
     no wrong-item swings. Record what he did.
@@ -413,7 +416,8 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
 
 ## Phase 6d — Loose ends (1.1.205): bundle reach, ambient offload, furnace fuel
 
-- [ ] **Bundled cobblestone still gets a pillar (1.1.205)**
+- [x] **Bundled cobblestone still gets a pillar (1.1.205)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 Pebble guarding in an open 1x1x2 hole, all 16 cobblestone in a bundle: `ensureAtSurface: Pebble pulled 1 scaffold stack(s) out of bundles for pillar recovery` (21:53:11), pillar steps=6, `Guard escape: Pebble succeeded` ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: put ALL of Jake's cobblestone in a bundle (none loose), wedge him in a 1×1×2 hole
     with an open top while guarding.
   - Claude watches for: `ensureAtSurface: Jake pulled N scaffold stack(s) out of bundles for pillar
@@ -486,6 +490,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
 ## Phase 6f — Crafting messages + water memory (1.1.207)
 
 - [ ] **Actions tab has no Regroup; Spells tab still does (1.1.207)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S9 bot inventory overlay: Actions, "Orders & Travel" lists Follow, Guard, Patrol, Return Home, Sleep, no Regroup; the Spells tab's Movement section lists Regroup (greyed, "Spells require artifacts. No artifacts detected."). ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: open the bot inventory → Actions tab ("Orders & Travel"), then the Spells tab.
   - Pass when: Regroup appears only on Spells (Movement) and works from there.
 - [ ] **`/bot direction reset` is the real name (1.1.207)**
@@ -513,6 +518,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
     Fill the pond in (or a 4-block-wide patch of it) and repeat → `Forgot remembered fishing spot …`
     then a fresh scan.
 - [ ] **Wider fishing scan (1.1.207)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S8 new bot Finn (no remembered spot), a 7x7 pond dug 18 blocks east, `/bot fish 1 Finn`: `Selected fishing spot: stand=67, 68, 60 water=70, 67, 58` and it walked there (22:13:45). The search took 18712 ms (pass 2 finding 14 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: stand 20 blocks from a pond (was out of the old 12-block reach), `/bot fish 1`.
   - Pass when: he finds it without a remembered spot (fresh world or after `bot_home_data.json` edit);
     the failure path in a desert answers within a second, not a multi-second stall.
@@ -522,6 +528,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
   - Claude watches for: `Falling back to remembered water source at … for irrigation/refills`.
   - Pass when: he refills from the remembered pool instead of failing.
 - [ ] **Per-kind cap keeps fishing memory (1.1.207)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S8 `bot_home_data.json` `waterSpotsByBot` after the fish: `finn: [{x 70, y 67, z 58, kind fishing}]`, and Jake's fishing spot from S4 is still there. No irrigation entry, because the farm item was not run. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: after the two items above, open `config/frens/bot_home_data.json` (or the
     equivalent BotHomeService file) → `waterSpotsByBot`.
   - Pass when: both a `fishing` and an `irrigation` entry are present for Jake with sane coordinates.
@@ -533,7 +540,8 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
 These are regression checks: every item must behave exactly as it did on 1.1.207. Any difference is a
 fail, even an improvement — note it and move on.
 
-- [ ] **Leaf-blocked navigation unchanged (1.1.208)**
+- [x] **Leaf-blocked navigation unchanged (1.1.208)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 `/bot come Jake` twice through the forest canopy around 15 -110 (22:11:30 from 28 blocks, 22:11:48 from 30 blocks): both arrived (2.8 blocks at the end), no exception, no `LeafClearService` line. Judged by Bradley's ruling ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: `/bot come` through a dense leaf canopy (oak/jungle), twice.
   - Claude watches for: the same bypass-then-mine sequence as before; the 1200 ms per-bot cooldown
@@ -892,23 +900,27 @@ toggles: the floor and the backoff are always on.
   - Claude watches for: the wolf-hurt line and which bot said it.
   - Pass when: the second event still draws a line — the per-pool dedup must not have inherited the
     five-minute animal window.
-- [ ] **The woodcut storm is gone (1.1.216)** — the repro Bradley captured
+- [x] **The woodcut storm is gone (1.1.216)** — the repro Bradley captured
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 Jake with an empty inventory idle in the forest at 15 76 -110, hobbies on: `Idle hobby 'woodcut' finished ... success=false` at 21:50:03, 21:52:03, 21:56:03 only, never more than once a minute. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Log evidence 2026-09-07/08 (1.1.216): 2 failures per session, `failures=1 remaining=48s` then `failures=2 remaining=108s` — PASS in logs.
   - Bradley does: take every axe, plank and stick off Jake, leave him idle near trees for three minutes.
   - Claude watches for: `Idle hobby 'woodcut' finished for Jake: success=false` and
     `skipping hobby 'woodcut' backing off: failures=N remaining=…s`.
   - Pass when: the failure line appears a handful of times at widening intervals, never more than once a
     minute, and never the 3–19 per second of the 1.1.215 log.
-- [ ] **The backoff ladder widens (1.1.216)**
+- [x] **The backoff ladder widens (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 `backing off: failures=1 remaining=48s` (21:49:15), `failures=2 remaining=108s`, `failures=3 remaining=228s`, `failures=4 remaining=468s` (21:56:15): 60, 120, 240, 480 s. The ten-minute hold was not reached before the axe test. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Log evidence 2026-09-07/08: 48 s → 108 s seen; sessions ended before 240 s — PARTIAL.
   - Bradley does: keep watching the same idle Jake for ten minutes.
   - Claude watches for: the `remaining=` values across successive skip lines.
   - Pass when: the gaps widen roughly 60s, 120s, 240s, 480s and then hold at ten minutes.
-- [ ] **An axe in a chest wakes it back up (1.1.216)**
+- [x] **An axe in a chest wakes it back up (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 a chest with a stone axe beside Jake 22:00:48, deep in the 480 s backoff: `Idle wooden fallback: Jake signature changed ... with 3894 ticks of cooldown left; resetting` the same second, and supply requests for the axe at once. ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: once Jake is deep in a long backoff, put an axe where he can reach it.
   - Claude watches for: the next `Idle wooden fallback` / woodcut start.
   - Pass when: he retries within seconds rather than waiting out the remaining backoff.
-- [ ] **Commanded work still starts immediately (1.1.216)**
+- [x] **Commanded work still starts immediately (1.1.216)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 `/bot skill woodcut Jake` 22:04:15 during the backoff: the skill started the same second (bare-hand bootstrap, "No axe yet, so I'll punch a tree first."). `/bot woodcut Jake` as the item writes it answers "Unsupported inline ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with Jake in a woodcut backoff, issue `/bot woodcut Jake` directly.
   - Claude watches for: the skill starting.
   - Pass when: the command runs at once — the backoff gates the idle fallback only, never a direct order.
@@ -926,11 +938,13 @@ From the five unreviewed 1.1.216 sessions (2026-09-07/08). No new toggles. Inclu
   - Pass when: no `tts engine started` line appears as the first scene plays, and line 1 starts about as fast as line 2.
     If line 1 still lags with the process already up, Piper's first inference is the cost — the deferred "Ready." priming.
 - [ ] **Torch stays up in the dark (1.1.217)** — run at night or underground; daylight only yields `light-above-7`
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S8 sealed stone tunnel at y 40 with one wall torch: `[torch-hold] Jake verdict=hold gate=none light=7 action=held slot=0 savedSlot=2` (savedSlot is his pre-torch slot), and `verdict=reject gate=light-above-11 light=12 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: walk Jake (give him torches; Bob carries none unless given some) through a dim cave for a minute.
   - Claude watches for: `[torch-hold] Jake verdict=hold … savedSlot=<his real slot>` and the gate on the yield line.
   - Pass when: the torch stays in hand across light 8–11 and is put away only at `gate=light-above-11` (light ≥12) or a
     hostile/task gate; `savedSlot=` shows the pre-torch slot, not the torch slot.
-- [ ] **Quit mid-hold does not reload with a torch in hand (1.1.217)**
+- [x] **Quit mid-hold does not reload with a torch in hand (1.1.217)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 quit while Jake held a torch in the dark tunnel (22:18), relaunch: first lines `verdict=reject gate=no-torch-in-inventory` then `verdict=hold ... light=5 action=held slot=0 savedSlot=2`, so he loaded on his own slot 2 and only ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: while Jake holds a torch underground, save and quit, reload.
   - Claude watches for: Jake's held item after reload (and `[torch-hold]` lines).
   - Pass when: Jake reloads holding his own pre-torch item.
@@ -981,21 +995,25 @@ walking out the doorway. Needs a flat, open build site; give the bot enough mate
   - Claude watches for: `[egress] bot=… door=x,z src=DESIGNED_GAP … outcome=ok` when a stance is outside.
   - Pass when: the bot walks out the gap instead of pressing into the wall; no `outcome=failed` run of two followed by the
     old stall.
-- [ ] **Hovel builder uses the door from the wall line (1.1.218)**
+- [x] **Hovel builder uses the door from the wall line (1.1.218)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S9 `/bot shelter hovel Bob` (diamond tools given): five `[hovel-egress] ... from=INSIDE to=OUTSIDE outcome=ok guard=proceed` (22:24:34-22:30:18) out the east door, then two `outcome=failed:exit guard=fail` from INSIDE (allowed), ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot shelter hovel` and watch the corners.
   - Claude watches for: `[hovel-egress] … from=ON_WALL|INSIDE … outcome=ok guard=proceed`.
   - Pass when: corner stances on the far side are reached via the door; any `outcome=failed` line still shows
     `guard=proceed` unless the bot was strictly inside heading strictly outside.
-- [ ] **No fall off a raised floor (1.1.218)**
+- [x] **No fall off a raised floor (1.1.218)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S9 `/bot skill build watchtower Jake` with no spruce fence (the railing): "Built schematic 'watchtower': 102/119 blocks placed." in 80 s; Jake's health 20 all through (sampled every 10 s), ended on top at y 72; the one egress on ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot build watchtower` with materials for all but the top railing (or stop it before the railing).
   - Claude watches for: `[egress]` lines while the bot is on the platform; its Y afterwards.
   - Pass when: the bot never walks off the platform edge through a missing railing (no `[egress] … outcome=ok` whose exit is
     past the edge; no fall damage).
-- [ ] **Line-of-sight retries stay local (1.1.218)**
+- [x] **Line-of-sight retries stay local (1.1.218)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S9 hovel: egress sequences 22:24:34, 22:28:33, 22:29:25, 22:30:18 minutes apart, each to a different target; watchtower two egresses at different wall gaps. No out-and-back run at one wall block. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: nothing extra — watch wall placement from inside.
   - Claude watches for: `[egress]` lines clustered at the same wall block.
   - Pass when: no out-and-back egress sequence per wall block; retries stay on the bot's side first.
 - [ ] **`/bot stop` mid-egress stops cleanly (1.1.218)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S9 second hovel, `/bot stop Bob` the moment the first `[hovel-egress]` line printed (22:33:50): `Task 'skill:shelter' aborted: Stopped by the player.`, "Bob has stopped.", skill exit 22:33:51. The egress line is written when the ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot stop` while the bot walks out the doorway.
   - Claude watches for: `outcome=aborted` (schematic) or `(aborted)` (hovel).
   - Pass when: the bot stops at once and the next build still tries the doorway (an abort does not count toward the
@@ -1046,7 +1064,8 @@ nearby, solo. Supplies Phase 2 is dormant: bots can't ask for chest items yet, s
   - Bradley does: right after a Jake DM reply, type "zzz" at night near a bed.
   - Claude watches for: the zzz trigger, and no `dm follow-up routed` for that line.
   - Pass when: the bot sleeps and no DM turn fires for "zzz".
-- [ ] **Bot-placed chests record their owner (1.1.219, supplies groundwork)**
+- [x] **Bot-placed chests record their owner (1.1.219, supplies groundwork)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 Jake placed a supply chest during a woodcut when his bag filled (20:43:49, -53, 82, -60); `bot_chest_registry.json` record has `"ownerUuid": "e6608e8d-..."` (RotiWokeman). The registry keys worlds by level name only, so other ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: let a bot fill its inventory until it places a supply chest, then open
     `config/frens/bot_chest_registry.json`.
   - Claude watches for: the new record.
@@ -1068,16 +1087,19 @@ still work exactly as before. Solo is enough for the first three items; the last
 Before starting, have a bot that has placed at least one supply chest (it shows in Bot Storage).
 
 - [ ] **Collect still works for the owner (1.1.220)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: no live chest record for Jake in this save (Quick Store does not register its chest; the only record was destroyed). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: bot inventory screen → Storage → pick a live chest → Collect, once with "stay" and once with "return
     to player".
   - Claude watches for: `Chest collect: … sending <bot> to chest at …`, then `Post-arrival: <bot> withdrew N items from
     chest at …`. No `[chest-registry] denied`, no `[chest-registry] refused collect`, no `withdraw refused`.
   - Pass when: the bot comes back with the chest's items, and the return trip happens for "return to player".
 - [ ] **Go and Dismiss still work for the owner (1.1.220)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S9 Storage > for Jake listed one record (the supply chest he placed in S5, shown "Destroyed" in this copy); Dismiss: `Dismissed chest record for Jake at -53,82,-60` (22:44:09) and the list emptied. Go needs a live chest record; ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: Go on a live chest; later, Dismiss on a chest entry he no longer wants.
   - Claude watches for: `Chest go: … sending <bot> to chest at …`; `Dismissed chest record for <bot> at …`.
   - Pass when: the bot travels to the chest and takes nothing; the dismissed entry leaves the list after the refresh.
-- [ ] **Quick Store / Quick Fetch still work for the owner (1.1.220)**
+- [x] **Quick Store / Quick Fetch still work for the owner (1.1.220)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S9 chest beside Jake, Quick Store, point and click: "Jake deposited 434 items (kept its gear)." (`Quick deposit: Jake deposited 434 items at 32,63,40`, 22:42:45), Quick Fetch "Jake fetched 434 items." (22:43:08). No ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: Actions → Store Here on a chest near the bot, then a Fetch from it.
   - Claude watches for: `Quick deposit: <bot> deposited N items at …` and `Quick fetch: <bot> fetched N items at …`.
   - Pass when: both move items, and no `[chest-registry] denied store` line appears.
@@ -1123,6 +1145,7 @@ Grep: `[supply] request`, `[supply] answer`, `[supply] transfer`, `[supply] with
   - Claude watches for: `result=REJECTED`, then no `[supply] withdraw … result=MOVED` for that chest and item.
   - Pass when: nothing moves, and Jake doesn't ask about that chest again for at least a minute.
 - [ ] **Walking away keeps the log quiet; coming back works at once (1.1.221)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S8 chest of 2 stone axes beside Jake (no Always), player 50 blocks away 2 min (22:02-22:04): 3 `[supply]` lines (`OWNER_NOT_NEARBY`), quiet. Back, `/bot skill woodcut Jake`: started at once but never asked the chest; it went to ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with a chest that has no Always, walk more than 32 blocks from Jake for 2 minutes while he lacks an
     axe. Then walk back and run `/bot woodcut`.
   - Claude watches for: no prompt while you are away, and at most 4 `[supply]` lines a minute for Jake however many
@@ -1157,7 +1180,8 @@ Grep: `[supply] request`, `[supply] answer`, `[supply] transfer`, `[supply] with
   - Pass when: the second `/bot craft` crafts with the chest planks (the first one only asks; crafting doesn't wait for
     an answer), and the harvest replants after one click. Chest pulls from a worker thread never worked before this
     build.
-- [ ] **Never-allowed items stay put (1.1.221)**
+- [x] **Never-allowed items stay put (1.1.221)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 chest with saddle, lead and iron axe beside idle Jake (22:05-22:06:15, hobbies on): no `[supply]` line at all, nothing taken; the stone-axe chest at the same spot had drawn requests within seconds. The mount half was not tried. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: put a saddle, a lead and an iron axe in a chest beside Jake, then try to mount him or make him fetch
     an axe.
   - Claude watches for: no `[supply] request` for those items.
@@ -1192,7 +1216,8 @@ Grep: `craft-station tick-side`, `Idle stone upgrade`, `to free inventory space`
   - Claude watches for: `Idle stone upgrade: Jake upgraded wooden tools to stone`, and no `Can't keep up!`.
   - Pass when: he crafts the stone pickaxe at that table without going to look for another one, and the game never
     stutters.
-- [ ] **A far table: no walk, no freeze, one quiet line (1.1.222)**
+- [x] **A far table: no walk, no freeze, one quiet line (1.1.222)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 Jake with the stone-upgrade kit (wooden pickaxe, shovel, axe, sword, 3 cobblestone, 2 sticks), the only table 18 blocks away, 3 min idle: one `craft-station tick-side: no table in reach for Jake, not walking (reason=no-table)` ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: the same kit, but the only crafting table is about 20 blocks away and Jake holds no table. Let him
     idle for 3 minutes.
   - Claude watches for: `craft-station tick-side: no table in reach for Jake, not walking (reason=far-table)` or
@@ -1200,7 +1225,8 @@ Grep: `craft-station tick-side`, `Idle stone upgrade`, `to free inventory space`
     stream. No `Can't keep up!`. No repeating `Failed to place` WARN.
   - Pass when: he doesn't walk off to the far table on his own, the game never stutters, and the log stays that
     quiet.
-- [ ] **A table in his bag gets placed beside him (1.1.222)**
+- [x] **A table in his bag gets placed beside him (1.1.222)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 same kit plus a crafting table in the bag: `Placed crafting table from inventory at 17, 76, -108` (Jake at 16, 76, -108), `Idle stone upgrade: Jake upgraded wooden tools to stone` 22:10:30; stone pickaxe in the bag. The axe ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: the same kit plus 1 crafting table in Jake's inventory, with no table nearby.
   - Claude watches for: `Idle stone upgrade: Jake upgraded wooden tools to stone`, and no `Can't keep up!`.
   - Pass when: a crafting table appears within 2 blocks of him and he crafts the stone pickaxe.
@@ -1257,11 +1283,13 @@ Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilCl
   - Claude watches for: `door-close skip: powered or controlled`, or no close by a bot at all. There should be no
     `door-closed: marked recently closed` for 266,66,1285.
   - Pass when: the plate opens and closes the gate by itself, and no bot right-clicks it shut.
-- [ ] **Ordinary doors still get closed behind the bots (1.1.223)**
+- [x] **Ordinary doors still get closed behind the bots (1.1.223)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S9 stone wall with a plain oak door, Jake and Bob following: once the player stood 12 blocks past it both went through and `door-close attempt` then `door-closed: marked recently closed` for 50, 66, 50 (Bob 22:22:27, Jake ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: open a plain wooden door with no plate or button nearby, walk through, and let the bots follow.
   - Claude watches for: `door-closed: …` for that door after the last bot passes.
   - Pass when: the door is closed behind them, as before.
-- [ ] **No server-thread walk warning (1.1.223 tripwire)**
+- [x] **No server-thread walk warning (1.1.223 tripwire)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5-S8 whole logs (19:28-22:19): no `nudgeTowardUntilClose on the server thread` WARN. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: nothing extra; this is read at the end of the session.
   - Claude watches for: any `nudgeTowardUntilClose on the server thread` WARN, and records the caller it names.
     The expected candidates are return-base door and escape.
@@ -1280,7 +1308,8 @@ Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilCl
   - Claude watches for: `[souls] banter routingId=… seed="Stay on one subject:…"`. There should be no
     `owner-address cut` unless a bot spoke TO you. Scenes that mention RotiWokeman should have 2–3 lines.
   - Pass when: the bots answer each other on one subject, and a mention of you doesn't end the scene.
-- [ ] **Crafting window search and sort (1.1.223)**
+- [x] **Crafting window search and sort (1.1.223)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S9 Actions, Crafting >: search "diamond" gave "Nothing matches "diamond"."; cleared, Sort cycled A-Z, Z-A, Category (headers Functional Blocks / Tools & Utilities / Ingredients), Base type (Wood / Stone), Learned; selected Stick, ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: open the Crafting window. Type `diamond`, then clear it. Cycle Sort through A-Z, Z-A, Category,
     Base type and Learned. Select an item, re-sort, and press Craft.
   - Claude watches for: `bot craft <the selected item>` in the log.
@@ -1302,6 +1331,7 @@ Grep: `[bot-access] denied`, `[PermCheck]`, `scene privacy stop`, `[legacy-chat]
   - Claude watches for (startup, no play needed; any 1.1.271+ launch): `[PermCheck] operator-permission mode=leveled-mapped class=net.minecraft.class_12086 field=OWNERS/field_63185`.
   - Pass when: that line appears and bots still talk in chat and run Carpet `/player` moves as before.
 - [ ] **Your own bot still works everywhere (1.1.224)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S9 right-click on Jake opens his inventory; `/bot inventory Jake` prints his inventory; Guide > Admin opens Jake's inventory overlay; no `[bot-access] denied` all session. The remote spell needs an artifact and the sunset prompt ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does:
     1. Right-click Jake.
     2. Run `/bot inventory Jake`.
@@ -1359,7 +1389,8 @@ Grep: `[ai-setup]`, `Ollama not detected`, `Ollama is not reachable`, `Processin
     3. Walk the steps: Choose model… (pick a small one), Turn on, Enable Jake, Say hi, then press Enter in chat.
   - Claude watches for: `[ai-setup] … set Soul Chat on` and `[ai-setup] enabled bot Jake as …`, then a soul reply correlation id for Jake.
   - Pass when: every step ticks ✔ without using a `/bot` command, and Jake answers the test line.
-- [ ] **Enable message names the blocker (1.1.225)**
+- [x] **Enable message names the blocker (1.1.225)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S8 `/bot soul system off`, `/bot soul enable Bob`: "Bob will speak as Bob, but Soul Chat is OFF. Turn it on in Set up AI companions or run /bot soul system on." See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: in a world with cheats on, run `/bot soul system off`, then `/bot soul enable Bob`.
   - Pass when: the reply says Soul Chat is OFF and how to turn it on, rather than an unconditional success.
 - [ ] **Model button and labels (1.1.225)**
@@ -1438,7 +1469,8 @@ Grep: `Unknown or incomplete command`, `No recipient resolved`, `Stopped by the 
 
 1.1.228 makes every Frens screen fit at the smallest Minecraft GUI size. Test three sizes: set Video Settings → GUI Scale and resize the window. 427x240 = 854x480 window at scale 2. 342x328 = Bradley's 1708x1642 window at Auto (scale 5). 320x240 = 640x480 window at scale 2. Take an F2 screenshot of each screen at each size.
 
-- [ ] **Wide unchanged (1.1.228)**
+- [x] **Wide unchanged (1.1.228)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S9 at 427x240 (window 1708x960, GUI scale 4): Guide topics and detail side by side, bot inventory with its Actions/Spells/Admin overlay and equal tabs, "Looking at Jake. Right-click to open menu • Press Right Bracket (]) for ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: at 427x240 (or wider), open the Guide, the bot inventory (right-click a bot) with its Admin/topics overlay, the roster, and look at a bot.
   - Claude watches for: screenshots matching 1.1.227 (Guide topics/detail side by side, equal tabs, "Looking at X. Right-click to open menu • Press Right Bracket (]) for Guide").
   - Pass when: nothing looks different from 1.1.227.
@@ -1495,7 +1527,8 @@ Best on a brand-new Survival world (the `frens-fresh` instance or a new world on
 
 Run the first item single-player BEFORE anything else in this session: every button (ops and host too) now goes through the new payload, so a dispatch bug breaks all of them. The rest need a second account or a LAN guest who is not an operator and owns a bot.
 
-- [ ] **Buttons still work for the host (1.1.231)**
+- [x] **Buttons still work for the host (1.1.231)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S9 single-player host, Jake's inventory overlay: Patrol (22:35:28 "Patrolling this area"), Guard (22:35:45), Follow (22:35:59 "Jake is following RotiWokeman."), Stop (22:36:00 "Jake has stopped."), Idle Hobbies toggle (22:36:45 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: single-player, open a bot's inventory, press Stop, Follow, Guard, a Skills toggle, a hobby toggle, then a key (come / sleep) and a Crafting History craft x1 and x2.
   - Claude watches for: no `[bot-access] refused granted dispatch` and no `[bot-access] denied` lines.
   - Pass when: each button does what it did in 1.1.230, the craft runs on the bot whose screen is open, and no "That button could not run. Check the server log." appears.
@@ -2052,7 +2085,8 @@ Observed across several scenes; collect as the session runs.
   - Bradley does: let a creeper walk up to a bot (a) unarmed, (b) armed with a sword and shield, (c) mid-skill (mining/woodcut). Do NOT ignite it with flint & steel — proximity swelling is the case that was broken.
   - Claude watches for: `[creeper] <Bot> decision=BACK_AWAY|FLEE_SPRINT|STAY dist=<d> armed=<bool> fuse=SWELLING|IDLE|IGNITED` (prints on decision change) and the `BotCreeperDefenseService` backoff lines (`creeper-defense` logger) — the root-cause fix: the always-on interrupt filtered on `isIgnited()`, which proximity swelling never sets, so it never fired in normal play; it now also triggers on `getFuseSpeed() > 0`.
   - Pass when: the bot backs off in all three cases before the fuse completes, the armed case shows `decision=BACK_AWAY` inside 4.5 blocks, and no explosion damages a bot. Record any case where it still stands still — with the dist/fuse values from the line.
-- [ ] **Doorway / pressure-plate stalls (observe only)**
+- [x] **Doorway / pressure-plate stalls (observe only)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: Captured S9 22:21:11-22:22:27: Jake and Bob following through a closed oak door at 50, 66, 50, player 7 blocks past it: `door-plan abort: stuck=24 doorBase=50, 66, 50`, `applyMovementInput-reject bot=Bob ... ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: route bots through doorways and over pressure plates during normal play.
   - Claude watches for: `applyMovementInput-reject` bursts, NavHazardCache penalty lines, the 5-min top-cells summary; door-plan jump loops (the 1.1.180 symptom).
   - Pass when: any stall is captured with timestamps and cell coordinates. **Observe only** — the door-plan architecture rework is a multi-day job to discuss with Bradley first.
