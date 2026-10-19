@@ -5,7 +5,6 @@ import net.wcfcarolina13.EntityUtil;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
-import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.command.argument.EntityAnchorArgumentType;
 import net.minecraft.server.MinecraftServer;
@@ -19,6 +18,7 @@ import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotFleeService;
+import net.wcfcarolina13.GameAI.services.DangerAlertPolicy;
 import net.wcfcarolina13.GameAI.services.HealingService;
 import net.wcfcarolina13.GameAI.services.LogThrottle;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
@@ -65,7 +65,6 @@ public class AutoFaceEntity {
         t.setDaemon(true);
         return t;
     });
-    private static final long DANGER_MESSAGE_COOLDOWN_MS = 4000L;
     public static boolean botBusy;
     private static boolean botExecutingTask;
     public static boolean hostileEntityInFront;
@@ -78,7 +77,9 @@ public class AutoFaceEntity {
     private static final Map<UUID, ScheduledExecutorService> botExecutors = new ConcurrentHashMap<>();
     private static final Map<UUID, AtomicBoolean> autoFaceInFlight = new ConcurrentHashMap<>();
     public static boolean isBotMoving = false;
-    private static volatile long lastDangerMessageMs = 0L;
+    // Per-bot threat episode: true once this bot has said the threat line for the hostiles now in
+    // range; cleared on its first scan with none (finding 37).
+    private static final Map<UUID, Boolean> DANGER_ALERT_EPISODE = new ConcurrentHashMap<>();
     private static final long LOADOUT_SWAP_LOG_INTERVAL_MS = 10_000L;
     private static final Map<String, Long> LOADOUT_SWAP_LOG = new ConcurrentHashMap<>();
 
@@ -217,6 +218,7 @@ public class AutoFaceEntity {
         if (!hostileEntities.isEmpty()) {
             lastHostileTick = server.getTicks();
         }
+        DangerAlertPolicy.onHostileScan(DANGER_ALERT_EPISODE, bot.getUuid(), !hostileEntities.isEmpty());
 
         // Use HealingService for automatic eating (safe regen + hunger maintenance)
         if (HealingService.autoEat(bot, hostileEntities)) {
@@ -228,11 +230,11 @@ public class AutoFaceEntity {
                     bot.getName().getString());
             isBotMoving = false;
             setBotExecutingTask(false);
-            broadcastDangerAlert(bot);
             BotFleeService.captureInterruptedSurvival(bot);
             // Resume later only a task this pause actually stopped (finding 23).
-            SkillResumeService.pauseWithAutoResume(bot,
+            boolean paused = SkillResumeService.pauseWithAutoResume(bot,
                     () -> SkillManager.requestSkillPause(bot, "§cPausing current task for incoming phantom dive."));
+            broadcastDangerAlert(bot, paused);
         }
 
         if (BotEventHandler.updateBehavior(bot, server, nearbyEntities, hostileEntities)) {
@@ -254,14 +256,6 @@ public class AutoFaceEntity {
                     .orElseThrow();
 
             double distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
-            boolean botSeesHostile = closestHostile instanceof LivingEntity livingHostile
-                    ? bot.canSee(livingHostile)
-                    : bot.canSee(closestHostile);
-            ServerPlayerEntity followTarget = BotEventHandler.getFollowTarget();
-            boolean playerSeesHostile = followTarget != null
-                    && (closestHostile instanceof LivingEntity living
-                    ? followTarget.canSee(living)
-                    : followTarget.canSee(closestHostile));
             // Non-diving phantoms at night are not actionable — shelter/flee handles them
             boolean allNonActionablePhantoms = hostileEntities.stream()
                     .allMatch(e -> e.getType() == EntityType.PHANTOM
@@ -269,10 +263,8 @@ public class AutoFaceEntity {
             boolean phantomSilent = allNonActionablePhantoms
                     && bot.getEntityWorld() instanceof ServerWorld sw && !sw.isDay();
 
-            if (!phantomSilent && botSeesHostile && !playerSeesHostile) {
-                broadcastDangerAlert(bot);
-            }
-
+            // No threat line here: it used to fire whenever the bot saw a hostile the player did
+            // not, paused or not. It now only follows a pause that stopped a task (finding 37).
             if (distanceToHostileEntity <= 10.0 && !phantomSilent) {
                 boolean botWasBusy = PathTracer.BotSegmentManager.getBotMovementStatus()
                         || isBotMoving
@@ -283,10 +275,12 @@ public class AutoFaceEntity {
                     LOGGER.debug("Bot is busy, stopping tasks before reacting to hostile.");
                     isBotMoving = false;
                     setBotExecutingTask(false);
-                    broadcastDangerAlert(bot);
                     // isBotMoving is shared across bots, so "busy" can be true for an idle bot:
-                    // ask for a resume only when the pause stopped a running task (finding 23).
-                    SkillResumeService.pauseWithAutoResume(bot, () -> SkillManager.requestSkillPause(bot, null));
+                    // ask for a resume, and announce, only when the pause stopped a running task
+                    // (findings 23, 37).
+                    boolean paused = SkillResumeService.pauseWithAutoResume(bot,
+                            () -> SkillManager.requestSkillPause(bot, null));
+                    broadcastDangerAlert(bot, paused);
                 }
 
                 if (BotEventHandler.isRegisteredBot(bot)) {
@@ -327,8 +321,9 @@ public class AutoFaceEntity {
 
             if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
                 LOGGER.debug("Stopping movement since danger zone is detected.");
-                broadcastDangerAlert(bot);
-                SkillResumeService.pauseWithAutoResume(bot, () -> SkillManager.requestSkillPause(bot, null));
+                boolean paused = SkillResumeService.pauseWithAutoResume(bot,
+                        () -> SkillManager.requestSkillPause(bot, null));
+                broadcastDangerAlert(bot, paused);
                 BotActions.stop(bot);
                 isBotMoving = false;
                 setBotExecutingTask(false);
@@ -396,6 +391,7 @@ public class AutoFaceEntity {
         }
         BotActions.resetRangedState(bot);
         autoFaceInFlight.remove(key);
+        DANGER_ALERT_EPISODE.remove(key);
     }
 
     private static void shutdownExecutorsWithUuid(UUID uuid) {
@@ -408,6 +404,7 @@ public class AutoFaceEntity {
             BotActions.resetRangedState(uuid);
         }
         autoFaceInFlight.remove(uuid);
+        DANGER_ALERT_EPISODE.remove(uuid);
     }
 
     private static void shutdownExecutor(ScheduledExecutorService executor) {
@@ -595,15 +592,17 @@ public class AutoFaceEntity {
         }), EMOTE_CROUCH_MS, TimeUnit.MILLISECONDS);
     }
 
-    private static void broadcastDangerAlert(ServerPlayerEntity bot) {
+    /**
+     * Says the threat line once per threat episode for this bot, and only when {@code paused}
+     * (the threat pause actually stopped a task). See {@link DangerAlertPolicy}.
+     */
+    private static void broadcastDangerAlert(ServerPlayerEntity bot, boolean paused) {
         if (bot == null) {
             return;
         }
-        long now = System.currentTimeMillis();
-        if (now - lastDangerMessageMs < DANGER_MESSAGE_COOLDOWN_MS) {
+        if (!DangerAlertPolicy.tryAnnounce(DANGER_ALERT_EPISODE, bot.getUuid(), paused)) {
             return;
         }
-        lastDangerMessageMs = now;
         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent(),
             "§cTerminating all current tasks due to threat detections");
     }
