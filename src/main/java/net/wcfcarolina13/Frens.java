@@ -834,6 +834,8 @@ public class Frens implements ModInitializer {
             // old save adopt its pre-fingerprint data; a brand-new save starts empty.
             net.wcfcarolina13.GameAI.services.BotHomeService.adoptLegacyWorldData(server);
             net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.adoptLegacyState(server);
+            // 1.1.274: the bot chest registry is per save too (it was level-name keyed).
+            net.wcfcarolina13.GameAI.services.BotChestRegistryService.adoptLegacyWorldData(server);
 
             // Seed the server-owned "Spawn" base on first start of each world. Idempotent per
             // world — if an admin deletes it later, the sticky flag keeps us from recreating it.

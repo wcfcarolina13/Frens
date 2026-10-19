@@ -101,6 +101,9 @@ public final class BotChestRegistryService {
 
     private static final class RootData {
         Map<String, WorldData> worlds = new HashMap<>();
+        // Legacy "levelName/dim" key -> fingerprint of the save that adopted it (1.1.274 migration).
+        // Absent in older files: Gson leaves it null, read as empty.
+        Map<String, String> legacyWorldClaims = new HashMap<>();
     }
 
     public record DepositCandidate(BlockPos pos,
@@ -157,12 +160,77 @@ public final class BotChestRegistryService {
         }
     }
 
+    /**
+     * Store key: save fingerprint + dimension ({@code "New World#1a2b3c:minecraft:overworld"}).
+     * Before 1.1.274 this was {@code levelName/dimension}, which two saves with the same level
+     * name share; see {@link #legacyServerWorldKey} and {@link #adoptLegacyWorldData}.
+     */
     private static String serverWorldKey(MinecraftServer server, ServerWorld world) {
+        return ChestRegistryWorldKeys.key(BotWorldStateService.currentWorldKey(server), dimensionId(world));
+    }
+
+    private static String legacyServerWorldKey(MinecraftServer server, ServerWorld world) {
         String level = server != null && server.getSaveProperties() != null
-                ? server.getSaveProperties().getLevelName() : "unknown";
-        String dim = world != null && world.getRegistryKey() != null
-                ? world.getRegistryKey().getValue().toString() : "unknown";
-        return level + "/" + dim;
+                ? server.getSaveProperties().getLevelName() : null;
+        return ChestRegistryWorldKeys.legacyKey(level, dimensionId(world));
+    }
+
+    private static String dimensionId(ServerWorld world) {
+        return world != null && world.getRegistryKey() != null
+                ? world.getRegistryKey().getValue().toString() : null;
+    }
+
+    /** identityHashCode of the server whose legacy adoption has run; -1 = none yet. */
+    private static volatile int adoptedServerIdentity = -1;
+
+    /**
+     * Once per server start, before anything reads chests: for each dimension with no
+     * fingerprinted entry, copy the legacy ({@code levelName/dim}) entry when
+     * {@link WorldStoreKeyPolicy#decide} allows it, and record the claim in
+     * {@code legacyWorldClaims}. Legacy entries are never removed or modified, so a second save
+     * with the same name starts empty instead of seeing the first one's chests. A world that
+     * starts empty gets an empty entry so the decision sticks. Call from SERVER_STARTED on the
+     * server thread; {@link #worldData} and {@link #recordedOwnersAt} also run it lazily as a
+     * fallback.
+     */
+    public static void adoptLegacyWorldData(MinecraftServer server) {
+        if (server == null) return;
+        adoptedServerIdentity = System.identityHashCode(server);
+        ensureLoaded();
+        String fingerprint = BotWorldStateService.currentWorldKey(server);
+        long gameTime = WorldZoneStore.overworldGameTime(server);
+        boolean changed = false;
+        synchronized (LOCK) {
+            if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+            if (DATA.legacyWorldClaims == null) DATA.legacyWorldClaims = new HashMap<>();
+            for (ServerWorld world : server.getWorlds()) {
+                String key = serverWorldKey(server, world);
+                String legacyKey = legacyServerWorldKey(server, world);
+                WorldData legacy = DATA.worlds.get(legacyKey);
+                WorldStoreKeyPolicy.Adoption adoption = WorldStoreKeyPolicy.decide(
+                        DATA.worlds.containsKey(key), legacy != null, gameTime,
+                        DATA.legacyWorldClaims.get(legacyKey), fingerprint);
+                if (adoption == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
+                    DATA.worlds.put(key, GSON.fromJson(GSON.toJson(legacy), WorldData.class));
+                    DATA.legacyWorldClaims.put(legacyKey, fingerprint);
+                    LOGGER.info("Adopted legacy chest registry '{}' as '{}'", legacyKey, key);
+                    changed = true;
+                } else if (WorldStoreKeyPolicy.mustCreateOwnStore(adoption)) {
+                    DATA.worlds.put(key, new WorldData());
+                    LOGGER.info("Chest registry '{}' starts empty ({}); legacy '{}' left untouched", key, adoption, legacyKey);
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            flush();
+        }
+    }
+
+    private static void adoptIfNeeded(MinecraftServer server) {
+        if (server != null && adoptedServerIdentity != System.identityHashCode(server)) {
+            adoptLegacyWorldData(server);
+        }
     }
 
     private static String botKey(ServerPlayerEntity bot) {
@@ -188,6 +256,7 @@ public final class BotChestRegistryService {
 
     private static WorldData worldData(MinecraftServer server, ServerWorld world) {
         ensureLoaded();
+        adoptIfNeeded(server);
         String key = serverWorldKey(server, world);
         synchronized (LOCK) {
             if (DATA.worlds == null) DATA.worlds = new HashMap<>();
@@ -239,8 +308,8 @@ public final class BotChestRegistryService {
      * element per record. A record with no owner ({@link ChestRecord#ownerUuid} {@code null}:
      * written before 1.1.219, or placed by an un-owned bot) is skipped, so a position holding only
      * such records returns an empty list, the same as no record at all. Input for
-     * {@code SupplyChestRules.ownership}. The registry is keyed by level name and dimension, not
-     * by save, so a same-named save's records at this position are included too.
+     * {@code SupplyChestRules.ownership}. The registry is keyed by save fingerprint and dimension
+     * (1.1.274), so a same-named save's records are not included.
      *
      * <p>A {@code null} world or position, or a world without a server, cannot be looked up and
      * returns a single {@code null} element, which that rule denies. Records never yield a
@@ -252,6 +321,7 @@ public final class BotChestRegistryService {
             return Collections.singletonList(null);
         }
         ensureLoaded();
+        adoptIfNeeded(server);
         String key = serverWorldKey(server, world);
         synchronized (LOCK) {
             WorldData wd = DATA.worlds == null ? null : DATA.worlds.get(key);
