@@ -54,6 +54,7 @@ Fork: `~/dev/minecraft-mod-mcp-hardened`, branch `hardened`. Build `cd packages/
 | `pause_menu` | yes | Opens the game menu (reports if it did not open). |
 | `save_and_quit` | yes | Pause-menu disconnect path, replies first. |
 | `set_time` time | yes | Singleplayer overworld time. |
+| `sound` [volume 0..1] [category] | no | Read or set a sound volume (default master) and save options.txt. The sandbox runs at master 0 (Bradley 2026-10-19); set 1 only for a check that needs sound, then 0 again. Fork `a0aa0dc`. |
 | `keybinds` filter | no | Every key binding: id, category, bound key, pressed. Frens: `key.frens.leash` (`'`), `key.frens.open_guide` (`]`), `key.frens.go_to_look` (`-`), ... |
 | `keybind` id, action tap/hold/release, ms, force | yes | Presses an in-world key binding (mod or vanilla movement). Refused with a screen open unless `force=true`. Holding attack does not mine in control mode. |
 | `look` yaw, pitch | yes | Sets the player's rotation (aim a movement hold). |
