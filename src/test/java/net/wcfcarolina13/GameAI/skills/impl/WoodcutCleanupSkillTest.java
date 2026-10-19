@@ -10,6 +10,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WoodcutCleanupSkillTest {
 
     @Test
+    void fallbackSweepMinesStoneOnlyWhenTheBotPlacedIt() {
+        // Natural stone under the bot: never mined.
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, false));
+        // Remembered or owned scaffold stone: mined.
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, true, false));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, true));
+        // Dirt keeps its shape-based checks (done by the caller).
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false));
+    }
+
+    @Test
     void blockedOrRejectedOnlySummaryIsNotReportedAsDone() {
         String summary = WoodcutCleanupDiagnostics.buildCompletionSummary(
                 false,

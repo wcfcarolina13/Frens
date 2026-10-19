@@ -36,6 +36,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 public class MiningTool {
 
     private static final long MINING_TICK_MS = BreakTimePolicy.TICK_MS;
@@ -168,6 +169,10 @@ public class MiningTool {
         AtomicInteger requiredTicksHolder = new AtomicInteger(1);
         AtomicInteger ticksElapsed = new AtomicInteger(0);
         AtomicInteger postThresholdAttempts = new AtomicInteger(0);
+        // Re-poll hysteresis for this run: the item the last re-poll swapped in, and whether a
+        // swap was ever undone by someone else (then equal-speed swaps stop, RepollPolicy).
+        AtomicReference<ItemStack> lastRepollSwap = new AtomicReference<>(null);
+        AtomicBoolean repollSwapUndone = new AtomicBoolean(false);
 
         // Initialize targeting and tool selection directly (avoid server-thread join deadlock)
         try {
@@ -308,8 +313,19 @@ public class MiningTool {
                     // Periodically re-poll for a better tool in case one was added to inventory mid-task
                     if (!preserveSelectedHotbarItem && ticksElapsed.get() > 0 && ticksElapsed.get() % 20 == 0) {
                         ItemStack current = bot.getMainHandStack();
+                        ItemStack previousSwap = lastRepollSwap.get();
+                        if (previousSwap != null && !repollSwapUndone.get()
+                                && !ItemStack.areItemsAndComponentsEqual(current, previousSwap)) {
+                            repollSwapUndone.set(true);
+                            LOGGER.info("Mining re-poll: swap to {} was undone (now {}) for {}; no more equal-speed swaps this run",
+                                    previousSwap.isEmpty() ? "empty-hand" : previousSwap.getItem().toString(),
+                                    current.isEmpty() ? "empty-hand" : current.getItem().toString(),
+                                    targetBlockPos);
+                        }
                         ItemStack repolled = ToolSelector.selectBestToolForBlock(bot, currentState);
-                        if (!ItemStack.areItemsAndComponentsEqual(current, repolled)) {
+                        if (!ItemStack.areItemsAndComponentsEqual(current, repolled)
+                                && RepollPolicy.shouldSwap(current.getMiningSpeedMultiplier(currentState),
+                                        repolled.getMiningSpeedMultiplier(currentState), repollSwapUndone.get())) {
                             LOGGER.info("Mining re-poll: swapping from {} to {} for {}",
                                     current.isEmpty() ? "empty-hand" : current.getItem().toString(),
                                     repolled.isEmpty() ? "empty-hand" : repolled.getItem().toString(),
@@ -318,15 +334,20 @@ public class MiningTool {
                             if (!swapped) {
                                 switchToHarmlessFallback(bot, currentState);
                             }
-                            // Recalculate required ticks from the new tool
+                            lastRepollSwap.set(bot.getMainHandStack().copy());
+                            // Recalculate required ticks from the new tool; only a faster tool
+                            // restarts progress (an equal-speed swap used to reset it forever).
                             float newDelta = currentState.calcBlockBreakingDelta(bot, bot.getEntityWorld(), targetBlockPos);
                             if (newDelta > 0.0f) {
+                                int oldRequired = requiredTicksHolder.get();
                                 int newRequired = BreakTimePolicy.requiredTicks(newDelta);
                                 requiredTicksHolder.set(newRequired);
-                                ticksElapsed.set(0);
-                                postThresholdAttempts.set(0);
-                                LOGGER.info("Mining re-poll: recalculated required ticks to {} (delta {}) for {}",
-                                        newRequired, String.format("%.4f", newDelta), targetBlockPos);
+                                if (RepollPolicy.shouldResetProgress(oldRequired, newRequired)) {
+                                    ticksElapsed.set(0);
+                                    postThresholdAttempts.set(0);
+                                }
+                                LOGGER.info("Mining re-poll: required ticks {} -> {} (delta {}) for {}",
+                                        oldRequired, newRequired, String.format("%.4f", newDelta), targetBlockPos);
                             }
                         }
                     }

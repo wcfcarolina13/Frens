@@ -5396,7 +5396,7 @@ public final class WoodcutSkill implements Skill {
         if (reachSession != null && associatedTargetBase != null && world.getBlockState(pos).isIn(BlockTags.LOGS)) {
             reachSession.trunkMineAttemptsStarted++;
         }
-        CompletableFuture<String> miningFuture = MiningTool.mineBlock(bot, pos, true, false);
+        CompletableFuture<String> miningFuture = MiningTool.mineBlock(bot, pos, preferAxe, false);
         try {
             String result = miningFuture.get(MINING_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             String lower = result == null ? "" : result.toLowerCase();

@@ -169,6 +169,16 @@ final class WoodcutCleanupDiagnostics {
         return nowMs - startMs >= capMs;
     }
 
+    /**
+     * Whether the fallback sweep may mine a pillar-material block. Sun-exposed dirt is still
+     * judged by shape (the caller's grass and sky checks), but stone-type material is mined only
+     * when this bot placed it: remembered scaffold or registered owned scaffold. 1.1.272 sandbox:
+     * the sweep mined the natural stone the bot stood on because stone is a pillar material.
+     */
+    static boolean fallbackMayMinePillarBlock(boolean dirtLike, boolean remembered, boolean ownedScaffold) {
+        return dirtLike || remembered || ownedScaffold;
+    }
+
     /** Time the post-loop fallback sweep (scan plus any mining it finds) may take. */
     static final long FALLBACK_SWEEP_BUDGET_MS = 3_000L;
 

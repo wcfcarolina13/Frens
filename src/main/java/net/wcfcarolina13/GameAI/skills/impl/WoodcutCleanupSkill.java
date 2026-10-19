@@ -30,6 +30,7 @@ import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.WoodcutCleanupMemoryService;
+import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -797,10 +798,19 @@ public final class WoodcutCleanupSkill implements Skill {
                         if (TreeDetector.isNearHumanBlocks(world, pos, 3) || TreeDetector.isProtected(world, pos)) {
                             continue;
                         }
-                        if (DIRT_LIKE_SCAFFOLD.contains(it)) {
+                        boolean dirtLike = DIRT_LIKE_SCAFFOLD.contains(it);
+                        if (dirtLike) {
                             if (!isSunExposedOnAnyFace(world, pos) || hasGrassPlantAbove(world, pos)) {
                                 continue;
                             }
+                        }
+                        // Stone-type material only when this bot placed it (never the ground it stands on).
+                        if (!WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(
+                                dirtLike,
+                                (scaffoldMemory != null && scaffoldMemory.contains(pos.asLong()))
+                                        || placedPillar.contains(pos),
+                                !dirtLike && OwnedScaffoldRegistry.isOwned(bot, world, pos))) {
+                            continue;
                         }
                         MineAttemptResult mineResult = mineWithRetries(bot, source, pos, placedPillar, scaffoldMemory, false);
                         if (mineResult.mined()) {
