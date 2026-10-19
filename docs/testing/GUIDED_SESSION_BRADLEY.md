@@ -429,3 +429,10 @@ From the 0-6ai sweep pass 4 (1.1.271, 2026-10-19, `FIELD_0_6AI_SANDBOX_2026-10-1
 - [ ] **Phase 6c: Travel-wait hobbies far from home (1.1.204)** (joins "Needs a decision")
   - Pass when: the item's rule is settled: should a bot waiting out a fast-travel cooldown run a hobby where it stands, even far from home?
   - Prep: Decision first. Idle hobbies only run within 24 blocks of home unless Admin > Idle Hobbies Anywhere is on, so a wait far from home logs `-> HOBBY` but the scheduler answers `too-far-from-home` and the bot stands still (pass 4 S12). With Anywhere on it worked. Claude's pick: let the travel-wait nudge bypass the home radius for that wait only.
+
+From the 1.1.272 release (2026-10-19):
+
+- [ ] **Phase 6bj: bind the Spells key on Nirn, then a two-player resurrection check (1.1.272)** (joins Block D)
+  - Bradley does: Options > Controls > Frens > "Open Spells" = `[` (Nirn keeps "Not Bound" from its saved options; new installs get `[`). Press `[` while looking at a bot: its Spells tab opens. Then, with the second player, let one of their bots (Auto Respawn off) die and try the Questing-off resurrection ritual from your account.
+  - Pass when: the Spells tab opens on your bot, and the ritual never revives the other player's bot for you (unless you are op or host).
+  - Prep: needs a decision too: should 1.1.273 bind `[` once on existing installs, or leave it to Reset Keys?

@@ -83,6 +83,8 @@ JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (
 
 ## Findings (backlog for a fix build)
 
+**Fixed in 1.1.272** (2026-10-19, sandbox-checked, replay `frens_1_1_272_6bj_fix_checks.zip`): 1, 5, 6, 8, 15, 25, 30 (key and Admin worlds; the ritual is a field item), 31, 32, 33, 35. Souls 2, 16 (contract line only), 19, 22 shipped, field items in Phase 6bj. New minors from that check: the voiced "Time to punch some trees." still plays after a chest axe was taken; on stone a stone axe and an oak log tie at speed 1.0 and the mining re-poll swaps axe → log every second against woodcut's re-equip (53 lines); a wool give-up prints two lines ("I'm stuck ... stopping wool." and "Stuck: could not reach any sheep."); the guard pillar escape took 60 s for 2 blocks; one `Mining ... with minecraft:bundle` on an already-mined block during the bundle pull.
+
 Severity: high = a feature stops working for the session, medium = wrong or slow behaviour a player notices, minor = wording or rare.
 Each finding is a hypothesis for the scoper, not a diagnosis.
 

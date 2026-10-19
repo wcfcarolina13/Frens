@@ -6,7 +6,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 ## Session Handoff 2026-10-19 (1.1.272) — next session starts here
 
-**State:** main = origin/main @ 1.1.272. Suite 2947 green. Deployed to Nirn; sandbox status and checks are in the 1.1.272 changelog entry and Phase 6bj of `docs/testing/FIELD_SESSION_1.1.202.md`.
+**State:** main = origin/main @ 1.1.272. Suite 2947 green. Deployed to Nirn and the mcp-sandbox. **Sandbox checks all pass** for 15, 5, 8, 6, 35, 31, 32, 30 (key) and 1 (replay `frens_1_1_272_6bj_fix_checks.zip`, changelog entry has the log lines), so no high finding is open: by Bradley's rule 1.1.272 is the next public release, pending his OK on the notes. Phase 6bj: 3 field items. Checklist 123 open.
 **1.1.272** (changelog entry has rulings and costs): all four high findings of the 0-6ai sweep (15 settings save past 32 KB, 31 lodestone travel to an unloaded chunk, 32 travel-wait probe overflow, 35 wool spin), plus 5 (wedged guard escape, stale abort latch), 30 (Spells key, spellbook and resurrection with Questing off, default key `[`), 8 (woodcut asks unregistered nearby chests for an axe before punching), 25, 6, 1, 33, souls 2/16a/19/22, and a `Long.MIN_VALUE` sweep (`TickIntervals`; the combat callout read a never-hit bot as just hit). Fable review (two reviewers), one fix wave (`0c62d973`).
 **Public release:** by Bradley's rule (2026-10-18) 1.1.272 is the candidate once the high findings pass in the sandbox. Nothing goes to Modrinth or Discord without his OK on the exact text; the 1.1.268 notes draft (`.superpowers/sdd/modrinth/`, base checkout) needs rewriting for 1.1.272.
 **Needs Bradley:**
