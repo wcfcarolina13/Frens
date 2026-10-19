@@ -1242,7 +1242,7 @@ Grep: `Door debug`, `door-close skip`, `vertical-lock skip`, `nudgeTowardUntilCl
 Grep: `[bot-access] denied`, `[PermCheck]`, `scene privacy stop`, `[legacy-chat] denied`, `sqlite-vec`, `Downloading`, `NLP model`.
 
 - [ ] **Startup permission mode (1.1.224)**
-  - Sandbox 2026-10-18: FAIL: S2/S3 every launch: `[PermCheck] operator-permission mode=permission-all-mapped-fallback class=net.minecraft.class_12096 field=ALL/field_63208`, never `leveled-mapped ... OWNERS`. Known since 1.1.232 (checklist note ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
+  - Sandbox 2026-10-18: FAIL on 1.1.270: every launch logged `[PermCheck] operator-permission mode=permission-all-mapped-fallback`. Fixed in 1.1.271 (`7dba5ee4`), recheck on the next launch. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): the library half is closed (sqlite-vec, xattr, the NLP model and the legacy stack were deleted in 1.1.243-1.1.251, and the 1.1.270 sandbox log has none of those lines). Only the permission check is left.
   - Found 2026-10-18: every log from 1.1.232 to 1.1.270 showed `mode=permission-all-mapped-fallback`. Cause: a static-init order bug (the field list was still null when the lookup ran). Fixed in 1.1.271. The old fallback was harmless (ALL grants everything OWNERS does in vanilla and Carpet), see the 1.1.271 changelog.
   - Claude watches for (startup, no play needed; any 1.1.271+ launch): `[PermCheck] operator-permission mode=leveled-mapped class=net.minecraft.class_12086 field=OWNERS/field_63185`.

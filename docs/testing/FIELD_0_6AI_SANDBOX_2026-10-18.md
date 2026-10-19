@@ -63,8 +63,8 @@ Each finding is a hypothesis for the scoper, not a diagnosis.
     minecraft:oak_planks`, several at `~3000ms`, though the bot held an axe (1.1.229 says the axe takes planks, well under 3 s).
 11. **"Picked up N items." overcounts (minor).** S3 drop sweep: chat "Picked up 27 items.", skill summary `collected: 20`,
     bag 21 items after a `/clear`. The 1.1.234 count fix (`d7ce8aaf`) does not hold here.
-12. **Phase 6v permission mode** (known, not investigated here): every launch logs `operator-permission mode=permission-all-mapped-fallback`.
-    Recorded as FAIL; the separate "why bot permissions use the fallback since 1.1.232" session owns it.
+12. **Phase 6v permission mode** (known, not investigated here): every 1.1.270 launch logged `operator-permission mode=permission-all-mapped-fallback`.
+    Recorded as FAIL. Already fixed in 1.1.271 (`7dba5ee4`, static-init order), which shipped while this sweep ran; recheck on any 1.1.271 launch.
 
 Not a finding but worth a look: Streaming first-word latency is about 5-7 s with `llama3.1:8b` (Ollama `promptEvalMs` 1.7-4.4 s
 plus Piper 0.5 s), over the ~3 s target. The 1.1.226 auto-spawn reserve no longer leaves a bot out now that auto-spawn waits for
