@@ -97,7 +97,10 @@ public final class CraftingHelper {
 
     // Cooldown after failing to reach a crafting table — prevents cascade of 6-second blocking
     // attempts when multiple tool provisions all try to reach the same unreachable table.
-    private static final Map<UUID, Long> CRAFT_TABLE_REACH_FAILURE = new java.util.concurrent.ConcurrentHashMap<>();
+    // It holds the failed table's position, so only that table is skipped: another table out of
+    // reach is still walked to (finding 13, 1.1.274).
+    private record ReachFail(long posLong, long atMs) { }
+    private static final Map<UUID, ReachFail> CRAFT_TABLE_REACH_FAILURE = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CRAFT_TABLE_FAILURE_COOLDOWN_MS = 30_000L;
 
     // Message cooldown — prevents 15+ identical "I need a crafting table" messages per second
@@ -1619,15 +1622,8 @@ public final class CraftingHelper {
         // nudges or carves: a walk there only sets velocity and waits for a tick that cannot run.
         // It uses a table already in reach, or places one on a cell that is ready now.
         boolean onServerThread = isServerThreadCall(source, bot);
-        // If we recently failed to reach a distant table, skip expensive movement but still try
-        // placing from inventory or crafting a new table (those are fast/local operations).
-        // A server-thread call has no movement to skip, so the cooldown does not apply there.
-        boolean reachCooldownActive = false;
-        Long lastFail = CRAFT_TABLE_REACH_FAILURE.get(bot.getUuid());
-        if (CraftingStationPolicy.mayWalk(onServerThread)
-                && lastFail != null && (System.currentTimeMillis() - lastFail) < CRAFT_TABLE_FAILURE_COOLDOWN_MS) {
-            reachCooldownActive = true;
-        }
+        // A table the bot recently failed to reach is passed over (see skipsFailedTable), so the
+        // scan can pick another one or fall through to placing or crafting a table.
         // Check nearby crafting table
         BlockPos botPos = bot.getBlockPos();
         ServerWorld world = source.getWorld();
@@ -1647,6 +1643,9 @@ public final class CraftingHelper {
                     // Gone: forget it before the reach test, as the check below does for a chosen
                     // table, so the scan still runs and a miss reports no-table, not far-table.
                     LAST_KNOWN_CRAFTING_TABLE.remove(bot.getUuid());
+                } else if (skipsFailedTable(bot, botPos, pos, onServerThread)) {
+                    // The table we just failed to reach: leave nearest null so the scan runs.
+                    LAST_KNOWN_CRAFTING_TABLE.remove(bot.getUuid());
                 } else if (CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
                     nearest = pos.toImmutable();
                 } else {
@@ -1663,7 +1662,8 @@ public final class CraftingHelper {
                 commanderLook = bhr.getBlockPos();
             }
         }
-        if (commanderLook != null && world.getBlockState(commanderLook).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+        if (commanderLook != null && world.getBlockState(commanderLook).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)
+                && !skipsFailedTable(bot, botPos, commanderLook, onServerThread)) {
             if (CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, commanderLook))) {
                 nearest = commanderLook.toImmutable();
             } else {
@@ -1678,6 +1678,9 @@ public final class CraftingHelper {
                     continue;
                 }
                 if (world.getBlockState(pos).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                    if (skipsFailedTable(bot, botPos, pos, onServerThread)) {
+                        continue;
+                    }
                     if (!CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
                         skippedTableOutOfReach = true;
                         continue;
@@ -1698,10 +1701,9 @@ public final class CraftingHelper {
             }
         }
         if (nearest != null) {
-            double distSq = botPos.getSquaredDistance(nearest);
-            // If we recently failed to reach a distant table, skip expensive movement and
+            // If we recently failed to reach this table, skip expensive movement and
             // fall through to the placement/crafting path instead.
-            if (reachCooldownActive && distSq > STATION_REACH_SQ) {
+            if (skipsFailedTable(bot, botPos, nearest, onServerThread)) {
                 LOGGER.info("Skipping unreachable crafting table at {} (cooldown active)", nearest.toShortString());
                 nearest = null;
             }
@@ -1820,7 +1822,9 @@ public final class CraftingHelper {
                 if (!close) {
                     LOGGER.warn("Failed to reach crafting table at {}", nearest.toShortString());
                     if (CraftingStationPolicy.armsReachFailCooldown(onServerThread)) {
-                        CRAFT_TABLE_REACH_FAILURE.put(bot.getUuid(), System.currentTimeMillis());
+                        CRAFT_TABLE_REACH_FAILURE.put(bot.getUuid(), new ReachFail(nearest.asLong(), System.currentTimeMillis()));
+                        // Forget it too, or the next call picks it again and never scans.
+                        LAST_KNOWN_CRAFTING_TABLE.remove(bot.getUuid());
                     }
                     ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(nearest));
                 }
@@ -1984,7 +1988,7 @@ public final class CraftingHelper {
     /**
      * Whether {@link #ensureCraftingStation} would find a table without crafting one: a table held,
      * or one its scan would accept (remembered or in the scan box, in reach on the server thread,
-     * not a far one under the reach-failure cooldown). A read-only pre-check so a craft can count
+     * not the one under the reach-failure cooldown). A read-only pre-check so a craft can count
      * the table's planks before anything is crafted; a miss only means 4 extra planks are asked for.
      */
     private static boolean tableAvailableWithoutCrafting(ServerPlayerEntity bot, ServerCommandSource source) {
@@ -1995,23 +1999,20 @@ public final class CraftingHelper {
             return true;
         }
         boolean onServerThread = isServerThreadCall(source, bot);
-        Long lastFail = CRAFT_TABLE_REACH_FAILURE.get(bot.getUuid());
-        boolean reachCooldownActive = CraftingStationPolicy.mayWalk(onServerThread)
-                && lastFail != null && (System.currentTimeMillis() - lastFail) < CRAFT_TABLE_FAILURE_COOLDOWN_MS;
         ServerWorld world = source.getWorld();
         BlockPos botPos = bot.getBlockPos();
         WorldPos remembered = LAST_KNOWN_CRAFTING_TABLE.get(bot.getUuid());
         if (remembered != null && remembered.worldKey() != null && remembered.worldKey().equals(world.getRegistryKey())) {
             BlockPos pos = remembered.pos();
             if (pos != null && botPos.getSquaredDistance(pos) <= MAX_REMEMBERED_TABLE_DIST_SQ
-                    && usableTableForCraft(bot, world, botPos, pos, onServerThread, reachCooldownActive)) {
+                    && usableTableForCraft(bot, world, botPos, pos, onServerThread)) {
                 return true;
             }
         }
         int radius = CraftingStationPolicy.scanHorizontal(onServerThread);
         int ySpan = CraftingStationPolicy.scanVertical(onServerThread);
         for (BlockPos pos : BlockPos.iterate(botPos.add(-radius, -ySpan, -radius), botPos.add(radius, ySpan, radius))) {
-            if (usableTableForCraft(bot, world, botPos, pos, onServerThread, reachCooldownActive)) {
+            if (usableTableForCraft(bot, world, botPos, pos, onServerThread)) {
                 return true;
             }
         }
@@ -2019,14 +2020,31 @@ public final class CraftingHelper {
     }
 
     private static boolean usableTableForCraft(ServerPlayerEntity bot, ServerWorld world, BlockPos botPos, BlockPos pos,
-                                               boolean onServerThread, boolean reachCooldownActive) {
+                                               boolean onServerThread) {
         if (!world.isChunkLoaded(pos) || !world.getBlockState(pos).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
             return false;
         }
         if (!CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
             return false;
         }
-        return !(reachCooldownActive && botPos.getSquaredDistance(pos) > STATION_REACH_SQ);
+        return !skipsFailedTable(bot, botPos, pos, onServerThread);
+    }
+
+    /**
+     * Whether {@code pos} is the table this bot failed to reach within the last
+     * {@link #CRAFT_TABLE_FAILURE_COOLDOWN_MS} and is still out of reach. Any other table is fair
+     * game. A server-thread call never walks, so the cooldown does not apply there.
+     */
+    private static boolean skipsFailedTable(ServerPlayerEntity bot, BlockPos botPos, BlockPos pos, boolean onServerThread) {
+        if (!CraftingStationPolicy.mayWalk(onServerThread)) {
+            return false;
+        }
+        ReachFail fail = CRAFT_TABLE_REACH_FAILURE.get(bot.getUuid());
+        if (fail == null || botPos.getSquaredDistance(pos) <= STATION_REACH_SQ) {
+            return false;
+        }
+        return CraftingStationPolicy.skipForReachCooldown(fail.posLong(), pos.asLong(),
+                System.currentTimeMillis() - fail.atMs(), CRAFT_TABLE_FAILURE_COOLDOWN_MS);
     }
 
     private static boolean isServerThreadCall(ServerCommandSource source, ServerPlayerEntity bot) {

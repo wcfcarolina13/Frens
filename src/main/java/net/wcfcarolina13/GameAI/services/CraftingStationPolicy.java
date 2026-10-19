@@ -185,4 +185,14 @@ public final class CraftingStationPolicy {
     public static int bedPlanksNeeded(int beds, boolean tableMustBeCrafted) {
         return 3 * Math.max(1, beds) + (tableMustBeCrafted ? TABLE_PLANKS : 0);
     }
+
+    /**
+     * Whether a table candidate is skipped because the bot failed to reach it {@code ageMs} ago:
+     * only the failed position, and only inside the cooldown (finding 13, 1.1.274). Any other
+     * table is still tried. A negative age (the clock went back) counts as expired, as in
+     * {@link LogThrottle#due}.
+     */
+    public static boolean skipForReachCooldown(long failedPosLong, long candidatePosLong, long ageMs, long cooldownMs) {
+        return failedPosLong == candidatePosLong && ageMs >= 0 && ageMs < cooldownMs;
+    }
 }

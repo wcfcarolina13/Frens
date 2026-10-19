@@ -459,6 +459,31 @@ class CraftingStationPolicyTest {
     }
 
     @Test
+    void reachCooldownSkipsOnlyTheFailedTableInsideTheWindow() {
+        // Finding 13: a buried table's reach failure hid a reachable table 15 blocks away.
+        long failed = 123_456_789L;
+        long other = 987_654_321L;
+        assertTrue(CraftingStationPolicy.skipForReachCooldown(failed, failed, 0L, 30_000L));
+        assertTrue(CraftingStationPolicy.skipForReachCooldown(failed, failed, 29_999L, 30_000L));
+        assertFalse(CraftingStationPolicy.skipForReachCooldown(failed, failed, 30_000L, 30_000L), "boundary is expired");
+        assertFalse(CraftingStationPolicy.skipForReachCooldown(failed, failed, 45_000L, 30_000L));
+        assertFalse(CraftingStationPolicy.skipForReachCooldown(failed, other, 1_000L, 30_000L), "another table is still tried");
+        assertFalse(CraftingStationPolicy.skipForReachCooldown(failed, failed, -5L, 30_000L), "clock went back: expired");
+    }
+
+    @Test
+    void aFailedReachForgetsTheRememberedTableAndEveryPickAsksAboutThatTable() throws IOException {
+        String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
+        int arm = body.indexOf("CRAFT_TABLE_REACH_FAILURE.put(");
+        assertTrue(arm >= 0);
+        assertTrue(blockAfter(body, body.lastIndexOf("if (", arm)).contains("LAST_KNOWN_CRAFTING_TABLE.remove("),
+                "the failed table must not stay remembered, or the next call never scans");
+        assertTrue(body.substring(arm, body.indexOf(';', arm)).contains("new ReachFail("), "the failure records its table");
+        assertEquals(4, count(body, "skipsFailedTable("), "remembered, looked-at, scanned and chosen tables");
+        assertFalse(body.contains("reachCooldownActive"), "no blanket cooldown left");
+    }
+
+    @Test
     void plankEquivalentCountsFourPlanksPerLog() {
         assertEquals(0, CraftingStationPolicy.plankEquivalent(0, 0));
         assertEquals(3, CraftingStationPolicy.plankEquivalent(3, 0));
