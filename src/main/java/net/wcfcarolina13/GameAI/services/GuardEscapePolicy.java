@@ -60,4 +60,16 @@ public final class GuardEscapePolicy {
                 ? Decision.CLEAR_AND_PROCEED
                 : Decision.PROCEED;
     }
+
+    /** A guard point at least this far below the bot after an escape counts as "in the hole". */
+    public static final double RECENTRE_MIN_RISE = 1.0D;
+
+    /**
+     * After a successful surface escape, whether the guard or patrol centre moves to the bot's new
+     * standing position. True when the old centre is at least {@link #RECENTRE_MIN_RISE} below the
+     * bot's new feet Y, so walking back to it would put the bot back in the hole.
+     */
+    public static boolean shouldRecentre(double oldCenterY, double newY) {
+        return newY - oldCenterY >= RECENTRE_MIN_RISE;
+    }
 }

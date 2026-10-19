@@ -3,6 +3,8 @@ package net.wcfcarolina13.GameAI.services;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GuardEscapePolicyTest {
 
@@ -78,5 +80,18 @@ class GuardEscapePolicyTest {
     void nightIsCheckedBeforeBase() {
         assertEquals(GuardEscapePolicy.Decision.SUPPRESS_NIGHT,
                 GuardEscapePolicy.decide(false, null, false, true, 20, true));
+    }
+
+    @Test
+    void recentresWhenGuardPointWasInTheHole() {
+        assertTrue(GuardEscapePolicy.shouldRecentre(60.0, 64.0));
+        assertTrue(GuardEscapePolicy.shouldRecentre(63.0, 64.0));
+    }
+
+    @Test
+    void keepsGuardPointAtOrAboveTheBot() {
+        assertFalse(GuardEscapePolicy.shouldRecentre(64.0, 64.0));
+        assertFalse(GuardEscapePolicy.shouldRecentre(63.5, 64.0));
+        assertFalse(GuardEscapePolicy.shouldRecentre(70.0, 64.0));
     }
 }

@@ -2031,7 +2031,9 @@ public class FrensClient implements ClientModInitializer {
         if (!isGameplayTipsEnabled()) {
             return;
         }
-        if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
+        // The '-' override is Questing-only (1.1.272 review). With Questing off '-' stays Go To
+        // Look and the dedicated Spells key opens spells.
+        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
             return;
         }
 
@@ -2067,9 +2069,9 @@ public class FrensClient implements ClientModInitializer {
         if (client == null || client.player == null || client.currentScreen != null) {
             return false;
         }
-        // Questing recruitment in progress keeps '-' for contact. With Questing off the override
-        // works in any world (finding 30).
-        if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
+        // Questing-only: recruitment in progress keeps '-' for contact, and with Questing off '-'
+        // stays Go To Look (1.1.272 review). The dedicated Spells key works in any world.
+        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
             return false;
         }
         return isHoldingSpellTriggerItem(client) || isNearEnchantingTable(client, 4);

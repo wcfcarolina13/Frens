@@ -46,7 +46,7 @@ public final class configNetworkManager {
             // overflow from disconnecting the player (finding 15). Skip the send instead.
             Frens.LOGGER.warn("sendSaveConfigPacket: config JSON is {} chars, over the {} limit; not sent",
                     json.length(), ConfigPayloadSizePolicy.MAX_CONFIG_JSON_CHARS);
-            notifySaveTooLargeOnce();
+            notifySaveTooLarge();
             return;
         }
         try {
@@ -60,22 +60,23 @@ public final class configNetworkManager {
         }
     }
 
-    private static final java.util.concurrent.atomic.AtomicBoolean SAVE_TOO_LARGE_NOTIFIED =
-            new java.util.concurrent.atomic.AtomicBoolean(false);
-
-    /** Client-side: tell the local player once per game session that a save was too large to sync. */
-    private static void notifySaveTooLargeOnce() {
-        if (!SAVE_TOO_LARGE_NOTIFIED.compareAndSet(false, true)) {
-            return;
-        }
+    /**
+     * Client-side: tell the local player a save was too large to send. Shown on every rejected
+     * save. On a remote server ManualConfig.save does not write locally, so nothing was kept.
+     */
+    private static void notifySaveTooLarge() {
         try {
+            boolean remote = Frens.CONFIG != null && Frens.CONFIG.isRemoteAuthoritative();
+            String line = remote
+                    ? "[Frens] Settings too large to send to the server. This change was not saved."
+                    : "[Frens] Settings too large to share with other players. Saved on this computer only.";
             // Every save site is a client screen, so this already runs on the render thread.
             net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
             if (client != null && client.player != null) {
-                client.player.sendMessage(Text.literal("[Frens] Settings too large to sync. Saved locally."), false);
+                client.player.sendMessage(Text.literal(line), false);
             }
         } catch (Throwable t) {
-            Frens.LOGGER.debug("notifySaveTooLargeOnce failed: {}", String.valueOf(t));
+            Frens.LOGGER.debug("notifySaveTooLarge failed: {}", String.valueOf(t));
         }
     }
 

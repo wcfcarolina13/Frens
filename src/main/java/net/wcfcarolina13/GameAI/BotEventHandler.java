@@ -1591,6 +1591,9 @@ public class BotEventHandler {
         registerBot(bot);
         // If a drop sweep is currently driving movement, cancel it so GUARD can take over immediately.
         DropSweepService.requestCancel(bot, "mode-switch-guard");
+        // A new guard order supersedes an earlier /bot stop. Without this the manual-stop latch
+        // made every surface escape HOLD forever (1.1.272 review).
+        TaskService.clearAbortLatch(bot.getUuid());
         setGuardState(bot, positionOf(bot), Math.max(3.0D, radius));
         setMode(bot, Mode.GUARD);
         setFollowTarget(bot, null);
@@ -1605,6 +1608,8 @@ public class BotEventHandler {
         registerBot(bot);
         // If a drop sweep is currently driving movement, cancel it so PATROL can take over immediately.
         DropSweepService.requestCancel(bot, "mode-switch-patrol");
+        // A new patrol order supersedes an earlier /bot stop (1.1.272 review).
+        TaskService.clearAbortLatch(bot.getUuid());
         GuardPatrolService.setPatrolState(bot.getUuid(), positionOf(bot), Math.max(3.0D, radius));
         setMode(bot, Mode.PATROL);
         setFollowTarget(bot, null);
@@ -3000,6 +3005,10 @@ public class BotEventHandler {
                     if (GUARD_ESCAPE_HOLD_LOGGED.add(botId)) {
                         LOGGER.info("[guard-escape] {} hold reason={}", name, latchReason);
                     }
+                    // Bound the re-check churn while the stop holds (1.1.272 review).
+                    if (server != null) {
+                        GuardPatrolService.startEscapeCooldown(botId, server.getTicks());
+                    }
                     return;
                 }
                 GUARD_ESCAPE_HOLD_LOGGED.remove(botId);
@@ -3034,6 +3043,22 @@ public class BotEventHandler {
                     }
                 } else {
                     LOGGER.info("{} escape: {} succeeded", label, name);
+                    // The guard point was in the hole: walking back to it would wedge the bot
+                    // again. Move it to where the bot now stands (1.1.272 review).
+                    Vec3d oldCenter = GuardPatrolService.getGuardCenter(botId);
+                    Vec3d standing = positionOf(bot);
+                    if (oldCenter != null && GuardEscapePolicy.shouldRecentre(oldCenter.y, standing.y)) {
+                        if ("Patrol".equals(label)) {
+                            GuardPatrolService.setPatrolState(botId, standing, GuardPatrolService.getPatrolRadius(botId));
+                            GuardPatrolService.setPatrolTarget(botId, null);
+                        } else {
+                            GuardPatrolService.setGuardState(botId, standing, GuardPatrolService.getGuardRadius(botId));
+                        }
+                        LOGGER.info("[guard-escape] {} guard point moved to {}", name, bot.getBlockPos().toShortString());
+                    }
+                    if (server != null) {
+                        GuardPatrolService.startEscapeCooldown(botId, server.getTicks());
+                    }
                 }
             } finally {
                 GuardPatrolService.setEscapeInProgress(botId, false);
