@@ -19,8 +19,12 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotIdleHobbiesService;
+import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
+import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy;
+import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -583,7 +587,7 @@ public final class BotAmbientChatter {
             long nextChatter = NEXT_CHATTER_TICK.getOrDefault(botUuid, nowTick + randomDelay());
 
             // Handle server restart: if next tick is way in the future, reset it
-            if (nowTick < 4_000L && nextChatter - nowTick > MAX_DELAY_TICKS * 2) {
+            if (nowTick < 4_000L && nextChatter - nowTick > paced(MAX_DELAY_TICKS) * 2) {
                 nextChatter = nowTick + randomDelay();
                 NEXT_CHATTER_TICK.put(botUuid, nextChatter);
             }
@@ -597,6 +601,14 @@ public final class BotAmbientChatter {
             // Avoid back-to-back ambient lines if we just spoke due to an event trigger.
             if (eventPlayed || (nowTick - state.lastAnyAmbientTick) < MIN_GAP_BETWEEN_AMBIENT_TICKS) {
                 NEXT_CHATTER_TICK.put(botUuid, nowTick + randomDelay());
+                continue;
+            }
+
+            // Cross-lane speech floor (finding 17, 1.1.273): another bot's line or a soul scene
+            // to the same player closes it. Dropped while closed, and the schedule is NOT
+            // consumed, so the line tries again on a later tick once the floor reopens.
+            UUID audience = resolveAudience(bot);
+            if (!SpeechFloorService.isFloorOpen(audience, SpeechFloorPolicy.Source.SCRIPTED_AMBIENT)) {
                 continue;
             }
 
@@ -620,6 +632,7 @@ public final class BotAmbientChatter {
             if (sound != null) {
                 // Play the sound (respects voiced dialogue setting internally)
                 if (BotDialoguePlayer.playSoundForBot(bot, sound, VoiceLineCategory.AMBIENT_CHATTER)) {
+                    SpeechFloorService.noteSpeech(audience, SpeechFloorPolicy.Source.SCRIPTED_AMBIENT);
                     state.lastAnyAmbientTick = nowTick;
                     state.lastScheduledSoundId = sound.id().toString();
                     LOGGER.debug("Ambient chatter for {}: {}", botName, sound.id().getPath());
@@ -713,14 +726,14 @@ public final class BotAmbientChatter {
             // Try a rare, themed entry callout (special cooldown).
             // Suppress if a dimension-handoff overhead line was already shown recently.
             if (!CompanionOverheadDialogueService.isRecentlyShown(bot.getUuid())) {
-                if (isNether && (nowTick - state.lastEnterNetherTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.80f) {
+                if (isNether && (nowTick - state.lastEnterNetherTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.80f) {
                     if (playEvent(bot, NETHER_ENTRY_CHATTER[RNG.nextInt(NETHER_ENTRY_CHATTER.length)])) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastEnterNetherTick = nowTick;
                         return true;
                     }
                 }
-                if (isEnd && (nowTick - state.lastEnterEndTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.85f) {
+                if (isEnd && (nowTick - state.lastEnterEndTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.85f) {
                     if (playEvent(bot, END_ENTRY_CHATTER[RNG.nextInt(END_ENTRY_CHATTER.length)])) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastEnterEndTick = nowTick;
@@ -899,7 +912,7 @@ public final class BotAmbientChatter {
             if (kindPrev == -1) {
                 state.lastWeatherKind = kindNow;
             } else if (kindNow != kindPrev
-                    && (nowTick - state.lastWeatherEventTick) >= EVENT_COOLDOWN_WEATHER_TICKS
+                    && (nowTick - state.lastWeatherEventTick) >= paced(EVENT_COOLDOWN_WEATHER_TICKS)
                     && RNG.nextFloat() < 0.85f) {
                 SoundEvent weatherLine = switch (kindNow) {
                     case 3 -> BotDialogueSounds.LINE_WEATHER_THUNDER;
@@ -937,7 +950,7 @@ public final class BotAmbientChatter {
 
             if (afterNoon
                     && state.lastSunsetSoonDay != day
-                    && (nowTick - state.lastSunsetSoonEventTick) >= EVENT_COOLDOWN_SUNSET_SOON_TICKS
+                    && (nowTick - state.lastSunsetSoonEventTick) >= paced(EVENT_COOLDOWN_SUNSET_SOON_TICKS)
                     && RNG.nextFloat() < 0.55f) {
                 boolean nearBase = BotHomeService.isNearAnyBase(bot, 64.0D);
                 boolean nearRecentBed = BotHomeService.isNearRecentSleep(bot, 48.0D, RECENT_SLEEP_WINDOW_MS);
@@ -961,7 +974,7 @@ public final class BotAmbientChatter {
             if (prev != null && !prev.isBlank() && currentBiomePath != null && !currentBiomePath.isBlank() && !prev.equals(currentBiomePath)) {
                 SoundEvent biomeLine = biomeFlavorSound(isNether, isEnd, currentBiomePath);
                 if (biomeLine != null
-                        && (nowTick - state.lastBiomeFlavorTick) >= EVENT_COOLDOWN_BIOME_TICKS
+                        && (nowTick - state.lastBiomeFlavorTick) >= paced(EVENT_COOLDOWN_BIOME_TICKS)
                         && RNG.nextFloat() < 0.80f) {
                     if (playEvent(bot, biomeLine)) {
                         state.lastAnyAmbientTick = nowTick;
@@ -985,7 +998,7 @@ public final class BotAmbientChatter {
         if (doScan) {
             // Portal proximity triggers (Overworld)
             if (isOverworld) {
-                if (hasNetherPortalOW && !state.hadNetherPortalOW && (nowTick - state.lastNetherPortalOWEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.70f) {
+                if (hasNetherPortalOW && !state.hadNetherPortalOW && (nowTick - state.lastNetherPortalOWEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.70f) {
                     if (playEvent(bot, NETHER_PORTAL_OW_CHATTER[RNG.nextInt(NETHER_PORTAL_OW_CHATTER.length)])) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastNetherPortalOWEventTick = nowTick;
@@ -997,7 +1010,7 @@ public final class BotAmbientChatter {
                     }
                 }
 
-                if (hasEndPortalOW && !state.hadEndPortalOW && (nowTick - state.lastEndPortalOWEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.80f) {
+                if (hasEndPortalOW && !state.hadEndPortalOW && (nowTick - state.lastEndPortalOWEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.80f) {
                     if (playEvent(bot, END_PORTAL_OW_CHATTER[RNG.nextInt(END_PORTAL_OW_CHATTER.length)])) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastEndPortalOWEventTick = nowTick;
@@ -1012,7 +1025,7 @@ public final class BotAmbientChatter {
 
             // Weird portal triggers (wrong dimension — rare, high roll chance)
             if (isNether) {
-                if (hasEndPortalNether && !state.hadEndPortalNether && (nowTick - state.lastEndPortalNetherEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.90f) {
+                if (hasEndPortalNether && !state.hadEndPortalNether && (nowTick - state.lastEndPortalNetherEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.90f) {
                     if (playEvent(bot, WEIRD_END_IN_NETHER_CHATTER[RNG.nextInt(WEIRD_END_IN_NETHER_CHATTER.length)])) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastEndPortalNetherEventTick = nowTick;
@@ -1024,7 +1037,7 @@ public final class BotAmbientChatter {
                 }
             }
             if (isEnd) {
-                if (hasNetherPortalEnd && !state.hadNetherPortalEnd && (nowTick - state.lastNetherPortalEndEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.90f) {
+                if (hasNetherPortalEnd && !state.hadNetherPortalEnd && (nowTick - state.lastNetherPortalEndEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.90f) {
                     if (playEvent(bot, WEIRD_NETHER_IN_END_CHATTER[RNG.nextInt(WEIRD_NETHER_IN_END_CHATTER.length)])) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastNetherPortalEndEventTick = nowTick;
@@ -1038,7 +1051,7 @@ public final class BotAmbientChatter {
 
             // Nether/End discovery triggers first so we don't waste the opportunity on overworld cave flavor.
             if (isNether) {
-                if (hasNetherNetherBricks && !state.hadNetherNetherBricks && (nowTick - state.lastNetherFortressEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.80f) {
+                if (hasNetherNetherBricks && !state.hadNetherNetherBricks && (nowTick - state.lastNetherFortressEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.80f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_NETHER_FORTRESS)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastNetherFortressEventTick = nowTick;
@@ -1054,7 +1067,7 @@ public final class BotAmbientChatter {
                     }
                 }
 
-                if (hasNetherBlackstone && !state.hadNetherBlackstone && (nowTick - state.lastNetherBlackstoneEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.60f) {
+                if (hasNetherBlackstone && !state.hadNetherBlackstone && (nowTick - state.lastNetherBlackstoneEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.60f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_NETHER_BASTION)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastNetherBlackstoneEventTick = nowTick;
@@ -1070,7 +1083,7 @@ public final class BotAmbientChatter {
                     }
                 }
 
-                if (hasNetherSoulSand && !state.hadNetherSoulSand && (nowTick - state.lastNetherSoulSandEventTick) >= EVENT_COOLDOWN_MINOR_TICKS && RNG.nextFloat() < 0.65f) {
+                if (hasNetherSoulSand && !state.hadNetherSoulSand && (nowTick - state.lastNetherSoulSandEventTick) >= paced(EVENT_COOLDOWN_MINOR_TICKS) && RNG.nextFloat() < 0.65f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_NETHER_SOUL_SAND)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastNetherSoulSandEventTick = nowTick;
@@ -1086,7 +1099,7 @@ public final class BotAmbientChatter {
                     }
                 }
 
-                if (hasNetherLava && !state.hadNetherLava && (nowTick - state.lastNetherLavaEventTick) >= EVENT_COOLDOWN_MINOR_TICKS && RNG.nextFloat() < 0.60f) {
+                if (hasNetherLava && !state.hadNetherLava && (nowTick - state.lastNetherLavaEventTick) >= paced(EVENT_COOLDOWN_MINOR_TICKS) && RNG.nextFloat() < 0.60f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_NETHER_LAVA)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastNetherLavaEventTick = nowTick;
@@ -1102,7 +1115,7 @@ public final class BotAmbientChatter {
                     }
                 }
 
-                if (hasNetherGhast && !state.hadNetherGhast && (nowTick - state.lastNetherGhastEventTick) >= EVENT_COOLDOWN_MINOR_TICKS && RNG.nextFloat() < 0.75f) {
+                if (hasNetherGhast && !state.hadNetherGhast && (nowTick - state.lastNetherGhastEventTick) >= paced(EVENT_COOLDOWN_MINOR_TICKS) && RNG.nextFloat() < 0.75f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_NETHER_GHASTS)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastNetherGhastEventTick = nowTick;
@@ -1118,7 +1131,7 @@ public final class BotAmbientChatter {
                     }
                 }
 
-                if (hasNetherPiglins && !state.hadNetherPiglins && (nowTick - state.lastNetherPiglinsEventTick) >= EVENT_COOLDOWN_MINOR_TICKS && RNG.nextFloat() < 0.70f) {
+                if (hasNetherPiglins && !state.hadNetherPiglins && (nowTick - state.lastNetherPiglinsEventTick) >= paced(EVENT_COOLDOWN_MINOR_TICKS) && RNG.nextFloat() < 0.70f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_NETHER_PIGLINS)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastNetherPiglinsEventTick = nowTick;
@@ -1136,7 +1149,7 @@ public final class BotAmbientChatter {
             }
 
             if (isEnd) {
-                if (hasEndGateway && !state.hadEndGateway && (nowTick - state.lastEndGatewayEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.85f) {
+                if (hasEndGateway && !state.hadEndGateway && (nowTick - state.lastEndGatewayEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.85f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_END_GATEWAY)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastEndGatewayEventTick = nowTick;
@@ -1150,7 +1163,7 @@ public final class BotAmbientChatter {
                     }
                 }
 
-                if (hasEndCity && !state.hadEndCity && (nowTick - state.lastEndCityEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.80f) {
+                if (hasEndCity && !state.hadEndCity && (nowTick - state.lastEndCityEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.80f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_END_CITY)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastEndCityEventTick = nowTick;
@@ -1164,7 +1177,7 @@ public final class BotAmbientChatter {
                     }
                 }
 
-                if (hasEndChorus && !state.hadEndChorus && (nowTick - state.lastEndChorusEventTick) >= EVENT_COOLDOWN_MINOR_TICKS && RNG.nextFloat() < 0.70f) {
+                if (hasEndChorus && !state.hadEndChorus && (nowTick - state.lastEndChorusEventTick) >= paced(EVENT_COOLDOWN_MINOR_TICKS) && RNG.nextFloat() < 0.70f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_END_CHORUS)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastEndChorusEventTick = nowTick;
@@ -1178,7 +1191,7 @@ public final class BotAmbientChatter {
                     }
                 }
 
-                if (hasEndermen && !state.hadEndermen && (nowTick - state.lastEndermenEventTick) >= EVENT_COOLDOWN_MINOR_TICKS && RNG.nextFloat() < 0.65f) {
+                if (hasEndermen && !state.hadEndermen && (nowTick - state.lastEndermenEventTick) >= paced(EVENT_COOLDOWN_MINOR_TICKS) && RNG.nextFloat() < 0.65f) {
                     if (playEvent(bot, BotDialogueSounds.LINE_END_ENDERMEN)) {
                         state.lastAnyAmbientTick = nowTick;
                         state.lastEndermenEventTick = nowTick;
@@ -1193,7 +1206,7 @@ public final class BotAmbientChatter {
                 }
             }
 
-            if (hasAmethyst && !state.hadAmethyst && (nowTick - state.lastAmethystEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.70f) {
+            if (hasAmethyst && !state.hadAmethyst && (nowTick - state.lastAmethystEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.70f) {
                 if (playEvent(bot, AMETHYST_CHATTER[RNG.nextInt(AMETHYST_CHATTER.length)])) {
                     state.lastAnyAmbientTick = nowTick;
                     state.lastAmethystEventTick = nowTick;
@@ -1207,7 +1220,7 @@ public final class BotAmbientChatter {
                 }
             }
 
-            if (hasBats && !state.hadBats && (nowTick - state.lastBatEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.65f) {
+            if (hasBats && !state.hadBats && (nowTick - state.lastBatEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.65f) {
                 if (playEvent(bot, BAT_CHATTER[RNG.nextInt(BAT_CHATTER.length)])) {
                     state.lastAnyAmbientTick = nowTick;
                     state.lastBatEventTick = nowTick;
@@ -1221,7 +1234,7 @@ public final class BotAmbientChatter {
                 }
             }
 
-            if (hasDripstone && !state.hadDripstone && (nowTick - state.lastDripstoneEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.70f) {
+            if (hasDripstone && !state.hadDripstone && (nowTick - state.lastDripstoneEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.70f) {
                 if (playEvent(bot, DRIPSTONE_CHATTER[RNG.nextInt(DRIPSTONE_CHATTER.length)])) {
                     state.lastAnyAmbientTick = nowTick;
                     state.lastDripstoneEventTick = nowTick;
@@ -1235,7 +1248,7 @@ public final class BotAmbientChatter {
                 }
             }
 
-            if (hasDeepslate && !state.hadDeepslate && (nowTick - state.lastDeepslateEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.60f) {
+            if (hasDeepslate && !state.hadDeepslate && (nowTick - state.lastDeepslateEventTick) >= paced(EVENT_COOLDOWN_SPECIAL_TICKS) && RNG.nextFloat() < 0.60f) {
                 if (playEvent(bot, DEEPSLATE_CHATTER[RNG.nextInt(DEEPSLATE_CHATTER.length)])) {
                     state.lastAnyAmbientTick = nowTick;
                     state.lastDeepslateEventTick = nowTick;
@@ -1251,7 +1264,7 @@ public final class BotAmbientChatter {
         }
 
         // Cheaper state transitions.
-        if (isOverworld && !state.wasUnderground && isUnderground && (nowTick - state.lastEnterCaveTick) >= EVENT_COOLDOWN_MINOR_TICKS && RNG.nextFloat() < 0.55f) {
+        if (isOverworld && !state.wasUnderground && isUnderground && (nowTick - state.lastEnterCaveTick) >= paced(EVENT_COOLDOWN_MINOR_TICKS) && RNG.nextFloat() < 0.55f) {
             if (playEvent(bot, AMBIENT_CAVE_CHATTER[RNG.nextInt(AMBIENT_CAVE_CHATTER.length)])) {
                 state.lastAnyAmbientTick = nowTick;
                 state.lastEnterCaveTick = nowTick;
@@ -1270,7 +1283,7 @@ public final class BotAmbientChatter {
         if (isOverworld
                 && !state.wasDark
                 && darkForEvents
-                && (nowTick - state.lastEnterDarkTick) >= EVENT_COOLDOWN_MINOR_TICKS
+                && (nowTick - state.lastEnterDarkTick) >= paced(EVENT_COOLDOWN_MINOR_TICKS)
                 && RNG.nextFloat() < 0.35f) {
             if (playEvent(bot, DARK_CHATTER[RNG.nextInt(DARK_CHATTER.length)])) {
                 state.lastAnyAmbientTick = nowTick;
@@ -1321,8 +1334,15 @@ public final class BotAmbientChatter {
         if (bot == null || sound == null) {
             return false;
         }
+        // Speech floor (finding 17): a closed floor drops the event line. Callers stamp their
+        // event cooldown only on true, so the cooldown is not consumed.
+        UUID audience = resolveAudience(bot);
+        if (!SpeechFloorService.isFloorOpen(audience, SpeechFloorPolicy.Source.SCRIPTED_AMBIENT)) {
+            return false;
+        }
         boolean played = BotDialoguePlayer.playSoundForBot(bot, sound, VoiceLineCategory.AMBIENT_CHATTER);
         if (played) {
+            SpeechFloorService.noteSpeech(audience, SpeechFloorPolicy.Source.SCRIPTED_AMBIENT);
             String text = DialogueTextMapper.textForSound(sound);
             if (text != null) {
                 CompanionOverheadDialogueService.showOverheadLine(bot, text, 3_000, 48.0, "ambient", null);
@@ -1370,7 +1390,28 @@ public final class BotAmbientChatter {
     }
 
     private static long randomDelay() {
-        return MIN_DELAY_TICKS + RNG.nextLong(MAX_DELAY_TICKS - MIN_DELAY_TICKS);
+        return paced(MIN_DELAY_TICKS + RNG.nextLong(MAX_DELAY_TICKS - MIN_DELAY_TICKS));
+    }
+
+    /**
+     * Scales a chatter delay or event cooldown by the Scripted rate slider (finding 17): rate 0 is
+     * ×8 rarer, 100 is ×1/8, never off. Read live so a slider change applies to the next check.
+     */
+    private static long paced(long baseTicks) {
+        return DialoguePacing.scaledTicks(DialoguePacing.Stream.SCRIPTED, baseTicks);
+    }
+
+    /**
+     * The player this bot's ambient lines are aimed at (its online controller), or {@code null}
+     * when there is none, in which case the floor is skipped. Same resolver as
+     * CompanionContextReactionService so both scripted paths share one floor with the soul lanes.
+     */
+    private static UUID resolveAudience(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return null;
+        }
+        ServerPlayerEntity controller = CompanionCommunicationPolicy.resolveController(world.getServer(), bot);
+        return controller == null ? null : controller.getUuid();
     }
 
     // How long a hobby context is considered "recent" (10 minutes)

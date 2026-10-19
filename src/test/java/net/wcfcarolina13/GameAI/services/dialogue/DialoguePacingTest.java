@@ -38,6 +38,26 @@ class DialoguePacingTest {
     }
 
     @Test
+    void ticksScaleLikeCooldownsAndNeverDropBelowOne() {
+        assertEquals(19_200L, DialoguePacing.scaledTicks(0, 2_400L));
+        assertEquals(2_400L, DialoguePacing.scaledTicks(50, 2_400L));
+        assertEquals(300L, DialoguePacing.scaledTicks(100, 2_400L));
+        assertEquals(1L, DialoguePacing.scaledTicks(100, 1L), "0.125 rounds to 0, floored at 1");
+        assertEquals(1L, DialoguePacing.scaledTicks(50, 0L), "floored at 1");
+    }
+
+    @Test
+    void scriptedRateZeroIsRarerNotOff() {
+        // Finding 17 (1.1.273): rate 0 must make ambient chatter rarer, never silence it.
+        assertEquals(0.0012 / 8.0, DialoguePacing.scaledChance(0, 0.0012), 1e-12);
+        assertEquals(0.0012, DialoguePacing.scaledChance(50, 0.0012), 1e-12);
+        assertEquals(0.0096, DialoguePacing.scaledChance(100, 0.0012), 1e-12);
+        assertEquals(0.005, DialoguePacing.scaledChance(0, 0.04), 1e-12);
+        assertEquals(0.32, DialoguePacing.scaledChance(100, 0.04), 1e-12);
+        assertTrue(DialoguePacing.scaledChance(0, 0.008) > 0.0);
+    }
+
+    @Test
     void describeReadsAsAHumanBand() {
         assertEquals("every ~8–15 min", DialoguePacing.describe(50, 8 * 60_000L, 15 * 60_000L));
         assertEquals("every ~1–2 min", DialoguePacing.describe(100, 8 * 60_000L, 15 * 60_000L));

@@ -35,6 +35,14 @@ public final class DialoguePacing {
         return Math.round(baseMs * multiplier(rate));
     }
 
+    /**
+     * A tick-counted cooldown or delay scaled like {@link #scaledCooldown(int, long)}, never below
+     * one tick so a scaled gap can't collapse to "every tick" at the chatty end.
+     */
+    public static long scaledTicks(int rate, long baseTicks) {
+        return Math.max(1L, Math.round(baseTicks * multiplier(rate)));
+    }
+
     public static double scaledChance(int rate, double base) {
         return Math.max(0.0, Math.min(1.0, base / multiplier(rate)));
     }
@@ -65,6 +73,10 @@ public final class DialoguePacing {
 
     public static long scaledCooldown(Stream stream, long baseMs) {
         return scaledCooldown(rate(stream), baseMs);
+    }
+
+    public static long scaledTicks(Stream stream, long baseTicks) {
+        return scaledTicks(rate(stream), baseTicks);
     }
 
     public static double scaledChance(Stream stream, double base) {

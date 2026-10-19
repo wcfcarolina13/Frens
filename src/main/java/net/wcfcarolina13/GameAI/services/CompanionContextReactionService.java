@@ -43,6 +43,7 @@ import net.minecraft.item.Items;
 import net.wcfcarolina13.Entity.LookController;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -56,6 +57,7 @@ import net.wcfcarolina13.ChatUtils.BotDialogueSounds;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.ChatUtils.TextLineVisibilityService;
+import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
 import net.wcfcarolina13.GameAI.services.dialogue.ScriptedDelivery;
 import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy;
 import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService;
@@ -995,7 +997,7 @@ public final class CompanionContextReactionService {
         if (inCombat || bot.hasVehicle()) {
             return false;
         }
-        if (RNG.nextDouble() > 0.04D) {
+        if (RNG.nextDouble() > DialoguePacing.scaledChance(DialoguePacing.Stream.SCRIPTED, 0.04D)) {
             return false;
         }
         return tryTrigger(bot, "random_idle_not_combat", AMBIENT_LINES, null, false);
@@ -1010,7 +1012,7 @@ public final class CompanionContextReactionService {
         if (inCombat || bot.hasVehicle()) return false;
         if (!world.getDimension().hasSkyLight()) return false;
         if (!world.isSkyVisible(bot.getBlockPos().up())) return false;
-        if (RNG.nextDouble() > 0.008D) return false;
+        if (RNG.nextDouble() > DialoguePacing.scaledChance(DialoguePacing.Stream.SCRIPTED, 0.008D)) return false;
         WeightedLine[] pool = hasNearbyLog(world, bot.getBlockPos(), 12)
                 ? OUTDOOR_AMBIENT_LINES
                 : OUTDOOR_AMBIENT_SKY_ONLY_LINES;
@@ -1164,7 +1166,9 @@ public final class CompanionContextReactionService {
         TriggerState state = STATE.computeIfAbsent(botId, ignored -> new TriggerState());
 
         long now = System.currentTimeMillis();
-        long cooldown = TRIGGER_COOLDOWN_MS.getOrDefault(triggerKey, COOLDOWN_90S_MS);
+        // Organic lines follow the Scripted rate slider (finding 17): rate 0 is x8 rarer, never off.
+        long cooldown = DialoguePacing.scaledCooldown(DialoguePacing.Stream.SCRIPTED,
+                TRIGGER_COOLDOWN_MS.getOrDefault(triggerKey, COOLDOWN_90S_MS));
         long last = state.lastTriggerMs.getOrDefault(triggerKey, 0L);
         if (forcedLineId == null && now - last < cooldown) {
             return false;
@@ -2270,6 +2274,24 @@ public final class CompanionContextReactionService {
     }
 
     /**
+     * Any axe in the main inventory, hotbar or offhand, by the item tag (not the translation key:
+     * waxed copper ids contain "axe"). Durability is ignored; a worn axe is still an axe.
+     */
+    private static boolean holdsAnyAxe(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        for (int slot = 0; slot < bot.getInventory().size(); slot++) {
+            ItemStack stack = bot.getInventory().getStack(slot);
+            if (!stack.isEmpty() && stack.isIn(ItemTags.AXES)) {
+                return true;
+            }
+        }
+        ItemStack offhand = bot.getOffHandStack();
+        return !offhand.isEmpty() && offhand.isIn(ItemTags.AXES);
+    }
+
+    /**
      * Called from the server-wide block-break hook for any player. Fans out to:
      *
      * <ul>
@@ -2298,7 +2320,9 @@ public final class CompanionContextReactionService {
             if (directlyBelowFeet) return;
 
             if (state.isIn(BlockTags.LOGS)) {
-                if (RNG.nextDouble() < 0.30D) {
+                // "Time to punch some trees" is only true for a bot with no axe: a woodcut bot
+                // that took an axe from a chest was still saying it (1.1.273).
+                if (TreePunchLinePolicy.shouldNarrate(true, holdsAnyAxe(player)) && RNG.nextDouble() < 0.30D) {
                     tryTrigger(player, "tree_punch_first", TREE_PUNCH_LINES, null, false);
                 }
                 return;

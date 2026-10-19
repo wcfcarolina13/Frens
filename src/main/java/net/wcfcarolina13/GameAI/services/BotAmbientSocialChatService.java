@@ -6,6 +6,10 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.services.dialogue.DialoguePacing;
+import net.wcfcarolina13.GameAI.services.dialogue.ScriptedDelivery;
+import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy;
+import net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -126,12 +130,14 @@ public final class BotAmbientSocialChatService {
                     }
 
                     // If they've been nearby a while, very occasionally say something.
-                    if ((nowTick - nearSince) > NEAR_CHAT_AFTER_TICKS && (nowTick - lastChat) > NEAR_CHAT_COOLDOWN_TICKS) {
-                        // ~0.12% chance per tick when eligible => roughly once every ~40-60s while hovering.
-                        if (Math.random() < 0.0012) {
+                    // Cooldown and chance follow the Scripted rate slider (finding 17): rate 0 is
+                    // x8 rarer, never off.
+                    long nearCooldown = DialoguePacing.scaledTicks(DialoguePacing.Stream.SCRIPTED, NEAR_CHAT_COOLDOWN_TICKS);
+                    if ((nowTick - nearSince) > NEAR_CHAT_AFTER_TICKS && (nowTick - lastChat) > nearCooldown) {
+                        // ~0.12% chance per tick when eligible at rate 50 => roughly once every ~40-60s while hovering.
+                        if (Math.random() < DialoguePacing.scaledChance(DialoguePacing.Stream.SCRIPTED, 0.0012)) {
                             String msg = pickNearbyRemarkLine(player, bot);
-                            if (msg != null && !msg.isBlank()) {
-                                say(bot, msg);
+                            if (msg != null && !msg.isBlank() && sayRemark(bot, msg)) {
                                 LAST_CHAT_TICK.put(key, nowTick);
                             }
                         }
@@ -153,6 +159,43 @@ public final class BotAmbientSocialChatService {
         } catch (Throwable t) {
             LOGGER.debug("Failed to send social chat line: {}", t.getMessage());
         }
+    }
+
+    /**
+     * A near-remark through the cross-lane speech floor (finding 17). Returns false, without the
+     * caller stamping its cooldown, when the floor is closed or nothing surfaced; arms the floor
+     * when the line was shown. Greetings stay on {@link #say} (a dropped greeting would be lost).
+     */
+    private static boolean sayRemark(ServerPlayerEntity bot, String msg) {
+        if (bot == null || msg == null || msg.isBlank()) {
+            return false;
+        }
+        UUID audience = resolveAudience(bot);
+        if (!SpeechFloorService.isFloorOpen(audience, SpeechFloorPolicy.Source.SCRIPTED_AMBIENT)) {
+            return false;
+        }
+        try {
+            ScriptedDelivery.Surface surface =
+                    CompanionOverheadDialogueService.showOverheadLine(bot, msg, 2_800, 24.0D, "ambient-social", null);
+            boolean delivered = surface != null && ScriptedDelivery.delivered(
+                    surface.textShown(), surface.voice(), ScriptedDelivery.VoiceOutcome.NONE, false);
+            if (delivered) {
+                SpeechFloorService.noteSpeech(audience, SpeechFloorPolicy.Source.SCRIPTED_AMBIENT);
+            }
+            return delivered;
+        } catch (Throwable t) {
+            LOGGER.debug("Failed to send social chat line: {}", t.getMessage());
+            return false;
+        }
+    }
+
+    /** The bot's online controller (same resolver the other scripted paths use), or null = no floor. */
+    private static UUID resolveAudience(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return null;
+        }
+        ServerPlayerEntity controller = CompanionCommunicationPolicy.resolveController(world.getServer(), bot);
+        return controller == null ? null : controller.getUuid();
     }
 
     private static String pickGreetingLine(GreetingPolicy.Pool pool, String playerName) {
