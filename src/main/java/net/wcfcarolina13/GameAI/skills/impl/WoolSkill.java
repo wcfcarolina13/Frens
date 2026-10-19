@@ -87,6 +87,9 @@ public class WoolSkill implements Skill {
             return SkillExecutionResult.failure("No active bot.");
         }
         ServerWorld world = source.getWorld();
+        // A sheep position remembered from an earlier run anchors the explore probes (and their Y);
+        // a stale anchor far above or below the bot makes every probe fail moveTo's dy check.
+        LAST_SEEN_SHEEP.remove(bot.getUuid());
 
         if (!ensureShears(bot, source)) {
             return SkillExecutionResult.failure("Missing shears and cannot craft.");
@@ -114,6 +117,7 @@ public class WoolSkill implements Skill {
         int sheared = 0;
         Set<UUID> failedSheepIds = new HashSet<>(); // Track sheep we couldn't reach to avoid oscillating
         long lastFailedClearTime = System.currentTimeMillis();
+        int stuckExploreCycles = 0;
         final long FAILED_CLEAR_INTERVAL_MS = 30_000L; // Reset failed list every 30 seconds to allow wool regrowth
 
         while (System.currentTimeMillis() - startedAt < MAX_JOB_MILLIS) {
@@ -157,8 +161,20 @@ public class WoolSkill implements Skill {
             if (candidates.isEmpty()) {
                 // Clear failed set when exploring - give them another chance after moving
                 failedSheepIds.clear();
-                if (!exploreForSheep(bot, world, source, radius)) {
+                ExploreOutcome outcome = exploreForSheep(bot, world, source, radius);
+                if (outcome == ExploreOutcome.STOP) {
                     break;
+                }
+                if (outcome == ExploreOutcome.STUCK) {
+                    stuckExploreCycles++;
+                    if (WoolExplorePolicy.shouldGiveUp(stuckExploreCycles)) {
+                        LOGGER.warn("Wool: {} consecutive stuck explore cycles; stopping", stuckExploreCycles);
+                        ChatUtils.sendSystemMessage(source, "I'm stuck and can't reach any sheep, so I'm stopping wool.");
+                        return SkillExecutionResult.failure("Stuck: could not reach any sheep.");
+                    }
+                    sleep((int) WoolExplorePolicy.STUCK_PAUSE_MS);
+                } else {
+                    stuckExploreCycles = 0;
                 }
                 continue;
             }
@@ -199,6 +215,7 @@ public class WoolSkill implements Skill {
             boolean shearSuccess = BotActions.interactEntity(bot, target, Hand.MAIN_HAND);
             if (shearSuccess) {
                 sheared++;
+                stuckExploreCycles = 0;
                 LOGGER.info("Sheared sheep {} (total={})", target.getUuid(), sheared);
             } else {
                 LOGGER.debug("interactEntity returned false for sheep {}", target.getUuid());
@@ -490,7 +507,10 @@ public class WoolSkill implements Skill {
         return visible;
     }
 
-    private boolean exploreForSheep(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, int radius) {
+    /** Result of one explore cycle: the bot moved (or found sheep), could not move at all, or must stop. */
+    private enum ExploreOutcome { MOVED, STUCK, STOP }
+
+    private ExploreOutcome exploreForSheep(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, int radius) {
         BlockPos last = LAST_SEEN_SHEEP.get(bot.getUuid());
         BlockPos anchor = last != null ? last : bot.getBlockPos();
 
@@ -515,7 +535,7 @@ public class WoolSkill implements Skill {
 
         if (candidates.isEmpty()) {
             ChatUtils.sendSystemMessage(source, "All nearby areas explored recently. Sheep may need time to regrow wool.");
-            return false;
+            return ExploreOutcome.STOP;
         }
 
         // Prefer unexplored zones first, then closest to bot
@@ -529,17 +549,19 @@ public class WoolSkill implements Skill {
         });
 
         int consecutiveFails = 0;
+        boolean moved = false;
         for (BlockPos probe : candidates) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 BotActions.stop(bot);
-                return false;
+                return ExploreOutcome.STOP;
             }
             probe = probe.withY(anchor.getY());
             if (moveTo(bot, source, probe, true)) {
                 consecutiveFails = 0;
+                moved = true;
                 zones.put(packZone(probe), now);
                 if (!visibleSheep(bot, world, radius).isEmpty()) {
-                    return true;
+                    return ExploreOutcome.MOVED;
                 }
             } else {
                 consecutiveFails++;
@@ -553,17 +575,20 @@ public class WoolSkill implements Skill {
                                 bot.getBlockY(), surface.getY(), surface.toShortString());
                         if (moveTo(bot, source, surface, true)) {
                             consecutiveFails = 0;
+                            moved = true;
                             continue; // recovered — retry exploration from surface
                         }
                     }
                     // Still stuck after recovery attempt — bail out of this cycle
                     LOGGER.warn("Exploration stuck after {} failures at Y={}; aborting explore cycle",
                             consecutiveFails, bot.getBlockY());
-                    return true; // return true to keep the main loop alive for next iteration
+                    // The caller counts STUCK cycles, pauses between them and gives up after a few.
+                    return moved ? ExploreOutcome.MOVED : ExploreOutcome.STUCK;
                 }
             }
         }
-        return true; // explored but found nothing
+        // Explored but found nothing. A cycle where no probe could be reached is stuck too.
+        return moved ? ExploreOutcome.MOVED : ExploreOutcome.STUCK;
     }
 
     private static long packZone(BlockPos pos) {

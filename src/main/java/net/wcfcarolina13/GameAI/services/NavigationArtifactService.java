@@ -1134,6 +1134,11 @@ public final class NavigationArtifactService {
             TRAVEL_COOLDOWNS.put(botUuid, now);
         }
 
+        // Every gate has passed and the bot is leaving: stop an ambient hobby (woodcut, fishing,
+        // a travel-wait offload) so it does not keep working at the spot being left behind
+        // (finding 33). Only AMBIENT tasks are touched; a commanded task keeps its slot.
+        TaskService.interruptAmbientTask(botUuid, "travel-depart");
+
         // Set mode to TRAVELING so other systems ignore this bot.
         BotCommandStateService.State state = BotCommandStateService.stateFor(botUuid);
         if (state != null) {

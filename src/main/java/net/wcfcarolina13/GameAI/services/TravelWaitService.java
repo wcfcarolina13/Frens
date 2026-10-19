@@ -148,7 +148,7 @@ public final class TravelWaitService {
             // Note: the probe only runs while no task is active, so `chestNearby` can be stale for
             // up to CHEST_PROBE_INTERVAL_TICKS (200t) after a hobby ends — it is a hint, not a fact.
             if (remaining > 0 && !taskActive
-                    && now - pending.lastChestProbeTick >= CHEST_PROBE_INTERVAL_TICKS) {
+                    && TickIntervals.elapsed(now, pending.lastChestProbeTick, CHEST_PROBE_INTERVAL_TICKS)) {
                 pending.lastChestProbeTick = now;
                 pending.chestNearby = probeNearbyChest(bot);
             }
@@ -195,7 +195,7 @@ public final class TravelWaitService {
                     // shouldNudgeHobby keeps the nudge off while any task holds the slot — including
                     // an offload this service started, which surfaces here as hobbyRunning=AMBIENT.
                     if (!hobbyRunning && TravelWaitPolicy.shouldNudgeHobby(inputs)
-                            && now - pending.lastHobbyNudgeTick >= HOBBY_NUDGE_INTERVAL_TICKS) {
+                            && TickIntervals.elapsed(now, pending.lastHobbyNudgeTick, HOBBY_NUDGE_INTERVAL_TICKS)) {
                         pending.lastHobbyNudgeTick = now;
                         BotIdleHobbiesService.requestDecisionNow(bot);
                     }

@@ -113,12 +113,8 @@ public final class TravelWaitPolicy {
         if (offloadFailures >= maxFailures) {
             return false;
         }
-        if (lastOffloadTick == Long.MIN_VALUE) {
-            return true;
-        }
-        long elapsed = nowTick - lastOffloadTick;
-        // A world-time rewind (negative elapsed) re-arms rather than locking the request out.
-        return elapsed < 0 || elapsed >= OFFLOAD_INTERVAL_TICKS;
+        // Never dispatched, or a world-time rewind, re-arms rather than locking the request out.
+        return TickIntervals.elapsed(nowTick, lastOffloadTick, OFFLOAD_INTERVAL_TICKS);
     }
 
     /**

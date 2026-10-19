@@ -182,4 +182,24 @@ class TravelWaitPolicyTest {
         assertFalse(TravelWaitPolicy.shouldDispatchOffload(1000L, Long.MIN_VALUE,
                 TravelWaitPolicy.MAX_OFFLOAD_FAILURES + 1, TravelWaitPolicy.MAX_OFFLOAD_FAILURES));
     }
+
+    @Test
+    void firstChestProbeAndHobbyNudgeAreNotBlockedByTheNeverSetSentinel() {
+        // Finding 32: TravelWaitService starts both timestamps at MIN_VALUE. The plain
+        // `now - MIN_VALUE >= 200` overflowed, so neither the probe nor the nudge ever ran.
+        long now = 24_000L;
+        assertTrue(TickIntervals.elapsed(now, Long.MIN_VALUE, 200L));
+        assertTrue(TickIntervals.elapsed(now, Long.MIN_VALUE, 600L));
+        // After the first run they throttle as intended.
+        assertFalse(TickIntervals.elapsed(now + 199L, now, 200L));
+        assertTrue(TickIntervals.elapsed(now + 600L, now, 600L));
+    }
+
+    @Test
+    void expiredCooldownTravelsEvenWhileAHobbyRuns() {
+        // Finding 33: TRAVEL_NOW wins over a running hobby, so the departure itself
+        // (NavigationArtifactService.beginDelayedTravel) has to stop the ambient task.
+        TravelWaitPolicy.Inputs in = new TravelWaitPolicy.Inputs(0L, true, true, true, false, 0.0f);
+        assertEquals(TravelWaitPolicy.Action.TRAVEL_NOW, TravelWaitPolicy.decide(in));
+    }
 }
