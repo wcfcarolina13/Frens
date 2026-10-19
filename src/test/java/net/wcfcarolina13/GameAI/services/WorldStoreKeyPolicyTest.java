@@ -246,4 +246,57 @@ class WorldStoreKeyPolicyTest {
                 new WorldStoreKeyPolicy.LegacyBase("spawn", -32, 67, 0));
         assertFalse(WorldStoreKeyPolicy.legacyZonesBelongToThisSave(true, half, DISK_ZONES));
     }
+
+    // ── Chest registry adoption (finding 40) ────────────────────────────
+
+    @Test
+    void chestStoreAdoptsWhenACheckedPositionHoldsAChest() {
+        assertEquals(ADOPT_LEGACY, WorldStoreKeyPolicy.decideChestStore(false, true, 90_000, null, "New World#aa", 4, 1));
+        assertEquals(ADOPT_LEGACY, WorldStoreKeyPolicy.decideChestStore(false, true, 90_000, "New World#aa", "New World#aa", 2, 2));
+    }
+
+    @Test
+    void chestStoreStartsEmptyWhenNoCheckedPositionHoldsAChest() {
+        // Sandbox 1.1.274: a second "New World" adopted the first one's chests by name alone.
+        WorldStoreKeyPolicy.Adoption a = WorldStoreKeyPolicy.decideChestStore(false, true, 90_000, null, "New World#bb", 3, 0);
+        assertEquals(START_EMPTY_NOT_THIS_SAVE, a);
+        assertTrue(WorldStoreKeyPolicy.mustCreateOwnStore(a), "the empty store sticks, no claim is recorded");
+    }
+
+    @Test
+    void chestStoreWithNothingCheckedAdoptsAsBefore() {
+        // A legacy entry with zero live records (or none readable) adopts as decide does.
+        assertEquals(ADOPT_LEGACY, WorldStoreKeyPolicy.decideChestStore(false, true, 90_000, null, "x#1", 0, 0));
+    }
+
+    @Test
+    void chestStoreCheckNeverOverridesTheOtherOutcomes() {
+        assertEquals(USE_OWN, WorldStoreKeyPolicy.decideChestStore(true, true, 90_000, null, "x#1", 4, 0));
+        assertEquals(START_EMPTY_NO_LEGACY, WorldStoreKeyPolicy.decideChestStore(false, false, 90_000, null, "x#1", 4, 0));
+        assertEquals(START_EMPTY_NEW_WORLD, WorldStoreKeyPolicy.decideChestStore(false, true, 10, null, "x#1", 4, 4));
+        assertEquals(START_EMPTY_CLAIMED, WorldStoreKeyPolicy.decideChestStore(false, true, 90_000, "y#2", "x#1", 4, 4));
+    }
+
+    @Test
+    void chestStoreMatchesDecideForEveryInputWhenAChestIsThere() {
+        for (boolean own : new boolean[]{true, false}) {
+            for (boolean legacy : new boolean[]{true, false}) {
+                for (long time : new long[]{0, 1199, 1200, 500_000}) {
+                    for (String claimant : new String[]{null, "", "x#1", "y#2"}) {
+                        assertEquals(WorldStoreKeyPolicy.decide(own, legacy, time, claimant, "x#1"),
+                                WorldStoreKeyPolicy.decideChestStore(own, legacy, time, claimant, "x#1", 4, 1));
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void wrongChestClaimIsReleasedOnlyByItsHolderWithCheckedEmptyPositions() {
+        assertTrue(WorldStoreKeyPolicy.shouldReleaseChestClaim("x#1", "x#1", 4, 0));
+        assertFalse(WorldStoreKeyPolicy.shouldReleaseChestClaim("x#1", "x#1", 4, 1), "a chest is there: the claim is right");
+        assertFalse(WorldStoreKeyPolicy.shouldReleaseChestClaim("x#1", "x#1", 0, 0), "nothing checked: no evidence");
+        assertFalse(WorldStoreKeyPolicy.shouldReleaseChestClaim("y#2", "x#1", 4, 0), "another save's claim");
+        assertFalse(WorldStoreKeyPolicy.shouldReleaseChestClaim(null, "x#1", 4, 0));
+    }
 }

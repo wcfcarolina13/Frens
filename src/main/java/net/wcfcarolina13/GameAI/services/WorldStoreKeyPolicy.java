@@ -113,7 +113,8 @@ public final class WorldStoreKeyPolicy {
          * {@link #legacyZonesBelongToThisSave}): start empty and leave it unclaimed for its real
          * owner (no claim marker). This save's own empty store is written so zones and locks stick
          * the same way (zones would stick anyway: syncZonesFromBases saves this world's own base
-         * zones right after the load).
+         * zones right after the load). The chest registry uses it too, when none of the legacy
+         * entry's checked chest positions holds a chest in this save ({@link #decideChestStore}).
          */
         START_EMPTY_NOT_THIS_SAVE
     }
@@ -187,6 +188,36 @@ public final class WorldStoreKeyPolicy {
             return Adoption.START_EMPTY_NOT_THIS_SAVE;
         }
         return adoption;
+    }
+
+    /**
+     * {@link #decide} for the bot chest registry. Its legacy key ({@code levelName/dim}) is shared
+     * by every save with that level name, so the first such save to load would adopt another
+     * save's chests (finding 40). The caller checks a few of the legacy entry's recorded chest
+     * positions in this save: when it checked at least one ({@code checked > 0}) and none holds a
+     * chest-like block ({@code chestLike == 0}), an adoption becomes
+     * {@link Adoption#START_EMPTY_NOT_THIS_SAVE} (no claim, legacy left for its real owner).
+     * Nothing checked (no live records, or none readable) adopts as {@link #decide} does.
+     */
+    public static Adoption decideChestStore(boolean hasOwnStore, boolean hasLegacyStore, long overworldGameTimeAtLoad,
+                                            String legacyClaimant, String fingerprint,
+                                            int checked, int chestLike) {
+        Adoption adoption = decide(hasOwnStore, hasLegacyStore, overworldGameTimeAtLoad, legacyClaimant, fingerprint);
+        if (adoption == Adoption.ADOPT_LEGACY && checked > 0 && chestLike <= 0) {
+            return Adoption.START_EMPTY_NOT_THIS_SAVE;
+        }
+        return adoption;
+    }
+
+    /**
+     * Whether a chest-registry claim that this save recorded (1.1.274 adopted by level name
+     * alone) should be released: the claim is this save's, and of the legacy chest positions
+     * checked here at least one was checked and none holds a chest. Releasing lets the save that
+     * really owns the legacy chests adopt them if it has not decided yet; this save keeps its own
+     * store.
+     */
+    public static boolean shouldReleaseChestClaim(String legacyClaimant, String fingerprint, int checked, int chestLike) {
+        return legacyClaimant != null && legacyClaimant.equals(fingerprint) && checked > 0 && chestLike <= 0;
     }
 
     /**
