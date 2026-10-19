@@ -10,7 +10,7 @@ public record SaveConfigPayload(String configJson) implements CustomPayload {
     public static final Identifier ID_IDENTIFIER = Identifier.of("frens", "save_config");
     public static final CustomPayload.Id<SaveConfigPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
 
-    public static final PacketCodec<PacketByteBuf, String> STRING_CODEC = new StringCodec(32767);
+    public static final PacketCodec<PacketByteBuf, String> STRING_CODEC = new StringCodec(ConfigPayloadSizePolicy.MAX_CONFIG_JSON_CHARS);
 
     public static final PacketCodec<PacketByteBuf, SaveConfigPayload> CODEC =
             PacketCodec.tuple(STRING_CODEC, SaveConfigPayload::configJson, SaveConfigPayload::new);

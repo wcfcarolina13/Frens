@@ -545,7 +545,7 @@ public class Frens implements ModInitializer {
         LOGGER.debug("Running on environment type: {}", FabricLoader.getInstance().getEnvironmentType());
 
         // registering the packets on the global entrypoint to recognise them
-        PayloadTypeRegistry.playC2S().register(SaveConfigPayload.ID, SaveConfigPayload.CODEC);
+        PayloadTypeRegistry.playC2S().registerLarge(SaveConfigPayload.ID, SaveConfigPayload.CODEC, net.wcfcarolina13.network.ConfigPayloadSizePolicy.MAX_SAVE_PAYLOAD_BYTES);
         PayloadTypeRegistry.playS2C().register(OpenConfigPayload.ID, OpenConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.ConfigSyncPayload.ID, net.wcfcarolina13.network.ConfigSyncPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.VoiceMuteMaskPayload.ID, net.wcfcarolina13.network.VoiceMuteMaskPayload.CODEC);

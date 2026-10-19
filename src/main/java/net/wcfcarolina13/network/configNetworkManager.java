@@ -41,6 +41,14 @@ public final class configNetworkManager {
         if (json == null) {
             return;
         }
+        if (!ConfigPayloadSizePolicy.fitsSavePayload(json)) {
+            // The encode runs later in the netty pipeline, so the catch below could never stop an
+            // overflow from disconnecting the player (finding 15). Skip the send instead.
+            Frens.LOGGER.warn("sendSaveConfigPacket: config JSON is {} chars, over the {} limit; not sent",
+                    json.length(), ConfigPayloadSizePolicy.MAX_CONFIG_JSON_CHARS);
+            notifySaveTooLargeOnce();
+            return;
+        }
         try {
             if (net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(SaveConfigPayload.ID)) {
                 net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(new SaveConfigPayload(json));
@@ -49,6 +57,25 @@ public final class configNetworkManager {
             }
         } catch (Throwable t) {
             Frens.LOGGER.debug("sendSaveConfigPacket failed: {}", String.valueOf(t));
+        }
+    }
+
+    private static final java.util.concurrent.atomic.AtomicBoolean SAVE_TOO_LARGE_NOTIFIED =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /** Client-side: tell the local player once per game session that a save was too large to sync. */
+    private static void notifySaveTooLargeOnce() {
+        if (!SAVE_TOO_LARGE_NOTIFIED.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            // Every save site is a client screen, so this already runs on the render thread.
+            net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
+            if (client != null && client.player != null) {
+                client.player.sendMessage(Text.literal("[Frens] Settings too large to sync. Saved locally."), false);
+            }
+        } catch (Throwable t) {
+            Frens.LOGGER.debug("notifySaveTooLargeOnce failed: {}", String.valueOf(t));
         }
     }
 
@@ -79,7 +106,16 @@ public final class configNetworkManager {
             if (!ServerPlayNetworking.canSend(player, OpenConfigPayload.ID)) {
                 return;
             }
-            ServerPlayNetworking.send(player, new OpenConfigPayload(serverConfigJson(player.getEntityWorld().getServer())));
+            String json = serverConfigJson(player.getEntityWorld().getServer());
+            if (!ConfigPayloadSizePolicy.fitsOpenPayload(json)) {
+                // Same overflow as finding 15 on the server's encode: skip rather than disconnect.
+                Frens.LOGGER.warn("sendOpenConfigPacket: config JSON is {} chars, over the {} limit; not sent to {}",
+                        json == null ? -1 : json.length(), ConfigPayloadSizePolicy.MAX_CONFIG_JSON_CHARS,
+                        player.getName().getString());
+                player.sendMessage(Text.literal("[Frens] Settings too large to open here. Ask the host to trim old bot entries."), false);
+                return;
+            }
+            ServerPlayNetworking.send(player, new OpenConfigPayload(json));
         } catch (Throwable t) {
             Frens.LOGGER.warn("sendOpenConfigPacket failed: {}", String.valueOf(t));
         }
