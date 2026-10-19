@@ -23,8 +23,16 @@ public final class SkillResumeService {
     private static final Map<UUID, PendingSkill> LAST_SKILL_BY_BOT = new ConcurrentHashMap<>();
     private static final Map<Object, PendingSkill> PENDING_BY_RESPONDER = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> AWAITING_DECISION = new ConcurrentHashMap<>();
-    /** Bots a threat paused, mapped to the wall-clock time of the pause (see {@link ResumeFreshnessPolicy}). */
-    private static final Map<UUID, Long> AUTO_RESUME_PENDING = new ConcurrentHashMap<>();
+    /**
+     * One auto-resume request: the wall-clock time of the pause (see {@link ResumeFreshnessPolicy})
+     * and a unique id, so an undo or a drop only ever removes the arm it made, never a request
+     * another thread armed in the same millisecond.
+     */
+    private record Arm(long atMs, long id) {}
+
+    /** Bots a threat paused, mapped to their auto-resume request. Every put stores a new {@link Arm}. */
+    private static final Map<UUID, Arm> AUTO_RESUME_PENDING = new ConcurrentHashMap<>();
+    private static final java.util.concurrent.atomic.AtomicLong ARM_IDS = new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.atomic.AtomicLong EXECUTION_IDS = new java.util.concurrent.atomic.AtomicLong();
     private static final Set<UUID> RESUME_INTENT = ConcurrentHashMap.newKeySet();
     /** Bots whose last pending skill was paused for a protected-zone refusal — Resume should grant a 60s zone override. */
@@ -186,7 +194,7 @@ public final class SkillResumeService {
         if (uuid == null || !LAST_SKILL_BY_BOT.containsKey(uuid)) {
             return;
         }
-        AUTO_RESUME_PENDING.put(uuid, System.currentTimeMillis());
+        AUTO_RESUME_PENDING.put(uuid, newArm());
         AWAITING_DECISION.remove(uuid);
     }
 
@@ -214,14 +222,14 @@ public final class SkillResumeService {
         if (!owns) {
             return pause.getAsBoolean();
         }
-        long armedAt = System.currentTimeMillis();
-        Long previous = AUTO_RESUME_PENDING.put(uuid, armedAt);
+        Arm arm = newArm();
+        Arm previous = AUTO_RESUME_PENDING.put(uuid, arm);
         boolean paused = pause.getAsBoolean();
         if (paused) {
             AWAITING_DECISION.remove(uuid);
             return true;
         }
-        AUTO_RESUME_PENDING.compute(uuid, (k, v) -> v != null && v == armedAt ? previous : v);
+        AUTO_RESUME_PENDING.compute(uuid, (k, v) -> v != null && v.id() == arm.id() ? previous : v);
         if (previous == null && TaskService.getActiveTaskInfo(uuid).isEmpty()
                 && ResumeFreshnessPolicy.shouldClearOnCompletion(true, false, isAwaiting(uuid), isHeldForSunrise(uuid))
                 && LAST_SKILL_BY_BOT.remove(uuid, record)) {
@@ -265,10 +273,11 @@ public final class SkillResumeService {
             return;
         }
         UUID uuid = bot.getUuid();
-        Long pausedAtMs = uuid != null ? AUTO_RESUME_PENDING.get(uuid) : null;
-        if (pausedAtMs == null) {
+        Arm arm = uuid != null ? AUTO_RESUME_PENDING.get(uuid) : null;
+        if (arm == null) {
             return;
         }
+        long pausedAtMs = arm.atMs();
         long now = System.currentTimeMillis();
         ResumeFreshnessPolicy.ThreatClearedAction action = ResumeFreshnessPolicy.onThreatCleared(
                 pausedAtMs, now, ResumeFreshnessPolicy.AUTO_RESUME_WINDOW_MS,
@@ -277,7 +286,7 @@ public final class SkillResumeService {
             case RESUME -> tryAutoResume(bot);
             case LEAVE_FOR_SUNRISE -> { }
             case DROP_REQUEST_KEEP_RECORD, DROP_REQUEST_AND_RECORD -> {
-                if (!AUTO_RESUME_PENDING.remove(uuid, pausedAtMs)) {
+                if (!AUTO_RESUME_PENDING.remove(uuid, arm)) {
                     return;
                 }
                 PendingSkill pending = LAST_SKILL_BY_BOT.get(uuid);
@@ -291,6 +300,10 @@ public final class SkillResumeService {
                         dropRecord ? "; dropped its resume record" : "");
             }
         }
+    }
+
+    private static Arm newArm() {
+        return new Arm(System.currentTimeMillis(), ARM_IDS.incrementAndGet());
     }
 
     public static void saveSunriseResume(UUID botUuid, String skillName, String rawArgs,
