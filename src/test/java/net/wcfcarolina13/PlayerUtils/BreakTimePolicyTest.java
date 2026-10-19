@@ -74,4 +74,23 @@ class BreakTimePolicyTest {
         assertEquals(12_000L, BreakTimePolicy.timeoutMs(60));
         assertEquals(15_000L, BreakTimePolicy.timeoutMs(200));
     }
+
+    @Test
+    void slowerToolExtendsDeadlineFromNow() {
+        // Started with 40 ticks (12 s floor) at t=0; at t=10 s a swap needs 300 ticks (20 s).
+        long deadline = BreakTimePolicy.timeoutMs(40);
+        assertEquals(30_000L, BreakTimePolicy.extendDeadline(deadline, 10_000L, 300));
+    }
+
+    @Test
+    void fasterToolNeverShortensDeadline() {
+        long deadline = 20_000L;
+        assertEquals(20_000L, BreakTimePolicy.extendDeadline(deadline, 1_000L, 10));
+    }
+
+    @Test
+    void extendDeadlineUsesTheTimeoutFloor() {
+        // 1 tick still gets the 12 s floor from now.
+        assertEquals(17_000L, BreakTimePolicy.extendDeadline(0L, 5_000L, 1));
+    }
 }

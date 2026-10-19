@@ -6,7 +6,7 @@ package net.wcfcarolina13.PlayerUtils;
  * in float) and the tick math {@link MiningTool} uses on top of it.
  *
  * <p>MiningTool keeps the vanilla delta call (it accounts for efficiency, haste, water and air) and
- * only uses {@link #requiredTicks}, {@link #isInstant} and {@link #timeoutMs} from here.</p>
+ * only uses {@link #requiredTicks}, {@link #isInstant}, {@link #timeoutMs} and {@link #extendDeadline} from here.</p>
  *
  * <p>No {@code net.minecraft.*} types.</p>
  */
@@ -45,5 +45,14 @@ public final class BreakTimePolicy {
     /** Failsafe timeout for a mining attempt that needs {@code ticks} ticks. */
     public static long timeoutMs(int ticks) {
         return Math.max(MIN_TIMEOUT_MS, ticks * TICK_MS + TIMEOUT_SLACK_MS);
+    }
+
+    /**
+     * Mining deadline after a re-poll switches to a tool needing {@code newRequiredTicks}: the later
+     * of the current deadline and {@code nowMs + timeoutMs(newRequiredTicks)}. It never moves
+     * earlier, so a faster tool keeps the slack it had and a slower one gets time to finish.
+     */
+    public static long extendDeadline(long currentDeadlineMs, long nowMs, int newRequiredTicks) {
+        return Math.max(currentDeadlineMs, nowMs + timeoutMs(newRequiredTicks));
     }
 }

@@ -31,11 +31,13 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 public class MiningTool {
 
@@ -167,6 +169,8 @@ public class MiningTool {
         AtomicBoolean canceled = new AtomicBoolean(false);
 
         AtomicInteger requiredTicksHolder = new AtomicInteger(1);
+        // Wall-clock mining deadline (ms); armed before the first tick, raised by a slower re-poll swap.
+        AtomicLong deadlineMs = new AtomicLong(Long.MAX_VALUE);
         AtomicInteger ticksElapsed = new AtomicInteger(0);
         AtomicInteger postThresholdAttempts = new AtomicInteger(0);
         // Re-poll hysteresis for this run: the item the last re-poll swapped in, and whether a
@@ -250,6 +254,10 @@ public class MiningTool {
             miningResult.complete("⚠️ Failed to initialize mining: " + t.getMessage());
             return miningResult;
         }
+
+        // Arm the deadline before the first tick so a re-poll can only ever raise it.
+        long startedMs = System.currentTimeMillis();
+        deadlineMs.set(startedMs + BreakTimePolicy.timeoutMs(requiredTicksHolder.get()));
 
         ScheduledFuture<?> task = MINING_EXECUTOR.scheduleAtFixedRate(() -> {
             if (canceled.get()) {
@@ -342,6 +350,10 @@ public class MiningTool {
                                 int oldRequired = requiredTicksHolder.get();
                                 int newRequired = BreakTimePolicy.requiredTicks(newDelta);
                                 requiredTicksHolder.set(newRequired);
+                                // A slower tool keeps its progress but needs longer: push the
+                                // timeout out so it is not cut short (1.1.274).
+                                long now = System.currentTimeMillis();
+                                deadlineMs.getAndUpdate(d -> BreakTimePolicy.extendDeadline(d, now, newRequired));
                                 if (RepollPolicy.shouldResetProgress(oldRequired, newRequired)) {
                                     ticksElapsed.set(0);
                                     postThresholdAttempts.set(0);
@@ -386,18 +398,39 @@ public class MiningTool {
             });
         }, 0, MINING_TICK_MS, TimeUnit.MILLISECONDS);
 
-        // Timeout: actual mining time + 5 second buffer (was fixed 12s, killed slow blocks)
-        long timeoutMs = BreakTimePolicy.timeoutMs(requiredTicksHolder.get());
-        ScheduledFuture<?> timeoutTask = MINING_EXECUTOR.schedule(() -> {
-            if (!miningResult.isDone()) {
-                LOGGER.warn("Mining timeout reached for {} (after {}ms)", targetBlockPos, timeoutMs);
+        // Timeout: actual mining time + 5 second buffer (was fixed 12s, killed slow blocks).
+        // The deadline moves when a re-poll swaps to a slower tool, so the check reschedules
+        // itself while the deadline is still ahead.
+        AtomicReference<ScheduledFuture<?>> timeoutTask = new AtomicReference<>();
+        Runnable timeoutCheck = new Runnable() {
+            @Override
+            public void run() {
+                if (miningResult.isDone()) {
+                    return;
+                }
+                long remaining = deadlineMs.get() - System.currentTimeMillis();
+                if (remaining > 0) {
+                    try {
+                        timeoutTask.set(MINING_EXECUTOR.schedule(this, remaining, TimeUnit.MILLISECONDS));
+                    } catch (RejectedExecutionException e) {
+                        miningResult.complete("⚠️ Mining attempt timed out.");
+                    }
+                    return;
+                }
+                LOGGER.warn("Mining timeout reached for {} (after {}ms)", targetBlockPos,
+                        System.currentTimeMillis() - startedMs);
                 miningResult.complete("⚠️ Mining attempt timed out.");
             }
-        }, timeoutMs, TimeUnit.MILLISECONDS);
+        };
+        timeoutTask.set(MINING_EXECUTOR.schedule(timeoutCheck,
+                deadlineMs.get() - startedMs, TimeUnit.MILLISECONDS));
 
         miningResult.whenComplete((result, error) -> {
             task.cancel(true);
-            timeoutTask.cancel(true);
+            ScheduledFuture<?> pendingTimeout = timeoutTask.get();
+            if (pendingTimeout != null) {
+                pendingTimeout.cancel(true);
+            }
             canceled.set(true);
             // Clear any lingering break animation
             server.execute(() -> {
