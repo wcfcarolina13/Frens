@@ -15,6 +15,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.GlobalPos;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.world.poi.PointOfInterestTypes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -78,12 +79,22 @@ public final class LodestoneCompassService {
         BlockPos pos = target.pos();
         WorldChunk chunk = world.getChunkManager().getWorldChunk(
                 pos.getX() >> 4, pos.getZ() >> 4);
-        if (chunk == null) {
-            LOGGER.debug("Cannot validate lodestone at {} in {} — chunk not loaded",
-                    pos.toShortString(), dimKey.getValue());
-            return false;
+        if (chunk != null) {
+            return LodestoneValidityPolicy.allowsTravel(LodestoneValidityPolicy.decide(
+                    world.getBlockState(pos).isOf(Blocks.LODESTONE), null, true));
         }
-        return world.getBlockState(pos).isOf(Blocks.LODESTONE);
+        // Chunk unloaded: ask POI storage like vanilla LodestoneTrackerComponent.forWorld.
+        // It reads POI region data only and never loads the chunk. Server thread only.
+        boolean onThread = server.isOnThread();
+        Boolean poi = null;
+        if (onThread) {
+            poi = world.isInBuildLimit(pos)
+                    && world.getPointOfInterestStorage().hasTypeAt(PointOfInterestTypes.LODESTONE, pos);
+        }
+        LodestoneValidityPolicy.Validity validity = LodestoneValidityPolicy.decide(null, poi, onThread);
+        LOGGER.debug("Validating lodestone at {} in {}: unloaded, POI={} -> {}",
+                pos.toShortString(), dimKey.getValue(), poi == null ? "not checked (off thread)" : poi, validity);
+        return LodestoneValidityPolicy.allowsTravel(validity);
     }
 
     public static boolean hasLodestoneCompass(ServerPlayerEntity bot) {
