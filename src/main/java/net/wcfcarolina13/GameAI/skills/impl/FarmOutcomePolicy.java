@@ -22,14 +22,27 @@ public final class FarmOutcomePolicy {
     }
 
     /**
-     * @param tilled        plots tilled this run (main pass, second pass and repair re-tills)
-     * @param planted       seeds planted this run (main pass, second pass and repair replants)
-     * @param standingCrops farm plots that hold a crop at the end of the run
-     * @param hoeAvailable  whether a hoe could still be brought into the hotbar
+     * @param tilled           plots tilled this run (main pass, second pass and repair re-tills)
+     * @param planted          seeds planted this run (main pass, second pass and repair replants)
+     * @param standingCrops    farm plots that hold a crop at the end of the run
+     * @param hoeAvailable     whether a hoe could still be brought into the hotbar
+     * @param untilledTillable farm plots at the end of the run that are not farmland but could be
+     *                         tilled (a tillable surface, not protected irrigation water)
+     * @param seedsLeft        seeds still in the inventory at the end of the run
      * @return {@code null} when the run counts as a success, otherwise the player-facing reason
      */
-    public static String failureReason(int tilled, int planted, int standingCrops, boolean hoeAvailable) {
-        if (tilled > 0 || planted > 0 || standingCrops > 0) {
+    public static String failureReason(int tilled, int planted, int standingCrops, boolean hoeAvailable,
+                                       int untilledTillable, int seedsLeft) {
+        if (tilled > 0 || planted > 0) {
+            return null;
+        }
+        // A half-planted farm whose hoe is gone: crops stand, but there is still ground to till
+        // and seeds to plant, and the run did nothing. Without seeds the till pass stops at its
+        // seed limit anyway, so a seedless run is not blamed on the hoe.
+        if (!hoeAvailable && untilledTillable > 0 && seedsLeft > 0) {
+            return NO_HOE_LINE;
+        }
+        if (standingCrops > 0) {
             return null;
         }
         return hoeAvailable ? NOTHING_TILLED_LINE : NO_HOE_LINE;

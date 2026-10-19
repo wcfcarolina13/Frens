@@ -511,10 +511,13 @@ public class FarmSkill implements Skill {
             cleanupTemporaryFarmAccess(bot, world, source, footprint, temporaryFarmAccess);
 
             int standingCrops = countStandingCrops(world, farmCenter);
-            String failure = FarmOutcomePolicy.failureReason(tilled, planted, standingCrops, hoeAvailable);
+            int untilledTillable = countUntilledTillable(world, farmCenter, protectedStillWater);
+            int seedsLeft = countSeeds(inventory);
+            String failure = FarmOutcomePolicy.failureReason(tilled, planted, standingCrops, hoeAvailable,
+                    untilledTillable, seedsLeft);
             if (failure != null) {
-                LOGGER.warn("[FarmIrrigation] farm run did nothing: tilled={} planted={} standingCrops={} hoeAvailable={}",
-                        tilled, planted, standingCrops, hoeAvailable);
+                LOGGER.warn("[FarmIrrigation] farm run did nothing: tilled={} planted={} standingCrops={} hoeAvailable={} untilledTillable={} seedsLeft={}",
+                        tilled, planted, standingCrops, hoeAvailable, untilledTillable, seedsLeft);
                 ChatUtils.sendSystemMessage(source, failure);
                 return SkillExecutionResult.failure(failure);
             }
@@ -3746,6 +3749,21 @@ public class FarmSkill implements Skill {
             }
         }
         return standing;
+    }
+
+    /** Farm plots that are not farmland yet but could be tilled (finding 34 follow-up). */
+    private static int countUntilledTillable(ServerWorld world, BlockPos center, Set<BlockPos> protectedStillWater) {
+        int untilled = 0;
+        for (BlockPos plot : farmPlots(center)) {
+            if (protectedStillWater != null && protectedStillWater.contains(plot)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(plot);
+            if (!state.isOf(Blocks.FARMLAND) && TILLABLE_SURFACES.contains(state.getBlock())) {
+                untilled++;
+            }
+        }
+        return untilled;
     }
 
     private static PlotRepairCounts repairDamagedPlots(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, Set<BlockPos> protectedStillWater) {
