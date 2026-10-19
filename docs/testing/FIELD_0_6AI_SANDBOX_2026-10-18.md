@@ -1,9 +1,9 @@
-# Field phases 0-6ai in the sandbox: Frens 1.1.270, driven by Claude (2026-10-18)
+# Field phases 0-6ai (then 6ak-10) in the sandbox: Frens 1.1.270 and 1.1.271, driven by Claude (2026-10-18)
 
 Step 2 of Bradley's field-checklist drain plan (2026-10-18). Claude swept the open items of phases 0 to 6ai of
 `FIELD_SESSION_1.1.202.md` in the `mcp-sandbox` Prism instance over the MCP API, alone, on `frens-1.1.270-release+1.21.11.jar`
 (sessions 1-3), then `frens-1.1.271-release+1.21.11.jar` (session 4, copied from Nirn's `mods/`, md5 ec6d16a7..., sandbox closed). Nirn was never launched. The checklist was swept against the
-text after Bradley's triage rulings (`124595f7`). Phases 7-10 are out of scope (they come after 6ai).
+text after Bradley's triage rulings (`124595f7`). Phases 7-10 were out of scope for passes 1-2; pass 3 covered them.
 
 **Counts in `FIELD_SESSION_1.1.202.md`:** before 267 open, 95 done; after **208 open, 154 done** (`grep -c '^- \[ \]'` and `'^- \[x\]'`).
 
@@ -12,6 +12,14 @@ for a part not set up (listed below with the reason, all already in `GUIDED_SESS
 guided doc and were left to it, and 99 sandbox-checkable items were not reached. Every item with a verdict
 also got a `Sandbox 2026-10-18:` sub-line in the checklist. No high-severity finding: nothing stops a feature for a whole session,
 apart from finding 5 (a guarding bot wedged in a hole never climbs out).
+
+**Pass 3 (1.1.271, sessions S5-S11, 19:28-23:47):** a third session swept the 99 "not reached" items, the 11 fortify items and the
+3 reworded items, then the still-open sandbox items of 6ak-6bi and 7-10. 126 verdicts (105 in 0-6ai, 21 in 6ak-10): **81 PASS (ticked),
+10 FAIL, 23 PARTIAL, 9 NOT REACHED** (tried, could not be completed), **2 CRITERION OUT OF DATE** and **1 NEEDS BRADLEY** (both added to
+`GUIDED_SESSION_BRADLEY.md` under "Appended by sweeps", with three new decision items). Each got a `Sandbox 2026-10-18 pass 3 (1.1.271):`
+sub-line in the checklist. Counts after pass 3: **127 open, 235 done** (from 208 and 154). Findings 15-29 below; finding 15 is high
+(a settings change disconnects the player once the config passes 32 KB), the rest medium or minor. Every pass-3 session was recorded
+with Flashback (replays A-H); the camera in the replays is free, so angles are chosen in post.
 
 Sessions (each save a fresh copy made with `tools/sandbox/worldcopy.py` while the game was closed):
 
@@ -44,6 +52,11 @@ Souls ran on `llama3.1:8b` through `ollama_tap.py` again, Piper as before, struc
 | S7 (21:17-21:42) | `Sweep Souls3`, config trimmed (finding 15), Bob's `mind.json` stripped of the 1.1.212/1.1.213 keys | Scripted rate 0, old-mind load, first-sighting restart check, Phase 10 resets; then muting and masters in Bot Controls | C `frens_1_1_271_souls_C_rate_oldminds_reset.zip` (21:28:35 the party reset cuts a scene), D `frens_1_1_271_6_6n_6o_muting_masters.zip` (21:38 masters off, scenes still play) |
 | S8 (21:45-22:18) | `Sweep Old3`, copy of `New World`, commands on; Spells key bound to K in the sandbox options | boat combat, Pebble's guard escape (bundle, stone and bedrock lids), Jake's woodcut backoff ladder in the forest at 15 76 -110, supply chest checks, 6t tables, fishing scan, dark tunnel torch | E `frens_1_1_271_6c_6d_6n_6t_pillar_backoff_tables.zip`. 21:53:06-21:54:06 Pebble pillars out of the hole with bundled cobblestone; 22:10:30 Jake places his table and crafts |
 | S9 (22:19-22:47) | `Sweep Old3` relaunched (quit mid torch hold), scripted masters back on | door follow, hovel and watchtower (diamond tools given so the builds go fast), Bot inventory buttons, Crafting window, Quick Store/Fetch, Storage screen | F `frens_1_1_271_6p_6r_6u_6ac_doors_builds_gui.zip`. 22:21-22:22 both bots stuck in the doorway, then through and closing it; 22:31:50-22:33:09 the watchtower |
+| S10 (22:48-22:58) | `Sweep NoCmd`, copy of `New World` with allowCommands 0, Soul Chat off in config | 6y roster and keys with commands off, 6b cheats-off save and model screen, 6w setup checklist from Soul Chat off to a reply | G `frens_1_1_271_6y_6w_6b_commands_off.zip`. 22:56:17 Finn's first reply after the checklist |
+| S11 (22:59-23:47) | `Sweep Old3` again; then the snowy village at -160, -688 | drop sweep count, collect_dirt, creepers, base-tree nudge, fortify (17 towers, merge, patch); the camera moved to a high perch from 23:44 | H `frens_1_1_271_6af_8_6ab_6h_dropsweep_creeper_fortify.zip`. 23:14-23:28 Jake raising towers round the village, several on the frozen lake (he walks on the ice) |
+
+After S11 the sandbox config went back to Ollama 11434, `llama3.1:8b`, Idle rate 50, Active and structured output off, mutes
+cleared, masters on, Force-Place off; the trimmed per-bot maps stay trimmed (finding 15). The Spells key went back to unbound.
 
 ## Findings (backlog for a fix build)
 
@@ -132,9 +145,17 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
 25. **One axe in a chest makes an idle bot retry every 5 s (minor).** S8 a chest holding a single stone axe beside axe-less Jake:
     `[supply] request ... outcome=INELIGIBLE(RESERVE_EXHAUSTED)` plus the matching `withdraw ... REFUSED` for `idle-weapon` and
     `idle-axe`, every 5 s (four lines each time) while the owner stood by. The reserve rule is fine; the retry has no backoff.
-26. **The bot chest registry keys worlds by level name only (minor, real for players).** `bot_chest_registry.json` stores
+26. **The bot chest registry keys worlds by level name only (minor, already deferred).** `bot_chest_registry.json` stores
     `worlds/New World/minecraft:overworld/...`, while `bot_home_data.json` uses `New World#<id>`. Every save named "New World" (the
-    default name) shares one chest list: S9 showed Jake's S5 supply chest from another save as "Destroyed".
+    default name) shares one chest list: S9 showed Jake's S5 supply chest from another save as "Destroyed". The 1.1.234 changelog
+    already lists the chest registry under "still keyed by level name (same leak class)", so this is a field sighting of a known deferral.
+27. **Stopping a follow prints two lines (minor).** S10 `\` and S9 the inventory Stop button: "Finn: Stopping follow command."
+    (a scripted chat line) and "Finn has stopped." (system). Phase 6y wants the single "has stopped." line.
+28. **"I'm stuck in Stone above! Mining with bare hands..." floods chat (minor).** S11 Jake teleported into stone inside a base
+    (protected, so he could not mine out): the line 97 times in the log, eight of them in four seconds (23:09:35-39).
+29. **A creeper line has no sound (minor).** S11 after a creeper exploded near Jake: client `WARN Unable to play empty soundEvent:
+    frens:bot.line.post_explosion_less_boom`. The `[creeper]` decision line also repeats every second with the same decision, though
+    the checklist says it prints on change.
 
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
@@ -227,6 +248,8 @@ the host (7 bots + host = 8/8 spawned fine), so that item's "6 bots" text may be
 | 6aa | Unreachable drop given up fast (1.1.229) | PASS | S4 a sapling dropped on a persistent leaf block 4 above idle Jake (idle hobbies on for 2 of the 3 minutes): no `[IdleSweep]` target at it, so no bot stared at it. The abandon path was not exercised. Replay `frens_1_1_271_6q_6aa_supply_cmds_and_drops`. |
 | 6ae | Leaves drop saplings, teardown uses hands (1.1.233) | PASS | S3 Jake with stone pickaxe, iron axe, shears and 32 dirt woodcut two trees with a 2-step dirt pillar: the dirt teardown was mined `with minecraft:dirt` in hand, stone pickaxe `damage 0` before and after (shears also 0). Plank scaffold was not part of this run. |
 | 6af | Drop sweep, return and craft feedback (1.1.234) | FAIL | S3 drops spread around Jake, `/bot skill drop_sweep Jake`: chat "Picked up 27 items.", but the skill's own summary says `collected: 20` and Jake's bag (cleared before) holds 21 items (13 saplings, 5 logs, 2 apples, 1 stick). No fast-travel error, no return trip. Finding 11. |
+
+
 
 
 
@@ -336,6 +359,32 @@ Evidence names the session (S5-S...) and the Flashback replay (A, B, ...: see Pa
 | 6q | Bot-placed chests record their owner (1.1.219, supplies groundwork) | PASS | S5 Jake placed a supply chest during a woodcut when his bag filled (20:43:49, -53, 82, -60); `bot_chest_registry.json` record has `"ownerUuid": "e6608e8d-..."` (RotiWokeman). The registry keys worlds by level name only, so other "New World" copies see it (finding 26). |
 | 6v | Your own bot still works everywhere (1.1.224) | PARTIAL | S9 right-click on Jake opens his inventory; `/bot inventory Jake` prints his inventory; Guide > Admin opens Jake's inventory overlay; no `[bot-access] denied` all session. The remote spell needs an artifact and the sunset prompt was not set up. |
 | 6z | Wide unchanged (1.1.228) | PASS | S9 at 427x240 (window 1708x960, GUI scale 4): Guide topics and detail side by side, bot inventory with its Actions/Spells/Admin overlay and equal tabs, "Looking at Jake. Right-click to open menu • Press Right Bracket (]) for Guide" on the HUD. Nothing broken; there are no 1.1.227 screenshots to compare against, so "unchanged" is judged by eye. |
+| 6y | Spawn and command with commands off (1.1.227) | FAIL | S10 `Sweep NoCmd` (allowCommands 0, Soul Chat off): `-` opened the roster ("No companions in this world yet", Other worlds (8)), Spawn Selected: "Spawned new bot Finn!" (22:50:10, the click caught Finn instead of Jake), no `Unknown or incomplete command` anywhere; follow key "Finn follow is now ON." (22:50:27); `\` gave two lines, "Finn: Stopping follow command." and "Finn has stopped." (22:50:30), where the item wants one (finding 27). Replay G 22:49-22:51. |
+| 6y | Roster and hints (1.1.227) | PASS | S10 with Finn out, Guide > Admin > Bot Controls > Spawn Bots...: "All your companions are already here", Finn not offered. "Finn, hello" with AI chat off: one notice "AI chat is off. To let companions talk back, open the Guide (]) → AI setup." (22:50:47), not repeated for "Finn, are you there?". A new bot Newt made with Create greeted with `greeting_hey`, not "welcome back". |
+| 6b | Cheats-off single-player still saves (1.1.203, review fix) | PASS | S10 commands-off world, Bot Controls global Force-Place OFF to ON, closed every screen, reopened: still ON, `settings.json5` `fortifyForcePlaceEnabled: true`, no `Rejected config save` in the log. Set back OFF the same way. The relog half was not run. |
+| 6b | RAM warning on the Download button (1.1.203) | PASS | S10 AI setup > Choose model...: "System: 32.0 GB RAM", buttons "Selected ✔" (8B), "Use" (3B), "Download" (1B), no ⚠ and no red RAM note. |
+| 6b | Dreamsleeve row on macOS (1.1.203) | NEEDS BRADLEY | S10 the Soul Voice Engine screen shows "Dreamsleeve: cloned bot voice ... Not set up on this machine" with "Install Dreamsleeve..." greyed, because the sandbox has no Dreamsleeve folder; whether the row reads "Available." needs Nirn's installed Dreamsleeve. |
+| 6w | Setup checklist, cheats-off singleplayer (1.1.225) | PASS | S10 commands-off world, Ollama up: Guide > AI setup listed Ollama ✔, model ✔, Soul Chat ✘, Finn and Newt ✘. Choose model... Use 3B (`soul model set to llama3.2:3b`), Turn on (`[ai-setup] RotiWokeman set Soul Chat on`), Enable Finn (`[ai-setup] enabled bot Finn as frens:jake`, "Finn is now speaking as Jake (no profile of their own is registered yet)"), Say hi then Enter: "Finn: Your voice carries. Can you see me?" (22:56:17). No `/bot` command used. Replay G 22:55-22:56. |
+| 6w | Bot Controls keeps a Soul Chat change (1.1.225) | PASS | S10 after the checklist turned Soul Chat on: Bot Controls, Force-Place flipped, closed, reopened: Soul Chat row still ON, `soulsEnabled: true` in the file. |
+| 6af | Drop sweep, return and craft feedback (1.1.234) | PASS | S11 on 1.1.271, four piles summoned around Jake (5 logs, 3 apples, 7 sticks, 2 saplings = 17 items), `/bot skill drop_sweep Jake`: "Picked up 17 items." and his bag holds exactly those 17; no fast-travel error, no return trip. The internal summary line still says `collected: 14` (stacks/pickup events), not shown to the player. Replay H 23:00:26. |
+| 6g | CollectDirt ladder exit unchanged (1.1.208) | PASS | S11 outside the Spawn base, Jake at the bottom of a 6-deep 1x1 shaft with a shovel and 32 ladders, `/bot skill collect_dirt Jake`: "Collected 10 dirt blocks." (23:04:18), no error; he tunnelled sideways and ended 6 below the surface without placing ladders, so the ladder column itself was not exercised. Judged by Bradley's ruling (runs clean and finishes). In S8 a come-recovery `collect_dirt ascent 12` from a cave ended "Mining paused: water flooded the area." |
+| 8 | Creeper back-away (P1 — 1.1.202 ships a fix, verify it) | PARTIAL | S11 easy, creeper summoned 6-7 blocks from Jake: (a) unarmed `[creeper] Jake decision=FLEE_SPRINT dist=5.4 armed=false`, `[creeper-defense] Jake engaging backoff: creeper at dist 2.5`, no damage; (b) iron sword + shield: `FLEE_SPRINT dist=4.9-5.9 armed=true` every second, never inside 4.5; a second armed run `STAY dist=4.3 armed=true` then backoff at 2.9, creeper exploded, Jake at 20 health; (c) mid-skill not achieved (the skill had ended). No damage to a bot in any case, but no `BACK_AWAY` line; the decision line repeats each second rather than on change. Replay H 23:04:55-23:06:41. |
+| 6ab | Bot says why it skips your base trees (1.1.230) | PARTIAL | S11 `/bot base set TreeBase` with three oaks around, `/bot skill woodcut Jake`: `protected-only scans triggered staged relocation`, `Woodcut protection nudge: Jake reasons={admin-zone=4}`, "The trees around here are in a protected area, so I'm heading out to find others." (23:08:45); a second woodcut did not repeat it. A base made by the admin's command reads as an admin zone, so the base-radius wording was not reached. |
+| 6g | Home data write is batched (1.1.208, debounce) | PARTIAL | S11 mtime of `config/frens/bot_home_data.json` sampled every 0.2 s for 26 min (22:59-23:25): one write, at 23:08:00 when `/bot base set TreeBase` saved a base. No per-mutation write storm, but the run had no hobby-heavy burst of mutations, so the coalescing itself was not seen. |
+| 6ak | Bots walk around, break soft blocks or place a dirt step (1.1.240) | PARTIAL | 1.1.271: S5 woodcut `terrain move: BREAK ... result: BREAK ok=true mined=true` (19:55:55) and `WALK_AROUND ok=true ... displaced=true` (19:55:57); S11 fortify 13 WALK_AROUND, 10 ok, 3 not. No PLACE step seen; no `not a standing cell`, no `A* pathfinding timed out` in S5-S11. |
+| 6h | Tower build unchanged (1.1.209) | PASS | S11 `/bot fortify` at the snowy village at -160, -688 (Jake with 640 blocks and diamond tools): plan 18 vertices, 9260 blocks; all 17 towers visited in order with `[FortifyTower] approach-select`, `tower=N/17 ... attempt=k gained=... present=x/54` lines (10/17 reached 53/54, 8/17 stopped at 24/54 after a zero-gain attempt), then "Moat stage is now a separate skill" and the wall edges until `NO_MATERIAL`. No exception all session. Judged by Bradley's ruling (runs clean and finishes the tower stage). Replay H 23:13:52-23:33. |
+| 6h | Deferred cleanup still drains (1.1.209) | NOT REACHED | S11 no carve corridor happened (`Break-through found no viable candidates` 120 times, never a carve), so no `[FortifyCleanup]` / `skill-fortify-cleanup` line. |
+| 6h | Tower patch unchanged (1.1.209) | PARTIAL | S11 two blocks removed from tower 10's top (-204 67 -617, -202 67 -615), `/bot fortify patch` 23:38: it ran with no error, patching wall edges first ("Patching edge 13 (11 missing blocks, attempt 2)...", zero-progress segments skipped); 8 minutes later both tower blocks were still missing. Stopped before it reached the towers. |
+| 6h | Merge verb still expands (1.1.209) | PASS | S11 `/bot fortify merge` 23:36:25: "Auto-detected nearest wall: wall_-173_-697", then "[Fortify] Schema expanded! Fortification plan: 18 hull vertices, 18 edges, 9980 blocks", "Carry-over scan retained 627 placed blocks", auto-resume. Not "unknown verb". |
+| 6h | Tower replan guard unchanged (1.1.209) | PASS | S11 whole fortify run (17 towers, many `walkTo unified replan` lines): `replan already active` never printed; the bot reached each tower approach or moved on. Not deliberately blocked, so judged by Bradley's ruling. |
+| 6h | No new log noise (1.1.209) | PASS | S11 fortify 23:13-23:46: no `NullPointerException` (no exception of any kind) in the log. |
+| 6i | Corridor carve unchanged (1.1.210) | NOT REACHED | S11 `[FortifyNav] Carve mode activated ctx=fortify-tower:approach` once (23:17:37, tower 4), but every break-through search found no candidate (`allAir=34 canBreak=0 noFloor=28`); the approach was a 5-block drop, not a hillside, so no corridor was dug. The bot bridged (`footing-bridge placed ... precipice-defense`) instead. |
+| 6i | Carve repair still drains (1.1.210) | NOT REACHED | no carve happened (see the corridor item). |
+| 6i | Trap-escape carve unchanged (1.1.210) | NOT REACHED | not set up (no 1x1 pocket during the build). |
+| 6i | Refused carve still summarised (1.1.210) | PARTIAL | S11 the break-through summary prints once per attempt with reason counts (`allAir=4 canBreak=0 reach=0 noFloor=0 recentCooldown=0 offsets=4 rejectReasons=none`, 120 lines); no protected block was put in a carve line, so the refusal case itself was not run. |
+| 6i | No new log noise (1.1.210) | PASS | S11 fortify run: no `NullPointerException` mentioning `FortifyCarveHelper` or `FortifyCarveContext` (no exception at all). |
+| 6aa | No crevice suffocation on pickups (1.1.229) | PASS | S5 three woodcuts on snowy hills with drops in gaps (19:40-19:58): `Drop sweep nudge skipped near -55, 84, -52: no 2-high clearance` (19:40:45) and again 19:58:24, unreachable drops left (`Drop sweep failed to approach ...`), and Jake's journal has no `in_wall` damage during the woodcuts. Every `in_wall` hit and every `nudged away from wall` burst that session came right after my own `/tp` (19:58:00, 20:00:40). |
+| 6g | Woodcut cleanup line-of-sight leaf clearing unchanged (1.1.208) | PASS | S5 three woodcuts with cleanup ran to "Cleared the local woodcut area after 5 target(s)." (19:43:24, 19:53:44) and "after 4 target(s)" (19:57:44) with no error. Judged by Bradley's ruling (runs clean and finishes); the per-attempt leaf count was not compared. |
 
 ## Items without a verdict
 
@@ -388,26 +437,6 @@ Every item in the four "Needs Bradley" groups is already in `GUIDED_SESSION_BRAD
 - 5: **Piper install retry on macOS (1.1.175 / 1.1.172, still open)**. the mod downloads Piper/voices/Pocket from the network; Claude does not start downloads unasked.
 - 5: **Pocket TTS installer (1.1.198)**. the mod downloads Piper/voices/Pocket from the network; Claude does not start downloads unasked.
 
-### Not reached: fortify village build (11)
-
-- 6h: **Tower build unchanged (1.1.209)**. fortify village build.
-- 6h: **Deferred cleanup still drains (1.1.209)**. fortify village build.
-- 6h: **Tower patch unchanged (1.1.209)**. fortify village build.
-- 6h: **Merge verb still expands (1.1.209)**. fortify village build.
-- 6h: **Tower replan guard unchanged (1.1.209)**. fortify village build.
-- 6h: **No new log noise (1.1.209)**. fortify village build.
-- 6i: **Corridor carve unchanged (1.1.210)**. fortify village build.
-- 6i: **Carve repair still drains (1.1.210)**. fortify village build.
-- 6i: **Trap-escape carve unchanged (1.1.210)**. fortify village build.
-- 6i: **Refused carve still summarised (1.1.210)**. fortify village build.
-- 6i: **No new log noise (1.1.210)**. fortify village build.
-
-### Reworded by Bradley's triage, not run (3)
-
-- 6g: **Woodcut cleanup line-of-sight leaf clearing unchanged (1.1.208)**. reworded 2026-10-18 (triage), open for the part never tested; not set up in this sweep.
-- 6ad: **Skins are owner-checked (1.1.232)**. reworded 2026-10-18 (triage), open for the part never tested; not set up in this sweep.
-- 6ai: **Admin toggle lets bots cut Spawn trees (1.1.238)**. reworded 2026-10-18 (triage), open for the part never tested; not set up in this sweep.
-
 ### Listed in GUIDED_SESSION_BRADLEY.md, not swept (13)
 
 - 4: **Voice-off beat pacing**.
@@ -424,38 +453,49 @@ Every item in the four "Needs Bradley" groups is already in `GUIDED_SESSION_BRAD
 - 6ag: **Questing hidden (1.1.235)**.
 - 6ai: **Own base over spawn still works (1.1.238)**.
 
-### Not reached, sandbox-checkable (99)
+### Not reached after pass 3
 
-- 1: llama3.2:3b speed vs llama3.1:8b (1.1.175, still open); Failed generation retries (1.1.184).
-- 2: ~1/3 of banter ends addressed to the player (1.1.181); Active lane fires on work (1.1.188); Pacing sliders (1.1.188); Walking away / bystander earshot (1.1.176); Cooldown spacing over the session.
-- 3: Addressing a bot mid-window closes it; Danger veto; Server-thread cost under load (1.1.178, never measured); Roster-lost backoff (1.1.179).
-- 6: Category-muting round-trip (1.1.175); The separation proof (1.1.182); `vetoed:muted` only in the right condition (1.1.182); Two lanes, two masters (1.1.193); Live-settings apply (1.1.184); At most one bot comments on the same thing (1.1.184).
-- 6b: Cheats-off single-player still saves (1.1.203, review fix); Mute screen sends a mask, not a global save (1.1.203); RAM warning on the Download button (1.1.203); Dreamsleeve row on macOS (1.1.203).
-- 6c: Spells key opens the inventory Spells tab (1.1.204); Travel-wait: hobby during a fast-travel cooldown (1.1.204, P1 idle); Travel-wait cancels on stop (1.1.204); Hotbar-lock combat honesty (1.1.204, side effect).
-- 6d: Bundled cobblestone still gets a pillar (1.1.205); Bundled armor equips only if better (1.1.205); Boat + out-of-hotbar sword, FarmSkill/RideSync variants (1.1.205); Travel-wait offload to an existing chest (1.1.205); Offload backoff on a full chest (1.1.205); `/bot stop` during the offload does not poison later offloads (1.1.205); Furnace fuel fallback (1.1.205).
-- 6e: Swap re-validation is rare (1.1.206); Full unlocked hotbar keeps the selected slot (1.1.206); `/bot stop` during an offload does not disable later offloads (1.1.206).
-- 6f: Actions tab has no Regroup; Spells tab still does (1.1.207); Wider fishing scan (1.1.207); Farm reuses its irrigation source (1.1.207); Per-kind cap keeps fishing memory (1.1.207).
-- 6g: Leaf-blocked navigation unchanged (1.1.208); Bridge scaffold still clears snow (1.1.208); CollectDirt ladder exit unchanged (1.1.208); Home data write is batched (1.1.208, debounce).
-- 6j: Novelty fires and does not gag the bots (1.1.211); Silas stays laconic (1.1.211); Quoted short idiom is not a repeat (1.1.211); Toggle off is silent (1.1.211).
-- 6k: Peer clause reaches the prompt (1.1.212).
-- 6l: SEEN fact forms from repeated completions (1.1.213); BELIEFS block reaches the prompt (1.1.213); Relation anchor fires and goes on cooldown (1.1.213); Toggle off is inert (1.1.213).
-- 6m: A malformed tail never costs a scene (1.1.214); A model fact lands as INFERRED at ≤0.6 (1.1.214); Model stance delta is peers-only and once per day (1.1.214).
-- 6n: No two bots talk over each other (1.1.216); Scripted lines do not interleave with a soul scene (1.1.216); A scene still gets through a scripted floor (1.1.216); The two banter lanes respect one quiet period (1.1.216); Muting scripted dialogue does not mute souls (1.1.216); Mount and animal lines stop repeating (1.1.216); A hurt wolf still gets an answer (1.1.216); The woodcut storm is gone (1.1.216); The backoff ladder widens (1.1.216); An axe in a chest wakes it back up (1.1.216); Commanded work still starts immediately (1.1.216).
-- 6o: Torch stays up in the dark (1.1.217); Quit mid-hold does not reload with a torch in hand (1.1.217); Scripted lines hold off while a scene is generating (1.1.217); Scripted logs tell the truth (1.1.217); Model switch keeps voices alive (1.1.217, Codex 7a663785); Group-chat hint appears once (1.1.217, Codex 43bd5474).
-- 6p: Hovel builder uses the door from the wall line (1.1.218); No fall off a raised floor (1.1.218); Line-of-sight retries stay local (1.1.218); `/bot stop` mid-egress stops cleanly (1.1.218).
-- 6q: Handled lines don't become DMs (1.1.219); Bot-placed chests record their owner (1.1.219, supplies groundwork).
-- 6r: Collect still works for the owner (1.1.220); Go and Dismiss still work for the owner (1.1.220); Quick Store / Quick Fetch still work for the owner (1.1.220).
-- 6s: Walking away keeps the log quiet; coming back works at once (1.1.221); Never-allowed items stay put (1.1.221).
-- 6t: A far table: no walk, no freeze, one quiet line (1.1.222); A table in his bag gets placed beside him (1.1.222).
-- 6u: Ordinary doors still get closed behind the bots (1.1.223); No server-thread walk warning (1.1.223 tripwire); A scene that mentions you plays in full (1.1.223); Crafting window search and sort (1.1.223).
-- 6v: Your own bot still works everywhere (1.1.224).
-- 6w: Setup checklist, cheats-off singleplayer (1.1.225); Enable message names the blocker (1.1.225); Bot Controls keeps a Soul Chat change (1.1.225).
-- 6y: Spawn and command with commands off (1.1.227); Roster and hints (1.1.227).
-- 6z: Wide unchanged (1.1.228).
-- 6aa: No crevice suffocation on pickups (1.1.229).
-- 6ab: Bot says why it skips your base trees (1.1.230).
-- 6ac: Buttons still work for the host (1.1.231).
+Pass 3 replaces the three lists that stood here ("Not reached: fortify village build", "Reworded by Bradley's triage, not run",
+"Not reached, sandbox-checkable"). 113 items were on them; 97 now have a pass-3 verdict. Still without a verdict, sandbox-checkable:
 
+- 6b: **Mute screen sends a mask, not a global save (1.1.203)**. needs `frens` DEBUG logging (per-recipient mute line).
+- 6c: **Travel-wait: hobby during a fast-travel cooldown (1.1.204, P1 idle)**. needs a lodestone base pair and a fast-travel cooldown.
+- 6c: **Travel-wait cancels on stop (1.1.204)**. needs a lodestone base pair and a fast-travel cooldown.
+- 6d: **Bundled armor equips only if better (1.1.205)**. not set up in this pass.
+- 6d: **Boat + out-of-hotbar sword, FarmSkill/RideSync variants (1.1.205)**. not set up in this pass.
+- 6d: **Travel-wait offload to an existing chest (1.1.205)**. needs a lodestone base pair and a fast-travel cooldown.
+- 6d: **Offload backoff on a full chest (1.1.205)**. needs a lodestone base pair and a fast-travel cooldown.
+- 6d: **`/bot stop` during the offload does not poison later offloads (1.1.205)**. needs a lodestone base pair and a fast-travel cooldown.
+- 6d: **Furnace fuel fallback (1.1.205)**. needs no chest and no chest materials near a furnace.
+- 6e: **Swap re-validation is rare (1.1.206)**. needs a forced tool swap or a scoop/boat trigger.
+- 6e: **Full unlocked hotbar keeps the selected slot (1.1.206)**. needs a forced tool swap or a scoop/boat trigger.
+- 6e: **`/bot stop` during an offload does not disable later offloads (1.1.206)**. needs a lodestone base pair and a fast-travel cooldown (the 6d offload setup).
+- 6f: **Farm reuses its irrigation source (1.1.207)**. needs a two-day farm move.
+- 6g: **Bridge scaffold still clears snow (1.1.208)**. needs a snowy gap that forces a bridge.
+- 6ai: **Admin toggle lets bots cut Spawn trees (1.1.238)**. needs the World Settings toggle on, then dirt in the Spawn base.
+- 6am: **Audit fixes in play (1.1.242)**. needs a furnace and chest at the fishing spot, a smoked hive and sheep (re-check after 1.1.268).
+- 7: **Open threads (1.1.198)**. needs a bot question ignored for 10 min.
+
+Got a pass-3 run but could not be completed (verdict NOT REACHED in the pass-3 table):
+
+- 3: **Roster-lost backoff (1.1.179)**. `vetoed:roster-lost` only fires when the snapshot capture throws; no way to force one from the game.
+- 6m: **A model fact lands as INFERRED at ≤0.6 (1.1.214)**. no side-channel line was ever applied (the one tail came with no dialogue and failed the scene; banter replies never carried one).
+- 6m: **Model stance delta is peers-only and once per day (1.1.214)**. same: no applied side-channel line.
+- 9: **Present truth beats memory (1.1.201 Task 6)**. not run.
+- 6r: **Collect still works for the owner (1.1.220)**. no live chest record for Jake in this save (Quick Store does not register its chest; the only record was destroyed).
+- 6h: **Deferred cleanup still drains (1.1.209)**. S11 no carve corridor happened (`Break-through found no viable candidates` 120 times, never a carve), so no `[FortifyCleanup]` / `skill-fortify-cleanup` line.
+- 6i: **Corridor carve unchanged (1.1.210)**. S11 `[FortifyNav] Carve mode activated ctx=fortify-tower:approach` once (23:17:37, tower 4), but every break-through search found no candidate (`allAir=34 canBreak=0 noFloor=28`); the approach was a 5-block drop, not a hillside, so no corridor was dug.
+- 6i: **Carve repair still drains (1.1.210)**. no carve happened (see the corridor item).
+- 6i: **Trap-escape carve unchanged (1.1.210)**. not set up (no 1x1 pocket during the build).
+
+Bradley-only items in 6ak-10 that pass 3 did not touch (also open in `GUIDED_SESSION_BRADLEY.md` or Nirn-only):
+
+- 6ad: **Skins are owner-checked (1.1.232)**. needs LAN guest.
+- 6ao: **Skins and saved mounts survive the update (1.1.246)**. needs Nirn.
+- 6ap: **/bot base owner (1.1.248)**. needs Nirn and a non-op player.
+- 6av: **Remote server edits stick (1.1.254, only if a dedicated or LAN server is handy)**. needs a server.
+- 9: **Party-scene attribution (added at final review)**. needs second player.
+- 9: **Privacy guard on `memory`**. needs second player.
 
 ## Test-method notes
 
@@ -473,3 +513,17 @@ Every item in the four "Needs Bradley" groups is already in `GUIDED_SESSION_BRAD
 - New tools: `tools/sandbox/ollama_tap.py` (prompt tap), `tools/sandbox/supplytest.py` (6s prompts), `tools/sandbox/rec.py start|stop <name>|status` (Flashback from the pause menu; the save dialog's name field is index 2, Save Replay index 6).
 - A player standing on the bot's block picks up items summoned at the bot's feet: step away before a dropped-item check.
 - A table set into a hillside (`setblock` into terrain) is buried: clear the cells around it first.
+
+Pass 3 notes:
+
+- Command shapes the checklist gets wrong: fortify is `/bot fortify [merge|patch|...]` (not `/bot skill fortify`), woodcut is
+  `/bot skill woodcut <bot>` (`/bot woodcut Jake` answers "Unsupported inline syntax").
+- Keep the sandbox `settings.json5` small: once its compact JSON passes 32 KB, any Bot Controls change kicks the client (finding 15).
+  Many world copies and test bots grow `botControlsByWorld` and `botSpawnPointsByWorld` fast.
+- In creative, the Quick Store "point and click" left click also breaks the chest. Do it in survival.
+- `execute ... positioned over motion_blocking_no_leaves run tp` does nothing on unloaded chunks: `/tp` high above first, then place.
+- `[VoicedDialogue] Played sound` is logged before the per-listener mute, so it cannot prove a voice mute; use `frens` DEBUG.
+- The Spells keybind ships unbound and only works in Questing mode; bind it in `options.txt` with the game closed if needed.
+- `gpt-oss:20b` returns empty `content` as a soul model (its reasoning takes the reply); use the llama models.
+- For wide footage, stand on a barrier block 18-20 blocks above the work (spectator mode may change owner-nearby checks), or rely on
+  Flashback's free camera in post: every pass-3 session was recorded.

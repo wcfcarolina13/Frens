@@ -384,11 +384,11 @@ Bradley hosts a sandbox world over LAN (H), the second account joins (G). G is n
 | Block | Items |
 |---|---|
 | A: screens at Bradley's window size | 3 |
-| B: souls and voices by ear | 14 |
-| C: Nirn | 7 |
+| B: souls and voices by ear | 14 (+1 appended) |
+| C: Nirn | 7 (+1 appended) |
 | D: second human on LAN | 29 |
-| Needs a decision | 2 |
-| **Total for Bradley** | **55** |
+| Needs a decision | 2 (+3 appended) |
+| **Total for Bradley** | **60** (55 + 5 appended by pass 3) |
 | Maybe Claude can do it | 6 |
 
 Split items are counted once, in the block that holds Bradley's half. Tick an item in `FIELD_SESSION_1.1.202.md` only when every half named in its Prep line has passed.
@@ -398,3 +398,26 @@ Split items are counted once, in the block that holds Bradley's half. Tick an it
 ## Appended by sweeps
 
 <!-- Sweeps append items here: phase + exact title, the three copied lines, a Prep line, and which block it joins. Update the counts table. -->
+
+From the 0-6ai sweep pass 3 (1.1.271, 2026-10-18, `FIELD_0_6AI_SANDBOX_2026-10-18.md`):
+
+- [ ] **Phase 6: Category-muting round-trip (1.1.175)** (joins Block B)
+  - Bradley does: mute `ambient_chatter` in **both** Adv menus (text and voice).
+  - Claude watches for: no chat fallback leaking the line as GENERAL (the "Nice bird!" bug).
+  - Pass when: scripted one-liners are silent in chat **and** voice.
+  - Prep: Pass 3 S7 showed the text half (no ambient line in chat, no fallback). The voice half is not in the log: `Played sound` prints before the per-listener mute and the muted count is DEBUG. Bradley listens for ambient lines ("If you need me, I'm listening.", "teeth itch") for two minutes, or Claude turns on `frens` DEBUG and reads `-> 0 recipient(s), 1 muted`.
+- [ ] **Phase 6b: Dreamsleeve row on macOS (1.1.203)** (joins Block C)
+  - Bradley does: Soul Voice engine chooser.
+  - Pass when: the Dreamsleeve row is **not** greyed and reads "Available." / "Use Dreamsleeve" as before (the grey-out must only trigger off macOS).
+  - Prep: In the sandbox the row reads "Not set up on this machine" with the install button greyed, because the sandbox has no Dreamsleeve folder. Open the chooser on Nirn, where Dreamsleeve is installed.
+- [ ] **Phase 6c: Spells key opens the inventory Spells tab (1.1.204)** (joins "Needs a decision")
+  - Bradley does: look at Jake, press the Spells keybind; then press it from the radial (slot 3).
+  - Pass when: the **bot inventory** screen opens already on the Spells tab both times, Enchant/Anvil buttons behave as before, and the old standalone spells popup never appears.
+  - Prep: Decision first. The keybind ships unbound, and `handleSpellsContextKey` only acts once survival recruitment is on and completed, so with Questing off (the default since 1.1.235) the key does nothing. Rule: test it in a Questing world, or treat the item as superseded.
+- [ ] **Phase 6: `vetoed:muted` only in the right condition (1.1.182)** (joins "Needs a decision")
+  - Pass when: it appears only with Text master off AND (Voice or Soul Voice) off.
+  - Prep: Decision first. Since the 1.1.193 lane split the banter/local surface listens only to Soul Chat and Soul Voice (`SoulRuntime` ambientTextOpen/ambientVoiceOpen); the scripted Text master no longer reaches it, and with Soul Chat off the pipeline is down before the muted check. Rule the new condition (Soul Chat off AND Soul Voice off?) or retire the item.
+- [ ] **Phase 10: Toggle everything off** (joins "Needs a decision")
+  - Bradley does: `/bot soul banter off`, `/bot soul local off`.
+  - Pass when: both directors go fully dark — nothing matching `[souls] banter` or `[souls] local` for the remainder.
+  - Prep: Decision first. Pass 3 S7: local went dark, but the Active lane (its own toggle) kept logging `banter lane=ACTIVE outcome=vetoed:...`. Should `banter off` also silence Active, or does the item mean Idle only?

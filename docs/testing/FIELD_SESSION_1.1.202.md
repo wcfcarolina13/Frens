@@ -298,7 +298,8 @@ launch (Prism: right-click the instance → *Launch* again, or a copy of the ins
 `1.21.10 TEST` instance cannot join a 1.21.11 world. Skip the pair if only one client is
 available and record it under "Not covered".
 
-- [ ] **Cheats-off single-player still saves (1.1.203, review fix)**
+- [x] **Cheats-off single-player still saves (1.1.203, review fix)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S10 commands-off world, Bot Controls global Force-Place OFF to ON, closed every screen, reopened: still ON, `settings.json5` `fortifyForcePlaceEnabled: true`, no `Rejected config save` in the log. Set back OFF the same way. The ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: in a world created with cheats **off**, flip any global toggle (e.g. Gameplay
     Tips) in Bot Control, close the screen, reopen it.
   - Claude watches for: **no** `Rejected config save from non-operator` in `latest.log`.
@@ -308,12 +309,14 @@ available and record it under "Not covered".
   - Claude watches for: the next reactions line logging `[VoicedDialogue] Muted (category reactions)`
     (baseline path — single-player shares the list) and no `sendSaveConfigPacket` debug noise.
   - Pass when: the line is silent in voice; text fallback unaffected.
-- [ ] **RAM warning on the Download button (1.1.203)**
+- [x] **RAM warning on the Download button (1.1.203)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S10 AI setup > Choose model...: "System: 32.0 GB RAM", buttons "Selected ✔" (8B), "Use" (3B), "Download" (1B), no ⚠ and no red RAM note. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: LLM chip → model manager.
   - Pass when: on this 32 GB machine every button reads `Download`/`Use`/`In use ✔` with **no** ⚠
     and no red RAM note (nothing recommends more than 12 GB). If any ⚠ shows, that's a fail —
     record the model tag.
 - [ ] **Dreamsleeve row on macOS (1.1.203)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NEEDS BRADLEY: S10 the Soul Voice Engine screen shows "Dreamsleeve: cloned bot voice ... Not set up on this machine" with "Install Dreamsleeve..." greyed, because the sandbox has no Dreamsleeve folder; whether the row reads "Available." needs ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: Soul Voice engine chooser.
   - Pass when: the Dreamsleeve row is **not** greyed and reads "Available." / "Use Dreamsleeve" as
     before (the grey-out must only trigger off macOS).
@@ -547,7 +550,8 @@ fail, even an improvement — note it and move on.
   - Claude watches for: the same bypass-then-mine sequence as before; the 1200 ms per-bot cooldown
     still visible as the gap between leaf-mine attempts; no new exceptions mentioning `LeafClearService`.
   - Pass when: he gets through with the same feel and roughly the same number of leaves broken.
-- [ ] **Woodcut cleanup line-of-sight leaf clearing unchanged (1.1.208)**
+- [x] **Woodcut cleanup line-of-sight leaf clearing unchanged (1.1.208)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 three woodcuts with cleanup ran to "Cleared the local woodcut area after 5 target(s)." (19:43:24, 19:53:44) and "after 4 target(s)" (19:57:44) with no error. Judged by Bradley's ruling (runs clean and finishes); the ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: fell a leafy tree so the cleanup pass runs.
   - Claude watches for: per-attempt leaf cap unchanged (same count of "cleared leaf" lines per target);
@@ -556,7 +560,8 @@ fail, even an improvement — note it and move on.
 - [ ] **Bridge scaffold still clears snow (1.1.208)**
   - Bradley does: woodcut across a snowy gap that needs a bridge.
   - Pass when: snow layers and leaves on the line are cleared exactly as before (raycast hit only).
-- [ ] **CollectDirt ladder exit unchanged (1.1.208)**
+- [x] **CollectDirt ladder exit unchanged (1.1.208)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S11 outside the Spawn base, Jake at the bottom of a 6-deep 1x1 shaft with a shovel and 32 ladders, `/bot skill collect_dirt Jake`: "Collected 10 dirt blocks." (23:04:18), no error; he tunnelled sideways and ended 6 below the ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: `/bot skill collect_dirt` where he digs a shaft deep enough to need ladders.
   - Pass when: the ladder column goes in on the same support side as before and he climbs out.
@@ -567,6 +572,7 @@ fail, even an improvement — note it and move on.
   - Claude watches for: no `frens-bot-home-writer` exception; file mtime updated at shutdown.
   - Pass when: on reload the change is present (`bot_home_data.json` was flushed on SERVER_STOPPING).
 - [ ] **Home data write is batched (1.1.208, debounce)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S11 mtime of `config/frens/bot_home_data.json` sampled every 0.2 s for 26 min (22:59-23:25): one write, at 23:08:00 when `/bot base set TreeBase` saved a base. No per-mutation write storm, but the run had no hobby-heavy burst of ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: run a hobby-heavy 2 minutes (several base/sleep/nav mutations).
   - Claude watches for: `bot_home_data.json` mtime changing at most every ~0.5–5 s, not per mutation.
   - Pass when: writes are visibly coalesced and nothing is lost on reload. (Known cost: a hard kill loses
@@ -580,34 +586,40 @@ Regression checks only: fortify must behave exactly as on 1.1.208. Needs a villa
 hull vertices that get towers (use the same test village as before if it still exists). Watch the log
 for the new categories `skill-fortify-tower` and `skill-fortify-cleanup` — the message text is unchanged.
 
-- [ ] **Tower build unchanged (1.1.209)**
+- [x] **Tower build unchanged (1.1.209)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S11 `/bot fortify` at the snowy village at -160, -688 (Jake with 640 blocks and diamond tools): plan 18 vertices, 9260 blocks; all 17 towers visited in order with `[FortifyTower] approach-select`, `tower=N/17 ... attempt=k ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: `/bot skill fortify` on the village and let the wall stage reach the towers.
   - Claude watches for: `[FortifyTower]` vertex lines in the same order as a 1.1.208 run; scaffold
     column placed on the same side; summit step/return lines; the ledger teardown at the end.
   - Pass when: every tower reaches the completion ratio and no `FortifyTowerHelper` exception appears.
 - [ ] **Deferred cleanup still drains (1.1.209)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: S11 no carve corridor happened (`Break-through found no viable candidates` 120 times, never a carve), so no `[FortifyCleanup]` / `skill-fortify-cleanup` line. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: during the build, watch for a carve corridor (bot mines through terrain) or force one
     by standing so the bot has to route through a hillside.
   - Claude watches for: `[FortifyCleanup]` queue lines under `skill-fortify-cleanup`; the replace-path
     retries (`mandatory` repairs) and the "would seal current exit" skip still fire.
   - Pass when: the corridor is repaired after the bot leaves it; the queue reports empty.
 - [ ] **Tower patch unchanged (1.1.209)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S11 two blocks removed from tower 10's top (-204 67 -617, -202 67 -615), `/bot fortify patch` 23:38: it ran with no error, patching wall edges first ("Patching edge 13 (11 missing blocks, attempt 2)...", zero-progress segments ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: remove two blocks from a tower top, then `/bot skill fortify patch`.
   - Pass when: both blocks are replaced via the tower staging position (same approach as before);
     a vertex that makes no progress twice is skipped, as before.
-- [ ] **Merge verb still expands (1.1.209)**
+- [x] **Merge verb still expands (1.1.209)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S11 `/bot fortify merge` 23:36:25: "Auto-detected nearest wall: wall_-173_-697", then "[Fortify] Schema expanded! Fortification plan: 18 hull vertices, 18 edges, 9980 blocks", "Carry-over scan retained 627 placed blocks", ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: `/bot skill fortify merge` (the dead `handleMerge` was deleted; the verb routes to
     expand).
   - Pass when: the response is the expand behaviour, not "unknown verb".
-- [ ] **Tower replan guard unchanged (1.1.209)**
+- [x] **Tower replan guard unchanged (1.1.209)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S11 whole fortify run (17 towers, many `walkTo unified replan` lines): `replan already active` never printed; the bot reached each tower approach or moved on. Not deliberately blocked, so judged by Bradley's ruling. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: block the tower approach so the bot triggers a medium-range replan.
   - Claude watches for: exactly one replan at a time (`replan already active` never appears twice in a
     row); the movement-epoch cancel still aborts the stale walk.
   - Pass when: the bot reaches the approach or gives the same give-up message as on 1.1.208.
-- [ ] **No new log noise (1.1.209)**
+- [x] **No new log noise (1.1.209)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S11 fortify 23:13-23:46: no `NullPointerException` (no exception of any kind) in the log. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: any `NullPointerException` mentioning `FortifyTowerHelper`,
     `FortifyCleanupProcessor` or `FortifySkillOps`.
   - Pass when: none in the whole session.
@@ -620,6 +632,7 @@ Regression checks only: carving must behave exactly as on 1.1.209. Watch the log
 `skill-fortify-carve` — the message text is unchanged. Grep: `grep -n "skill-fortify-carve" latest.log`.
 
 - [ ] **Corridor carve unchanged (1.1.210)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: S11 `[FortifyNav] Carve mode activated ctx=fortify-tower:approach` once (23:17:37, tower 4), but every break-through search found no candidate (`allAir=34 canBreak=0 noFloor=28`); the approach was a 5-block drop, not a hillside, ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: during `/bot skill fortify`, stand so the bot has to route through a hillside (or
     reuse the corridor from Phase 6h).
@@ -628,20 +641,24 @@ Regression checks only: carving must behave exactly as on 1.1.209. Watch the log
   - Pass when: the bot reaches the far side and `attemptFinalizeCarveTransaction` queues the repair
     (`skill-fortify-cleanup` lines follow).
 - [ ] **Carve repair still drains (1.1.210)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: no carve happened (see the corridor item). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: the mandatory repair of the corridor after the bot leaves it; the "would seal
     current exit" skip still fires when the bot is still inside.
   - Pass when: the corridor is closed and the cleanup queue reports empty.
 - [ ] **Trap-escape carve unchanged (1.1.210)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): NOT REACHED: not set up (no 1x1 pocket during the build). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley's ruling 2026-10-18 (triage): later builds changed this path on purpose, so "identical to the old build" is no longer the bar. Pass when: the task runs with no errors and finishes.
   - Bradley does: box the bot into a 1×1 pocket beside the wall during the build.
   - Claude watches for: emergency trap-escape eligibility and meaningful-progress lines; carving stops
     at the depth limit (6) if it cannot break out.
   - Pass when: the bot is freed or gives the same give-up message as on 1.1.209.
 - [ ] **Refused carve still summarised (1.1.210)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S11 the break-through summary prints once per attempt with reason counts (`allAir=4 canBreak=0 reach=0 noFloor=0 recentCooldown=0 offsets=4 rejectReasons=none`, 120 lines); no protected block was put in a carve line, so the ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: put a protected block (lodestone, chest) in the only carve line.
   - Claude watches for: the nav-break reject summary line (reason counts) once per attempt.
   - Pass when: the summary prints and the bot replans instead of mining the protected block.
-- [ ] **No new log noise (1.1.210)**
+- [x] **No new log noise (1.1.210)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S11 fortify run: no `NullPointerException` mentioning `FortifyCarveHelper` or `FortifyCarveContext` (no exception at all). See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Claude watches for: any `NullPointerException` mentioning `FortifyCarveHelper` or
     `FortifyCarveContext`.
   - Pass when: none in the whole session.
@@ -1382,7 +1399,8 @@ Grep: `[ai-setup]`, `Ollama not detected`, `Ollama is not reachable`, `Processin
     - The screen says "Choose Frens World Mode" and that Frens works without Ollama.
     - No "Processing your message, please wait." appears.
     - The model list shows "Ollama not detected (optional — only needed for AI chat)" instead of a fake model entry.
-- [ ] **Setup checklist, cheats-off singleplayer (1.1.225)**
+- [x] **Setup checklist, cheats-off singleplayer (1.1.225)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S10 commands-off world, Ollama up: Guide > AI setup listed Ollama ✔, model ✔, Soul Chat ✘, Finn and Newt ✘. Choose model... Use 3B (`soul model set to llama3.2:3b`), Turn on (`[ai-setup] RotiWokeman set Soul Chat on`), Enable ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does:
     1. Start Ollama.
     2. Open Guide → AI setup; then also try Bot Controls → Soul Chat row → Setup….
@@ -1399,7 +1417,8 @@ Grep: `[ai-setup]`, `Ollama not detected`, `Ollama is not reachable`, `Processin
 - [ ] **Checklist fits a small window (1.1.225)**
   - Bradley does: set GUI scale to its largest value (or shrink the window), with 3+ bots, then open the checklist.
   - Pass when: Refresh and Close are on screen, and bot rows scroll with the mouse wheel.
-- [ ] **Bot Controls keeps a Soul Chat change (1.1.225)**
+- [x] **Bot Controls keeps a Soul Chat change (1.1.225)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S10 after the checklist turned Soul Chat on: Bot Controls, Force-Place flipped, closed, reopened: Soul Chat row still ON, `soulsEnabled: true` in the file. See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does:
     1. Turn Soul Chat on from the checklist and return to Bot Controls.
     2. Flip an unrelated toggle, close, and reopen.
@@ -1453,6 +1472,7 @@ Grep: `Auto-spawn deferred until the first real player joins`, `Auto-spawn skipp
 Grep: `Unknown or incomplete command`, `No recipient resolved`, `Stopped by the player`, `AI chat is off`, `is pending`.
 
 - [ ] **Spawn and command with commands off (1.1.227)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S10 `Sweep NoCmd` (allowCommands 0, Soul Chat off): `-` opened the roster ("No companions in this world yet", Other worlds (8)), Spawn Selected: "Spawned new bot Finn!" (22:50:10, the click caught Finn instead of Jake), no ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: in a new commands-off world press `-`, tick Jake, Spawn Selected. Then the follow key, then `\` to stop.
   - Claude watches for: no `Unknown or incomplete command` anywhere; `Spawned new bot Jake!`; follow ON; a single "Jake has stopped." line.
   - Pass when: Jake spawns, follows and stops with no red error, and stop shows one chat line.
@@ -1460,7 +1480,8 @@ Grep: `Unknown or incomplete command`, `No recipient resolved`, `Stopped by the 
   - Bradley does: create a new commands-off world.
   - Claude watches for: the World Mode selection screen opening on join (F2 screenshot).
   - Pass when: "Choose Frens World Mode" opens without enabling cheats.
-- [ ] **Roster and hints (1.1.227)**
+- [x] **Roster and hints (1.1.227)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S10 with Finn out, Guide > Admin > Bot Controls > Spawn Bots...: "All your companions are already here", Finn not offered. "Finn, hello" with AI chat off: one notice "AI chat is off. To let companions talk back, open the Guide ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: with Jake out, open the roster (Guide → Admin → Bot Controls → Spawn Bots), then say "Jake, hello" in chat with AI chat off.
   - Claude watches for: roster without Jake (or "All your companions are already here"); one notice "AI chat is off. To let companions talk back, open the Guide (]) → AI setup."
   - Pass when: present bots aren't offered, the notice shows once, and a brand-new bot's first greeting is not "welcome back".
@@ -1506,7 +1527,8 @@ Best on a brand-new Survival world (the `frens-fresh` instance or a new world on
   - Bradley does: give a bot a copper or stone axe and a hotbar with dirt, let it woodcut a tall tree that needs a dirt pillar, and watch the pillar teardown.
   - Claude watches for: `MiningTool` lines on dirt with `bare-hands` (or a shovel), never an axe. Plank bridge retracts using the axe (well under 3 s per plank).
   - Pass when: the axe's durability doesn't drop during teardown.
-- [ ] **No crevice suffocation on pickups (1.1.229)**
+- [x] **No crevice suffocation on pickups (1.1.229)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S5 three woodcuts on snowy hills with drops in gaps (19:40-19:58): `Drop sweep nudge skipped near -55, 84, -52: no 2-high clearance` (19:40:45) and again 19:58:24, unreachable drops left (`Drop sweep failed to approach ...`), and ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: woodcut near uneven ground where drops fall into 1-high gaps.
   - Claude watches for: `Drop sweep nudge skipped near …: no 2-high clearance`. No `nudged away from wall … to escape collision clip`.
   - Pass when: the bot never takes suffocation damage while picking up and leaves items it can't safely reach.
@@ -1519,6 +1541,7 @@ Best on a brand-new Survival world (the `frens-fresh` instance or a new world on
 ## Phase 6ab — Woodcut protection nudge (1.1.230)
 
 - [ ] **Bot says why it skips your base trees (1.1.230)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S11 `/bot base set TreeBase` with three oaks around, `/bot skill woodcut Jake`: `protected-only scans triggered staged relocation`, `Woodcut protection nudge: Jake reasons={admin-zone=4}`, "The trees around here are in a ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: set a base (or stand in your Nirn base) with trees around and no other trees close, order woodcut.
   - Claude watches for: `Woodcut: protected-only scans triggered staged relocation` followed by `Woodcut protection nudge: <bot> reasons={base-radius=…}`.
   - Pass when: the bot says "The trees around here are inside your base, so I'm leaving them alone and heading out to find others." once, walks out, and a second woodcut (or a second bot) does not repeat it until the world is reopened.
@@ -1635,7 +1658,8 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 - [x] **Cleanup finishes and says one sentence (1.1.234)** — closed 2026-10-18 by triage: SUPERSEDED, bug B fixed in 1.1.266 and 1.1.267 (c2bc8ad0, 16 s in the sandbox); covered by 6bg Empty cleanup ends fast (B2)
   - Sandbox 2026-10-17: FAIL: right sentence, 1 s on bare ground but 127 s in forest (bug B), see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Pass when: with nothing to clean, woodcut cleanup ends within a few seconds with "Nothing left to clean up here." (no `minedLogs=` stats in chat).
-- [ ] **Drop sweep, return and craft feedback (1.1.234)**
+- [x] **Drop sweep, return and craft feedback (1.1.234)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PASS: S11 on 1.1.271, four piles summoned around Jake (5 logs, 3 apples, 7 sticks, 2 saplings = 17 items), `/bot skill drop_sweep Jake`: "Picked up 17 items." and his bag holds exactly those 17; no fast-travel error, no return trip. ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-18: FAIL: S3 drops spread around Jake, `/bot skill drop_sweep Jake`: chat "Picked up 27 items.", but the skill's own summary says `collected: 20` and Jake's bag (cleared before) holds 21 items (13 saplings, 5 logs, 2 apples, 1 ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-17: FAIL: no-wood craft answers with two lines (bug C); sweep counts stacks, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does: drop a few items, run a drop sweep. Then `/bot craft` an axe with no wood anywhere.
@@ -1728,6 +1752,7 @@ Run FIRST in a session: open **Nirn** first after deploying (item 1), then a bra
 ## Phase 6ak — Multi-step navigation (1.1.240)
 
 - [ ] **Bots walk around, break soft blocks or place a dirt step (1.1.240)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: 1.1.271: S5 woodcut `terrain move: BREAK ... result: BREAK ok=true mined=true` (19:55:55) and `WALK_AROUND ok=true ... displaced=true` (19:55:57); S11 fortify 13 WALK_AROUND, 10 ok, 3 not. No PLACE step seen; no `not a standing ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Sandbox 2026-10-18 (1.1.267): PARTIAL: BREAK ok=true and WALK_AROUND moves seen, both WALK_AROUND ok=false, no PLACE, see `FIELD_6AJ_6BG_SANDBOX_2026-10-17.md`.
   - Sandbox 2026-10-17: PARTIAL: walk-arounds ok, no timeouts, no BREAK or PLACE success seen, see `FIELD_6AD_6AL_SANDBOX_2026-10-17.md`.
   - Bradley does (or Claude in the sandbox): woodcut with a no-tools companion in rough terrain (ravines, sand banks, stepped hills), outside the Spawn base.
@@ -2082,6 +2107,7 @@ Observed across several scenes; collect as the session runs.
   - Claude watches for (1.1.202 state-change diagnostics): `[torch-hold] <Bot> verdict=reject gate=<gate> dist=<d> light=<l> mob=<id>` and `[torch-hold] <Bot> verdict=hold gate=none ... action=promoted+held slot=<n> savedSlot=<m>`. Gates: `mode-<M>`, `active-task`, `using-item`, `mounted`, `sleeping`, `light-above-7`, `audible-hostile-8`, `visible-hostile-16`, `no-torch-in-inventory`. Each line prints only when the verdict changes.
   - Pass when: the rejecting gate is named (expected suspects: the 8-block audible-hostile suppression, or foreign-swap cycling against the combat loadout / AutoFaceEntity). Do not fix in-session — collect the reason.
 - [ ] **Creeper back-away (P1 — 1.1.202 ships a fix, verify it)**
+  - Sandbox 2026-10-18 pass 3 (1.1.271): PARTIAL: S11 easy, creeper summoned 6-7 blocks from Jake: (a) unarmed `[creeper] Jake decision=FLEE_SPRINT dist=5.4 armed=false`, `[creeper-defense] Jake engaging backoff: creeper at dist 2.5`, no damage; (b) iron sword + shield: ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: let a creeper walk up to a bot (a) unarmed, (b) armed with a sword and shield, (c) mid-skill (mining/woodcut). Do NOT ignite it with flint & steel — proximity swelling is the case that was broken.
   - Claude watches for: `[creeper] <Bot> decision=BACK_AWAY|FLEE_SPRINT|STAY dist=<d> armed=<bool> fuse=SWELLING|IDLE|IGNITED` (prints on decision change) and the `BotCreeperDefenseService` backoff lines (`creeper-defense` logger) — the root-cause fix: the always-on interrupt filtered on `isIgnited()`, which proximity swelling never sets, so it never fired in normal play; it now also triggers on `getFuseSpeed() > 0`.
   - Pass when: the bot backs off in all three cases before the fuse completes, the armed case shows `decision=BACK_AWAY` inside 4.5 blocks, and no explosion damages a bot. Record any case where it still stands still — with the dist/fuse values from the line.
