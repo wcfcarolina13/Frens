@@ -83,7 +83,7 @@ JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (
 
 ## Findings (backlog for a fix build)
 
-**Fixed in 1.1.273** (2026-10-19, not yet sandbox-checked; field items in Phase 6bk): 4, 9, 10, 11, 17, 18, 23, 24, 27, 28, 29, 34, 36, plus the two 1.1.272-check minors (the "Time to punch some trees." line after a chest axe, and the stone axe / oak log re-poll swap). Still open: 3, 7, 13, 14, 20, 21, 26.
+**Fixed in 1.1.273** (2026-10-19, sandbox-checked for 4, 9, 11, 17 (short run), 18, 23, 27 and the re-poll swap, all pass, replays `frens_1_1_273_6bk_fix_checks.zip` and `frens_1_1_273_6bk_fix_checks_rate0.zip`, `tools/sandbox/fix273.py`; not checked there: 10, 24, 28, 29, 34, 36 and the tree-punch line; field items in Phase 6bk): 4, 9, 10, 11, 17, 18, 23, 24, 27, 28, 29, 34, 36, plus the two 1.1.272-check minors (the "Time to punch some trees." line after a chest axe, and the stone axe / oak log re-poll swap). Still open: 3, 7, 13, 14, 20, 21, 26.
 
 **Fixed in 1.1.272** (2026-10-19, sandbox-checked, replay `frens_1_1_272_6bj_fix_checks.zip`): 1, 5, 6, 8, 15, 25, 30 (key and Admin worlds; the ritual is a field item), 31, 32, 33, 35. Souls 2, 16 (contract line only), 19, 22 shipped, field items in Phase 6bj. New minors from that check: the voiced "Time to punch some trees." still plays after a chest axe was taken; on stone a stone axe and an oak log tie at speed 1.0 and the mining re-poll swaps axe → log every second against woodcut's re-equip (53 lines); a wool give-up prints two lines ("I'm stuck ... stopping wool." and "Stuck: could not reach any sheep."); the guard pillar escape took 60 s for 2 blocks; one `Mining ... with minecraft:bundle` on an already-mined block during the bundle pull.
 
@@ -221,6 +221,16 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     rides a boat (S12 08:15, 717 lines in 30 s). The mining skill stops on the bot's own torches ("This is a torch.", "Cannot break placed
     torches Collected 2 out of 10 requested.", 08:27 and 08:48). Asked about a false past event, Bob agreed with the player ("You took my
     shovel, didn't you?") and named the wrong held item although the state block was right (medium, model quality; Phase 9 item).
+37. **"Terminating all current tasks due to threat detections" repeats every 4 s while a hostile stays near (minor).** 1.1.273 sandbox
+    2026-10-19, a frozen (NoAI, invulnerable) zombie 6 blocks from Bob: Bob said it at 16:33:50, :54, :58, 16:34:02, :06, :10, :14, :18
+    (until the zombie was killed), and 28 times in 16:35-16:37 across Jake and Bob. Nothing is paused after the first line, so the rest
+    is chat noise. A real zombie dies or leaves, but a hostile behind a fence or in a pit within 10 blocks would do the same
+    (`AutoFaceEntity.broadcastDangerAlert`, 4 s cooldown).
+38. **Woodcut's fallback sweep mines the dirt block the trunk stood on (minor).** 1.1.273 sandbox 2026-10-19 16:18:22, after
+    "Got 9 logs" with no sapling to replant: `woodcut_cleanup scaffold scan: found 0 candidates`, then `Mining 297, 119, 300 with
+    minecraft:cobblestone` (the soil under the trunk, placed by the test, not by the bot) and `fallback sweep removed 1 extra items`.
+    1.1.273 kept dirt sweepable on purpose (bots pillar with dirt), so on natural ground every felled tree without a replant may leave a
+    1-block hole. The next bot standing there fell into it.
 
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
