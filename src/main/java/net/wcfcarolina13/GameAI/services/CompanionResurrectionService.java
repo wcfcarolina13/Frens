@@ -22,9 +22,13 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 
 /**
- * Nether-only ritual to resurrect the recruited companion after death.
+ * Nether-only ritual to resurrect a companion after death.
  *
  * <p>Trigger: sneak-right-click a Respawn Anchor with a Ghast Tear in the Nether.
+ *
+ * <p>Questing on: brings back the recruited companion (unchanged). Questing off (finding 30,
+ * Bradley 2026-10-19): brings back a dead bot the player owns (or any, for an operator or the
+ * host) whose Auto Respawn is off, picked by {@link ResurrectionEligibilityPolicy}.
  */
 public final class CompanionResurrectionService {
 
@@ -48,9 +52,9 @@ public final class CompanionResurrectionService {
             return ActionResult.PASS;
         }
 
-        // Only applies to survival recruitment worlds.
+        // Questing off: the owned-bot ritual (finding 30). Questing on: the recruited companion.
         if (!SurvivalRecruitmentService.isEnabled(server)) {
-            return ActionResult.PASS;
+            return tryOwnedBotRitual(player, world, hand, pos, server);
         }
 
         ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
@@ -119,6 +123,108 @@ public final class CompanionResurrectionService {
             return ActionResult.SUCCESS;
         }
 
+        // Clear "dead" state before spawning so auto-presence won't race.
+        return completeRitual(player, world, server, pos, state, charges, held, alias, () -> {
+            st.setCompanionDead(false);
+            st.setCompanionDiedAtEpochMs(0L);
+            st.setCompanionDiedDimension(null);
+            st.setCompanionDiedPos(0L);
+            if (Frens.CONFIG != null) {
+                Frens.CONFIG.save();
+            }
+        });
+    }
+
+    /**
+     * Questing off: the same ritual for a dead, shelved bot the player may act on. Silent PASS
+     * (vanilla anchor use) until the player sneaks with a Ghast Tear on a Respawn Anchor and some
+     * bot qualifies, so Admin worlds without a dead bot never see ritual messages.
+     */
+    private static ActionResult tryOwnedBotRitual(ServerPlayerEntity player, ServerWorld world, Hand hand,
+                                                  BlockPos pos, MinecraftServer server) {
+        if (!player.isSneaking()) {
+            return ActionResult.PASS;
+        }
+        ItemStack held = player.getStackInHand(hand);
+        if (held == null || !held.isOf(Items.GHAST_TEAR)) {
+            return ActionResult.PASS;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state == null || !state.isOf(net.minecraft.block.Blocks.RESPAWN_ANCHOR)) {
+            return ActionResult.PASS;
+        }
+        if (Frens.CONFIG == null) {
+            return ActionResult.PASS;
+        }
+
+        String worldKey = BotWorldStateService.currentWorldKey(server);
+        String alias = ResurrectionEligibilityPolicy.chooseBot(player.getUuid(), Frens.isOperator(player),
+                net.wcfcarolina13.network.BotAccessGate.isHost(player), gatherCandidates(server, worldKey));
+        if (alias == null) {
+            return ActionResult.PASS;
+        }
+
+        if (!world.getRegistryKey().equals(World.NETHER)) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "Nothing happens.");
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "(This ritual only works in the Nether.)");
+            return ActionResult.SUCCESS;
+        }
+
+        int charges = 0;
+        try {
+            charges = state.get(RespawnAnchorBlock.CHARGES);
+        } catch (Throwable ignored) {
+            charges = 0;
+        }
+        if (charges <= 0) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "The anchor is inert.");
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "(Charge it with Glowstone first.)");
+            return ActionResult.SUCCESS;
+        }
+
+        return completeRitual(player, world, server, pos, state, charges, held, alias, () -> {
+            // Un-shelve: drop the session yes/no prompt and let the bot load with the world again.
+            BotRespawnPromptService.clear(alias);
+            Frens.CONFIG.getOrCreateBotControl(alias, worldKey).setAutoSpawnOnLoad(true);
+            Frens.CONFIG.save();
+        });
+    }
+
+    /** Every known bot of this world as a policy candidate. Server thread. */
+    private static java.util.List<ResurrectionEligibilityPolicy.Candidate> gatherCandidates(MinecraftServer server,
+                                                                                          String worldKey) {
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        java.util.Set<String> aliases = new java.util.LinkedHashSet<>(Frens.CONFIG.getAllBotAliases());
+        aliases.addAll(Frens.CONFIG.getBotOwnership().keySet());
+        java.util.List<ResurrectionEligibilityPolicy.Candidate> out = new java.util.ArrayList<>();
+        for (String alias : aliases) {
+            if (alias == null || alias.isBlank() || "default".equalsIgnoreCase(alias)
+                    || !seen.add(alias.toLowerCase(java.util.Locale.ROOT))) {
+                continue;
+            }
+            BotDeathRecordService.DeathRecord death = BotDeathRecordService.getBotRecord(server, alias);
+            ManualConfig.BotOwnership owner = Frens.CONFIG.getOwner(alias);
+            ServerPlayerEntity online = server.getPlayerManager().getPlayer(alias);
+            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(alias, worldKey);
+            // No settings → Auto Respawn on, as the death hook in Frens reads it.
+            boolean autoRespawn = ctrl == null || ctrl.isAutoRespawnOnDeath();
+            out.add(new ResurrectionEligibilityPolicy.Candidate(
+                    alias,
+                    ResurrectionEligibilityPolicy.parseOwner(owner != null ? owner.ownerUuid() : null),
+                    death != null ? death.epochMs() : null,
+                    online != null && !online.isRemoved() && online.isAlive(),
+                    autoRespawn));
+        }
+        return out;
+    }
+
+    /**
+     * Shared ritual tail: real-player name check, offering, anchor charge, {@code markAlive},
+     * then spawn or rebind the bot beside the player. Server thread.
+     */
+    private static ActionResult completeRitual(ServerPlayerEntity player, ServerWorld world, MinecraftServer server,
+                                               BlockPos pos, BlockState state, int charges, ItemStack held,
+                                               String alias, Runnable markAlive) {
         // Refuse if a real player is online with that name.
         ServerPlayerEntity existing = server.getPlayerManager().getPlayer(alias);
         if (existing != null && !existing.isRemoved() && existing.isAlive() && !(existing instanceof createFakePlayer)) {
@@ -151,13 +257,7 @@ public final class CompanionResurrectionService {
         }
 
         // Clear "dead" state before spawning so auto-presence won't race.
-        st.setCompanionDead(false);
-        st.setCompanionDiedAtEpochMs(0L);
-        st.setCompanionDiedDimension(null);
-        st.setCompanionDiedPos(0L);
-        if (Frens.CONFIG != null) {
-            Frens.CONFIG.save();
-        }
+        markAlive.run();
 
         // Spawn (or rebind) the companion near the player in the Nether.
         Vec3d spawn = new Vec3d(player.getX() + 1.0, player.getY(), player.getZ() + 1.0);

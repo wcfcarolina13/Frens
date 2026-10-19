@@ -573,7 +573,9 @@ public class FrensClient implements ClientModInitializer {
         ));
         KEY_OPEN_SPELLS = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.frens.open_spells",
-            GLFW.GLFW_KEY_UNKNOWN,
+            // Default '[' pairs with ']' for the Guide. The in-screen [ / ] bot paging only runs
+            // with a screen open, and handleSpellsContextKey returns early when one is.
+            GLFW.GLFW_KEY_LEFT_BRACKET,
             KeyBinding.Category.MISC
         ));
 
@@ -718,7 +720,7 @@ public class FrensClient implements ClientModInitializer {
                         // '-' is only temporarily rebound to spells while holding a spell trigger
                         // item (tome/horn/eye) or when near an enchanting table.
                         if (!forceGoToStorage && isTemporaryGoToSpellsOverrideActive(client)) {
-                            handleSpellsContextKey(client);
+                            handleSpellsContextKey(client, true);
                         } else {
                             handleGoToLook(client);
                         }
@@ -729,7 +731,9 @@ public class FrensClient implements ClientModInitializer {
                 handleOpenGuideKey(client);
             }
             if (KEY_OPEN_SPELLS.wasPressed()) {
-                handleSpellsContextKey(client);
+                // Dedicated key: opens the Spells tab in any world without an artifact; each
+                // spell keeps its own conditions (finding 30, Bradley 2026-10-19).
+                handleSpellsContextKey(client, false);
             }
             if (KEY_RESUME.wasPressed()) {
                 handleResumeKey(client);
@@ -753,7 +757,7 @@ public class FrensClient implements ClientModInitializer {
                 // Context key (default '-'):
                 // - During recruitment: initiates contact.
                 // - After recruitment: opens companion spells when available.
-                    if (!handleSpellsContextKey(client)) {
+                    if (!handleSpellsContextKey(client, true)) {
                         handleRecruitContactKey(client);
                     }
                 }
@@ -1886,8 +1890,9 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
 
-        // Only meaningful once a companion exists.
-        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
+        // Quiet while Questing recruitment is still in progress. With Questing off spells work
+        // in any world (finding 30).
+        if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
             lastHasEyeToken = false;
             lastHasHornToken = false;
             lastHasEnchantingTableToken = false;
@@ -1934,8 +1939,12 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
 
-        // Prefer the context key (default '-') since that's what actually opens spells in practice.
-        String keyName = keyNameOrNull(KEY_GO_TO_LOOK);
+        // Prefer the dedicated Spells key (default '['), which works without holding the item.
+        // Fall back to the context key, which opens spells while the item is held.
+        String keyName = keyNameOrNull(KEY_OPEN_SPELLS);
+        if (keyName == null) {
+            keyName = keyNameOrNull(KEY_GO_TO_LOOK);
+        }
         if (keyName == null) {
             keyName = "-";
         }
@@ -1954,7 +1963,7 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
 
-        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
+        if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
             return;
         }
 
@@ -1971,11 +1980,17 @@ public class FrensClient implements ClientModInitializer {
         drawTopTip(context, TopTipLane.RIGHT, java.util.List.of(line1, line2), TopTipStyle.bordered());
     }
 
-    private static boolean handleSpellsContextKey(MinecraftClient client) {
+    /**
+     * Opens the bot inventory on its Spells tab. {@code requireArtifact} is false only for the
+     * dedicated Spells key and the hotkey overlay: those open the tab in any world, and each
+     * spell stays available or not by its own conditions. The contextual '-' paths keep the
+     * artifact check and the storage guard.
+     */
+    private static boolean handleSpellsContextKey(MinecraftClient client, boolean requireArtifact) {
         if (client == null || client.player == null || client.currentScreen != null) {
             return false;
         }
-        if (shouldForceGoToLookStorageContext(client)) {
+        if (requireArtifact && shouldForceGoToLookStorageContext(client)) {
             return false;
         }
         // If '-' is currently reserved for a pending directional/shelter confirm flow,
@@ -1984,20 +1999,19 @@ public class FrensClient implements ClientModInitializer {
             return false;
         }
 
-        // Don't interfere with recruitment flow.
+        // Don't interfere with recruitment flow. With Questing off spells work in any world
+        // (finding 30, Bradley 2026-10-19).
         if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
             return false;
         }
-        // Spells are only meaningful after a companion exists.
-        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
+
+        if (requireArtifact && !canAccessCompanionSpells(client)) {
             return false;
         }
 
-        if (!canAccessCompanionSpells(client)) {
-            return false;
-        }
-
-        String alias = getRecruitmentBotAlias();
+        String alias = net.wcfcarolina13.GameAI.services.SpellsKeyPolicy.chooseTarget(
+                findLookedAtBotName(client), survivalRecruitmentEnabled, survivalRecruitmentCompleted,
+                recruitmentBotAlias);
         playMagicUiSound(client);
         // Open the canonical bot inventory screen preselected to its Spells tab.
         // The screen is server-opened (BOT_PLAYER_INV_HANDLER), so flag the
@@ -2017,7 +2031,7 @@ public class FrensClient implements ClientModInitializer {
         if (!isGameplayTipsEnabled()) {
             return;
         }
-        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
+        if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
             return;
         }
 
@@ -2053,10 +2067,9 @@ public class FrensClient implements ClientModInitializer {
         if (client == null || client.player == null || client.currentScreen != null) {
             return false;
         }
+        // Questing recruitment in progress keeps '-' for contact. With Questing off the override
+        // works in any world (finding 30).
         if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
-            return false;
-        }
-        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
             return false;
         }
         return isHoldingSpellTriggerItem(client) || isNearEnchantingTable(client, 4);
@@ -2454,7 +2467,7 @@ public class FrensClient implements ClientModInitializer {
                             "bot resume" + suffix);
                 }
             }
-            case 3 -> handleSpellsContextKey(client);
+            case 3 -> handleSpellsContextKey(client, false);
             case 4 -> handleReturnHomeLook(client);
             case 5 -> handleSleepLook(client);
             case 6 -> BotActionClientSender.send(BotActionPolicy.Action.COME, alias, java.util.List.of(),

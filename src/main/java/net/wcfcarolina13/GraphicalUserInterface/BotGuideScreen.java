@@ -1383,7 +1383,7 @@ public final class BotGuideScreen extends Screen {
                                 "Can also be obtained via /give @p frens:wizard_tome in creative."
                         ),
                         "/give @p frens:wizard_tome (creative)",
-                        "Open Spells keybind (when holding tome)",
+                        "Open Spells key [ (works in any world)",
                         "wizard tome spellbook magic enchant craft ritual end"
                 ),
                 new GuideTopic(
@@ -1402,7 +1402,7 @@ public final class BotGuideScreen extends Screen {
                                 "Let go of leads -> Release Leads in the bot menu -> bot leash release <bot>",
                                 "Fetch your drops after dying -> Retrieve Drops in the bot menu -> bot retrieve <bot> me",
                                 "Resume -> (bind key.frens.resume) -> bot resume <bot>",
-                                "Open Spells -> (bind key.frens.open_spells) -> opens spells menu when unlocked",
+                                "Open Spells -> [ -> opens the Spells tab of your bot inventory in any world (rebind key.frens.open_spells)",
                                 "Recruit Contact -> (optional bind key.frens.recruit_contact) -> opens recruitment contact flow",
                                 "Tip: hold Stop (\\) for the 1-0 hotkey overlay menu."
                         ),
@@ -1438,7 +1438,7 @@ public final class BotGuideScreen extends Screen {
                                 "Open the Spells tab to cast this spell."
                         ),
                         "UI-only action (Spells tab)",
-                        "Shortcut: bind key.frens.open_spells",
+                        "Shortcut: [ (key.frens.open_spells)",
                         "spell guidance ender pearl paired navigation remote"
                 ),
                 new GuideTopic(
@@ -1453,7 +1453,7 @@ public final class BotGuideScreen extends Screen {
                                 "All four items are consumed (one pearl + one chorus from each)."
                         ),
                         "UI-only action (Spells tab)",
-                        "Shortcut: bind key.frens.open_spells",
+                        "Shortcut: [ (key.frens.open_spells)",
                         "spell recall chorus fruit ender pearl teleport instant paired"
                 ),
                 new GuideTopic(
