@@ -20,7 +20,49 @@ public final class FishingSearchPolicy {
     /** Reachable stands kept per spot besides the primary, for the approach fallback. */
     public static final int MAX_STAND_ALTERNATES = 2;
 
+    /** How far a stand candidate may sit from its water block, per axis (FishingSkill.findStandCandidates). */
+    public static final int STAND_REACH = 3;
+    /** Blocks added to the scanned area when looking for chest anchors (finding 39). */
+    public static final int CHEST_SCAN_MARGIN = 8;
+    /** Half height of the chest-anchor scan, centred on the bot (or the remembered water). */
+    public static final int CHEST_SCAN_Y_SPAN = 6;
+
     private FishingSearchPolicy() {
+    }
+
+    /**
+     * Horizontal half width of the chest-anchor scan for an area of the given radius
+     * (finding 39). The scan used to cover 48 blocks around the bot and again around home,
+     * ~620k block reads per search; anchors only give stands a small score bonus, so the
+     * scan now covers the searched area plus {@link #CHEST_SCAN_MARGIN}.
+     *
+     * @param areaRadius radius of the searched area (the water search radius, or
+     *                   {@link #STAND_REACH} around one remembered water block)
+     */
+    public static int chestScanHalfWidth(int areaRadius) {
+        return Math.max(0, areaRadius) + CHEST_SCAN_MARGIN;
+    }
+
+    /** Whether a chest at this offset from the scan centre is inside the chest-anchor scan. */
+    public static boolean chestScanCovers(int dx, int dy, int dz, int halfWidth, int yHalfSpan) {
+        return Math.abs(dx) <= halfWidth && Math.abs(dz) <= halfWidth && Math.abs(dy) <= yHalfSpan;
+    }
+
+    /**
+     * Whether a stand at this offset from the bot needs an A* reachability check, which is
+     * what makes the search build its path snapshot (finding 39: the snapshot alone was ~60%
+     * of an 11.7 s search that then ran no A* at all). Mirrors the reach-check condition in
+     * FishingSkill: the stand lies inside the snapshot box (|dx|,|dz| &lt;= regionRadius,
+     * |dy| &lt;= yHalfSpan for a snapshot centred on the bot) and the bot is not already on it.
+     *
+     * @param alreadyThereSq squared distance at or under which the bot counts as standing on the stand
+     */
+    public static boolean snapshotNeeded(int dx, int dy, int dz, int regionRadius, int yHalfSpan, double alreadyThereSq) {
+        if (Math.abs(dx) > regionRadius || Math.abs(dz) > regionRadius || Math.abs(dy) > yHalfSpan) {
+            return false;
+        }
+        double distSq = (double) dx * dx + (double) dy * dy + (double) dz * dz;
+        return distSq > alreadyThereSq;
     }
 
     /**

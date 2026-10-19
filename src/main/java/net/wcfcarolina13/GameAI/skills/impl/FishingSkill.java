@@ -18,6 +18,8 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.minecraft.world.RaycastContext;
+import net.minecraft.world.chunk.Chunk;
+import net.minecraft.world.chunk.ChunkStatus;
 import net.minecraft.registry.tag.FluidTags;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.LookController;
@@ -118,6 +120,8 @@ public final class FishingSkill implements Skill {
     private static final int CHEST_PROXIMITY_RADIUS = 16;
     private static final double CHEST_PROXIMITY_BONUS = -0.45;
     private static final int HOME_CHEST_SCAN_RADIUS = 48;
+    /** Y half span of FollowPathService.capture(world, o, o, true): minY = o.y - 2, maxY = o.y + 2. */
+    private static final int REACH_SNAPSHOT_Y_HALF_SPAN = 2;
 
     @Override
     public String name() {
@@ -1312,7 +1316,6 @@ public final class FishingSkill implements Skill {
                 WaterSpotMemory.rank(known, origin.getX(), origin.getY(), origin.getZ(), now);
 
         double maxDistSq = (double) REMEMBERED_SPOT_RADIUS * REMEMBERED_SPOT_RADIUS;
-        List<BlockPos> chestAnchors = null;
         int tried = 0;
         for (WaterSpotMemory.WaterSpot remembered : ranked) {
             if (tried >= REMEMBERED_SPOT_ATTEMPTS) {
@@ -1335,9 +1338,10 @@ public final class FishingSkill implements Skill {
                 LOGGER.info("Forgot remembered fishing spot {} (no open water there any more)", pos.toShortString());
                 continue;
             }
-            if (chestAnchors == null) {
-                chestAnchors = collectChestAnchors(bot, world);
-            }
+            // Anchors around this water only matter for ordering its stands: a stand sits within
+            // STAND_REACH of the water and earns the bonus within CHEST_PROXIMITY_RADIUS of a chest.
+            List<BlockPos> chestAnchors = collectChestAnchors(world, water,
+                    FishingSearchPolicy.STAND_REACH + CHEST_PROXIMITY_RADIUS);
             List<StandOption> options = findStandOptions(world, water, origin, chestAnchors);
             if (options.isEmpty()) {
                 continue;
@@ -1363,20 +1367,26 @@ public final class FishingSkill implements Skill {
         // The summary's elapsed figure covers the whole search, snapshot and chest scan included.
         long searchStart = System.nanoTime();
 
-        // Pre-capture a reachability snapshot centered on the bot for A* validation.
-        FollowPathService.FollowSnapshot reachabilitySnapshot = FollowPathService.capture(world, origin, origin, true);
+        // Finding 39: the reachability snapshot (49x5x49 cells, ~80 world reads each, every
+        // one a hop to the server thread from this worker) is built only when the first stand
+        // actually needs an A* check. A search whose stands are all outside the snapshot box
+        // (or under the bot) never builds it.
+        FollowPathService.FollowSnapshot reachabilitySnapshot = null;
+        boolean snapshotAttempted = false;
+        long snapshotNanos = 0L;
 
         // Clean up expired blacklist entries.
         UUID botUuid = bot.getUuid();
         cleanupBlacklist(botUuid);
         Map<BlockPos, Long> blacklist = FAILED_TARGET_BLACKLIST.getOrDefault(botUuid, Map.of());
 
-        // Chest anchors: local scan + home-base scan.  Scored stands near any
-        // of these get a small bonus so the bot naturally picks spots it can
-        // actually offload inventory to.
-        List<BlockPos> chestAnchors = collectChestAnchors(bot, world);
-        // The time budget starts after the snapshot and chest scan, so a slow scan does not
-        // force a nearest-column pick before any column is evaluated.
+        // Chest anchors within the search area. Scored stands near any of these get a small
+        // bonus so the bot naturally picks spots it can actually offload inventory to.
+        long chestStart = System.nanoTime();
+        List<BlockPos> chestAnchors = collectChestAnchors(world, origin, FishingSearchPolicy.chestScanHalfWidth(radius));
+        long chestMs = (System.nanoTime() - chestStart) / 1_000_000L;
+        // The time budget starts after the chest scan and leaves out the snapshot build, so a
+        // slow scan does not force a nearest-column pick before any column is evaluated.
         long budgetStart = System.nanoTime();
 
         FishingSpot best = null;
@@ -1396,9 +1406,12 @@ public final class FishingSkill implements Skill {
         // Column pre-filter: probe one open-water surface per (x,z) column, nearest
         // columns first, instead of evaluating every block in the radius volume.
         // Keeps the widened radius at ~O(r^2) cheap probes.
+        long columnsStart = System.nanoTime();
         List<BlockPos> waterColumns = nearestWaterColumns(world, origin, radius, WATER_SEARCH_Y_SPAN);
+        long columnsMs = (System.nanoTime() - columnsStart) / 1_000_000L;
+        long loopStart = System.nanoTime();
         for (BlockPos water : waterColumns) {
-            long elapsedMs = (System.nanoTime() - budgetStart) / 1_000_000L;
+            long elapsedMs = (System.nanoTime() - budgetStart - snapshotNanos) / 1_000_000L;
             if (FishingSearchPolicy.stopEvaluating(evaluated, elapsedMs, best != null)) {
                 break;
             }
@@ -1424,6 +1437,15 @@ public final class FishingSkill implements Skill {
                 if (blacklist.containsKey(stand)) {
                     LOGGER.debug("Skipping blacklisted fishing stand {}", stand.toShortString());
                     continue;
+                }
+                // Build the snapshot the first time a stand needs a reach check.
+                if (!snapshotAttempted && FishingSearchPolicy.snapshotNeeded(
+                        stand.getX() - origin.getX(), stand.getY() - origin.getY(), stand.getZ() - origin.getZ(),
+                        FollowPathService.MAX_REGION_RADIUS, REACH_SNAPSHOT_Y_HALF_SPAN, 2.25D)) {
+                    snapshotAttempted = true;
+                    long snapshotStart = System.nanoTime();
+                    reachabilitySnapshot = FollowPathService.capture(world, origin, origin, true);
+                    snapshotNanos = System.nanoTime() - snapshotStart;
                 }
                 // Check reachability via A* if we have a snapshot and stand is in bounds.
                 if (reachabilitySnapshot != null && reachabilitySnapshot.inBounds(stand)) {
@@ -1462,12 +1484,18 @@ public final class FishingSkill implements Skill {
                 );
             }
         }
+        long loopNanos = System.nanoTime() - loopStart;
         long searchMs = (System.nanoTime() - searchStart) / 1_000_000L;
-        String summary = "Fishing spot search: columns={} evaluated={} stands={} aStar={} cacheHits={} found={} elapsed={}ms";
+        long snapshotMs = snapshotNanos / 1_000_000L;
+        long evalMs = (loopNanos - snapshotNanos) / 1_000_000L;
+        String summary = "Fishing spot search: columns={} evaluated={} stands={} aStar={} cacheHits={} found={} elapsed={}ms"
+                + " (snapshot={} snapshotMs={} chests={} chestMs={} columnsMs={} evalMs={})";
+        Object[] args = {waterColumns.size(), evaluated, standsChecked, aStarCalls, cacheHits, best != null, searchMs,
+                snapshotAttempted ? "built" : "skipped", snapshotMs, chestAnchors.size(), chestMs, columnsMs, evalMs};
         if (searchMs >= 250L) {
-            LOGGER.info(summary, waterColumns.size(), evaluated, standsChecked, aStarCalls, cacheHits, best != null, searchMs);
+            LOGGER.info(summary, args);
         } else {
-            LOGGER.debug(summary, waterColumns.size(), evaluated, standsChecked, aStarCalls, cacheHits, best != null, searchMs);
+            LOGGER.debug(summary, args);
         }
 
         if (best != null) {
@@ -1533,39 +1561,53 @@ public final class FishingSkill implements Skill {
     }
 
     /**
-     * Collects chest positions near the bot and near the bot's home base.
-     * Home-base scan is cheap (one-time per spot search) and dramatically improves
-     * the odds that the picked fishing spot is within offload range of a chest.
+     * Collects chest positions within {@code halfWidth} blocks (horizontally) and
+     * {@link FishingSearchPolicy#CHEST_SCAN_Y_SPAN} (vertically) of {@code center}.
+     *
+     * <p>Finding 39: this used to scan 48 blocks around the bot and again around home
+     * (~620k reads, each a hop to the server thread from the skill worker). Anchors only give
+     * stands within {@link #CHEST_PROXIMITY_RADIUS} a small score bonus, so the scan covers the
+     * searched area plus a margin; home chests inside that area are still seen. Blocks are read
+     * through each loaded chunk once (one thread hop per chunk, not per block).</p>
      */
-    private static List<BlockPos> collectChestAnchors(ServerPlayerEntity bot, ServerWorld world) {
+    private static List<BlockPos> collectChestAnchors(ServerWorld world, BlockPos center, int halfWidth) {
         List<BlockPos> anchors = new ArrayList<>();
-        if (bot == null || world == null) {
+        if (world == null || center == null || halfWidth <= 0) {
             return anchors;
         }
-        BlockPos botPos = bot.getBlockPos();
-        scanForChests(world, botPos, HOME_CHEST_SCAN_RADIUS, anchors);
-        Optional<BlockPos> home = BotHomeService.resolveHomeTarget(bot);
-        home.ifPresent(h -> {
-            if (h.getSquaredDistance(botPos) > 4.0D) {
-                scanForChests(world, h, HOME_CHEST_SCAN_RADIUS, anchors);
+        int minX = center.getX() - halfWidth;
+        int maxX = center.getX() + halfWidth;
+        int minZ = center.getZ() - halfWidth;
+        int maxZ = center.getZ() + halfWidth;
+        int minY = Math.max(world.getBottomY(), center.getY() - FishingSearchPolicy.CHEST_SCAN_Y_SPAN);
+        int maxY = Math.min(world.getTopYInclusive(), center.getY() + FishingSearchPolicy.CHEST_SCAN_Y_SPAN);
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
+            for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
+                if (!world.isChunkLoaded(cx, cz)) {
+                    continue;
+                }
+                Chunk chunk = world.getChunk(cx, cz, ChunkStatus.FULL, false);
+                if (chunk == null) {
+                    continue;
+                }
+                int x0 = Math.max(minX, cx << 4);
+                int x1 = Math.min(maxX, (cx << 4) + 15);
+                int z0 = Math.max(minZ, cz << 4);
+                int z1 = Math.min(maxZ, (cz << 4) + 15);
+                for (int y = minY; y <= maxY; y++) {
+                    for (int x = x0; x <= x1; x++) {
+                        for (int z = z0; z <= z1; z++) {
+                            BlockState state = chunk.getBlockState(cursor.set(x, y, z));
+                            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL)) {
+                                anchors.add(cursor.toImmutable());
+                            }
+                        }
+                    }
+                }
             }
-        });
+        }
         return anchors;
-    }
-
-    private static void scanForChests(ServerWorld world, BlockPos center, int radius, List<BlockPos> out) {
-        if (world == null || center == null || radius <= 0 || out == null) {
-            return;
-        }
-        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -HOME_CHEST_Y_SPAN, -radius), center.add(radius, HOME_CHEST_Y_SPAN, radius))) {
-            if (!world.isChunkLoaded(pos)) {
-                continue;
-            }
-            BlockState state = world.getBlockState(pos);
-            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL)) {
-                out.add(pos.toImmutable());
-            }
-        }
     }
 
     private static BlockPos chooseCastTarget(ServerWorld world, ServerPlayerEntity bot, BlockPos stand, BlockPos waterAnchor, BlockPos preferred) {
