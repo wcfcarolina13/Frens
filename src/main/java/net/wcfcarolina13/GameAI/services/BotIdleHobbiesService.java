@@ -460,9 +460,11 @@ public final class BotIdleHobbiesService {
                 continue;
             }
 
-            // Stone upgrades run before the wooden fallback: that fallback returns true while it
-            // cools down and after "no safe woodcut target", so anything after it never runs for a
-            // bot with no axe. This one has its own cooldown and only acts when cobble is at hand.
+            // Each fallback below returns true only when it started or changed something (a woodcut
+            // started, a supply pulled, a tool crafted), so a fallback that is cooling down or backed
+            // off falls through to the next one and to the hobby picker (ruling 1.1.274: other
+            // hobbies may run during the wooden fallback's backoff). Stone upgrades still go first:
+            // they have their own cooldown and only act when cobble is at hand.
             if (maybeHandleIdleStoneToolUpgrades(server, bot, world, nowTick)) {
                 continue;
             }
@@ -1272,7 +1274,7 @@ public final class BotIdleHobbiesService {
             // deep serves out the full ten minutes no matter what the commander does. Probe
             // instead — throttled, because the scan is not free at tick rate.
             probeWoodenFallbackAvailability(bot, world, needWeapon, needAxe, nowTick);
-            return true;
+            return false;
         }
 
         SupplyPullPolicy.Pull pull = pullIdleFallbackSupplies(bot, world, needWeapon, needAxe, nowTick);
@@ -1288,7 +1290,7 @@ public final class BotIdleHobbiesService {
             // here (nothing below frees a slot): it falls through to the craft or woodcut.
             NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + WOODEN_FALLBACK_SUPPLY_WAIT_TICKS);
             LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
-            return true;
+            return IdleFallbackGatePolicy.reportsWork(false, moved, false);
         }
         boolean craftReady = ToolProvisionService.canCraftIdleWoodenFallback(bot, needWeapon, needAxe);
         boolean crafted = craftReady && tryCraftIdleWoodenFallback(bot);
@@ -1300,7 +1302,7 @@ public final class BotIdleHobbiesService {
             if (!BotFleeService.isAtSurface(bot, world)) {
                 NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + 600L);
                 LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
-                return true;
+                return IdleFallbackGatePolicy.reportsWork(false, moved, crafted);
             }
             if (craftReady && !crafted) {
                 long waitTicks = idleCraftFailureWaitTicks(botUuid, CRAFT_WOODEN_FALLBACK_KEY, false,
@@ -1310,7 +1312,7 @@ public final class BotIdleHobbiesService {
                 LOGGER.warn("Idle wooden fallback: {} craft attempt failed; backing off for {} ticks",
                         bot.getName().getString(),
                         waitTicks);
-                return true;
+                return IdleFallbackGatePolicy.reportsWork(false, moved, crafted);
             }
             if (canStartFallbackWoodcut(world, bot)) {
                 // Escalating per-(bot, hobby) backoff, not the flat 12 s cooldown: a woodcut that
@@ -1326,7 +1328,7 @@ public final class BotIdleHobbiesService {
                     NEXT_WOODEN_FALLBACK_TICK.put(botUuid,
                             (moved || crafted) ? Math.min(backoffNext, nowTick + 40L) : backoffNext);
                     LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
-                    return true;
+                    return IdleFallbackGatePolicy.reportsWork(false, moved, crafted);
                 }
                 // Short in-flight guard only; the authoritative wait after a failure is armed by
                 // recordHobbyAttempt when the run finishes.
@@ -1335,7 +1337,7 @@ public final class BotIdleHobbiesService {
                 LAST_HOBBY.put(botUuid, "woodcut");
                 startAmbientSkill(server, bot, "woodcut");
                 LOGGER.info("Idle wooden fallback: starting one-tree woodcut for {}", bot.getName().getString());
-                return true;
+                return IdleFallbackGatePolicy.reportsWork(true, moved, crafted);
             }
             if (moved || crafted) {
                 NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + 40L);
@@ -1347,7 +1349,8 @@ public final class BotIdleHobbiesService {
                     : nowTick + WOODEN_FALLBACK_COOLDOWN_TICKS;
             NEXT_WOODEN_FALLBACK_TICK.put(botUuid, retryAt);
             LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, signature);
-            return true;
+            // Nothing moved, crafted or started on this path (moved/crafted returned above).
+            return false;
         }
 
         clearWoodenFallbackState(botUuid);
@@ -1638,6 +1641,17 @@ public final class BotIdleHobbiesService {
         if (ToolProvisionService.hasPlanksOrLogsAvailable(bot)) return false;
 
         if (!canStartFallbackWoodcut(world, bot)) return false;
+
+        // The wooden fallback now falls through while it cools down or is backed off, so this
+        // woodcut is reachable for a bot with no axe. Without this gate it would restart the
+        // doomed "I have no axe" run the fallback's backoff exists to stop (the cd4120ca storm).
+        if (IdleFallbackGatePolicy.blocksResourcesWoodcut(
+                ToolProvisionService.hasUsableAxe(bot),
+                nowTick,
+                hobbyNextAllowedTick(bot.getUuid(), WOODEN_FALLBACK_HOBBY),
+                NEXT_WOODEN_FALLBACK_TICK.getOrDefault(bot.getUuid(), 0L))) {
+            return false;
+        }
 
         LAST_HOBBY.put(bot.getUuid(), "woodcut");
         startAmbientSkill(server, bot, "woodcut");
