@@ -4,7 +4,20 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-18 (1.1.271) — next session starts here
+## Session Handoff 2026-10-19 (1.1.272) — next session starts here
+
+**State:** main = origin/main @ 1.1.272. Suite 2947 green. Deployed to Nirn; sandbox status and checks are in the 1.1.272 changelog entry and Phase 6bj of `docs/testing/FIELD_SESSION_1.1.202.md`.
+**1.1.272** (changelog entry has rulings and costs): all four high findings of the 0-6ai sweep (15 settings save past 32 KB, 31 lodestone travel to an unloaded chunk, 32 travel-wait probe overflow, 35 wool spin), plus 5 (wedged guard escape, stale abort latch), 30 (Spells key, spellbook and resurrection with Questing off, default key `[`), 8 (woodcut asks unregistered nearby chests for an axe before punching), 25, 6, 1, 33, souls 2/16a/19/22, and a `Long.MIN_VALUE` sweep (`TickIntervals`; the combat callout read a never-hit bot as just hit). Fable review (two reviewers), one fix wave (`0c62d973`).
+**Public release:** by Bradley's rule (2026-10-18) 1.1.272 is the candidate once the high findings pass in the sandbox. Nothing goes to Modrinth or Discord without his OK on the exact text; the 1.1.268 notes draft (`.superpowers/sdd/modrinth/`, base checkout) needs rewriting for 1.1.272.
+**Needs Bradley:**
+- Existing installs keep the Spells key unbound (options.txt saved `key.keyboard.unknown`), so Nirn needs Options > Controls > Frens > Spells = `[` (or Reset Keys). Ruling wanted: a one-time migration?
+- Woodcut crafts an axe from planks before it asks a chest (order kept: craft, chest, bare hands). Should a chest axe come before crafting?
+- On a shared server the woodcut chest scan offers another player's unlocked chest within 12 blocks to the owner through the normal prompt.
+**Deferred (with reasons in the changelog):** #16 retry on a sentinel-only reply; enchant/anvil proxy has no owner gate; a picker for several dead bots; death records never cleared (an old shelved bot qualifies for the ritual); party-scene generation is not cancelled when one of its bots dies; two log-only MIN_VALUE sites (`Frens.java` in-wall warning, `BotEventHandler` follow-backoff log); novelty pushes an exact repeat into the ring; ToolSelector cooldown map never pruned; per-bot `lastRespawnHandledTick`.
+**Next fix build (from findings 1-36, not in 1.1.272):** 17 ambient chatter ignores the speech floor and Scripted rate (medium, behind four FAILs), 18 local danger veto misses a zombie, 34 farm reports success after tilling nothing, 23 a threat resumes a long-finished woodcut, 13 craft after a failed table reach, 4 bed craft builds a table first, 7/9/10/11/14/20/21/24/26-29/36 minors, 3 same speaker twice.
+**Field checklist drain:** steps 1-2 done; step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-18 (1.1.271) — superseded
 
 **State:** main = origin/main @ 1.1.271. Suite 2853 green. Deployed to Nirn; the mcp-sandbox still has 1.1.270 (a field sweep held the sandbox lock at release time), deploy there when the lock is free.
 **1.1.271:** the bot operator-permission lookup now reaches `leveled-mapped` OWNERS. Since 1.1.232 a static-init order bug (the leveled field list was still null) made every launch fall back to `PermissionPredicate.ALL`. The fallback was harmless in vanilla and Carpet; the changelog entry has the javap evidence.
@@ -149,7 +162,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "claim an ownerless wall" (1.1.233 handoff, 2026-10-13)
 - [ ] "typed /bot ... for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
 - [ ] "SPAWN for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
-- [ ] "resurrection owner clause." (1.1.233 handoff, 2026-10-13)
+- [x] "resurrection owner clause." (1.1.233 handoff, 2026-10-13) ✅ 1.1.272 (Questing-off ritual: owner, op or host)
 - [ ] "After 6ac/6ad results: bot-slot check refuse mode" (6ad item 7 was clean; `AuthorizedBotDispatch` is still WARN-only; 1.1.233 handoff; also 1.1.232 "D5 refuse mode", 2026-10-13)
 - [ ] "A bot respawned by the End exit is a plain `ServerPlayerEntity`, so it gets \"not a companion\" until it is recreated." ("fails closed, and the mod's 78 other `instanceof` checks share it"; 1.1.220 handoff, 2026-09-25)
 - [ ] (uncertain) "An offline-mode LAN guest using the host's name passes `isHost`; `configNetworkManager` has the same gap." (1.1.220 handoff, 2026-09-25)
