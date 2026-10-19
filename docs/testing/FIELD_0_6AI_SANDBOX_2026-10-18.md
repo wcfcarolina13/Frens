@@ -137,6 +137,7 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     72 KB compact: `botControlsByWorld` 36 KB and `botSpawnPointsByWorld` 16 KB over 45 bots times every world copy. Nirn's file is 10 KB
     today, so Nirn is safe for now, but these maps only grow with bots and worlds. After trimming the sandbox file to Jake/Bob/Silas
     (backup `config/settings.json5.bak-pass3-bloat`) the same slider saved fine.
+    Scoped 2026-10-19: `docs/superpowers/specs/2026-10-19-frens-save-config-32kb-scope.md` (only `botControlsByWorld` crosses the wire; fix = `registerLarge` + 262144 codec, `/configMan` open packet has the same cap).
 16. **A reply that is only the `##FRENS` line costs the scene (medium).** S5 20:33:09, "bots, what should we do next?" with
     structured output on: `llama3.1:8b` answered with nothing but `##FRENS {"stance":...,"facts":[...]}`, so `accepted=false`,
     `failed:MALFORMED`, and the player got no answer. That was the only tail the 8B model wrote in about 30 scenes.
