@@ -718,6 +718,8 @@ public class BotEventHandler {
         clearState(bot);
         LAST_JOIN_ENCLOSURE_CHECK_TICK.remove(uuid);
         LAST_ARMOR_AUDIT_TICK.remove(uuid);
+        CREEPER_FLEE_STATE.remove(uuid);
+        CREEPER_DECISION_LOG_STATE.remove(uuid);
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (primaryUuid != null && primaryUuid.equals(uuid)) {
             BotLifecycleService.setPrimaryBotUuid(null);
@@ -3569,7 +3571,7 @@ public class BotEventHandler {
                 double healthFraction = maxHealth <= 0.0F ? 1.0D : bot.getHealth() / (double) maxHealth;
                 CreeperEvasionPolicy.Decision decision = CreeperEvasionPolicy.decide(
                         distance, armed, chargedCreeper, fuseState, healthFraction);
-                logCreeperDecisionIfChanged(bot, decision, distance, armed, fuseState);
+                logCreeperDecisionIfChanged(bot, closest.getId(), decision, distance, armed, fuseState);
 
                 if (decision == CreeperEvasionPolicy.Decision.STAY) {
                     double cdx = closest.getX() - bot.getX();
@@ -3631,8 +3633,10 @@ public class BotEventHandler {
             } else {
                 // Out of engagement range — drop any stale flee memory so we don't
                 // misattribute "no progress" once the creeper closes in again.
+                // The decision-log key is NOT dropped here (1.1.273): a creeper hovering at the
+                // edge of the radius reprinted the same line every pass. The key carries the
+                // creeper's entity id, so a new creeper still logs.
                 CREEPER_FLEE_STATE.remove(bot.getUuid());
-                CREEPER_DECISION_LOG_STATE.remove(bot.getUuid());
             }
         }
 
@@ -3932,21 +3936,19 @@ public class BotEventHandler {
     /**
      * State-change-only INFO diagnostic for the creeper evasion decision. Format:
      * {@code [creeper] Jake decision=BACK_AWAY dist=2.8 armed=true fuse=SWELLING}
-     * The line is only emitted when the decision (or the coarse inputs) change,
-     * so a per-tick combat loop does not flood the field log.
+     * The line is only emitted when the creeper, the decision or the coarse inputs
+     * change, so a per-tick combat loop does not flood the field log.
      */
     private static void logCreeperDecisionIfChanged(ServerPlayerEntity bot,
+                                                    int creeperEntityId,
                                                     CreeperEvasionPolicy.Decision decision,
                                                     double distance,
                                                     boolean armed,
                                                     CreeperEvasionPolicy.FuseState fuse) {
         // Distance is reported but NOT part of the change key — it drifts every
         // tick and would defeat the state-change suppression.
-        String key = decision + "|" + armed + "|" + fuse;
-        UUID botId = bot.getUuid();
-        String prev = CREEPER_DECISION_LOG_STATE.get(botId);
-        if (!key.equals(prev)) {
-            CREEPER_DECISION_LOG_STATE.put(botId, key);
+        String key = creeperEntityId + "|" + decision + "|" + armed + "|" + fuse;
+        if (net.wcfcarolina13.GameAI.services.LogThrottle.changed(CREEPER_DECISION_LOG_STATE, bot.getUuid(), key)) {
             LOGGER.info("[creeper] {} decision={} dist={} armed={} fuse={}",
                     bot.getName().getString(), decision,
                     String.format("%.1f", distance), armed, fuse);
@@ -7282,6 +7284,8 @@ public class BotEventHandler {
                 FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.clear();
                 FOLLOW_COMMANDER_LADDER_HINT.clear();
                 COMBAT_TARGET.clear();
+                CREEPER_FLEE_STATE.clear();
+                CREEPER_DECISION_LOG_STATE.clear();
                 TELEPORT_DETECT_LAST_POS.clear();
                 TELEPORT_GRACE_UNTIL_TICK.clear();
                 STOP_COMMAND_GRACE_UNTIL_TICK.clear();

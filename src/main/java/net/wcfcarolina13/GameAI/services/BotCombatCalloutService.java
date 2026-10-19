@@ -138,10 +138,11 @@ public final class BotCombatCalloutService {
             new WeightedLine("post_combat_single_inconvenience", "Barely an inconvenience.", BotDialogueSounds.LINE_POST_COMBAT_SINGLE_INCONVENIENCE, WEIGHT_RARE)
     };
 
+    // post_explosion_less_boom was removed in 1.1.273: its oggs were deleted in 1.1.30 and the
+    // sound event has an empty sounds[] (missing-sound warning on every pick).
     // Generic post-explosion pool — plays after any explosion (creeper, TNT,
     // end crystal, ghast fireball, wither skull, etc.).
     private static final WeightedLine[] POST_EXPLOSION_LINES = new WeightedLine[] {
-            new WeightedLine("post_explosion_less_boom", "Next time, less 'boom,' yeah?", BotDialogueSounds.LINE_POST_EXPLOSION_LESS_BOOM, WEIGHT_COMMON),
             new WeightedLine("post_explosion_exactly_how_it_went", "That went... exactly how it went.", BotDialogueSounds.LINE_POST_EXPLOSION_EXACTLY_HOW_IT_WENT, WEIGHT_UNCOMMON)
     };
 
@@ -149,7 +150,6 @@ public final class BotCombatCalloutService {
     // fire when a creeper exploded, not for e.g. TNT).
     private static final WeightedLine[] POST_EXPLOSION_CREEPER_LINES = new WeightedLine[] {
             new WeightedLine("post_explosion_bones", "I felt that in my bones.", BotDialogueSounds.LINE_POST_EXPLOSION_BONES, WEIGHT_COMMON),
-            new WeightedLine("post_explosion_less_boom", "Next time, less 'boom,' yeah?", BotDialogueSounds.LINE_POST_EXPLOSION_LESS_BOOM, WEIGHT_COMMON),
             new WeightedLine("post_explosion_exactly_how_it_went", "That went... exactly how it went.", BotDialogueSounds.LINE_POST_EXPLOSION_EXACTLY_HOW_IT_WENT, WEIGHT_UNCOMMON)
     };
 

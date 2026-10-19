@@ -46,8 +46,13 @@ public final class BotRescueService {
     private static final Map<UUID, Long> LAST_STUCK_LOG_MS = new ConcurrentHashMap<>();
     private static final long ESCAPE_NUDGE_COOLDOWN_MS = 1_200L;
 
-    private static final Map<UUID, Long> LAST_SUFFOCATION_ALERT_TICK = new ConcurrentHashMap<>();
-    private static final long SUFFOCATION_ALERT_COOLDOWN_TICKS = 20L; // 1 second for urgent warnings
+    // Keyed bot|block|pos (1.1.273): one "I'm stuck in X" line per block per 10 s. Not cleared on
+    // not-stuck exits, so position jitter at the edge of a block cannot re-arm it.
+    private static final Map<String, Long> SUFFOCATION_ALERT_TICK_BY_BLOCK = new ConcurrentHashMap<>();
+    private static final long SUFFOCATION_ALERT_COOLDOWN_TICKS = 200L;
+    // [FollowAssert] mounted-rescue-skip lines log on change of vehicle type per bot (1.1.273).
+    private static final Map<UUID, String> MOUNTED_SKIP_LOG_STATE = new ConcurrentHashMap<>();
+    private static final Map<UUID, String> MOUNTED_PROACTIVE_SKIP_LOG_STATE = new ConcurrentHashMap<>();
     private static long lastBurialScanTick = -1L;
 
     // Lost shout / found detection tracking
@@ -87,7 +92,9 @@ public final class BotRescueService {
     }
 
     public static void reset() {
-        LAST_SUFFOCATION_ALERT_TICK.clear();
+        SUFFOCATION_ALERT_TICK_BY_BLOCK.clear();
+        MOUNTED_SKIP_LOG_STATE.clear();
+        MOUNTED_PROACTIVE_SKIP_LOG_STATE.clear();
         LAST_OBSTRUCT_DAMAGE_TICK.clear();
         LAST_MINING_ESCAPE_ATTEMPT.clear();
         LAST_ESCAPE_NUDGE_MS.clear();
@@ -234,13 +241,14 @@ public final class BotRescueService {
             var vehicle = bot.getVehicle();
             boolean vehicleInWall = vehicle != null && vehicle.isInsideWall();
             if (!takingSuffocationDamage && !vehicleInWall) {
-                LOGGER.info("[FollowAssert] mounted-rescue-skip bot={} vehicle={} reason=not-suffocating",
-                        bot.getName().getString(),
-                        vehicle == null ? "<null>" : vehicle.getType().toString());
+                String vehicleType = vehicle == null ? "<null>" : vehicle.getType().toString();
+                if (LogThrottle.changed(MOUNTED_SKIP_LOG_STATE, bot.getUuid(), vehicleType)) {
+                    LOGGER.info("[FollowAssert] mounted-rescue-skip bot={} vehicle={} reason=not-suffocating",
+                            bot.getName().getString(), vehicleType);
+                }
                 DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} mounted on {} and not suffocating - skipping burial rescue",
                         bot.getName().getString(),
                         vehicle == null ? "<null>" : vehicle.getType().toString());
-                LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
                 LAST_STUCK_LOG_MS.remove(bot.getUuid());
                 return false;
             }
@@ -255,6 +263,8 @@ public final class BotRescueService {
                 bot.stopRiding();
             } catch (Exception ignored) {
             }
+        } else {
+            MOUNTED_SKIP_LOG_STATE.remove(bot.getUuid());
         }
 
         // Vanilla physics short-circuit. If the bot is on the ground (vanilla seated
@@ -268,7 +278,6 @@ public final class BotRescueService {
             DebugToggleService.debug(LOGGER,
                     "rescueFromBurial: bot={} on-ground, not inside-wall, no suffocation — vanilla physics OK, skipping",
                     bot.getName().getString());
-            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             LAST_STUCK_LOG_MS.remove(bot.getUuid());
             return false;
         }
@@ -312,7 +321,6 @@ public final class BotRescueService {
         // unless we're actually taking suffocation damage. Otherwise, this fights follow's door traversal.
         if (!takingSuffocationDamage && (headIsDoor || feetIsDoor) && headBlocked && feetBlocked) {
             DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} door overlap and not suffocating - skipping mining", bot.getName().getString());
-            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             LAST_STUCK_LOG_MS.remove(bot.getUuid());
             return false;
         }
@@ -372,7 +380,6 @@ public final class BotRescueService {
         // Exit if not suffocating AND not stuck in blocks
         if (!takingSuffocationDamage && !stuckInBlocks) {
             DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} not suffocating and not stuck - nothing to do", bot.getName().getString());
-            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             LAST_STUCK_LOG_MS.remove(bot.getUuid());
             return false;
         }
@@ -439,7 +446,7 @@ public final class BotRescueService {
 
             String blockName = headState.getBlock().getName().getString();
             String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
-            alertSuffocationWithDetails(bot, blockName, toolName, "above");
+            alertSuffocationWithDetails(bot, blockName, toolName, "above", head);
 
             MinecraftServer srv = bot.getCommandSource().getServer();
             if (srv != null) {
@@ -503,7 +510,7 @@ public final class BotRescueService {
                 String blockName = targetState.getBlock().getName().getString();
                 String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
                 String directionName = escapeDirection.toString().toLowerCase();
-                alertSuffocationWithDetails(bot, blockName, toolName, "toward " + directionName);
+                alertSuffocationWithDetails(bot, blockName, toolName, "toward " + directionName, targetPos);
 
                 MinecraftServer srv = bot.getCommandSource().getServer();
                 if (srv != null) {
@@ -548,7 +555,7 @@ public final class BotRescueService {
 
             String blockName = feetState.getBlock().getName().getString();
             String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
-            alertSuffocationWithDetails(bot, blockName, toolName, "at feet");
+            alertSuffocationWithDetails(bot, blockName, toolName, "at feet", feet);
 
             MinecraftServer srv = bot.getCommandSource().getServer();
             if (srv != null) {
@@ -585,11 +592,14 @@ public final class BotRescueService {
         // Vehicle passengers can look "embedded" due to quantized block positions.
         if (bot.hasVehicle()) {
             var vehicle = bot.getVehicle();
-            LOGGER.info("[FollowAssert] mounted-rescue-skip bot={} vehicle={} reason=proactive-escape-disabled",
-                    bot.getName().getString(),
-                    vehicle == null ? "<null>" : vehicle.getType().toString());
+            String vehicleType = vehicle == null ? "<null>" : vehicle.getType().toString();
+            if (LogThrottle.changed(MOUNTED_PROACTIVE_SKIP_LOG_STATE, bot.getUuid(), vehicleType)) {
+                LOGGER.info("[FollowAssert] mounted-rescue-skip bot={} vehicle={} reason=proactive-escape-disabled",
+                        bot.getName().getString(), vehicleType);
+            }
             return false;
         }
+        MOUNTED_PROACTIVE_SKIP_LOG_STATE.remove(bot.getUuid());
 
         BlockPos feet = bot.getBlockPos();
         BlockPos head = feet.up();
@@ -663,7 +673,7 @@ public final class BotRescueService {
             String location = blockedPos.equals(head) ? "above" : "at feet";
 
             // Send urgent alert
-            alertSuffocationWithDetails(bot, blockName, toolName, location);
+            alertSuffocationWithDetails(bot, blockName, toolName, location, blockedPos);
 
             // Start time-based mining (throttled)
             MinecraftServer srv = bot.getCommandSource().getServer();
@@ -1011,7 +1021,8 @@ public final class BotRescueService {
         return false;
     }
 
-    private static void alertSuffocationWithDetails(ServerPlayerEntity bot, String blockName, String toolName, String location) {
+    private static void alertSuffocationWithDetails(ServerPlayerEntity bot, String blockName, String toolName, String location,
+                                                    BlockPos blockPos) {
         if (bot == null) {
             return;
         }
@@ -1023,11 +1034,13 @@ public final class BotRescueService {
         if (srv == null) {
             return;
         }
-        UUID uuid = bot.getUuid();
         long now = srv.getTicks();
-        long last = LAST_SUFFOCATION_ALERT_TICK.getOrDefault(uuid, -1L);
-        if (last >= 0 && (now - last) < SUFFOCATION_ALERT_COOLDOWN_TICKS) {
+        String key = bot.getUuid() + "|" + blockName + "|" + (blockPos == null ? "?" : Long.toString(blockPos.asLong()));
+        if (!LogThrottle.due(SUFFOCATION_ALERT_TICK_BY_BLOCK, key, now, SUFFOCATION_ALERT_COOLDOWN_TICKS)) {
             return;
+        }
+        if (SUFFOCATION_ALERT_TICK_BY_BLOCK.size() > 256) {
+            SUFFOCATION_ALERT_TICK_BY_BLOCK.values().removeIf(t -> now - t >= SUFFOCATION_ALERT_COOLDOWN_TICKS || t > now);
         }
         String message = String.format("I'm stuck in %s %s! Mining with %s...", blockName, location, toolName);
         ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), message);
@@ -1037,7 +1050,6 @@ public final class BotRescueService {
             BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), message, VoiceLineCategory.SURVIVAL_STATUS);
         } catch (Exception ignored) {
         }
-        LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
     }
 
     public static void tickBurialRescue(MinecraftServer server) {
