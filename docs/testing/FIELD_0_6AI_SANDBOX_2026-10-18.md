@@ -15,9 +15,9 @@ apart from finding 5 (a guarding bot wedged in a hole never climbs out).
 
 **Pass 3 (1.1.271, sessions S5-S11, 19:28-23:47):** a third session swept the 99 "not reached" items, the 11 fortify items and the
 3 reworded items, then the still-open sandbox items of 6ak-6bi and 7-10. 126 verdicts (105 in 0-6ai, 21 in 6ak-10): **81 PASS (ticked),
-10 FAIL, 23 PARTIAL, 9 NOT REACHED** (tried, could not be completed), **2 CRITERION OUT OF DATE** and **1 NEEDS BRADLEY** (both added to
-`GUIDED_SESSION_BRADLEY.md` under "Appended by sweeps", with three new decision items). Each got a `Sandbox 2026-10-18 pass 3 (1.1.271):`
-sub-line in the checklist. Counts after pass 3: **127 open, 235 done** (from 208 and 154). Findings 15-29 below; finding 15 is high
+11 FAIL, 23 PARTIAL, 9 NOT REACHED** (tried, could not be completed), **1 CRITERION OUT OF DATE** and **1 NEEDS BRADLEY** (both added to
+`GUIDED_SESSION_BRADLEY.md` under "Appended by sweeps", with the decision items; the Spells key was ruled 2026-10-19 and is now a FAIL). Each got a `Sandbox 2026-10-18 pass 3 (1.1.271):`
+sub-line in the checklist. Counts after pass 3: **127 open, 235 done** (from 208 and 154). Findings 15-30 below; finding 15 is high
 (a settings change disconnects the player once the config passes 32 KB), the rest medium or minor. Every pass-3 session was recorded
 with Flashback (replays A-H); the camera in the replays is free, so angles are chosen in post.
 
@@ -157,6 +157,16 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     frens:bot.line.post_explosion_less_boom`. The `[creeper]` decision line also repeats every second with the same decision, though
     the checklist says it prints on change.
 
+30. **The Spells key only works after a Questing recruitment (medium, ruled 2026-10-19).** `FrensClient.handleSpellsContextKey` returns
+    unless survival recruitment is enabled and completed, and the keybind ships unbound. Bradley's ruling: spells are not Questing-only;
+    the key should open the bot inventory on its Spells tab in any world (Admin mode included), and each spell stays available or not
+    by its own conditions (artifacts and similar). Questing is a separate worldbuilding layer (quests that unlock abilities), not the
+    gate for the key. A default binding is worth deciding in the same fix. Same ruling covers two flavour features: making a spellbook
+    and the companion resurrection ritual should both work with Questing off. Today `CompanionResurrectionService` returns early
+    unless survival recruitment is on and the companion was recruited (lines 51-57), so with Questing off no bot can be resurrected;
+    the spellbook token checks (`hasSpellbookToken`, Spells access, remote guidance) are not Questing-gated in the code, but making a
+    spellbook was not played in the sandbox.
+
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
 after the S6 trim, the shelved bots Ash, Birch and Cedar came back on the next launch as lowercase `ash`, `birch`, `cedar` at world
@@ -253,6 +263,7 @@ the host (7 bots + host = 8/8 spawned fine), so that item's "6 bots" text may be
 
 
 
+
 ### Pass 3 verdicts (1.1.271)
 
 Evidence names the session (S5-S...) and the Flashback replay (A, B, ...: see Pass 3 sessions).
@@ -325,7 +336,7 @@ Evidence names the session (S5-S...) and the Flashback replay (A, B, ...: see Pa
 | 10 | `/bot soul reset Jake` | PASS | S7 21:25:35 reset: `/bot soul memory Jake` "Jake doesn't remember anything about you yet."; `mind.json` `playerMemories` 0, `archivedPlayerMemories` 22, `digestCursors` {}. |
 | 10 | `/bot soul reset party` mid-banter | PASS | S7 scene 72cfdd67 line 1 at 21:28:35, `/bot soul reset party` the same second: `scene-playback ... outcome=cancelled delivered=1/3`, "Archived your group conversation, new epoch 2.", archive file `epoch-1-...jsonl`; the epoch-0 archive holds 71 HEARD, 175 SPOKEN, 7 FAILURE records. Next banter fired 21:28:56. Replay C 21:28:35. |
 | 10 | Toggle everything off | PARTIAL | S7 `/bot soul banter off` + `local off` 21:29:3x, two salient unaddressed lines, 2 min: no `[souls] local` line, but the Active lane kept evaluating (`banter lane=ACTIVE outcome=vetoed:not-quiet`, `vetoed:nobody-working`). Active has its own toggle; whether `banter off` should silence it is Bradley's call. |
-| 6c | Spells key opens the inventory Spells tab (1.1.204) | CRITERION OUT OF DATE | S8 the Spells keybind ships unbound (`GLFW_KEY_UNKNOWN`); bound to K in the sandbox's options, looking at Jake, pressed: nothing opened, no log. `handleSpellsContextKey` returns unless survival recruitment is on and completed, and Questing has been off by default since 1.1.235, so in Admin mode the key is a no-op. Needs Bradley's ruling (Questing-only, or bind it and drop the recruitment gate). |
+| 6c | Spells key opens the inventory Spells tab (1.1.204) | FAIL | S8 the Spells keybind ships unbound (`GLFW_KEY_UNKNOWN`); bound to K in the sandbox's options, looking at Jake, pressed: nothing opened, no log. `handleSpellsContextKey` returns unless survival recruitment is on and completed, so in Admin mode (the default since 1.1.235) the key is a no-op. Bradley's ruling 2026-10-19: the key is not Questing-only; it should open the Spells tab in any world, and each spell stays gated by its own conditions (artifacts etc.). Finding 30. |
 | 6c | Wedged bot: pillar reason + 30 s back-off (1.1.204, P1 escape) | PASS | S8 on 1.1.271 fresh bot Pebble guarding in a 1x1x2 hole, player 150 blocks away, day. Bedrock lid: every try `pillar recovery placed no blocks reason=overhead-mine-failed`, then `Guard escape: Pebble failed — cooldown 30s` (21:57:22, 21:57:56, 21:58:29, about 33 s apart); lid removed, `Guard escape: Pebble succeeded` 22:00:11. A stone lid: first try `overhead-mine-failed`, second try dug through and climbed out. Pass 2's finding 5 (every movement aborted) did not reproduce. Replay E. |
 | 6c | Hotbar-lock combat honesty (1.1.204, side effect) | PASS | S8 Jake in an oak boat on land, hotbar planks/dirt/sticks, iron sword in the main inventory, easy, zombie 4 blocks away (21:47:40): Jake moved the sword into hotbar slot 0 (planks pushed to slot 14) and held it; no swing with another item. He stayed in the boat. While mounted the log printed `[FollowAssert] mounted-rescue-skip ... reason=not-suffocating` about 25 times a second (finding 24). |
 | 6d | Bundled cobblestone still gets a pillar (1.1.205) | PASS | S8 Pebble guarding in an open 1x1x2 hole, all 16 cobblestone in a bundle: `ensureAtSurface: Pebble pulled 1 scaffold stack(s) out of bundles for pillar recovery` (21:53:11), pillar steps=6, `Guard escape: Pebble succeeded` 21:54:06; 10 cobblestone left loose afterwards. Replay E 21:53:06-21:54:06. |

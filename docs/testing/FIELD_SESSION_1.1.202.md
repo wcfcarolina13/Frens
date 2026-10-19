@@ -356,7 +356,7 @@ All single-player. Do the Silas item early if you want him in the roster for Pha
 (three bots), otherwise run it here.
 
 - [ ] **Spells key opens the inventory Spells tab (1.1.204)**
-  - Sandbox 2026-10-18 pass 3 (1.1.271): CRITERION OUT OF DATE: S8 the Spells keybind ships unbound (`GLFW_KEY_UNKNOWN`); bound to K in the sandbox's options, looking at Jake, pressed: nothing opened, no log. `handleSpellsContextKey` returns unless survival recruitment is on and completed, ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
+  - Sandbox 2026-10-18 pass 3 (1.1.271): FAIL: S8 the Spells keybind ships unbound (`GLFW_KEY_UNKNOWN`); bound to K in the sandbox's options, looking at Jake, pressed: nothing opened, no log. `handleSpellsContextKey` returns unless survival recruitment is on and completed, so ... See `FIELD_0_6AI_SANDBOX_2026-10-18.md`.
   - Bradley does: look at Jake, press the Spells keybind; then press it from the radial (slot 3).
   - Claude watches for: nothing in the log on success; `Out of range or wrong dimension` in chat = fail
     (should not happen — the host is op).

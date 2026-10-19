@@ -387,8 +387,8 @@ Bradley hosts a sandbox world over LAN (H), the second account joins (G). G is n
 | B: souls and voices by ear | 14 (+1 appended) |
 | C: Nirn | 7 (+1 appended) |
 | D: second human on LAN | 29 |
-| Needs a decision | 2 (+3 appended) |
-| **Total for Bradley** | **60** (55 + 5 appended by pass 3) |
+| Needs a decision | 2 (+2 appended, 1 ruled 2026-10-19) |
+| **Total for Bradley** | **59** (55 + 5 appended by pass 3, 1 ruled) |
 | Maybe Claude can do it | 6 |
 
 Split items are counted once, in the block that holds Bradley's half. Tick an item in `FIELD_SESSION_1.1.202.md` only when every half named in its Prep line has passed.
@@ -410,10 +410,8 @@ From the 0-6ai sweep pass 3 (1.1.271, 2026-10-18, `FIELD_0_6AI_SANDBOX_2026-10-1
   - Bradley does: Soul Voice engine chooser.
   - Pass when: the Dreamsleeve row is **not** greyed and reads "Available." / "Use Dreamsleeve" as before (the grey-out must only trigger off macOS).
   - Prep: In the sandbox the row reads "Not set up on this machine" with the install button greyed, because the sandbox has no Dreamsleeve folder. Open the chooser on Nirn, where Dreamsleeve is installed.
-- [ ] **Phase 6c: Spells key opens the inventory Spells tab (1.1.204)** (joins "Needs a decision")
-  - Bradley does: look at Jake, press the Spells keybind; then press it from the radial (slot 3).
-  - Pass when: the **bot inventory** screen opens already on the Spells tab both times, Enchant/Anvil buttons behave as before, and the old standalone spells popup never appears.
-  - Prep: Decision first. The keybind ships unbound, and `handleSpellsContextKey` only acts once survival recruitment is on and completed, so with Questing off (the default since 1.1.235) the key does nothing. Rule: test it in a Questing world, or treat the item as superseded.
+- [x] **Phase 6c: Spells key opens the inventory Spells tab (1.1.204)** (decision answered 2026-10-19, leaves this doc)
+  - Bradley's ruling: not Questing-only. The key should open the Spells tab in any world, Admin mode included; each spell stays gated by its own conditions (artifacts and similar). Questing is a separate quest/lore layer. Spellbook creation and the resurrection ritual also stay available with Questing off (they add flavour). Now a fix item (finding 30 in `FIELD_0_6AI_SANDBOX_2026-10-18.md`; resurrection is recruitment-gated today); re-test in the sandbox after the fix, no session needed.
 - [ ] **Phase 6: `vetoed:muted` only in the right condition (1.1.182)** (joins "Needs a decision")
   - Pass when: it appears only with Text master off AND (Voice or Soul Voice) off.
   - Prep: Decision first. Since the 1.1.193 lane split the banter/local surface listens only to Soul Chat and Soul Voice (`SoulRuntime` ambientTextOpen/ambientVoiceOpen); the scripted Text master no longer reaches it, and with Soul Chat off the pipeline is down before the muted check. Rule the new condition (Soul Chat off AND Soul Voice off?) or retire the item.
