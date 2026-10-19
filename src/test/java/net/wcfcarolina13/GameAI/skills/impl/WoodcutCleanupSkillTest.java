@@ -12,12 +12,33 @@ class WoodcutCleanupSkillTest {
     @Test
     void fallbackSweepMinesStoneOnlyWhenTheBotPlacedIt() {
         // Natural stone under the bot: never mined.
-        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, false));
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, false, false));
         // Remembered or owned scaffold stone: mined.
-        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, true, false));
-        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, true));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, true, false, false));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, true, false));
         // Dirt keeps its shape-based checks (done by the caller).
-        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false, false));
+    }
+
+    @Test
+    void fallbackSweepLeavesTheSoilUnderAFelledTrunk() {
+        // Finding 38: natural dirt the trunk stood on stays, so no hole opens where the tree was.
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false, true));
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, false, true));
+        // Unless this bot placed it there.
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, true, false, true));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, true, true));
+    }
+
+    @Test
+    void protectedSoilParameterParsesOnlyPackedPositions() {
+        assertTrue(WoodcutCleanupDiagnostics.parseProtectedSoil(null).isEmpty());
+        assertTrue(WoodcutCleanupDiagnostics.parseProtectedSoil("1,2,3").isEmpty());
+        assertTrue(WoodcutCleanupDiagnostics.parseProtectedSoil(new long[0]).isEmpty());
+        var soil = WoodcutCleanupDiagnostics.parseProtectedSoil(new long[] {5L, -9L, 5L});
+        assertEquals(2, soil.size());
+        assertTrue(soil.contains(5L));
+        assertTrue(soil.contains(-9L));
     }
 
     @Test

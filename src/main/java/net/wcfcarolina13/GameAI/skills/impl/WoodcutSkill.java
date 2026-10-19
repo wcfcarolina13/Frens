@@ -74,6 +74,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.Collections;
 import java.util.HashSet;
@@ -817,6 +818,8 @@ public final class WoodcutSkill implements Skill {
         Map<BlockPos, String> failedBaseReasons = new HashMap<>();
         Set<BlockPos> pendingFloaters = new HashSet<>();
         Set<BlockPos> bootstrapRegatheredBases = new HashSet<>();
+        // Bases of trunks cut this run: the cleanup sweep leaves the soil under them (finding 38).
+        Set<BlockPos> cutTreeBases = new HashSet<>();
         int felled = 0;
         int consecutiveFailures = 0;
         int totalFailures = 0;
@@ -1218,6 +1221,9 @@ public final class WoodcutSkill implements Skill {
                     consecutiveFailures = WoodcutFailureStreakPolicy.next(consecutiveFailures, false, harvest.detail(), logsCutFromTree);
                     failedBases.add(target.base().toImmutable());
                     failedBaseReasons.put(target.base().toImmutable(), harvest.detail());
+                    if (logsCutFromTree > 0) {
+                        cutTreeBases.add(target.base().toImmutable());
+                    }
                     if (harvest.failureReason() == WoodcutFailureReason.PROTECTED_AT_MINING) {
                         miningProtectedFailures++;
                     } else if (harvest.failureReason() == WoodcutFailureReason.PATH_OR_REACH_FAILURE) {
@@ -1263,6 +1269,7 @@ public final class WoodcutSkill implements Skill {
 
                 felled++;
                 consecutiveFailures = 0;
+                cutTreeBases.add(target.base().toImmutable());
                 sinceCleanup++;
                 LOGGER.info("Woodcut target cleared: base={} logs={} logsCut={} felled={} target={}",
                         target.base().toShortString(), reachSession.trunkMineAttemptsStarted, logsCutFromTree, felled,
@@ -1277,7 +1284,7 @@ public final class WoodcutSkill implements Skill {
                 if (openEnded && sinceCleanup >= 5) {
                     runWoodcutCleanup(context, source, bot, startPos, minX, maxX, minY, maxY, minZ, maxZ,
                             Math.max(searchRadius + 6, 16), Math.max(verticalRange + 8, 12),
-                            false);
+                            false, cutTreeBases);
                     sinceCleanup = 0;
                 }
                 } finally {
@@ -1388,7 +1395,7 @@ public final class WoodcutSkill implements Skill {
                         // Cleanup pass first (break floating logs/scaffolds).
                         runWoodcutCleanup(context, source, bot, startPos, minX, maxX, minY, maxY, minZ, maxZ,
                                 (int) Math.ceil(horizRadius), (int) Math.ceil(vertRange),
-                                false);
+                                false, cutTreeBases);
                     }
                 } else {
                     LOGGER.info("Woodcut: abort requested; skipping cleanup pass and performing final sweep.");
@@ -1528,7 +1535,8 @@ public final class WoodcutSkill implements Skill {
                                   int maxZ,
                                   int radius,
                                   int verticalRange,
-                                  boolean sweepDrops) {
+                                  boolean sweepDrops,
+                                  Collection<BlockPos> cutTreeBases) {
         if (bot == null || source == null) {
             return;
         }
@@ -1545,6 +1553,7 @@ public final class WoodcutSkill implements Skill {
             params.put("durationMs", 35_000L);
             params.put("sweep", sweepDrops);
             params.put("scaffold", true);
+            params.put("protectSoil", treeSoilPositions(cutTreeBases));
 
             // Provide a tighter region for the cleanup scan.
             params.put("minX", clamped.minX());
@@ -1564,6 +1573,29 @@ public final class WoodcutSkill implements Skill {
         } catch (Exception e) {
             LOGGER.warn("Woodcut cleanup pass failed: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Packed positions of the soil a cut trunk stood on, for the cleanup's {@code protectSoil}
+     * parameter (finding 38). The base is one column of the trunk; a 2x2 trunk's other columns may
+     * lie on any side of it, so the whole ring below and around the base is covered. Those blocks
+     * are ground level, never the pillar scaffold the sweep is for, and the bot's own placed blocks
+     * still go (the sweep mines remembered or owned scaffold regardless).
+     */
+    private static long[] treeSoilPositions(Collection<BlockPos> bases) {
+        if (bases == null || bases.isEmpty()) {
+            return new long[0];
+        }
+        long[] out = new long[bases.size() * 9];
+        int i = 0;
+        for (BlockPos base : bases) {
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    out[i++] = BlockPos.asLong(base.getX() + dx, base.getY() - 1, base.getZ() + dz);
+                }
+            }
+        }
+        return out;
     }
 
     private void runPerTreeMaintenance(SkillContext context,
@@ -1649,6 +1681,7 @@ public final class WoodcutSkill implements Skill {
             params.put("durationMs", LOCAL_TREE_CLEANUP_DURATION_MS);
             params.put("sweep", false);
             params.put("scaffold", true);
+            params.put("protectSoil", treeSoilPositions(List.of(base)));
             RequestedWorkBounds.CleanupBounds clamped = clampCleanupBounds(bot,
                     base.getX() - LOCAL_TREE_CLEANUP_RADIUS,
                     base.getX() + LOCAL_TREE_CLEANUP_RADIUS,

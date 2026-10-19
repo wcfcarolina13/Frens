@@ -290,6 +290,8 @@ public final class WoodcutCleanupSkill implements Skill {
         boolean removeScaffold = getBooleanParameter(params, "scaffold", true);
         boolean sweepDrops = getBooleanParameter(params, "sweep", true);
         boolean floatingLogsOnly = getBooleanParameter(params, "floatingLogsOnly", true);
+        // Soil under the trunks woodcut felled (finding 38): the fallback sweep leaves it unless this bot placed it.
+        Set<Long> protectedSoil = WoodcutCleanupDiagnostics.parseProtectedSoil(params.get("protectSoil"));
 
         // Optional region override (primarily for internal calls from woodcut).
         Integer minX = getNullableIntParameter(params, "minX");
@@ -804,12 +806,15 @@ public final class WoodcutCleanupSkill implements Skill {
                                 continue;
                             }
                         }
-                        // Stone-type material only when this bot placed it (never the ground it stands on).
+                        // Stone-type material, and the soil a felled trunk stood on, only when this
+                        // bot placed it (never the ground it stands on).
+                        boolean treeSoil = protectedSoil.contains(pos.asLong());
                         if (!WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(
                                 dirtLike,
                                 (scaffoldMemory != null && scaffoldMemory.contains(pos.asLong()))
                                         || placedPillar.contains(pos),
-                                !dirtLike && OwnedScaffoldRegistry.isOwned(bot, world, pos))) {
+                                (!dirtLike || treeSoil) && OwnedScaffoldRegistry.isOwned(bot, world, pos),
+                                treeSoil)) {
                             continue;
                         }
                         MineAttemptResult mineResult = mineWithRetries(bot, source, pos, placedPillar, scaffoldMemory, false);

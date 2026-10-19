@@ -174,9 +174,31 @@ final class WoodcutCleanupDiagnostics {
      * judged by shape (the caller's grass and sky checks), but stone-type material is mined only
      * when this bot placed it: remembered scaffold or registered owned scaffold. 1.1.272 sandbox:
      * the sweep mined the natural stone the bot stood on because stone is a pillar material.
+     * {@code treeSoil} marks the soil a felled trunk stood on: mined only when this bot placed it
+     * (finding 38, 1.1.274: the sweep dug out the dirt under a felled trunk and a bot fell in).
      */
-    static boolean fallbackMayMinePillarBlock(boolean dirtLike, boolean remembered, boolean ownedScaffold) {
-        return dirtLike || remembered || ownedScaffold;
+    static boolean fallbackMayMinePillarBlock(boolean dirtLike, boolean remembered, boolean ownedScaffold,
+                                              boolean treeSoil) {
+        if (remembered || ownedScaffold) {
+            return true;
+        }
+        return dirtLike && !treeSoil;
+    }
+
+    /**
+     * The {@code protectSoil} cleanup parameter: packed positions of the soil under felled trunks.
+     * Anything other than a {@code long[]} (absent, or a stray type from a chat call) protects
+     * nothing.
+     */
+    static java.util.Set<Long> parseProtectedSoil(Object raw) {
+        if (!(raw instanceof long[] packed) || packed.length == 0) {
+            return java.util.Set.of();
+        }
+        java.util.Set<Long> out = new java.util.HashSet<>(packed.length * 2);
+        for (long p : packed) {
+            out.add(p);
+        }
+        return out;
     }
 
     /** Time the post-loop fallback sweep (scan plus any mining it finds) may take. */
