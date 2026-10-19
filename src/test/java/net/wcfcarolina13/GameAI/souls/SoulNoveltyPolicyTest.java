@@ -192,4 +192,27 @@ class SoulNoveltyPolicyTest {
     void emptyHistoryNeverRejects() {
         assertEquals(Optional.empty(), SoulNoveltyPolicy.rejectReason("anything at all", List.of()));
     }
+
+    @Test
+    void floorRescueKeepsTheFirstLineWhenAPlayerSceneLostEveryLine() {
+        assertEquals(0, SoulNoveltyPolicy.floorRescueIndex(List.of(false, false), true));
+        assertEquals(0, SoulNoveltyPolicy.floorRescueIndex(List.of(false), true));
+    }
+
+    @Test
+    void floorRescueDoesNothingWhenALineSurvived() {
+        assertEquals(-1, SoulNoveltyPolicy.floorRescueIndex(List.of(false, true), true));
+        assertEquals(-1, SoulNoveltyPolicy.floorRescueIndex(List.of(true), true));
+    }
+
+    @Test
+    void floorRescueNeverAppliesToBanterOrWork() {
+        assertEquals(-1, SoulNoveltyPolicy.floorRescueIndex(List.of(false, false), false));
+    }
+
+    @Test
+    void floorRescueNeedsAtLeastOneParsedLine() {
+        assertEquals(-1, SoulNoveltyPolicy.floorRescueIndex(List.of(), true));
+        assertEquals(-1, SoulNoveltyPolicy.floorRescueIndex(null, true));
+    }
 }

@@ -323,7 +323,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
      * ring only after they survive the filter. Ring snapshots are taken before filtering, so the
      * speaker's bot id is passed alongside each line and the policy also checks a candidate
      * against what that same bot already kept in this scene. With the toggle off this returns the
-     * parsed lines unchanged and touches no state.
+     * parsed lines unchanged and touches no state. A PLAYER scene is the one exception to the
+     * zero-delivery path: when novelty would drop every line, the first is kept anyway
+     * ({@link SoulNoveltyPolicy#floorRescueIndex}), since the owner asked and silence reads as a
+     * failure. Banter and work scenes may still deliver nothing.
      */
     private List<SoulGroupTypes.SceneLine> applyNovelty(SoulGroupTypes.GroupSceneTurn turn,
                                                         List<SoulGroupTypes.SceneLine> parsed) {
@@ -358,6 +361,21 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                 ring.remember(verdict.normalised());
             }
             kept.add(line);
+        }
+        int rescue = SoulNoveltyPolicy.floorRescueIndex(
+                verdicts.stream().map(SoulNoveltyPolicy.Verdict::kept).toList(),
+                turn.kind() == SoulGroupTypes.SceneKind.PLAYER);
+        if (rescue >= 0) {
+            SoulNoveltyPolicy.Verdict verdict = verdicts.get(rescue);
+            SoulGroupTypes.SceneLine line = parsed.get(verdict.index());
+            SoulNoveltyPolicy.Ring ring = rings.get(verdict.index());
+            if (ring != null) {
+                ring.remember(verdict.normalised());
+            }
+            kept.add(line);
+            SoulGroupTypes.SceneParticipant speaker = participantFor(turn, line.participantIndex());
+            LOGGER.info("[souls] novelty floor kept bot={} reason={}",
+                    speaker == null ? "?" : speaker.displayName(), verdict.reason());
         }
         return kept;
     }

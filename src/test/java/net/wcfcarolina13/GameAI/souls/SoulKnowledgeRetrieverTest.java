@@ -156,6 +156,56 @@ class SoulKnowledgeRetrieverTest {
                 String.valueOf(lines));
     }
 
+    private static GameKnowledgeGraph.GraphData barrelGraph() {
+        return new GameKnowledgeGraph.GraphData(
+                Map.of(), Map.of(), Map.of("barrel", "barrel"), Map.of("barrel", "Barrel"));
+    }
+
+    private static SoulKnowledgeRetriever.RetrievalContext barrelContext(SoulTypes.ToldFact... facts) {
+        return new SoulKnowledgeRetriever.RetrievalContext(Map.of(), List.of(),
+                new SoulTypes.KnowledgeMemory(List.of(), Map.of("barrel", List.of(facts))),
+                "minecraft:overworld", 0, 64, 0);
+    }
+
+    @Test
+    void toldFactEqualToTheCurrentLineIsNotRepeated() {
+        // Finding 22: the line just said is the prompt's final user turn; it must not also come
+        // back as RELEVANT KNOWLEDGE. Normalised match: case and punctuation do not matter.
+        String said = "The spare picks are in the barrel by the gate!";
+        List<String> lines = SoulKnowledgeRetriever.retrieve(said + " oak log",
+                barrelContext(new SoulTypes.ToldFact("Roti", "the spare picks are in the barrel by the gate", 1000L)),
+                barrelGraph(), said);
+        assertTrue(lines.stream().noneMatch(l -> l.contains("told you")), String.valueOf(lines));
+    }
+
+    @Test
+    void anOlderToldFactStillShowsWhenTheNewestIsTheCurrentLine() {
+        String said = "the barrel is full now";
+        List<String> lines = SoulKnowledgeRetriever.retrieve(said,
+                barrelContext(new SoulTypes.ToldFact("Roti", "the spare picks are in the barrel by the gate", 1000L),
+                        new SoulTypes.ToldFact("Roti", said, 2000L)),
+                barrelGraph(), said);
+        assertTrue(lines.contains("Roti told you: \"the spare picks are in the barrel by the gate\""),
+                String.valueOf(lines));
+        assertTrue(lines.stream().noneMatch(l -> l.contains(said)), String.valueOf(lines));
+    }
+
+    @Test
+    void aDifferentCurrentLineLeavesTheToldFactInPlace() {
+        List<String> lines = SoulKnowledgeRetriever.retrieve("check the barrel",
+                barrelContext(new SoulTypes.ToldFact("Roti", "the spare picks are in the barrel by the gate", 1000L)),
+                barrelGraph(), "check the barrel");
+        assertTrue(lines.contains("Roti told you: \"the spare picks are in the barrel by the gate\""),
+                String.valueOf(lines));
+    }
+
+    @Test
+    void isCurrentLineNeedsANonEmptyCurrentLine() {
+        assertTrue(SoulKnowledgeRetriever.isCurrentLine("Hello, there.", "hello there"));
+        org.junit.jupiter.api.Assertions.assertFalse(SoulKnowledgeRetriever.isCurrentLine("", ""));
+        org.junit.jupiter.api.Assertions.assertFalse(SoulKnowledgeRetriever.isCurrentLine("hello", "goodbye"));
+    }
+
     @Test
     void legacyEntryPointStillWorksWithoutMemory() {
         List<String> lines = SoulKnowledgeRetriever.retrieve(

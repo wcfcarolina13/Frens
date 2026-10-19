@@ -223,6 +223,24 @@ final class SoulNoveltyPolicy {
     }
 
     /**
+     * Novelty floor for a PLAYER scene: the owner asked something, so novelty alone must never
+     * leave them with silence (1.1.211 field check). When every parsed line was dropped and at
+     * least one was parsed, the first line is kept anyway; returns its index, or -1 when no
+     * rescue applies (banter/work scenes, nothing parsed, or some line already survived).
+     */
+    static int floorRescueIndex(List<Boolean> kept, boolean playerScene) {
+        if (!playerScene || kept == null || kept.isEmpty()) {
+            return -1;
+        }
+        for (Boolean k : kept) {
+            if (Boolean.TRUE.equals(k)) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    /**
      * A bot's ring of the last {@link #RING_SIZE} normalised delivered lines, oldest evicted
      * first. Held per bot in a concurrent map by the caller; scenes for different owners complete
      * on different worker threads, so every access here is synchronized. Never persisted — a

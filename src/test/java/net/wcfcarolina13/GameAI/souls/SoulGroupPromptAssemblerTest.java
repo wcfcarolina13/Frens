@@ -80,6 +80,67 @@ class SoulGroupPromptAssemblerTest {
     }
 
     @Test
+    void twoBotPlayerSceneGetsATurnTakingDirectiveJustBeforeTheOwnerLine() {
+        SoulTypes.ProviderRequest request = assembler.assemble(UUID.randomUUID(), "m",
+                turn("what should we do tonight"),
+                List.of(profile("frens:jake", "Jake"), profile("frens:jake", "Jake")),
+                List.of(), Duration.ofSeconds(60));
+        List<SoulTypes.Message> messages = request.messages();
+        SoulTypes.Message directive = messages.get(messages.size() - 2);
+        assertEquals(SoulTypes.Role.SYSTEM, directive.role());
+        assertEquals("[Each of Jake and Sara answers Bradley in turn, one or two short lines each.]",
+                directive.content());
+        // The owner's turn is unchanged: history replays exactly this string.
+        assertEquals("Bradley: what should we do tonight", messages.get(messages.size() - 1).content());
+    }
+
+    @Test
+    void playerSceneDirectiveNamesEveryoneAndSkipsALoneBot() {
+        assertEquals(Optional.of("[Each of Jake, Bob and Sara answers Roti in turn, one or two short lines each.]"),
+                SoulGroupPromptAssembler.playerSceneDirective(List.of("Jake", "Bob", "Sara"), "Roti"));
+        assertEquals(Optional.empty(), SoulGroupPromptAssembler.playerSceneDirective(List.of("Jake"), "Roti"));
+        assertEquals(Optional.empty(), SoulGroupPromptAssembler.playerSceneDirective(List.of(), "Roti"));
+    }
+
+    @Test
+    void oneBotPlayerSceneAndTwoBotBanterGetNoTurnTakingDirective() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        SoulGroupTypes.SceneParticipant jakeP =
+                new SoulGroupTypes.SceneParticipant(jake, "frens:jake", "Jake", grounding(jake, "Jake"));
+        SoulGroupTypes.SceneParticipant saraP =
+                new SoulGroupTypes.SceneParticipant(sara, "frens:jake", "Sara", grounding(sara, "Sara"));
+        SoulGroupTypes.GroupSceneTurn solo = new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.PLAYER,
+                owner, "Bradley", List.of(jakeP), "hi", Instant.EPOCH, UUID.randomUUID());
+        SoulGroupTypes.GroupSceneTurn banter = new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.BANTER,
+                owner, "Bradley", List.of(jakeP, saraP), "the sun is setting", Instant.EPOCH, UUID.randomUUID());
+        for (SoulGroupTypes.GroupSceneTurn t : List.of(solo, banter)) {
+            SoulTypes.ProviderRequest request = assembler.assemble(UUID.randomUUID(), "m", t,
+                    List.of(profile("frens:jake", "Jake"), profile("frens:jake", "Jake")),
+                    List.of(), Duration.ofSeconds(60));
+            assertTrue(request.messages().stream().noneMatch(m -> m.content().startsWith("[Each of ")),
+                    t.kind() + " scene got the player directive");
+        }
+    }
+
+    @Test
+    void sideChannelContractSaysDialogueComesFirstOnlyWhenEnabled() {
+        String sentence = "Always write the dialogue lines first; the ##FRENS line is never the whole reply.";
+        String on = new SoulGroupPromptAssembler(id -> Optional.empty(), () -> false, () -> true)
+                .assemble(UUID.randomUUID(), "m", turn("hi"),
+                        List.of(profile("frens:jake", "Jake"), profile("frens:jake", "Jake")),
+                        List.of(), Duration.ofSeconds(60))
+                .messages().get(0).content();
+        assertTrue(on.contains(sentence), on);
+        String off = assembler.assemble(UUID.randomUUID(), "m", turn("hi"),
+                        List.of(profile("frens:jake", "Jake"), profile("frens:jake", "Jake")),
+                        List.of(), Duration.ofSeconds(60))
+                .messages().get(0).content();
+        assertFalse(off.contains("##FRENS"), off);
+    }
+
+    @Test
     void castAndStateBlocksNameEveryRosterMember() {
         SoulTypes.ProviderRequest request = assembler.assemble(UUID.randomUUID(), "m",
                 turn("hi"), List.of(profile("frens:jake", "Jake"), profile("frens:jake", "Jake")),
@@ -107,11 +168,12 @@ class SoulGroupPromptAssemblerTest {
                 history, Duration.ofSeconds(60));
         List<SoulTypes.Message> messages = request.messages();
         int n = messages.size();
-        // ... history..., final USER message
-        assertEquals("Sara: fishing is safer.", messages.get(n - 2).content());
-        assertEquals(SoulTypes.Role.ASSISTANT, messages.get(n - 2).role());
-        assertEquals("Bradley: evening plans?", messages.get(n - 4).content());
-        assertEquals(SoulTypes.Role.USER, messages.get(n - 4).role());
+        // ... history..., the two-bot PLAYER turn-taking directive, final USER message
+        assertTrue(messages.get(n - 2).content().startsWith("[Each of "), messages.get(n - 2).content());
+        assertEquals("Sara: fishing is safer.", messages.get(n - 3).content());
+        assertEquals(SoulTypes.Role.ASSISTANT, messages.get(n - 3).role());
+        assertEquals("Bradley: evening plans?", messages.get(n - 5).content());
+        assertEquals(SoulTypes.Role.USER, messages.get(n - 5).role());
         assertTrue(messages.stream().noneMatch(m -> m.content().isEmpty() && m.role() == SoulTypes.Role.ASSISTANT));
     }
 

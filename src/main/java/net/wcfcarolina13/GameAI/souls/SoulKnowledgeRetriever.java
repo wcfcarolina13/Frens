@@ -51,6 +51,16 @@ final class SoulKnowledgeRetriever {
 
     static List<String> retrieve(String message, RetrievalContext context,
                                  GameKnowledgeGraph.GraphData graph) {
+        return retrieve(message, context, graph, null);
+    }
+
+    /**
+     * @param currentPlayerMessage the raw line the player just sent (not the look-target-extended
+     *     match text); a told fact equal to it after normalisation is skipped, since that line is
+     *     already the prompt's final user turn. Null skips nothing.
+     */
+    static List<String> retrieve(String message, RetrievalContext context,
+                                 GameKnowledgeGraph.GraphData graph, String currentPlayerMessage) {
         if (message == null || message.isBlank() || graph.nameIndex().isEmpty()) {
             return List.of();
         }
@@ -63,7 +73,7 @@ final class SoulKnowledgeRetriever {
                     .ifPresent(topicLines::add);
             dropsLine(topic, graph).ifPresent(topicLines::add);
             rememberedPlaceLine(topic, context, graph).ifPresent(topicLines::add);
-            toldFactLine(topic, context).ifPresent(topicLines::add);
+            toldFactLine(topic, context, currentPlayerMessage).ifPresent(topicLines::add);
             for (String line : topicLines) {
                 if (total + line.length() > MAX_KNOWLEDGE_CHARS) {
                     return lines;
@@ -117,13 +127,26 @@ final class SoulKnowledgeRetriever {
         return Optional.of(display + " drops: " + names);
     }
 
-    private static Optional<String> toldFactLine(String topic, RetrievalContext context) {
+    /** Newest told fact on {@code topic} that is not the player's current line, rendered. */
+    private static Optional<String> toldFactLine(String topic, RetrievalContext context,
+                                                 String currentPlayerMessage) {
         List<SoulTypes.ToldFact> facts = context.memory().toldFacts().getOrDefault(topic, List.of());
-        if (facts.isEmpty()) {
-            return Optional.empty();
+        String current = currentPlayerMessage == null ? ""
+                : SoulMemoryDigestOps.normalize(currentPlayerMessage);
+        for (int i = facts.size() - 1; i >= 0; i--) {
+            SoulTypes.ToldFact fact = facts.get(i);
+            if (isCurrentLine(fact.message(), current)) {
+                continue;
+            }
+            return Optional.of(fact.teller() + " told you: \"" + fact.message() + "\"");
         }
-        SoulTypes.ToldFact newest = facts.get(facts.size() - 1);
-        return Optional.of(newest.teller() + " told you: \"" + newest.message() + "\"");
+        return Optional.empty();
+    }
+
+    /** True when a told fact's text is the current player line ({@code current} already normalised). */
+    static boolean isCurrentLine(String toldMessage, String current) {
+        return !current.isEmpty() && toldMessage != null
+                && SoulMemoryDigestOps.normalize(toldMessage).equals(current);
     }
 
     private static long squaredDistance(SoulTypes.KnownPlace place, RetrievalContext context) {

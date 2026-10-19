@@ -261,6 +261,45 @@ class SoulGroupConversationServiceTest {
         assertEquals(SoulGroupTypes.BANTER_MAX_SCENE_LINES, player.enqueued.get(0).lines().size());
     }
 
+    private SoulGroupConversationService noveltyService(String reply, int times) {
+        provider.clear();
+        for (int i = 0; i < times; i++) {
+            provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(
+                    true, reply, null, "test", "test-model", 5L, null, null, null)));
+        }
+        SoulSettings settings = new SoulSettings(true, true, "", "ollama", "test-model",
+                URI.create("http://127.0.0.1:11434"), Duration.ofSeconds(60), 8);
+        return new SoulGroupConversationService(partyStore, new SoulGroupPromptAssembler(), scheduler,
+                provider, new SoulGroupResponseValidator(), settings, player, status, () -> true);
+    }
+
+    @Test
+    void noveltyNeverEmptiesAPlayerScene() throws Exception {
+        // Finding 19: the same reply twice would drop every line of the second scene. A PLAYER
+        // scene keeps its first parsed line instead, so the owner is never answered by silence.
+        SoulGroupConversationService novel = noveltyService("Jake: Mining tonight.\nSara: Fishing is safer.", 2);
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, novel.submit(turn).get(2, SECONDS));
+        assertEquals(2, player.enqueued.get(0).lines().size());
+
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED,
+                novel.submit(sceneTurn("and tomorrow?")).get(2, SECONDS));
+        List<SoulGroupTypes.SceneLine> second = player.enqueued.get(1).lines();
+        assertEquals(1, second.size(), "novelty floor keeps exactly one line");
+        assertEquals(0, second.get(0).participantIndex());
+        assertEquals("Mining tonight.", second.get(0).text());
+    }
+
+    @Test
+    void noveltyMayStillEmptyABanterScene() throws Exception {
+        SoulGroupConversationService novel = noveltyService("Jake: Mining tonight.\nSara: Fishing is safer.", 2);
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED,
+                novel.submit(banterTurn("seed one")).get(2, SECONDS));
+        assertEquals(2, player.enqueued.get(0).lines().size());
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED,
+                novel.submit(banterTurn("seed two")).get(2, SECONDS));
+        assertEquals(0, player.enqueued.get(1).lines().size(), "banter keeps the zero-delivery path");
+    }
+
     // === Fakes ===
 
     @Test

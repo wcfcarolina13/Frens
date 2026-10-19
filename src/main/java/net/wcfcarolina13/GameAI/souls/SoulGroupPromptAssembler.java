@@ -121,6 +121,17 @@ public final class SoulGroupPromptAssembler {
         beliefsBlock(turn).ifPresent(messages::add);
         HistoryBlock history = boundedHistory(partyHistory, turn.audience());
         messages.addAll(history.messages());
+        // A PLAYER scene with several companions: without this every model answered with one
+        // line from one bot (field finding 2). A separate SYSTEM message, so the owner's user
+        // turn stays byte-identical to what history later replays.
+        if (turn.kind() == SoulGroupTypes.SceneKind.PLAYER) {
+            List<String> names = new ArrayList<>(turn.roster().size());
+            for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+                names.add(participant.displayName());
+            }
+            playerSceneDirective(names, turn.ownerDisplayName())
+                    .ifPresent(text -> messages.add(new SoulTypes.Message(SoulTypes.Role.SYSTEM, text)));
+        }
         messages.add(switch (turn.kind()) {
             // Narrator directive, never attributed to the player: banter has no player utterance.
             // Three variants (engagement spec §4): solo scenes always speak TO the owner; group
@@ -157,6 +168,26 @@ public final class SoulGroupPromptAssembler {
         });
         return new Assembled(new SoulTypes.ProviderRequest(correlationId, model, messages,
                 timeout, maxOutputTokens()), about.privateOwner(), history.privateOwner());
+    }
+
+    /**
+     * Turn-taking directive for a PLAYER scene: "[Each of Jake and Bob answers Roti in turn, one
+     * or two short lines each.]". Empty for fewer than two speakers — a lone bot needs no
+     * instruction to answer.
+     */
+    static Optional<String> playerSceneDirective(List<String> names, String owner) {
+        if (names == null || names.size() < 2) {
+            return Optional.empty();
+        }
+        StringBuilder who = new StringBuilder();
+        for (int i = 0; i < names.size(); i++) {
+            if (i > 0) {
+                who.append(i == names.size() - 1 ? " and " : ", ");
+            }
+            who.append(names.get(i));
+        }
+        return Optional.of("[Each of " + who + " answers " + owner
+                + " in turn, one or two short lines each.]");
     }
 
     /** "skill:woodcut" → "woodcutting"; unknown ids just lose the prefix and underscores. */
@@ -253,7 +284,8 @@ public final class SoulGroupPromptAssembler {
             "recording what changed: {\"stance\":{\"<name>\":{\"warmth\":1}},\"facts\":[[\"<who>\",\"LIKES\",\"<what>\",0.7]]}.",
             "Use only the relations LIKES, DISLIKES, FEARS, GOOD_AT, BAD_AT, PROMISED, WANTS, CALLS. Values",
             "for warmth, friction and curiosity are only -1, 0 or 1. If nothing changed, omit the line",
-            "entirely. Never let this line be spoken by a character.");
+            "entirely. Never let this line be spoken by a character.",
+            "Always write the dialogue lines first; the ##FRENS line is never the whole reply.");
 
     // === Cast (authored identities, bounded per bot) ===
 

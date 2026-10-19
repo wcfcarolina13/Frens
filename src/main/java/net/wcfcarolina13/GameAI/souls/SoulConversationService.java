@@ -147,11 +147,14 @@ public final class SoulConversationService {
         CompletableFuture<List<SoulTypes.SoulEvent>> eventsFuture =
                 store.recentEvents(turn.key().botId(), SoulPromptAssembler.EVENT_FETCH_WINDOW);
 
-        recordKnowledgeObservations(turn);
-
         CompletableFuture<SoulTypes.KnowledgeMemory> memoryFuture =
                 store.knowledgeMemory(turn.key().botId())
                         .exceptionally(ex -> SoulTypes.KnowledgeMemory.empty());
+
+        // After the reads, never before: SoulStore runs one FIFO writer thread, so a told fact
+        // queued ahead of knowledgeMemory came back in RELEVANT KNOWLEDGE and the prompt
+        // carried the player's line twice (finding 22).
+        recordKnowledgeObservations(turn);
 
         historyFuture.thenCombine(eventsFuture, HistoryAndEvents::new)
                 .thenCombine(memoryFuture, (he, memory) -> dispatchProvider(
@@ -217,7 +220,8 @@ public final class SoulConversationService {
                             turn.grounding().situation().facilityIds(),
                             memory, bot.dimension(),
                             bot.coarseX(), bot.coarseY(), bot.coarseZ()),
-                    net.wcfcarolina13.GameAI.Knowledge.GameKnowledgeGraph.current());
+                    net.wcfcarolina13.GameAI.Knowledge.GameKnowledgeGraph.current(),
+                    turn.playerMessage());
         } catch (Throwable ignored) {
             // Retrieval is additive grounding, never load-bearing for a turn.
         }
