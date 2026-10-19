@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.command.argument.EntityAnchorArgumentType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -19,6 +20,7 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.HealingService;
+import net.wcfcarolina13.GameAI.services.LogThrottle;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
@@ -77,6 +79,37 @@ public class AutoFaceEntity {
     private static final Map<UUID, AtomicBoolean> autoFaceInFlight = new ConcurrentHashMap<>();
     public static boolean isBotMoving = false;
     private static volatile long lastDangerMessageMs = 0L;
+    private static final long LOADOUT_SWAP_LOG_INTERVAL_MS = 10_000L;
+    private static final Map<String, Long> LOADOUT_SWAP_LOG = new ConcurrentHashMap<>();
+
+    /**
+     * Runs the combat loadout and, when it changes the held item while a TaskService task is
+     * active, logs one throttled INFO line naming {@code trigger} (so a work tool being swapped
+     * out mid-task shows in the log).
+     */
+    private static void ensureCombatLoadoutLogged(ServerPlayerEntity bot, String trigger) {
+        int slotBefore = bot.getInventory().getSelectedSlot();
+        ItemStack heldBefore = bot.getMainHandStack().copy();
+        CombatInventoryManager.ensureCombatLoadout(bot);
+        int slotAfter = bot.getInventory().getSelectedSlot();
+        ItemStack heldAfter = bot.getMainHandStack();
+        if (slotBefore == slotAfter && ItemStack.areItemsAndComponentsEqual(heldBefore, heldAfter)) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        Optional<String> task = TaskService.getActiveTaskName(botId);
+        if (task.isEmpty()) {
+            return;
+        }
+        if (LogThrottle.due(LOADOUT_SWAP_LOG, botId + "|" + trigger, System.currentTimeMillis(),
+                LOADOUT_SWAP_LOG_INTERVAL_MS)) {
+            LOGGER.info("Combat loadout swapped {} slot {} -> {} ({} -> {}) during task '{}' (trigger: {})",
+                    bot.getName().getString(), slotBefore, slotAfter,
+                    heldBefore.isEmpty() ? "empty-hand" : heldBefore.getItem().toString(),
+                    heldAfter.isEmpty() ? "empty-hand" : heldAfter.getItem().toString(),
+                    task.get(), trigger);
+        }
+    }
 
     public static void setBotExecutingTask(boolean value) {
         botExecutingTask = value;
@@ -257,7 +290,7 @@ public class AutoFaceEntity {
                 }
 
                 if (BotEventHandler.isRegisteredBot(bot)) {
-                    CombatInventoryManager.ensureCombatLoadout(bot);
+                    ensureCombatLoadoutLogged(bot, "hostile within 10 blocks");
                 }
 
                 FaceClosestEntity.faceClosestEntity(bot, hostileEntities);
@@ -276,9 +309,10 @@ public class AutoFaceEntity {
             setBotExecutingTask(false);
             botBusy = true;
 
-            if (BotEventHandler.isRegisteredBot(bot)) {
-                CombatInventoryManager.ensureCombatLoadout(bot);
-            }
+            // No combat loadout here: this branch only runs with no hostile in range, and the
+            // cliff probe follows the look vector, so a bot looking up at stone or a log read as
+            // a cliff and had its axe forced back into hand every 200 ms (1.1.274). A hostile
+            // takes the branch above, which equips the weapon.
 
             double distanceToHostileEntity = 0.0;
             Entity closestHostile = hostileEntities.stream()
