@@ -305,6 +305,32 @@ class SoulBanterSeedTest {
     }
 
     @Test
+    void attackerlessDamageIdsReadInWordsNotAsAMob() {
+        // "took a beating from a explosion": non-environmental damage ids with no attacker.
+        assertEquals("took a beating from an explosion", damagePhrase("explosion"));
+        assertEquals("took a beating from an explosion", damagePhrase("player_explosion"));
+        assertEquals("took a beating from magic", damagePhrase("magic"));
+        assertEquals("took a beating from magic", damagePhrase("indirect_magic"));
+        assertEquals("took a beating from withering", damagePhrase("wither"));
+        assertEquals("took a beating from thorns", damagePhrase("thorns"));
+        assertEquals("took a beating from the world", damagePhrase("generic"));
+        assertEquals("took a beating from the world", damagePhrase("generic_kill"));
+        assertEquals("took a beating from the world", damagePhrase("sonic_boom"));
+        assertEquals("took a beating from the world", damagePhrase("arrow"));
+        assertEquals("died recently from an explosion", SoulBanterSeed.phraseFor(event(
+                SoulTypes.EventType.DEATH, SoulTypes.Salience.HIGH, 1, Map.of("source", "explosion"))));
+        // Mobs and players keep "from a <id>"; no source keeps no suffix.
+        assertEquals("took a beating from a creeper", damagePhrase("creeper"));
+        assertEquals("took a beating from a player", damagePhrase("player"));
+        assertEquals("took a beating", damagePhrase(""));
+    }
+
+    private static String damagePhrase(String source) {
+        return SoulBanterSeed.phraseFor(event(SoulTypes.EventType.BOT_DAMAGE, SoulTypes.Salience.NORMAL, 1,
+                Map.of("amount", "2.0", "source", source)));
+    }
+
+    @Test
     void sleepTasksRotateUnderTheSleepTopicNotTheWork() {
         assertEquals("sleep", SoulBanterSeed.topicOf(event(SoulTypes.EventType.TASK_STARTED,
                 SoulTypes.Salience.LOW, 1, Map.of("task", "skill:sleep", "category", "skill"))));

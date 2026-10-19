@@ -479,7 +479,8 @@ class CraftingStationPolicyTest {
         assertTrue(blockAfter(body, body.lastIndexOf("if (", arm)).contains("LAST_KNOWN_CRAFTING_TABLE.remove("),
                 "the failed table must not stay remembered, or the next call never scans");
         assertTrue(body.substring(arm, body.indexOf(';', arm)).contains("new ReachFail("), "the failure records its table");
-        assertEquals(4, count(body, "skipsFailedTable("), "remembered, looked-at, scanned and chosen tables");
+        assertEquals(5, count(body, "skipsFailedTable("),
+                "remembered, looked-at, scanned, chosen and no-standable-spot alternative tables");
         assertFalse(body.contains("reachCooldownActive"), "no blanket cooldown left");
     }
 

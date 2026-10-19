@@ -1792,7 +1792,7 @@ public final class CraftingHelper {
                 double best2 = Double.MAX_VALUE;
                 for (BlockPos pos2 : BlockPos.iterate(botPos.add(-radius, -ySpan, -radius), botPos.add(radius, ySpan, radius))) {
                     if (!world.isChunkLoaded(pos2)) continue;
-                    if (pos2.equals(unreachable)) continue;
+                    if (pos2.equals(unreachable) || skipsFailedTable(bot, botPos, pos2, onServerThread)) continue;
                     if (world.getBlockState(pos2).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
                         List<BlockPos> altStandables = findStandableOptions(world, pos2.toImmutable(), 3);
                         if (altStandables.isEmpty()) continue;

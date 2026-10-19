@@ -195,7 +195,6 @@ public final class BotChestRegistryService {
      */
     public static void adoptLegacyWorldData(MinecraftServer server) {
         if (server == null) return;
-        adoptedServerIdentity = System.identityHashCode(server);
         ensureLoaded();
         String fingerprint = BotWorldStateService.currentWorldKey(server);
         long gameTime = WorldZoneStore.overworldGameTime(server);
@@ -221,6 +220,10 @@ public final class BotChestRegistryService {
                     changed = true;
                 }
             }
+            // Marked only once the loop has run: a worker that sees the old value runs this too,
+            // waits on LOCK, and finds every key already decided, instead of skipping adoption
+            // and creating an empty store before the legacy chests are copied.
+            adoptedServerIdentity = System.identityHashCode(server);
         }
         if (changed) {
             flush();

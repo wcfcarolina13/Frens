@@ -1360,7 +1360,7 @@ public final class FishingSkill implements Skill {
             return null;
         }
         BlockPos origin = bot.getBlockPos();
-        // Timed from here so the summary and the time budget include the snapshot and chest scan.
+        // The summary's elapsed figure covers the whole search, snapshot and chest scan included.
         long searchStart = System.nanoTime();
 
         // Pre-capture a reachability snapshot centered on the bot for A* validation.
@@ -1375,7 +1375,10 @@ public final class FishingSkill implements Skill {
         // of these get a small bonus so the bot naturally picks spots it can
         // actually offload inventory to.
         List<BlockPos> chestAnchors = collectChestAnchors(bot, world);
-        
+        // The time budget starts after the snapshot and chest scan, so a slow scan does not
+        // force a nearest-column pick before any column is evaluated.
+        long budgetStart = System.nanoTime();
+
         FishingSpot best = null;
         double bestScore = Double.MAX_VALUE;
         int evaluated = 0;
@@ -1395,7 +1398,7 @@ public final class FishingSkill implements Skill {
         // Keeps the widened radius at ~O(r^2) cheap probes.
         List<BlockPos> waterColumns = nearestWaterColumns(world, origin, radius, WATER_SEARCH_Y_SPAN);
         for (BlockPos water : waterColumns) {
-            long elapsedMs = (System.nanoTime() - searchStart) / 1_000_000L;
+            long elapsedMs = (System.nanoTime() - budgetStart) / 1_000_000L;
             if (FishingSearchPolicy.stopEvaluating(evaluated, elapsedMs, best != null)) {
                 break;
             }

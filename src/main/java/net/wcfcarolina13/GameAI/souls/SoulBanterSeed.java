@@ -567,8 +567,35 @@ final class SoulBanterSeed {
         if (SoulEventObserver.isEnvironmentalDamage(raw)) {
             return " from " + ENVIRONMENTAL_CAUSES.getOrDefault(raw, "the world");
         }
+        // classifySource gives an attacker-less hit its damage-type id and an attacker its entity
+        // id, both as bare paths, so the vanilla damage-type ids are listed here to tell them apart.
+        if (NON_ENTITY_DAMAGE.contains(raw)) {
+            return " from " + NON_ENTITY_CAUSES.getOrDefault(raw, "the world");
+        }
         return " from a " + raw.replace('_', ' ');
     }
+
+    /** Non-environmental damage ids that read as a word after "from"; the rest read "the world". */
+    private static final Map<String, String> NON_ENTITY_CAUSES = Map.of(
+            "explosion", "an explosion",
+            "player_explosion", "an explosion",
+            "bad_respawn_point", "an explosion",
+            "magic", "magic",
+            "indirect_magic", "magic",
+            "wither", "withering",
+            "thorns", "thorns");
+
+    /**
+     * Vanilla damage-type ids that are not environmental and not an entity: what classifySource
+     * returns for a hit of these types that carries no attacker ("from a explosion" before).
+     * "wither" is also the Wither boss's entity id; it reads "withering" either way.
+     */
+    private static final Set<String> NON_ENTITY_DAMAGE = Set.of(
+            "explosion", "player_explosion", "bad_respawn_point", "magic", "indirect_magic",
+            "wither", "thorns", "generic", "generic_kill", "sonic_boom", "dragon_breath",
+            "arrow", "trident", "fireball", "unattributed_fireball", "wither_skull", "fireworks",
+            "thrown", "mob_projectile", "spit", "wind_charge", "sting", "ender_pearl",
+            "mob_attack", "mob_attack_no_aggro", "player_attack", "mace_smash", "spear");
 
     /** Environmental damage ids as a noun phrase that reads after "from". */
     private static final Map<String, String> ENVIRONMENTAL_CAUSES = Map.ofEntries(

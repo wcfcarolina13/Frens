@@ -110,9 +110,10 @@ public final class SupplyRequestPolicy {
      * @param worldId the save's identity plus the dimension, built by
      *                {@link SupplyChestRules#worldId(String, String)} from
      *                {@code BotWorldStateService.currentWorldKey(server)} ({@code levelName#rootPathHash})
-     *                and the dimension id, e.g. {@code "New World#1a2b3c/minecraft:overworld"}. Not
-     *                {@code BotChestRegistryService.serverWorldKey}'s {@code levelName/dimension}:
-     *                two saves can share a level name, so that spelling is not unique across saves
+     *                and the dimension id, e.g. {@code "New World#1a2b3c/minecraft:overworld"}.
+     *                {@code BotChestRegistryService.serverWorldKey} uses the same fingerprint but
+     *                joins it with {@code ':'} ({@code "New World#1a2b3c:minecraft:overworld"},
+     *                1.1.274), so the two strings are not interchangeable
      */
     public record ChestKey(String worldId, int x, int y, int z) {
         public ChestKey {

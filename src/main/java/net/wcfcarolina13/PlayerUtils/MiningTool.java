@@ -411,7 +411,13 @@ public class MiningTool {
                 long remaining = deadlineMs.get() - System.currentTimeMillis();
                 if (remaining > 0) {
                     try {
-                        timeoutTask.set(MINING_EXECUTOR.schedule(this, remaining, TimeUnit.MILLISECONDS));
+                        ScheduledFuture<?> next = MINING_EXECUTOR.schedule(this, remaining, TimeUnit.MILLISECONDS);
+                        timeoutTask.set(next);
+                        // Mining may have finished after the isDone check above; its cleanup then
+                        // cancelled the previous future, so cancel this late reschedule here.
+                        if (miningResult.isDone()) {
+                            next.cancel(true);
+                        }
                     } catch (RejectedExecutionException e) {
                         miningResult.complete("⚠️ Mining attempt timed out.");
                     }

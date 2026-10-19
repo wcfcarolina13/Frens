@@ -1637,14 +1637,10 @@ public final class BotIdleHobbiesService {
         boolean needShovel = !hasAnyShovel(bot);
         if (!needPickaxe && !needShovel) return false;
 
-        // Only trigger if there's no wood available at all (inventory + nearby chests)
-        if (ToolProvisionService.hasPlanksOrLogsAvailable(bot)) return false;
-
-        if (!canStartFallbackWoodcut(world, bot)) return false;
-
         // The wooden fallback now falls through while it cools down or is backed off, so this
         // woodcut is reachable for a bot with no axe. Without this gate it would restart the
         // doomed "I have no axe" run the fallback's backoff exists to stop (the cd4120ca storm).
+        // Checked before the chest and tree scans so a backed-off bot skips them.
         if (IdleFallbackGatePolicy.blocksResourcesWoodcut(
                 ToolProvisionService.hasUsableAxe(bot),
                 nowTick,
@@ -1652,6 +1648,11 @@ public final class BotIdleHobbiesService {
                 NEXT_WOODEN_FALLBACK_TICK.getOrDefault(bot.getUuid(), 0L))) {
             return false;
         }
+
+        // Only trigger if there's no wood available at all (inventory + nearby chests)
+        if (ToolProvisionService.hasPlanksOrLogsAvailable(bot)) return false;
+
+        if (!canStartFallbackWoodcut(world, bot)) return false;
 
         LAST_HOBBY.put(bot.getUuid(), "woodcut");
         startAmbientSkill(server, bot, "woodcut");
