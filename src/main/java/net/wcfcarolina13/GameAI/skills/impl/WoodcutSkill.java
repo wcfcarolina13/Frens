@@ -56,6 +56,7 @@ import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
 import net.wcfcarolina13.GameAI.skills.support.BaseVerdictMemo;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutFailureStreakPolicy;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutOutcomePolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutTreeOwnershipPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutFinalReasonPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutStandRetryPolicy;
@@ -822,6 +823,8 @@ public final class WoodcutSkill implements Skill {
         Set<BlockPos> cutTreeBases = new HashSet<>();
         int felled = 0;
         int consecutiveFailures = 0;
+        // The streak was last pinned by a scan that found no tree, not by a real failure (finding 41).
+        boolean exhaustedNoTargets = false;
         int totalFailures = 0;
         int sinceCleanup = 0;
         int relocations = 0;
@@ -926,6 +929,7 @@ public final class WoodcutSkill implements Skill {
                 if (!ensureWoodSpaceOrDeposit(source, bot, isHuntPrerequisite, workAreaState, pendingFloaters)) {
                     totalFailures++;
                     consecutiveFailures++;
+                    exhaustedNoTargets = false;
                     lastFailureReason = WoodcutFailureReason.INVENTORY_BLOCKED;
                     ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't store items, stopping woodcut.");
                     break;
@@ -1008,6 +1012,7 @@ public final class WoodcutSkill implements Skill {
                                             });
                                 }
                                 consecutiveFailures = MAX_CONSECUTIVE_FAILURES;
+                                exhaustedNoTargets = true;
                                 continue;
                             }
                         } else {
@@ -1016,12 +1021,14 @@ public final class WoodcutSkill implements Skill {
                         if (detection.totalLogs() <= 0) {
                             LOGGER.warn("Woodcut: found no detectable trees/logs within {}x{}", effectiveSearchRadius, verticalRange);
                             consecutiveFailures = MAX_CONSECUTIVE_FAILURES;
+                            exhaustedNoTargets = true;
                             continue;
                         }
                         // All logs detected but none selectable (soilFail etc.) — skip to relocation
                         if (detection.soilFail() >= detection.totalLogs()) {
                             LOGGER.info("Woodcut: all {} detected logs failed soil check, forcing relocation", detection.totalLogs());
                             consecutiveFailures = MAX_CONSECUTIVE_FAILURES;
+                            exhaustedNoTargets = true;
                             continue;
                         }
                         consecutiveFailures++;
@@ -1042,6 +1049,7 @@ public final class WoodcutSkill implements Skill {
                     failedBaseReasons.put(target.base().toImmutable(), "out-of-bounds-tree-envelope");
                     totalFailures++;
                     consecutiveFailures++;
+                    exhaustedNoTargets = false;
                     lastFailureReason = WoodcutFailureReason.PATH_OR_REACH_FAILURE;
                     continue;
                 }
@@ -1051,6 +1059,7 @@ public final class WoodcutSkill implements Skill {
                             failedBaseReasons.getOrDefault(target.base(), "previous-failure"));
                     totalFailures++;
                     consecutiveFailures++;
+                    exhaustedNoTargets = false;
                     lastFailureReason = WoodcutFailureReason.PATH_OR_REACH_FAILURE;
                     continue;
                 }
@@ -1080,6 +1089,7 @@ public final class WoodcutSkill implements Skill {
                                 target.base().toShortString(), detectionProtection.reason());
                         totalFailures++;
                         consecutiveFailures++;
+                        exhaustedNoTargets = false;
                         // Never selected again this run (detection and relocation skip failed bases).
                         failedBases.add(target.base().toImmutable());
                         failedBaseReasons.put(target.base().toImmutable(), "protected:" + detectionProtection.reason());
@@ -1147,6 +1157,7 @@ public final class WoodcutSkill implements Skill {
                     }
                     totalFailures++;
                     consecutiveFailures++;
+                    exhaustedNoTargets = false;
                     // A stop or pause mid-approach cancels the mine: not a path failure.
                     if (!isAbortRequested(bot)) {
                         pathFailures++;
@@ -1219,6 +1230,7 @@ public final class WoodcutSkill implements Skill {
                     // six of them in a forest relocated the bot away from the trees it was cutting.
                     boolean productivePartial = WoodcutFailureStreakPolicy.isProductivePartial(harvest.detail(), logsCutFromTree);
                     consecutiveFailures = WoodcutFailureStreakPolicy.next(consecutiveFailures, false, harvest.detail(), logsCutFromTree);
+                    exhaustedNoTargets = false;
                     failedBases.add(target.base().toImmutable());
                     failedBaseReasons.put(target.base().toImmutable(), harvest.detail());
                     if (logsCutFromTree > 0) {
@@ -1351,10 +1363,12 @@ public final class WoodcutSkill implements Skill {
                 };
             } else if (felled == 0) {
                 finalResult = SkillExecutionResult.failure("No valid trees nearby. Try moving closer or adjust radius.");
-            } else if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            } else if (WoodcutOutcomePolicy.endedOnRepeatedFailures(consecutiveFailures, MAX_CONSECUTIVE_FAILURES, exhaustedNoTargets)) {
                 finalResult = SkillExecutionResult.failure("Stopped after cutting " + felled + " tree(s). Repeated failures reaching remaining targets (path/LOS/inventory).");
             } else if (radiusClearMode && !openEnded) {
                 finalResult = SkillExecutionResult.success("Cleared the local woodcut area after " + felled + " target(s).");
+            } else if (WoodcutOutcomePolicy.ranOutOfTrees(felled, consecutiveFailures, MAX_CONSECUTIVE_FAILURES, exhaustedNoTargets)) {
+                finalResult = SkillExecutionResult.success(WoodcutOutcomePolicy.ranOutOfTreesLine(felled));
             } else if (felled < targetTrees) {
                 finalResult = SkillExecutionResult.success("Stopped after cutting " + felled + " tree(s).");
             } else {
