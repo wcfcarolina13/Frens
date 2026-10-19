@@ -51,6 +51,7 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -207,17 +208,12 @@ public final class FishingSkill implements Skill {
         }
 
         if (spot == null) {
-            long spotStart = System.nanoTime();
             spot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
-            long spotElapsedMs = (System.nanoTime() - spotStart) / 1_000_000L;
             if (spot == null) {
                 if (hasNearbyWater(bot, WATER_SEARCH_RADIUS)) {
                     return SkillExecutionResult.failure("No safe shoreline block to stand on.");
                 }
                 return SkillExecutionResult.failure("I need to be standing near open water to fish.");
-            }
-            if (spotElapsedMs > 250L) {
-                LOGGER.info("Fishing spot search took {}ms", spotElapsedMs);
             }
             rememberFishingSpot(bot, spot);
         }
@@ -1364,7 +1360,9 @@ public final class FishingSkill implements Skill {
             return null;
         }
         BlockPos origin = bot.getBlockPos();
-        
+        // Timed from here so the summary and the time budget include the snapshot and chest scan.
+        long searchStart = System.nanoTime();
+
         // Pre-capture a reachability snapshot centered on the bot for A* validation.
         FollowPathService.FollowSnapshot reachabilitySnapshot = FollowPathService.capture(world, origin, origin, true);
 
@@ -1381,17 +1379,24 @@ public final class FishingSkill implements Skill {
         FishingSpot best = null;
         double bestScore = Double.MAX_VALUE;
         int evaluated = 0;
-        // Was 200 — produced 30-50s searches in dense water areas.  80 still
-        // explores enough to find a near-best spot.  Also exit early if we
-        // already have a very good score after some evaluations.
-        int MAX_WATER_EVALUATIONS = 80;
+        // Finding 14: an 18.7 s search beside a 7x7 pond. Neighbouring columns share most of
+        // their stands, and each stand ran its own A*. Reachability is now cached per stand
+        // for this search, a column's stands are checked in score order and stop at the first
+        // reachable one plus FishingSearchPolicy.MAX_STAND_ALTERNATES, and evaluation stops
+        // at FishingSearchPolicy.TIME_BUDGET_MS once a usable spot exists.
         int EARLY_EXIT_AFTER = 25;
         double EARLY_EXIT_SCORE = 8.0;
+        Map<BlockPos, Boolean> reachableCache = new HashMap<>();
+        int aStarCalls = 0;
+        int cacheHits = 0;
+        int standsChecked = 0;
         // Column pre-filter: probe one open-water surface per (x,z) column, nearest
         // columns first, instead of evaluating every block in the radius volume.
         // Keeps the widened radius at ~O(r^2) cheap probes.
-        for (BlockPos water : nearestWaterColumns(world, origin, radius, WATER_SEARCH_Y_SPAN)) {
-            if (best != null && evaluated >= MAX_WATER_EVALUATIONS) {
+        List<BlockPos> waterColumns = nearestWaterColumns(world, origin, radius, WATER_SEARCH_Y_SPAN);
+        for (BlockPos water : waterColumns) {
+            long elapsedMs = (System.nanoTime() - searchStart) / 1_000_000L;
+            if (FishingSearchPolicy.stopEvaluating(evaluated, elapsedMs, best != null)) {
                 break;
             }
             if (best != null && evaluated >= EARLY_EXIT_AFTER && bestScore <= EARLY_EXIT_SCORE) {
@@ -1404,11 +1409,15 @@ public final class FishingSkill implements Skill {
                 continue;
             }
 
-            // Filter options: skip blacklisted stands and verify reachability.
+            // Options come sorted by score: keep the first reachable stand and a couple of
+            // alternates, skipping blacklisted stands.
             List<StandOption> reachableOptions = new ArrayList<>();
             for (StandOption opt : options) {
+                if (!FishingSearchPolicy.worthChecking(!reachableOptions.isEmpty(), reachableOptions.size(),
+                        opt.score(), bestScore)) {
+                    break;
+                }
                 BlockPos stand = opt.stand();
-                // Skip blacklisted positions.
                 if (blacklist.containsKey(stand)) {
                     LOGGER.debug("Skipping blacklisted fishing stand {}", stand.toShortString());
                     continue;
@@ -1416,9 +1425,20 @@ public final class FishingSkill implements Skill {
                 // Check reachability via A* if we have a snapshot and stand is in bounds.
                 if (reachabilitySnapshot != null && reachabilitySnapshot.inBounds(stand)) {
                     boolean alreadyThere = origin.getSquaredDistance(stand) <= 2.25D;
-                    if (!alreadyThere && !FollowPathService.isReachable(reachabilitySnapshot, stand)) {
-                        LOGGER.debug("Fishing spot {} unreachable via A* from {}", stand.toShortString(), origin.toShortString());
-                        continue;
+                    if (!alreadyThere) {
+                        standsChecked++;
+                        Boolean reachable = reachableCache.get(stand);
+                        if (reachable != null) {
+                            cacheHits++;
+                        } else {
+                            aStarCalls++;
+                            reachable = FollowPathService.isReachable(reachabilitySnapshot, stand);
+                            reachableCache.put(stand, reachable);
+                        }
+                        if (!reachable) {
+                            LOGGER.debug("Fishing spot {} unreachable via A* from {}", stand.toShortString(), origin.toShortString());
+                            continue;
+                        }
                     }
                 }
                 reachableOptions.add(opt);
@@ -1439,7 +1459,14 @@ public final class FishingSkill implements Skill {
                 );
             }
         }
-        
+        long searchMs = (System.nanoTime() - searchStart) / 1_000_000L;
+        String summary = "Fishing spot search: columns={} evaluated={} stands={} aStar={} cacheHits={} found={} elapsed={}ms";
+        if (searchMs >= 250L) {
+            LOGGER.info(summary, waterColumns.size(), evaluated, standsChecked, aStarCalls, cacheHits, best != null, searchMs);
+        } else {
+            LOGGER.debug(summary, waterColumns.size(), evaluated, standsChecked, aStarCalls, cacheHits, best != null, searchMs);
+        }
+
         if (best != null) {
             LOGGER.info("Selected fishing spot: stand={} water={} (score={})",
                     best.stand().toShortString(),
