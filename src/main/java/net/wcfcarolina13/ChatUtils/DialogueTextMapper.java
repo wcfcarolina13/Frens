@@ -140,6 +140,13 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Just tidying up the tree line.", BotDialogueSounds.LINE_SKILL_WOODCUT_TIDYING);
         EXACT_MAP.put("A few more swings and this one's down.", BotDialogueSounds.LINE_SKILL_WOODCUT_FEW_MORE);
 
+        // Fortify cavity callouts use normalized apostrophes, like lookup().
+        EXACT_MAP.put("Noted a pocket in the wall, flagging it for you.", BotDialogueSounds.LINE_FORTIFY_CAVITY_CALLOUT_1);
+        EXACT_MAP.put("Found a tiny cavity here. It's safe but needs eyes on.", BotDialogueSounds.LINE_FORTIFY_CAVITY_CALLOUT_2);
+        EXACT_MAP.put("Here's the gap I marked. No mobs, just a small void.", BotDialogueSounds.LINE_FORTIFY_CAVITY_CALLOUT_3);
+        EXACT_MAP.put("Spotting the ignored cavity. We can patch later together.", BotDialogueSounds.LINE_FORTIFY_CAVITY_CALLOUT_4);
+        EXACT_MAP.put("This nook is harmless, but I'm calling it out for you.", BotDialogueSounds.LINE_FORTIFY_CAVITY_CALLOUT_5);
+
         // ============ SKILL: HANGOUT ============
         EXACT_MAP.put("Just warming up by the fire.", BotDialogueSounds.LINE_SKILL_HANGOUT_FIRE);
         EXACT_MAP.put("Nice and quiet out here.", BotDialogueSounds.LINE_SKILL_HANGOUT_NICE_QUIET);

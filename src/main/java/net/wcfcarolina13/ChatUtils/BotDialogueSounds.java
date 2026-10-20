@@ -76,6 +76,13 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_SKILL_FISH_SESSION_DONE = register("bot.line.skill_fish_session_done");
     public static final SoundEvent LINE_SKILL_FISH_SUNSET = register("bot.line.skill_fish_sunset");
 
+    // Line-specific sound events (skill: fortify)
+    public static final SoundEvent LINE_FORTIFY_CAVITY_CALLOUT_1 = register("bot.line.fortify_cavity_callout_1");
+    public static final SoundEvent LINE_FORTIFY_CAVITY_CALLOUT_2 = register("bot.line.fortify_cavity_callout_2");
+    public static final SoundEvent LINE_FORTIFY_CAVITY_CALLOUT_3 = register("bot.line.fortify_cavity_callout_3");
+    public static final SoundEvent LINE_FORTIFY_CAVITY_CALLOUT_4 = register("bot.line.fortify_cavity_callout_4");
+    public static final SoundEvent LINE_FORTIFY_CAVITY_CALLOUT_5 = register("bot.line.fortify_cavity_callout_5");
+
     // Line-specific sound events (skill: woodcut)
     public static final SoundEvent LINE_SKILL_WOODCUT_CAREFUL = register("bot.line.skill_woodcut_careful");
     public static final SoundEvent LINE_SKILL_WOODCUT_TIDYING = register("bot.line.skill_woodcut_tidying");

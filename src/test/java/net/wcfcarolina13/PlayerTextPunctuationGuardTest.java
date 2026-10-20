@@ -1,5 +1,7 @@
 package net.wcfcarolina13;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -27,6 +29,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PlayerTextPunctuationGuardTest {
 
     private static final Path ROOT = Paths.get("src/main/java");
+    private static final Path RESOURCES = Paths.get("src/main/resources");
 
     /** Whole files whose literals are LLM prompt or knowledge text, or mixin descriptors. */
     private static final List<String> ALLOWED_FILES = List.of(
@@ -81,6 +84,50 @@ class PlayerTextPunctuationGuardTest {
         return false;
     }
 
+    @Test
+    void resourcePlayerTextHasNoEmDashOrSemicolon() throws IOException {
+        assertTrue(Files.isDirectory(RESOURCES), "run from the project directory");
+        List<String> hits = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(RESOURCES)) {
+            for (Path file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".json"))::iterator) {
+                String rel = RESOURCES.relativize(file).toString().replace('\\', '/');
+                if (rel.contains("/souls/") || rel.contains("/quests/") || rel.contains("/lang/")
+                        || rel.contains("/dialogue/") || rel.contains("/lines/")) {
+                    scanJson(rel, JsonParser.parseString(Files.readString(file)),
+                            !rel.contains("/souls/") && !rel.contains("/quests/"), hits);
+                }
+            }
+        }
+        assertTrue(hits.isEmpty(), "resource player text with an em dash or semicolon:\n" + String.join("\n", hits));
+    }
+
+    @Test
+    void jsonGuardChecksDecodedPlayerTextAndSkipsPromptInstructions() {
+        List<String> hits = new ArrayList<>();
+        scanJson("soul", JsonParser.parseString("{\"identity\":[\"prompt; allowed\"],"
+                + "\"displayName\":\"bad; name\",\"examples\":[{\"content\":\"bad\\u2014line\"}]}"), false, hits);
+        assertTrue(hits.size() == 2, hits.toString());
+    }
+
+    private static void scanJson(String location, JsonElement value, boolean playerText, List<String> hits) {
+        if (value.isJsonObject()) {
+            value.getAsJsonObject().entrySet().forEach(entry -> scanJson(location + "/" + entry.getKey(),
+                    entry.getValue(), playerText || List.of("displayName", "examples", "intent", "bot_reflection")
+                            .contains(entry.getKey()), hits));
+        } else if (value.isJsonArray()) {
+            for (int i = 0; i < value.getAsJsonArray().size(); i++) {
+                scanJson(location + "/" + i, value.getAsJsonArray().get(i), playerText, hits);
+            }
+        } else if (playerText && value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()
+                && forbiddenPunctuation(value.getAsString())) {
+            hits.add(location + ": " + value.getAsString());
+        }
+    }
+
+    private static boolean forbiddenPunctuation(String text) {
+        return text.contains("—") || text.contains("\\u2014") || text.contains(";");
+    }
+
     private static void scan(String rel, List<String> lines, List<String> hits) {
         boolean inBlockComment = false;
         boolean inLogCall = false;
@@ -111,7 +158,7 @@ class PlayerTextPunctuationGuardTest {
             Matcher m = LITERAL.matcher(line);
             while (m.find()) {
                 String lit = m.group();
-                if ((lit.contains("—") || lit.contains("\\u2014") || lit.contains(";")) && !allowedLine(line)) {
+                if (forbiddenPunctuation(lit) && !allowedLine(line)) {
                     hits.add(rel + ":" + (i + 1) + ": " + t);
                     break;
                 }

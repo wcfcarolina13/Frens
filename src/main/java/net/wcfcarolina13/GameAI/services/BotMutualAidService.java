@@ -1711,7 +1711,8 @@ public final class BotMutualAidService {
                 || hasNearbyThreats(recipient, HANDOFF_THREAT_RADIUS)) {
             return false;
         }
-        return true;
+        int flowerSlot = pickFlowerSlot(donor);
+        return flowerSlot >= 0 && hasRoomForOne(recipient, donor.getInventory().getStack(flowerSlot));
     }
 
     private static boolean needsSharedGear(ServerPlayerEntity recipient) {
