@@ -711,9 +711,13 @@ public final class BotMutualAidService {
             double hostileDistSq = engagement.kind() == EngagementKind.DEFEND_HOSTILE && target != null
                     ? bot.squaredDistanceTo(target)
                     : Double.POSITIVE_INFINITY;
+            // wouldEngage reads block state (locked gates), so it runs only for a hostile in scan.
+            boolean ownCombatWouldEngage = hostileDistSq <= MutualAidDefensePolicy.OWN_COMBAT_SCAN_SQ
+                    && BotEventHandler.wouldEngage(bot, target);
             MutualAidDefensePolicy.Handoff handoff = MutualAidDefensePolicy.defenseHandoff(
-                    BotEventHandler.hasCombatTarget(bot.getUuid()),
+                    BotEventHandler.hasCombatTarget(bot),
                     hostileDistSq,
+                    ownCombatWouldEngage,
                     TaskService.hasActiveTask(bot.getUuid()));
             if (handoff != MutualAidDefensePolicy.Handoff.NONE) {
                 handOffEngagement(bot, engagement, handoff, nowTick);

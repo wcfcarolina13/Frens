@@ -46,7 +46,7 @@ public final class MutualAidDefensePolicy {
         NONE,
         /** A task (a hobby that started mid-approach) now moves the bot. */
         TASK,
-        /** The bot's own combat has a target, or the hostile is within its own scan. */
+        /** The bot's own combat has a target, or will fight the hostile within its own scan. */
         OWN_COMBAT
     }
 
@@ -88,16 +88,23 @@ public final class MutualAidDefensePolicy {
      * input; and stopping the bot on the way out would cancel that mover's work (a bow draw). Either
      * way the approach did its job: it is a success-handoff, ended without a stop.
      *
-     * @param hasCombatTarget the bot's own combat loop has picked a target
-     * @param hostileDistSq   squared distance to the hostile walked toward, or
-     *                        {@link Double#POSITIVE_INFINITY} when there is none (approaching the ally)
-     * @param hasActiveTask   a task is running for the bot
+     * <p>A hostile within the own-combat scan is handed off only when own combat would fight it.
+     * A mob targeting the ally, not the bot, passes own combat's pursuit gate only for a bot with
+     * a ranged weapon; a melee bot keeps approaching and strikes at reach, which turns the mob on
+     * the bot, and own combat takes over from there.
+     *
+     * @param hasCombatTarget       the bot's own combat loop has a live target
+     * @param hostileDistSq         squared distance to the hostile walked toward, or
+     *                              {@link Double#POSITIVE_INFINITY} when there is none (approaching the ally)
+     * @param ownCombatWouldEngage  the bot's own combat would engage that hostile
+     * @param hasActiveTask         a task is running for the bot
      */
-    public static Handoff defenseHandoff(boolean hasCombatTarget, double hostileDistSq, boolean hasActiveTask) {
+    public static Handoff defenseHandoff(boolean hasCombatTarget, double hostileDistSq,
+                                         boolean ownCombatWouldEngage, boolean hasActiveTask) {
         if (hasActiveTask) {
             return Handoff.TASK;
         }
-        if (hasCombatTarget || hostileDistSq <= OWN_COMBAT_SCAN_SQ) {
+        if (hasCombatTarget || (hostileDistSq <= OWN_COMBAT_SCAN_SQ && ownCombatWouldEngage)) {
             return Handoff.OWN_COMBAT;
         }
         return Handoff.NONE;

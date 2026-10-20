@@ -238,9 +238,21 @@ public class BotEventHandler {
     /** Per-bot current combat target UUID for threat-scoring stickiness. */
     private static final Map<UUID, UUID> COMBAT_TARGET = new ConcurrentHashMap<>();
 
-    /** Whether the bot's own combat loop currently has a target. Any thread. */
-    public static boolean hasCombatTarget(UUID botId) {
-        return botId != null && COMBAT_TARGET.containsKey(botId);
+    /**
+     * Whether the bot's own combat loop currently has a live target: one recorded by
+     * {@link #engageHostiles} that is still present and alive in the bot's world. A target that
+     * died or despawned counts as none even before the next tick clears the entry. Server thread.
+     */
+    public static boolean hasCombatTarget(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        UUID targetId = COMBAT_TARGET.get(bot.getUuid());
+        if (targetId == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        Entity target = world.getEntity(targetId);
+        return target != null && !target.isRemoved() && target.isAlive();
     }
     /** Teleport detection: last known position per bot, updated each tick. */
     private static final Map<UUID, Vec3d> TELEPORT_DETECT_LAST_POS = new ConcurrentHashMap<>();
@@ -1213,6 +1225,8 @@ public class BotEventHandler {
 
         // ---- Post-combat drop/arrow sweep (all modes) ----
         if (augmentedHostiles.isEmpty()) {
+            // engageHostiles only runs with hostiles, so the last target's entry would outlive it.
+            COMBAT_TARGET.remove(botId);
             BotCombatCalloutService.noteHostilesCleared(bot, server.getTicks());
         } else {
             // Hostiles present — cancel any active drop sweep but do NOT clear kill positions

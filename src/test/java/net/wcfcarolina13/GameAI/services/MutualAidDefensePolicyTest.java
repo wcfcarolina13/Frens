@@ -121,35 +121,63 @@ class MutualAidDefensePolicyTest {
     @Test
     void farHostileNoTargetNoTaskKeepsApproaching() {
         assertEquals(MutualAidDefensePolicy.Handoff.NONE,
-                MutualAidDefensePolicy.defenseHandoff(false, 12.0D * 12.0D, false));
+                MutualAidDefensePolicy.defenseHandoff(false, 12.0D * 12.0D, true, false));
         assertEquals(MutualAidDefensePolicy.Handoff.NONE,
-                MutualAidDefensePolicy.defenseHandoff(false, Double.POSITIVE_INFINITY, false));
+                MutualAidDefensePolicy.defenseHandoff(false, Double.POSITIVE_INFINITY, false, false));
     }
 
     @Test
-    void aHostileWithinTheBotsOwnScanGoesToItsOwnCombat() {
+    void aHostileWithinTheBotsOwnScanGoesToItsOwnCombatWhenItWouldFight() {
         assertEquals(MutualAidDefensePolicy.Handoff.OWN_COMBAT,
-                MutualAidDefensePolicy.defenseHandoff(false, 100.0D, false));
+                MutualAidDefensePolicy.defenseHandoff(false, 100.0D, true, false));
         assertEquals(MutualAidDefensePolicy.Handoff.NONE,
-                MutualAidDefensePolicy.defenseHandoff(false, 100.01D, false));
-        // Reach (7 blocks) is inside the scan: an approach never strikes beside the combat loop.
+                MutualAidDefensePolicy.defenseHandoff(false, 100.01D, true, false));
+    }
+
+    @Test
+    void aMeleeBotKeepsApproachingAMobOwnCombatWouldNotStart() {
+        // The mob targets the ally, not the bot: own combat's pursuit gate needs a ranged weapon.
+        // The approach goes on to reach (7 blocks) and strikes, which turns the mob on the bot.
+        assertEquals(MutualAidDefensePolicy.Handoff.NONE,
+                MutualAidDefensePolicy.defenseHandoff(false, 100.0D, false, false));
+        assertEquals(MutualAidDefensePolicy.Handoff.NONE,
+                MutualAidDefensePolicy.defenseHandoff(false, 49.0D, false, false));
         assertTrue(49.0D <= MutualAidDefensePolicy.OWN_COMBAT_SCAN_SQ);
     }
 
     @Test
     void aCombatTargetHandsOffEvenWithTheHostileFarOrGone() {
         assertEquals(MutualAidDefensePolicy.Handoff.OWN_COMBAT,
-                MutualAidDefensePolicy.defenseHandoff(true, 20.0D * 20.0D, false));
+                MutualAidDefensePolicy.defenseHandoff(true, 20.0D * 20.0D, false, false));
         assertEquals(MutualAidDefensePolicy.Handoff.OWN_COMBAT,
-                MutualAidDefensePolicy.defenseHandoff(true, Double.POSITIVE_INFINITY, false));
+                MutualAidDefensePolicy.defenseHandoff(true, Double.POSITIVE_INFINITY, false, false));
     }
 
     @Test
     void aTaskThatStartedMidApproachWins() {
         assertEquals(MutualAidDefensePolicy.Handoff.TASK,
-                MutualAidDefensePolicy.defenseHandoff(false, 400.0D, true));
+                MutualAidDefensePolicy.defenseHandoff(false, 400.0D, false, true));
         assertEquals(MutualAidDefensePolicy.Handoff.TASK,
-                MutualAidDefensePolicy.defenseHandoff(true, 25.0D, true));
+                MutualAidDefensePolicy.defenseHandoff(true, 25.0D, true, true));
+    }
+
+    @Test
+    void theHandoffAsksWhetherOwnCombatWouldFightTheHostile() throws IOException {
+        String advance = bodyOf(mutualAidSource(), "void advanceEngagement(");
+        assertTrue(advance.contains("BotEventHandler.wouldEngage(bot, target)"));
+        assertTrue(advance.contains("BotEventHandler.hasCombatTarget(bot)"));
+    }
+
+    @Test
+    void theStaleCombatTargetIsClearedWhenNoHostilesRemain() throws IOException {
+        String handler = source("src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java");
+        String update = bodyOf(handler, "public static boolean updateBehavior(");
+        int empty = update.indexOf("if (augmentedHostiles.isEmpty()) {");
+        assertTrue(empty >= 0);
+        assertTrue(update.substring(empty, update.indexOf('}', empty)).contains("COMBAT_TARGET.remove(botId)"));
+        String accessor = bodyOf(handler, "public static boolean hasCombatTarget(");
+        assertTrue(accessor.contains("isAlive()") && accessor.contains("isRemoved()"),
+                "a dead or despawned target is no target");
     }
 
     // ── source guards ────────────────────────────────────────────────────────────────────────
@@ -242,7 +270,10 @@ class MutualAidDefensePolicyTest {
     }
 
     private static String mutualAidSource() throws IOException {
-        String relative = "src/main/java/net/wcfcarolina13/GameAI/services/BotMutualAidService.java";
+        return source("src/main/java/net/wcfcarolina13/GameAI/services/BotMutualAidService.java");
+    }
+
+    private static String source(String relative) throws IOException {
         Path dir = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
         for (Path at = dir; at != null; at = at.getParent()) {
             Path candidate = at.resolve(relative);
