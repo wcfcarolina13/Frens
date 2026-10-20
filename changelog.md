@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Sunset return finds a distant owner, voice mute mask capped at its category count; 1.1.284 (2026-10-20)
+
+Small-items build from the backlog triage, implemented by Codex (with Bradley's permission for this task); controller read the diff, dropped one part and ran the suite.
+
+- **Sunset return finds the bot's owner at any distance** (backlog 196; `c982f8b6`): the commander anchor only looked within 48 blocks, so an owner farther away was ignored. An owner in the same dimension is found by UUID; the 48-block nearest-player search stays only for a bot with no owner.
+- **Voice mute mask wire cap is 9** (backlog 253, cap only; `c982f8b6`): one entry per voice category instead of 64. The suggested 250 ms receiver throttle was dropped: it discarded the last update of a quick toggle, and each update is the full mask.
+- **Skipped:** backlog 216 (double-chest grant estimate: the counts come from callers, not small), 210 (preference receivers already check the sender before queuing).
+- **Tests** 3382 → 3382. Not sandbox-checked.
+
+**Field checks:** sunset with the owner more than 48 blocks away: the bot comes to the owner.
+
 ## Fortify cavity callouts voiced, flower gifts skip a full pack, punctuation guard covers JSON lines; 1.1.283 (2026-10-20)
 
 Small-items build from the backlog triage, implemented by Codex (with Bradley's permission for this task); controller read the diff and ran the suite.
