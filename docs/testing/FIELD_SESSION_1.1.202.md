@@ -1,6 +1,6 @@
 # Field Session — Frens 1.1.202
 
-**Version under test:** `frens-1.1.281-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z + 1.1.229 fresh-world woodcut, follow after tasks, tool wear, drop pickups — Phase 6aa + 1.1.230 woodcut protection nudge — Phase 6ab + 1.1.231 non-op owners use the UI — Phase 6ac + 1.1.232 host sweep — Phase 6ad + 1.1.233 cleanup — Phase 6ae + 1.1.234 playthrough fixes — Phase 6af + 1.1.235 sandbox fixes and Questing flag — Phase 6ag + 1.1.236 shelter-hole climb-out and per-world roster — Phase 6ah + 1.1.237 capped-pit surface fix, no new items + 1.1.238 Spawn-base trees protected — Phase 6ai + 1.1.239 bare-hand stone refused, unreachable trees skipped, stuck backoff, hunger in chat — Phase 6aj + 1.1.240 multi-step navigation — Phase 6ak + 1.1.241 tree claims, creeper line, walk outcomes — Phase 6al + 1.1.242 unified finder opt-in, audit bug fixes — Phase 6am + 1.1.243 dead-code removal 1, no new items + 1.1.244 dead-code removal 2 — Phase 6an + 1.1.245 dead-code removal 3, no new items + 1.1.246 dead-code removal 4 — Phase 6ao + 1.1.247 dead-code removal 5, no new items + 1.1.248 combat callouts, base owner, leash target — Phase 6ap + 1.1.249 wall-off night shelter — Phase 6aq + 1.1.250 legacy LLM chat retired, part 1 — Phase 6ar + 1.1.251 legacy LLM stack deleted — Phase 6as + 1.1.252 leash release, base commands — Phase 6at + 1.1.253 shelters — Phase 6au + 1.1.254 Bot Controls per world — Phase 6av + 1.1.255 death retrieval — Phase 6aw + 1.1.256 global spawns retired, no new items + 1.1.257 dig-down dawn climb-out — Phase 6ax + 1.1.258 retrieval drops only, trips survive reload — Phase 6ay + 1.1.259 ranged pause, woodcut stands — Phase 6az + 1.1.260 player text sweep, no new items + 1.1.261 unified pathfinder default — Phase 6ba + 1.1.263 sunset return and reach probes use the bot's finder — Phase 6bc + 1.1.264 stuck escape reads collision shapes — Phase 6bd + 1.1.265 go_to uses the bot's finder — Phase 6be + 1.1.266 sandbox bugs A-G — Phase 6bf + 1.1.267 unified search routes around its own breaks, faster empty cleanup — Phase 6bg + 1.1.268 Spawn-base own scaffold, forest woodcut, honey and fish — Phase 6bh + 1.1.269 honey on the server thread, own-tree log count, rescue chest food — Phase 6bi + 1.1.270 rescue sees refusals, locked chests and an absent owner, honey reach and deposit, no new items + 1.1.271 operator-permission lookup reaches leveled-mapped, Phase 6v reworded, no new items + 1.1.272 fix build from the 0-6ai sweep (settings past 32 KB, lodestone, travel-wait, wool, guard hole, Spells without Questing, woodcut chest axe, souls player scenes), sandbox-checked, Phase 6bj + 1.1.273 second fix build from the 0-6ai sweep (ambient chatter floor and rate, any-actor danger veto, threat resume, mining re-poll, idle stone upgrade, bed craft, pickup count) — Phase 6bk + 1.1.274 third fix build from the 0-6ai sweep (woodcut keeps its axe, craft after a failed reach, fishing search, idle fallbacks, farm no hoe, minds preload, damage in words, chest registry per save) — Phase 6bl + 1.1.275 fix build from the 1.1.273/274 sandbox checks (threat line, tree soil, woodcut outcome, fishing search, chest adoption, desperate eating) — Phase 6bm + 1.1.276 worker scans read each chunk once, miner threats, copied chest records retired — Phase 6bn + 1.1.277 canopy step down, flooded-pocket ledge, soul stage directions, woodcut per-log reads — Phase 6bo + 1.1.278 tick-driven defensive aid, golden-apple yes/no, go_to dimension, doorway line-up, Collect messages — Phase 6bp + 1.1.279 small steps don't clip into walls, a full pack never costs a valuable stack, fresh stuck counters per return, no cooking sleep on the server thread, voice installer timeout, bundled food — Phase 6bq + 1.1.280 follow under oak canopies, flooded-pocket ledge climb, cleanup leaves other trees' soil and pillars alone, bow defenders and friendly fire, admin remote open — Phase 6br + 1.1.281 idle stone upgrade crafts only stone, keeps its cobblestone, stays quiet — Phase 6bs). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
+**Version under test:** `frens-1.1.287-release+1.21.11.jar` (1.1.201 memory digest + 1.1.202 torch/creeper diagnostics and the creeper fuse fix + 1.1.203 config sync / per-player mute masks — Phase 6b + 1.1.204 backlog run — Phase 6c + 1.1.205 loose ends — Phase 6d + 1.1.206 follow-ups — Phase 6e + 1.1.207 crafting/water — Phase 6f + 1.1.208 refactors — Phase 6g + 1.1.209 fortify extraction — Phase 6h + 1.1.210 carve extraction — Phase 6i + 1.1.211 novelty rejection — Phase 6j + 1.1.212 peer stance — Phase 6k + 1.1.213 typed relations — Phase 6l + 1.1.214 structured output — Phase 6m + 1.1.215 bullet-sentinel fix, no new items + 1.1.216 speech floor and idle-hobby backoff — Phase 6n + 1.1.217 pre-warm, torch hysteresis, truthful scripted logs, scene floor reservation, group-chat hint — Phase 6o + 1.1.218 construction interior egress — Phase 6p + 1.1.219 chat addressee rules, DM follow-up window and supplies groundwork — Phase 6q + 1.1.220 Bot Storage owner-only — Phase 6r + 1.1.221 companions ask before taking from chests (supplies Phase 3) — Phase 6s + 1.1.222 no tick freezes from table searches or make-room — Phase 6t + 1.1.223 gate follow, redstone doors, craft names, scene smoothing, crafting search — Phase 6u + 1.1.224 access control, DM privacy, no native downloads — Phase 6v + 1.1.225 AI companion setup, multiplayer AI settings, model-free first run — Phase 6w + 1.1.226 singleplayer auto-spawn waits for the host — Phase 6x + 1.1.227 commands-off first run — Phase 6y + 1.1.228 narrow-screen layouts — Phase 6z + 1.1.229 fresh-world woodcut, follow after tasks, tool wear, drop pickups — Phase 6aa + 1.1.230 woodcut protection nudge — Phase 6ab + 1.1.231 non-op owners use the UI — Phase 6ac + 1.1.232 host sweep — Phase 6ad + 1.1.233 cleanup — Phase 6ae + 1.1.234 playthrough fixes — Phase 6af + 1.1.235 sandbox fixes and Questing flag — Phase 6ag + 1.1.236 shelter-hole climb-out and per-world roster — Phase 6ah + 1.1.237 capped-pit surface fix, no new items + 1.1.238 Spawn-base trees protected — Phase 6ai + 1.1.239 bare-hand stone refused, unreachable trees skipped, stuck backoff, hunger in chat — Phase 6aj + 1.1.240 multi-step navigation — Phase 6ak + 1.1.241 tree claims, creeper line, walk outcomes — Phase 6al + 1.1.242 unified finder opt-in, audit bug fixes — Phase 6am + 1.1.243 dead-code removal 1, no new items + 1.1.244 dead-code removal 2 — Phase 6an + 1.1.245 dead-code removal 3, no new items + 1.1.246 dead-code removal 4 — Phase 6ao + 1.1.247 dead-code removal 5, no new items + 1.1.248 combat callouts, base owner, leash target — Phase 6ap + 1.1.249 wall-off night shelter — Phase 6aq + 1.1.250 legacy LLM chat retired, part 1 — Phase 6ar + 1.1.251 legacy LLM stack deleted — Phase 6as + 1.1.252 leash release, base commands — Phase 6at + 1.1.253 shelters — Phase 6au + 1.1.254 Bot Controls per world — Phase 6av + 1.1.255 death retrieval — Phase 6aw + 1.1.256 global spawns retired, no new items + 1.1.257 dig-down dawn climb-out — Phase 6ax + 1.1.258 retrieval drops only, trips survive reload — Phase 6ay + 1.1.259 ranged pause, woodcut stands — Phase 6az + 1.1.260 player text sweep, no new items + 1.1.261 unified pathfinder default — Phase 6ba + 1.1.263 sunset return and reach probes use the bot's finder — Phase 6bc + 1.1.264 stuck escape reads collision shapes — Phase 6bd + 1.1.265 go_to uses the bot's finder — Phase 6be + 1.1.266 sandbox bugs A-G — Phase 6bf + 1.1.267 unified search routes around its own breaks, faster empty cleanup — Phase 6bg + 1.1.268 Spawn-base own scaffold, forest woodcut, honey and fish — Phase 6bh + 1.1.269 honey on the server thread, own-tree log count, rescue chest food — Phase 6bi + 1.1.270 rescue sees refusals, locked chests and an absent owner, honey reach and deposit, no new items + 1.1.271 operator-permission lookup reaches leveled-mapped, Phase 6v reworded, no new items + 1.1.272 fix build from the 0-6ai sweep (settings past 32 KB, lodestone, travel-wait, wool, guard hole, Spells without Questing, woodcut chest axe, souls player scenes), sandbox-checked, Phase 6bj + 1.1.273 second fix build from the 0-6ai sweep (ambient chatter floor and rate, any-actor danger veto, threat resume, mining re-poll, idle stone upgrade, bed craft, pickup count) — Phase 6bk + 1.1.274 third fix build from the 0-6ai sweep (woodcut keeps its axe, craft after a failed reach, fishing search, idle fallbacks, farm no hoe, minds preload, damage in words, chest registry per save) — Phase 6bl + 1.1.275 fix build from the 1.1.273/274 sandbox checks (threat line, tree soil, woodcut outcome, fishing search, chest adoption, desperate eating) — Phase 6bm + 1.1.276 worker scans read each chunk once, miner threats, copied chest records retired — Phase 6bn + 1.1.277 canopy step down, flooded-pocket ledge, soul stage directions, woodcut per-log reads — Phase 6bo + 1.1.278 tick-driven defensive aid, golden-apple yes/no, go_to dimension, doorway line-up, Collect messages — Phase 6bp + 1.1.279 small steps don't clip into walls, a full pack never costs a valuable stack, fresh stuck counters per return, no cooking sleep on the server thread, voice installer timeout, bundled food — Phase 6bq + 1.1.280 follow under oak canopies, flooded-pocket ledge climb, cleanup leaves other trees' soil and pillars alone, bow defenders and friendly fire, admin remote open — Phase 6br + 1.1.281 idle stone upgrade crafts only stone, keeps its cobblestone, stays quiet — Phase 6bs + 1.1.282 cleanup never swings a weapon at leaves, no wrong-material line after a full pack, chest placement misses logged — Phase 6bt + 1.1.283 fortify cavity callouts voiced, flower gifts skip a full pack — Phase 6bu + 1.1.284 sunset return finds a distant owner, voice mute mask cap — Phase 6bv + 1.1.285 starvation pauses reach a distant owner, Allow once while the owner is away, Collect re-checks permission, no chest-record revival by a stranger's chest — Phase 6bw + 1.1.286 follow mines leaves at a step up, bow defender sidesteps for a clear shot, double chests counted once, implicit pathfinder default, mounted leaf clearing at normal speed — Phase 6bx + 1.1.287 owner-only zone edits, village mapping and wall claims, double chest with an unloaded half refused, a stopped tool search stays stopped, woodcut cleanup tracks its own pillars — Phase 6by). Session protocol: `GUIDED_SESSION_PROTOCOL.md` beside this file.
 **Date:** ____________  **Instance:** PrismLauncher `1.21.11`
 **Server log Claude tails:** `~/Library/Application Support/PrismLauncher/instances/1.21.11/minecraft/logs/latest.log`
 
@@ -2246,6 +2246,124 @@ Sandbox 2026-10-20 on the 1.1.281 jar (md5 45431a42...), save "Sweep Souls3" (ea
   - Claude watches for: `Crafted 1 <kind>(s) using <material>`, `Dropped .* to free inventory space`, "My pack's full, so I can't craft X right now." and how often it repeats, `craft (quiet)` lines.
   - Pass when: only stone tools are made, no iron, gold or diamond is used, no cobblestone it still needs is dropped, and the pack-full line comes at most once per 30 s.
   - Sandbox 2026-10-20 (1.1.281): PASS with cobblestone only; mixed stone types (strict stone needs 3 of one type, deferred in the changelog) not checked.
+
+## Phase 6bt — 1.1.282 fix checks (1.1.282)
+
+Not sandbox-checked yet: 1.1.282-1.1.287 are queued for one combined sandbox run (RALPH_TASK handoff, "Pending sandbox check"). Log-only changes not listed here: chest-pull pauses and pending pulls cleared at server stop (backlog 218).
+
+- [ ] **Woodcut cleanup with a hotbar full of tools and weapons never swings one at leaves (1.1.282).**
+  - Bradley does: fill all nine hotbar slots of a bot with tools and weapons (an enchanted sword in slot 0), have it fell a tree, and let woodcut cleanup run under the canopy.
+  - Claude watches for: `woodcut_cleanup starting`, `woodcut_cleanup target selected: kind=...`, `woodcut_cleanup completed`; the leaf clear itself is skipped with no log line (visual: the held item while it clears).
+  - Pass when: the bot never breaks a leaf with the sword or a tool from slot 0; leaves it can't clear are left, and the logs still come down.
+- [ ] **A full-pack refusal of a stone tool says nothing about cobbled deepslate (1.1.282).**
+  - Bradley does: let a bot with wooden tools, cobblestone, sticks and a full pack idle near a crafting table (the 6bs set-up; `fix281.py craft full` in the sandbox).
+  - Claude watches for: "My pack's full, so I can't craft stone pickaxe right now." and `craft (quiet) <name>: ...` lines after it.
+  - Pass when: the pack-full line comes once, and no `craft (quiet)` line after it names cobbled deepslate or blackstone ("I need 3 cobbled deepslate ...", finding 61).
+- [ ] **A chest a bot can't place for storage is logged (1.1.282).**
+  - Bradley does: ask a bot that carries a chest to store its loot where there is no room to place one (a 1x2 tunnel, or standing in water).
+  - Claude watches for: `Store chest placement miss: no placeable spot near <pos> (bot=<name>)` or `Store chest placement miss: placed at <pos> but found <block> (bot=<name>)`.
+  - Pass when: a placement that fails leaves one of those lines (log-level change; check it only when a store run happens anyway).
+
+## Phase 6bu — 1.1.283 fix checks (1.1.283)
+
+Not sandbox-checked yet (queued with 6bt). The punctuation guard now covering JSON resources is test-only (no field check).
+
+- [ ] **A fortify run that finds a cavity speaks the callout aloud (1.1.283).**
+  - Bradley does: with bot voices on, run fortify on ground that has a small hidden cavity (a pocket or air gap in the wall line).
+  - Claude watches for: chat line "Noted a pocket in the wall, flagging it for you.", "Found a tiny cavity here. It's safe but needs eyes on.", "Here's the gap I marked. No mobs, just a small void.", "Spotting the ignored cavity. We can patch later together." or "This nook is harmless, but I'm calling it out for you." (no log line for the sound; audible).
+  - Pass when: the chat line is heard as well as read, in the bot's voice.
+- [ ] **A flower gift skips a recipient with a full pack (1.1.283).**
+  - Bradley does: have two bots idle together, the giver carrying flowers and the other with every inventory slot full (no slot that takes a flower); then free a slot.
+  - Claude watches for: `Mutual aid: <giver> offered a flower to <recipient>; awaiting acknowledgment`.
+  - Pass when: no flower offer goes to the full bot (no walk-over or offer line for it), and an offer can come once it has room.
+
+## Phase 6bv — 1.1.284 fix checks (1.1.284)
+
+Not sandbox-checked yet (queued with 6bt).
+
+- [ ] **At sunset a bot comes to its owner more than 48 blocks away (1.1.284).**
+  - Bradley does: leave an owned bot working 60-150 blocks from him in the same dimension (no base nearer) and wait for sunset.
+  - Claude watches for: `Auto-return at sunset triggered for <name> (day=... tod=...)`, `Sent sunset auto-return notification to ...`, `Sunset segment for <name> finder=... pathLen=... next=...` heading toward him.
+  - Pass when: the bot travels to him rather than to a nearer player or ally bot, or staying put.
+- [ ] **Voice mute toggles still apply (1.1.284).**
+  - Bradley does: in the voice settings, mute two or three voice categories, then unmute one, while bots are talking.
+  - Claude watches for: (no log line; audible).
+  - Pass when: muted categories stay silent, the unmuted one speaks again, and the choice survives a rejoin.
+
+## Phase 6bw — 1.1.285 fix checks (1.1.285)
+
+Not sandbox-checked yet (queued with 6bt). Two items need a second, non-op player.
+
+- [ ] **A starving strip-mine bot reaches its owner from far away (1.1.285).**
+  - Bradley does: start a strip mine (`/bot skill stripmine`, or collect dirt) on a bot with no food, walk 100+ blocks away, and wait until it starves.
+  - Claude watches for: chat line "I'm starving and out of food. Stripmine paused. Feed me, then /bot resume." (collect dirt: "I'm starving and out of food. Paused. Feed me, then /bot resume.").
+  - Pass when: he sees the line at that distance.
+- [ ] **An "Allow once" supply grant works while the owner is away (1.1.285).**
+  - Bradley does: answer a bot's chest supply ask with [Allow once], then walk far off before it takes the items (or let it re-ask for the same chest and item later).
+  - Claude watches for: `[supply] request bot=<name> chest=... item=... qty=... need=... outcome=COVERED_BY_GRANT` (not `OWNER_NOT_NEARBY`), then `[supply] transfer bot=<name> ... moved=...`.
+  - Pass when: the bot takes what was granted once, with no second prompt, and the grant is then spent.
+- [ ] **Collect re-checks permission on arrival (1.1.285; needs a second, non-op player).**
+  - Bradley does: let a second player who may collect from a bot's chest start a Collect, then remove that permission (or `/deop` them) while the bot is walking.
+  - Claude watches for: chat line "<bot> arrived, but you no longer have permission to collect from its chest. Nothing was collected."
+  - Pass when: the line comes on arrival and the chest is unchanged.
+- [ ] **A hand-placed chest on a destroyed record stays unlisted (1.1.285).**
+  - Bradley does: break a chest a bot registered, place a new chest by hand on the same spot, then reopen the bot's chest list or let it look for supplies.
+  - Claude watches for: no `[supply]` request or withdraw line naming that chest's position (no log line for the record itself; visual in the chest list).
+  - Pass when: the hand-placed chest is not listed or used until a bot places and registers a chest there.
+
+## Phase 6bx — 1.1.286 fix checks (1.1.286)
+
+Not sandbox-checked yet (queued with 6bt). The stair-escape rewrite was reverted (unreachable path), so there is nothing to check for backlog 146.
+
+- [ ] **Following through oak leaves at a step up, the bot mines the leaf and gets past (1.1.286).**
+  - Bradley does: walk up a one-block step whose top is in oak leaves (feet and head height) with a bot following; the fix277/280 `canopy` east route in the sandbox.
+  - Claude watches for: `leaf-action: toward=... action=MINING_STARTED target=... stagnant=...` (the old `leaf-cleared` line is gone), then `Mining complete at ...`; `Follow status: bot=<name>` with the same `dist=` for 5 s or more.
+  - Pass when: the leaf is mined and the bot is past the step within about 10 s (finding 56: five `leaf-cleared` lines and no mine).
+- [ ] **A bow-only defender sidesteps and shoots past an ally; a sword-and-bow one melees up close (1.1.286).**
+  - Bradley does: fix278 `aid bowarmor` with Bob in the line: once with Jake holding only a bow and arrows, once with a sword as well and the zombie inside 5 blocks.
+  - Claude watches for: `Mutual aid: Jake hands its defend_hostile approach to its own combat`, arrows fired, `ff_received` for Bob, Jake's movement.
+  - Pass when: bow-only Jake steps sideways or back to a clear line and shoots, never hitting Bob; sword-and-bow Jake inside 5 blocks fights with the sword (finding 60).
+- [ ] **A mounted bot under leaves mines them at normal speed (1.1.286).**
+  - Bradley does: ride with a bot on a horse under low oak leaves, and past a few leaves he placed by hand (persistent).
+  - Claude watches for: with the `mount-leaf` and `leaf-clear-service` loggers at DEBUG, `Leaf clear: bot=<name> mining=... toward=...` and `leaf-mine start [mounted]: bot=<name> pos=...`; no stuck line while riding.
+  - Pass when: leaves take a normal break time (not instant), the tool is picked once, and his placed leaves are left alone.
+- [ ] **A supply ask counts a double chest once (1.1.286).**
+  - Bradley does: put a known count of an item a bot needs (e.g. 20 cobblestone, split over both halves) in a double chest, and let the bot ask for it.
+  - Claude watches for: `[supply] request bot=<name> chest=... item=... qty=... need=...` and `[supply] withdraw ... moved=...`.
+  - Pass when: the asked and moved amounts match the total in the double chest, not one half or double.
+- [ ] **The settings file no longer pins the default pathfinder (1.1.286).**
+  - Bradley does: on a fresh config, open and save the Frens settings once without touching the pathfinder, then look at `config/settings.json5`.
+  - Claude watches for: (no log line; visual) a `"pathfinder"` line in the file.
+  - Pass when: the file has no `"pathfinder"` line until he picks one, and bots still use the default pathfinder.
+
+## Phase 6by — 1.1.287 fix checks (1.1.287)
+
+Not sandbox-checked yet (queued with 6bt). Riskiest: the two-bot tree cleanup (finding 59, cause not proven) and the permission gates, which need a second, non-op player (on a LAN world with cheats every guest is an op, so the gates can't be shown there).
+
+- [ ] **RISKY: two bots cleaning the same felled tree leave no scaffold dirt and no hole in natural soil (1.1.287, finding 59).**
+  - Bradley does: have two bots fell and clean up the same tree (or two trees whose canopies touch) on grass, both using dirt pillars; repeat two or three times.
+  - Claude watches for: `woodcut_cleanup scaffold phase: removeScaffold=... shouldAbort=...`, `woodcut_cleanup completed: ...`, `woodcut_cleanup target failed: kind=... pos=... reason=...`.
+  - Pass when: no dirt pillar or scaffold block is left standing (grass-topped ones included), and no natural block under a tree is mined. Any leftover block: note its position and which bot built there.
+- [ ] **RISKY: a non-owner can't rename or delete someone else's zone (1.1.287; needs a second, non-op player).**
+  - Bradley does: as a second non-op player, open the Base Manager's Protected Zones and try to rename and delete one of Bradley's zones, a base auto-zone (`base:X`) and the player's own zone (e.g. a village it mapped).
+  - Claude watches for: chat line "Only the zone's owner, an operator or the host can rename or delete this zone.", "Only an operator or the host can rename or delete a base's automatic zone.", or "No zone named '<name>' found." for a zone hidden from that player.
+  - Pass when: only the player's own zone changes; also `/bot zone remove` on a zone with no owner gives no crash.
+- [ ] **RISKY: only a bot owner, an op or the host can map a village (1.1.287; needs a second, non-op player).**
+  - Bradley does: as a second non-op player who owns no bot, press Map Village in the Base Manager near a village; then again after giving that player a bot.
+  - Claude watches for: chat line "Only a bot owner, an operator or the host can map a village."
+  - Pass when: refused without a bot, allowed with one.
+- [ ] **RISKY: an ownerless wall can be claimed only by an op or the host (1.1.287; needs a second, non-op player).**
+  - Bradley does: unclaim a wall (Unclaim in the Base Manager), then as the second non-op player press Claim Wall on it; then claim it back as the host.
+  - Claude watches for: chat line "This wall has no recorded owner or builder. Only an operator or the host can claim it."
+  - Pass when: the non-op player is refused and the host can claim it.
+- [ ] **A stopped tool search stays stopped (1.1.287).**
+  - Bradley does: give a bot a task that needs a tool it lacks (so it starts looking in chests), `/bot stop` while it searches, then give it a new task straight away.
+  - Claude watches for: `[supply] tool scan for <name>: ...` before the stop, and no `[supply] request` or `[supply] withdraw` line for that bot after it; the bot's path.
+  - Pass when: the bot never walks to the chest or takes the tool after the stop, and does the new task.
+- [ ] **A double chest with one half in an unloaded chunk is skipped, not half-read (1.1.287).**
+  - Bradley does: place a double chest across a chunk border at the edge of loaded terrain, with the item a bot needs, and let the bot ask for supplies while the far half is unloaded; then again with both halves loaded.
+  - Claude watches for: `[supply] request bot=<name> chest=... outcome=DENIED(DENY_UNLOADED)`, then a request at the next chest.
+  - Pass when: the half-loaded chest is skipped with no partial take and no lost "Yes"; with both halves loaded it is used.
 
 ## Phase 7 — Conversation ontology (1.1.196, 1.1.197, 1.1.198)
 
