@@ -39,6 +39,7 @@ import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.services.WoodcutCleanupMemoryService;
 import net.wcfcarolina13.GameAI.services.WoodcutKnowledgeService;
 import net.wcfcarolina13.GameAI.services.BotBeehiveRegistryService;
+import net.wcfcarolina13.GameAI.services.ChunkBlockReader;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.construction.BridgeScaffoldService;
@@ -4401,7 +4402,11 @@ public final class WoodcutSkill implements Skill {
             return new WoodcutDetectionSnapshot(Optional.empty(), Optional.empty(), null, null, null, 0, 0, 0, 0, 0, 0, Map.of(), List.of(), false, 0, 0);
         }
         BlockPos origin = bot.getBlockPos();
-        BotBeehiveRegistryService.discoverBeehivesNear(world, origin, radius, vertical);
+        // One reader for this scan (1.1.276): the box read and the beehive discovery each fetch a
+        // chunk once instead of paying a server round trip per cell from the worker. An unloaded
+        // chunk reads as null and is skipped (it is no longer loaded by the scan).
+        ChunkBlockReader reader = new ChunkBlockReader(world);
+        BotBeehiveRegistryService.discoverBeehivesNear(world, reader, origin, radius, vertical);
         int totalLogs = 0;
         int visitedLogs = 0;
         int protectedCount = 0;
@@ -4445,8 +4450,8 @@ public final class WoodcutSkill implements Skill {
         }
 
         for (BlockPos pos : BlockPos.iterate(scanMinX, scanMinY, scanMinZ, scanMaxX, scanMaxY, scanMaxZ)) {
-            BlockState state = world.getBlockState(pos);
-            if (!state.isIn(BlockTags.LOGS)) {
+            BlockState state = reader.state(pos);
+            if (state == null || !state.isIn(BlockTags.LOGS)) {
                 continue;
             }
             totalLogs++;
@@ -4456,7 +4461,7 @@ public final class WoodcutSkill implements Skill {
             TreeDetector.WoodcutProtectionDecision protectionDecision =
                     TreeDetector.getWoodcutProtectionDecision(world, pos, 4);
             boolean protectedTarget = protectionDecision.blocked();
-            boolean soilValid = TreeDetector.isValidSoil(world.getBlockState(pos.down()));
+            boolean soilValid = TreeDetector.isValidSoil(reader.state(pos.getX(), pos.getY() - 1, pos.getZ()));
             boolean leavesNearby = TreeDetector.hasLeavesNearby(world, pos, 4, 4);
 
             if (nearHuman) {

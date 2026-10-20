@@ -8,6 +8,8 @@ import net.minecraft.block.Blocks;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.world.chunk.WorldChunk;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +20,7 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -191,16 +194,69 @@ public final class BotBeehiveRegistryService {
         if (world == null || origin == null) {
             return;
         }
+        discoverBeehivesNear(world, new ChunkBlockReader(world), origin, horizontalRadius, verticalRadius);
+    }
+
+    /**
+     * Registers every beehive / bee nest in the box around {@code origin}, reading through
+     * {@code reader} (one chunk fetch per chunk, not a server round trip per cell from a worker).
+     * Chunk sections whose palette holds no hive are skipped whole; unloaded chunks are skipped
+     * (never loaded), as before. Hives are registered in the old {@code BlockPos.iterate} order
+     * (x fastest, then y, then z) so the registry list order is unchanged.
+     */
+    public static void discoverBeehivesNear(ServerWorld world, ChunkBlockReader reader, BlockPos origin,
+                                            int horizontalRadius, int verticalRadius) {
+        if (world == null || reader == null || origin == null) {
+            return;
+        }
         int h = Math.max(AUTO_DISCOVERY_HORIZONTAL_RADIUS, horizontalRadius);
         int v = Math.max(AUTO_DISCOVERY_VERTICAL_RADIUS, verticalRadius);
         verifyBeehives(world);
-        for (BlockPos pos : BlockPos.iterate(origin.add(-h, -v, -h), origin.add(h, v, h))) {
-            if (!world.isChunkLoaded(pos)) {
-                continue;
+        int minX = origin.getX() - h, maxX = origin.getX() + h;
+        int minY = origin.getY() - v, maxY = origin.getY() + v;
+        int minZ = origin.getZ() - h, maxZ = origin.getZ() + h;
+        List<BlockPos> found = null;
+        for (int sz = minZ >> 4; sz <= maxZ >> 4; sz++) {
+            for (int sx = minX >> 4; sx <= maxX >> 4; sx++) {
+                WorldChunk chunk = reader.chunk(sx, sz);
+                if (chunk == null) {
+                    continue;
+                }
+                for (int sy = minY >> 4; sy <= maxY >> 4; sy++) {
+                    int index = chunk.getSectionIndex(sy << 4);
+                    if (index < 0 || index >= chunk.countVerticalSections()) {
+                        continue;
+                    }
+                    ChunkSection section = chunk.getSection(index);
+                    if (section == null || section.isEmpty() || !section.hasAny(BotBeehiveRegistryService::isBeehiveBlock)) {
+                        continue;
+                    }
+                    int x0 = Math.max(minX, sx << 4), x1 = Math.min(maxX, (sx << 4) + 15);
+                    int y0 = Math.max(minY, sy << 4), y1 = Math.min(maxY, (sy << 4) + 15);
+                    int z0 = Math.max(minZ, sz << 4), z1 = Math.min(maxZ, (sz << 4) + 15);
+                    for (int z = z0; z <= z1; z++) {
+                        for (int y = y0; y <= y1; y++) {
+                            for (int x = x0; x <= x1; x++) {
+                                if (isBeehiveBlock(section.getBlockState(x & 15, y & 15, z & 15))) {
+                                    if (found == null) {
+                                        found = new ArrayList<>();
+                                    }
+                                    found.add(new BlockPos(x, y, z));
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            if (isBeehiveBlock(world.getBlockState(pos))) {
-                registerBeehive(world, pos.toImmutable());
-            }
+        }
+        if (found == null) {
+            return;
+        }
+        found.sort(Comparator.comparingInt(BlockPos::getZ)
+                .thenComparingInt(BlockPos::getY)
+                .thenComparingInt(BlockPos::getX));
+        for (BlockPos pos : found) {
+            registerBeehive(world, pos);
         }
     }
 
