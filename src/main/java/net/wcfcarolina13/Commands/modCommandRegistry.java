@@ -2738,8 +2738,6 @@ public class modCommandRegistry {
         int y_distance = position.getY();
         int z_distance = position.getZ();
 
-        ServerWorld world = server.getOverworld();
-
         ServerPlayerEntity bot = null;
         try {
             bot = EntityArgumentType.getPlayer(context, "bot");
@@ -2750,6 +2748,18 @@ public class modCommandRegistry {
             server.sendMessage(Text.literal("Error! Bot not found!"));
             LOGGER.error("The requested bot could not be found on the server!");
             return;  // stop here if no bot
+        }
+
+        // Plan on the terrain the bot actually walks: PathTracer moves it in its own world.
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        // "~" coordinates resolve against the commander, so a commander in another dimension
+        // would send the bot to a position that only makes sense over there.
+        ServerPlayerEntity commander = context.getSource().getPlayer();
+        if (commander != null && commander.getEntityWorld().getRegistryKey() != world.getRegistryKey()) {
+            ChatUtils.sendSystemMessage(context.getSource(), bot.getName().getString() + " can't go there across dimensions.");
+            return;
         }
 
         // Commander-directed movement should preempt idle hobbies.
@@ -4278,6 +4288,9 @@ public class modCommandRegistry {
                 continue;
             }
             if (bot.getEntityWorld() != commanderWorld) {
+                if (targetArg != null && !isAll) {
+                    ChatUtils.sendSystemMessage(source, bot.getName().getString() + " can't go there across dimensions.");
+                }
                 continue;
             }
             if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.FOLLOW
