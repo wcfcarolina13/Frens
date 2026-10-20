@@ -13,7 +13,7 @@ Fix build from the 1.1.279 sandbox check (findings 57, 58). Scoped read-only fir
 - **Tests** 3370 → 3380.
 - **Deferred:** strict stone needs 3 of one stone type (mixed types aren't combined, pre-existing); a stackable output that would merge into the offhand now triggers one needless cheap drop.
 
-**Field checks:** SANDBOX
+**Field checks:** sandbox-checked 2026-10-20 (Phase 6bs, `tools/sandbox/fix281.py`, replays `frens_1_1_281_6bs_craft`, `_explicit_follow`): PASS strict stone (0 `using diamond|iron` in seven runs; with 4 free slots 4x `Crafted 1 <kind>(s) using stone` and the 3 diamonds and 5 iron kept), batch reserve (0 `Dropped .*Cobblestone`; a pack with rotten flesh dropped it, crafted the pickaxe and kept 13 cobblestone), quiet idle crafts (0 "Missing materials"; one "My pack's full, so I can't craft X right now." per run, none at the 10 s retry), explicit `/bot craft` still talks ("I need a crafting table placed nearby to craft that."), follow no regression. With fix279's 36-of-36 pack nothing is crafted: the reserved cobblestone is its only cheap stack (by design). New finding 61 (log only: the quiet line after a full-pack refusal names cobbled deepslate).
 
 ## Follow under oak canopies (waypoints, corners, leaves, /tp), flooded-pocket ledge climb, cleanup leaves other trees' soil and pillars alone, bow defenders and friendly fire, admin remote open; 1.1.280 (2026-10-20)
 
