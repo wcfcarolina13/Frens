@@ -87,6 +87,25 @@ public final class FishingSearchPolicy {
     }
 
     /**
+     * Score of a water surface as a cast target from a stand; lower is better. Distance from
+     * the ideal cast distance costs, open surface around the target and water depth earn, and
+     * {@code openWaterBonus} (negative) rewards vanilla open water. One formula for both the
+     * cast-line pick and the stand ranking in FishingSkill, which memoize openness, depth and
+     * vanilla-open per surface for one search (finding 43); the arithmetic order is the one
+     * those two sites used, so scores and picks are unchanged.
+     *
+     * @param distSq         squared distance from the stand to the target
+     * @param idealDistSq    squared ideal cast distance
+     * @param openness       open-water surface blocks in the 3x3 around the target
+     * @param depth          water blocks from the target down (capped by the caller)
+     * @param openWaterBonus bonus added when the target is vanilla open water (0 or negative)
+     */
+    public static double castScore(double distSq, int idealDistSq, int openness, int depth, double openWaterBonus) {
+        double distPenalty = Math.abs(distSq - idealDistSq) / (double) idealDistSq;
+        return distPenalty - openness * 0.35 - depth * 0.55 + openWaterBonus;
+    }
+
+    /**
      * Whether a column's stand option still needs its reachability checked. Options come in
      * score order (lower is better). Before the column has a reachable primary, an option
      * that cannot beat the current best cannot make this column win, so neither can any

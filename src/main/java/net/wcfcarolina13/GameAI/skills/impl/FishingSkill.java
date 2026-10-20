@@ -19,13 +19,13 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.minecraft.world.RaycastContext;
 import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.ChunkStatus;
 import net.minecraft.registry.tag.FluidTags;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
+import net.wcfcarolina13.GameAI.services.ChunkBlockReader;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.BotWaterEscapeService;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
@@ -49,6 +49,7 @@ import net.wcfcarolina13.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -105,6 +106,60 @@ public final class FishingSkill implements Skill {
     private static final int CHEST_SCAN_RADIUS = 16;
     private static final record StandCandidate(BlockPos pos, boolean adjacent) {}
     private static final record StandOption(BlockPos stand, BlockPos castTarget, double score) {}
+
+    /** How a water surface scores as a cast target: open surface around it, depth, vanilla open water. */
+    private static final record SurfaceQuality(int openness, int depth, boolean vanillaOpen) {}
+
+    /** Vertical reach of the cast-target surface probes (chooseCastTargetAlongLine, findOpenWaterSurfaceNear). */
+    private static final int CAST_PROBE_Y_RADIUS = 2;
+
+    /**
+     * Block reads for one spot search or one cast-time check (finding 43).
+     *
+     * <p>Every read goes through one {@link ChunkBlockReader}, so a worker thread pays a
+     * server-thread hop per chunk, not per block. A search beside a 7x7 pond re-scores the
+     * same few dozen water surfaces from every stand of every column, so surface probes and
+     * surface quality are memoized for the life of the instance. Like the reader, an instance
+     * is not thread-safe and must not outlive its search.</p>
+     *
+     * <p>A cell the reader cannot give (outside the world height, or an unloaded chunk) reads
+     * as void air with no fluid, which is what {@code world.getBlockState} /
+     * {@code getFluidState} return outside the height. Callers check the chunk is loaded
+     * before reading wherever the old code did, and {@link #isStandable(SearchReads, BlockPos)}
+     * now also rejects a stand in an unloaded chunk instead of loading it.</p>
+     */
+    private static final class SearchReads {
+        private static final BlockPos NO_SURFACE = new BlockPos(Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE);
+
+        final ServerWorld world;
+        private final ChunkBlockReader reader;
+        private final Long2ObjectOpenHashMap<SurfaceQuality> quality = new Long2ObjectOpenHashMap<>();
+        /** findOpenWaterSurfaceAt results for CAST_PROBE_Y_RADIUS, keyed by (x, baseY, z); NO_SURFACE for none. */
+        private final Long2ObjectOpenHashMap<BlockPos> castProbes = new Long2ObjectOpenHashMap<>();
+
+        SearchReads(ServerWorld world) {
+            this.world = world;
+            this.reader = new ChunkBlockReader(world);
+        }
+
+        boolean isLoaded(BlockPos pos) {
+            return reader.isLoaded(pos.getX(), pos.getZ());
+        }
+
+        BlockState state(BlockPos pos) {
+            BlockState state = reader.state(pos);
+            return state != null ? state : Blocks.VOID_AIR.getDefaultState();
+        }
+
+        boolean isWater(BlockPos pos) {
+            FluidState fluid = reader.fluid(pos);
+            return fluid != null && fluid.isIn(FluidTags.WATER);
+        }
+
+        int memoizedSurfaces() {
+            return quality.size();
+        }
+    }
 
     // Failed target blacklist: prevent oscillation by remembering unreachable targets.
     private static final long BLACKLIST_DURATION_MS = 45_000L; // Forget after 45 seconds
@@ -958,11 +1013,12 @@ public final class FishingSkill implements Skill {
         BlockPos best = null;
         double bestDist = Double.POSITIVE_INFINITY;
         int r = Math.max(0, radius);
+        SearchReads reads = new SearchReads(world);
         for (BlockPos pos : BlockPos.iterate(around.add(-r, -1, -r), around.add(r, 1, r))) {
-            if (!world.isChunkLoaded(pos)) {
+            if (!reads.isLoaded(pos)) {
                 continue;
             }
-            if (!isStandable(world, pos)) {
+            if (!isStandable(reads, pos)) {
                 continue;
             }
             double d = pos.getSquaredDistance(around);
@@ -1316,6 +1372,7 @@ public final class FishingSkill implements Skill {
                 WaterSpotMemory.rank(known, origin.getX(), origin.getY(), origin.getZ(), now);
 
         double maxDistSq = (double) REMEMBERED_SPOT_RADIUS * REMEMBERED_SPOT_RADIUS;
+        SearchReads reads = new SearchReads(world);
         int tried = 0;
         for (WaterSpotMemory.WaterSpot remembered : ranked) {
             if (tried >= REMEMBERED_SPOT_ATTEMPTS) {
@@ -1329,10 +1386,10 @@ public final class FishingSkill implements Skill {
                 continue;
             }
             tried++;
-            if (!world.isChunkLoaded(pos)) {
+            if (!reads.isLoaded(pos)) {
                 continue; // don't forget it just because the chunk isn't resident
             }
-            BlockPos water = findOpenWaterSurfaceAt(world, pos.getX(), pos.getZ(), pos.getY(), 2);
+            BlockPos water = findOpenWaterSurfaceAt(reads, pos.getX(), pos.getZ(), pos.getY(), CAST_PROBE_Y_RADIUS);
             if (water == null) {
                 BotHomeService.forgetWaterSpot(bot, remembered.x(), remembered.y(), remembered.z());
                 LOGGER.info("Forgot remembered fishing spot {} (no open water there any more)", pos.toShortString());
@@ -1340,9 +1397,9 @@ public final class FishingSkill implements Skill {
             }
             // Anchors around this water only matter for ordering its stands: a stand sits within
             // STAND_REACH of the water and earns the bonus within CHEST_PROXIMITY_RADIUS of a chest.
-            List<BlockPos> chestAnchors = collectChestAnchors(world, water,
+            List<BlockPos> chestAnchors = collectChestAnchors(reads, water,
                     FishingSearchPolicy.STAND_REACH + CHEST_PROXIMITY_RADIUS);
-            List<StandOption> options = findStandOptions(world, water, origin, chestAnchors);
+            List<StandOption> options = findStandOptions(reads, water, origin, chestAnchors);
             if (options.isEmpty()) {
                 continue;
             }
@@ -1366,6 +1423,9 @@ public final class FishingSkill implements Skill {
         BlockPos origin = bot.getBlockPos();
         // The summary's elapsed figure covers the whole search, snapshot and chest scan included.
         long searchStart = System.nanoTime();
+        // Finding 43: every block read of this search (chest scan, column probes, stands, cast
+        // targets) goes through one chunk reader, and water-surface quality is memoized.
+        SearchReads reads = new SearchReads(world);
 
         // Finding 39: the reachability snapshot (49x5x49 cells, ~80 world reads each, every
         // one a hop to the server thread from this worker) is built only when the first stand
@@ -1383,7 +1443,7 @@ public final class FishingSkill implements Skill {
         // Chest anchors within the search area. Scored stands near any of these get a small
         // bonus so the bot naturally picks spots it can actually offload inventory to.
         long chestStart = System.nanoTime();
-        List<BlockPos> chestAnchors = collectChestAnchors(world, origin, FishingSearchPolicy.chestScanHalfWidth(radius));
+        List<BlockPos> chestAnchors = collectChestAnchors(reads, origin, FishingSearchPolicy.chestScanHalfWidth(radius));
         long chestMs = (System.nanoTime() - chestStart) / 1_000_000L;
         // The time budget starts after the chest scan and leaves out the snapshot build, so a
         // slow scan does not force a nearest-column pick before any column is evaluated.
@@ -1407,7 +1467,7 @@ public final class FishingSkill implements Skill {
         // columns first, instead of evaluating every block in the radius volume.
         // Keeps the widened radius at ~O(r^2) cheap probes.
         long columnsStart = System.nanoTime();
-        List<BlockPos> waterColumns = nearestWaterColumns(world, origin, radius, WATER_SEARCH_Y_SPAN);
+        List<BlockPos> waterColumns = nearestWaterColumns(reads, origin, radius, WATER_SEARCH_Y_SPAN);
         long columnsMs = (System.nanoTime() - columnsStart) / 1_000_000L;
         long loopStart = System.nanoTime();
         for (BlockPos water : waterColumns) {
@@ -1420,7 +1480,7 @@ public final class FishingSkill implements Skill {
             }
             evaluated++;
 
-            List<StandOption> options = findStandOptions(world, water, origin, chestAnchors);
+            List<StandOption> options = findStandOptions(reads, water, origin, chestAnchors);
             if (options.isEmpty()) {
                 continue;
             }
@@ -1489,9 +1549,10 @@ public final class FishingSkill implements Skill {
         long snapshotMs = snapshotNanos / 1_000_000L;
         long evalMs = (loopNanos - snapshotNanos) / 1_000_000L;
         String summary = "Fishing spot search: columns={} evaluated={} stands={} aStar={} cacheHits={} found={} elapsed={}ms"
-                + " (snapshot={} snapshotMs={} chests={} chestMs={} columnsMs={} evalMs={})";
+                + " (snapshot={} snapshotMs={} chests={} chestMs={} columnsMs={} evalMs={} surfaces={})";
         Object[] args = {waterColumns.size(), evaluated, standsChecked, aStarCalls, cacheHits, best != null, searchMs,
-                snapshotAttempted ? "built" : "skipped", snapshotMs, chestAnchors.size(), chestMs, columnsMs, evalMs};
+                snapshotAttempted ? "built" : "skipped", snapshotMs, chestAnchors.size(), chestMs, columnsMs, evalMs,
+                reads.memoizedSurfaces()};
         if (searchMs >= 250L) {
             LOGGER.info(summary, args);
         } else {
@@ -1509,8 +1570,8 @@ public final class FishingSkill implements Skill {
         return best;
     }
 
-    private static List<StandOption> findStandOptions(ServerWorld world, BlockPos water, BlockPos botPos, List<BlockPos> chestAnchors) {
-        List<BlockPos> stands = findStandCandidates(world, water, botPos);
+    private static List<StandOption> findStandOptions(SearchReads reads, BlockPos water, BlockPos botPos, List<BlockPos> chestAnchors) {
+        List<BlockPos> stands = findStandCandidates(reads, water, botPos);
         if (stands.isEmpty()) {
             return List.of();
         }
@@ -1518,21 +1579,19 @@ public final class FishingSkill implements Skill {
         List<StandOption> options = new ArrayList<>();
         double chestRadiusSq = (double) CHEST_PROXIMITY_RADIUS * CHEST_PROXIMITY_RADIUS;
         for (BlockPos stand : stands) {
-            BlockPos castTarget = chooseCastTargetHeuristic(world, stand, water);
+            BlockPos castTarget = chooseCastTargetHeuristic(reads, stand, water);
             if (castTarget == null) {
                 continue;
             }
-            double castDistSq = stand.getSquaredDistance(castTarget);
-            double castDistancePenalty = Math.abs(castDistSq - IDEAL_CAST_DISTANCE_SQ) / (double) IDEAL_CAST_DISTANCE_SQ;
-            int openness = countOpenWaterSurface(world, castTarget, 1);
-            int depth = estimateWaterDepth(world, castTarget, 6);
+            SurfaceQuality surface = surfaceQuality(reads, castTarget);
             // Strong bonus when the cast target passes the vanilla open-water check —
             // treasure catches require it, so the qualitative jump dominates the
             // modest openness/depth deltas between shoreline and open-water spots.
-            double openWaterBonus = isVanillaOpenWater(world, castTarget) ? -5.0 : 0.0;
+            double openWaterBonus = surface.vanillaOpen() ? -5.0 : 0.0;
 
             // Prefer open/deep water and a reasonable cast distance.
-            double quality = castDistancePenalty - openness * 0.35 - depth * 0.55 + openWaterBonus;
+            double quality = FishingSearchPolicy.castScore(stand.getSquaredDistance(castTarget), IDEAL_CAST_DISTANCE_SQ,
+                    surface.openness(), surface.depth(), openWaterBonus);
 
             // Strong preference for shoreline adjacency: loot pickup suffers when we stand a few blocks back.
             // This is deliberately large enough to override small water-quality differences.
@@ -1570,11 +1629,12 @@ public final class FishingSkill implements Skill {
      * searched area plus a margin; home chests inside that area are still seen. Blocks are read
      * through each loaded chunk once (one thread hop per chunk, not per block).</p>
      */
-    private static List<BlockPos> collectChestAnchors(ServerWorld world, BlockPos center, int halfWidth) {
+    private static List<BlockPos> collectChestAnchors(SearchReads reads, BlockPos center, int halfWidth) {
         List<BlockPos> anchors = new ArrayList<>();
-        if (world == null || center == null || halfWidth <= 0) {
+        if (reads == null || center == null || halfWidth <= 0) {
             return anchors;
         }
+        ServerWorld world = reads.world;
         int minX = center.getX() - halfWidth;
         int maxX = center.getX() + halfWidth;
         int minZ = center.getZ() - halfWidth;
@@ -1584,10 +1644,7 @@ public final class FishingSkill implements Skill {
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
             for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
-                if (!world.isChunkLoaded(cx, cz)) {
-                    continue;
-                }
-                Chunk chunk = world.getChunk(cx, cz, ChunkStatus.FULL, false);
+                Chunk chunk = reads.reader.chunk(cx, cz);
                 if (chunk == null) {
                     continue;
                 }
@@ -1615,28 +1672,30 @@ public final class FishingSkill implements Skill {
             return null;
         }
 
-        if (preferred != null && isOpenWaterSurface(world, preferred) && isCastPathClear(world, bot, preferred) && isReasonableCastDistance(stand, preferred)) {
+        SearchReads reads = new SearchReads(world);
+        if (preferred != null && isOpenWaterSurface(reads, preferred) && isCastPathClear(world, bot, preferred) && isReasonableCastDistance(stand, preferred)) {
             return preferred;
         }
 
-        return chooseCastTargetAlongLine(world, bot, stand, waterAnchor);
+        return chooseCastTargetAlongLine(reads, bot, stand, waterAnchor);
     }
 
-    private static BlockPos chooseCastTargetHeuristic(ServerWorld world, BlockPos stand, BlockPos waterAnchor) {
-        return chooseCastTargetAlongLine(world, null, stand, waterAnchor);
+    private static BlockPos chooseCastTargetHeuristic(SearchReads reads, BlockPos stand, BlockPos waterAnchor) {
+        return chooseCastTargetAlongLine(reads, null, stand, waterAnchor);
     }
 
-    private static BlockPos chooseCastTargetAlongLine(ServerWorld world, ServerPlayerEntity bot, BlockPos stand, BlockPos waterAnchor) {
-        if (world == null || stand == null || waterAnchor == null) {
+    private static BlockPos chooseCastTargetAlongLine(SearchReads reads, ServerPlayerEntity bot, BlockPos stand, BlockPos waterAnchor) {
+        if (reads == null || stand == null || waterAnchor == null) {
             return null;
         }
+        ServerWorld world = reads.world;
 
         Vec3d standCenter = Vec3d.ofCenter(stand);
         Vec3d waterCenter = Vec3d.ofCenter(waterAnchor);
         Vec3d dir = waterCenter.subtract(standCenter).multiply(1.0, 0.0, 1.0);
         double lenSq = dir.lengthSquared();
         if (lenSq < 1.0E-6) {
-            return isOpenWaterSurface(world, waterAnchor) ? waterAnchor.toImmutable() : null;
+            return isOpenWaterSurface(reads, waterAnchor) ? waterAnchor.toImmutable() : null;
         }
         dir = dir.normalize();
 
@@ -1650,7 +1709,7 @@ public final class FishingSkill implements Skill {
             for (int ox = -1; ox <= 1; ox++) {
                 for (int oz = -1; oz <= 1; oz++) {
                     BlockPos probe = basePos.add(ox, 0, oz);
-                    BlockPos surface = findOpenWaterSurfaceAt(world, probe.getX(), probe.getZ(), waterAnchor.getY(), 2);
+                    BlockPos surface = findOpenWaterSurfaceAt(reads, probe.getX(), probe.getZ(), waterAnchor.getY(), CAST_PROBE_Y_RADIUS);
                     if (surface == null) {
                         continue;
                     }
@@ -1661,12 +1720,10 @@ public final class FishingSkill implements Skill {
                         continue;
                     }
 
-                    double distSq = stand.getSquaredDistance(surface);
-                    double distPenalty = Math.abs(distSq - IDEAL_CAST_DISTANCE_SQ) / (double) IDEAL_CAST_DISTANCE_SQ;
-                    int openness = countOpenWaterSurface(world, surface, 1);
-                    int depth = estimateWaterDepth(world, surface, 6);
-                    double openWaterBonus = isVanillaOpenWater(world, surface) ? -3.0 : 0.0;
-                    double score = distPenalty - openness * 0.35 - depth * 0.55 + openWaterBonus;
+                    SurfaceQuality quality = surfaceQuality(reads, surface);
+                    double openWaterBonus = quality.vanillaOpen() ? -3.0 : 0.0;
+                    double score = FishingSearchPolicy.castScore(stand.getSquaredDistance(surface), IDEAL_CAST_DISTANCE_SQ,
+                            quality.openness(), quality.depth(), openWaterBonus);
 
                     if (score < bestScore) {
                         bestScore = score;
@@ -1680,7 +1737,7 @@ public final class FishingSkill implements Skill {
             return best;
         }
 
-        BlockPos fallback = findOpenWaterSurfaceNear(world, waterAnchor, 2, 2);
+        BlockPos fallback = findOpenWaterSurfaceNear(reads, waterAnchor, 2, CAST_PROBE_Y_RADIUS);
         if (fallback == null) {
             return null;
         }
@@ -1690,28 +1747,46 @@ public final class FishingSkill implements Skill {
         return fallback.toImmutable();
     }
 
-    private static BlockPos findOpenWaterSurfaceAt(ServerWorld world, int x, int z, int baseY, int verticalRadius) {
-        if (world == null) {
+    private static BlockPos findOpenWaterSurfaceAt(SearchReads reads, int x, int z, int baseY, int verticalRadius) {
+        if (reads == null) {
+            return null;
+        }
+        if (verticalRadius != CAST_PROBE_Y_RADIUS) {
+            return probeOpenWaterSurface(reads, x, z, baseY, verticalRadius);
+        }
+        // Stands of one column, and neighbouring columns, probe the same cells along their cast lines.
+        long key = BlockPos.asLong(x, baseY, z);
+        BlockPos cached = reads.castProbes.get(key);
+        if (cached == null) {
+            BlockPos found = probeOpenWaterSurface(reads, x, z, baseY, verticalRadius);
+            cached = found != null ? found : SearchReads.NO_SURFACE;
+            reads.castProbes.put(key, cached);
+        }
+        return cached == SearchReads.NO_SURFACE ? null : cached;
+    }
+
+    private static BlockPos probeOpenWaterSurface(SearchReads reads, int x, int z, int baseY, int verticalRadius) {
+        if (!reads.reader.isLoaded(x, z)) {
             return null;
         }
         for (int dy = 0; dy <= verticalRadius; dy++) {
             BlockPos up = new BlockPos(x, baseY + dy, z);
-            if (world.isChunkLoaded(up) && isOpenWaterSurface(world, up)) {
-                return up.toImmutable();
+            if (isOpenWaterSurface(reads, up)) {
+                return up;
             }
             if (dy == 0) {
                 continue;
             }
             BlockPos down = new BlockPos(x, baseY - dy, z);
-            if (world.isChunkLoaded(down) && isOpenWaterSurface(world, down)) {
-                return down.toImmutable();
+            if (isOpenWaterSurface(reads, down)) {
+                return down;
             }
         }
         return null;
     }
 
-    private static BlockPos findOpenWaterSurfaceNear(ServerWorld world, BlockPos around, int horizontalRadius, int verticalRadius) {
-        if (world == null || around == null || horizontalRadius < 0 || verticalRadius < 0) {
+    private static BlockPos findOpenWaterSurfaceNear(SearchReads reads, BlockPos around, int horizontalRadius, int verticalRadius) {
+        if (reads == null || around == null || horizontalRadius < 0 || verticalRadius < 0) {
             return null;
         }
         BlockPos best = null;
@@ -1719,7 +1794,7 @@ public final class FishingSkill implements Skill {
         int baseY = around.getY();
         for (int dx = -horizontalRadius; dx <= horizontalRadius; dx++) {
             for (int dz = -horizontalRadius; dz <= horizontalRadius; dz++) {
-                BlockPos surface = findOpenWaterSurfaceAt(world, around.getX() + dx, around.getZ() + dz, baseY, verticalRadius);
+                BlockPos surface = findOpenWaterSurfaceAt(reads, around.getX() + dx, around.getZ() + dz, baseY, verticalRadius);
                 if (surface == null) {
                     continue;
                 }
@@ -1738,14 +1813,26 @@ public final class FishingSkill implements Skill {
         return distSq >= MIN_CAST_DISTANCE_SQ && distSq <= MAX_CAST_DISTANCE_SQ;
     }
 
-    private static boolean isOpenWaterSurface(ServerWorld world, BlockPos pos) {
-        if (world == null || pos == null) {
+    private static boolean isOpenWaterSurface(SearchReads reads, BlockPos pos) {
+        if (reads == null || pos == null) {
             return false;
         }
-        if (!world.getFluidState(pos).isIn(FluidTags.WATER)) {
+        if (!reads.isWater(pos)) {
             return false;
         }
-        return isSpaceClear(world, pos.up());
+        return isSpaceClear(reads, pos.up());
+    }
+
+    /** Openness, depth and vanilla open water of a surface, computed once per search (finding 43). */
+    private static SurfaceQuality surfaceQuality(SearchReads reads, BlockPos surface) {
+        long key = surface.asLong();
+        SurfaceQuality quality = reads.quality.get(key);
+        if (quality == null) {
+            quality = new SurfaceQuality(countOpenWaterSurface(reads, surface, 1),
+                    estimateWaterDepth(reads, surface, 6), isVanillaOpenWater(reads, surface));
+            reads.quality.put(key, quality);
+        }
+        return quality;
     }
 
     /**
@@ -1764,12 +1851,12 @@ public final class FishingSkill implements Skill {
      * ABOVE_WATER → INSIDE_WATER regression. Sky access is <b>not</b>
      * required — vanilla permits covered open water.
      */
-    private static boolean isVanillaOpenWater(ServerWorld world, BlockPos waterSurface) {
-        if (world == null || waterSurface == null) return false;
+    private static boolean isVanillaOpenWater(SearchReads reads, BlockPos waterSurface) {
+        if (reads == null || waterSurface == null) return false;
         BlockPos bobberPos = waterSurface.up();
         OpenWaterPositionType prev = OpenWaterPositionType.INVALID;
         for (int dy = -1; dy <= 2; dy++) {
-            OpenWaterPositionType current = classifyOpenWaterSlab(world, bobberPos, dy);
+            OpenWaterPositionType current = classifyOpenWaterSlab(reads, bobberPos, dy);
             switch (current) {
                 case ABOVE_WATER:
                     if (prev == OpenWaterPositionType.INVALID) return false;
@@ -1787,13 +1874,13 @@ public final class FishingSkill implements Skill {
 
     private enum OpenWaterPositionType { INSIDE_WATER, ABOVE_WATER, INVALID }
 
-    private static OpenWaterPositionType classifyOpenWaterSlab(ServerWorld world, BlockPos center, int dy) {
+    private static OpenWaterPositionType classifyOpenWaterSlab(SearchReads reads, BlockPos center, int dy) {
         OpenWaterPositionType aggregate = null;
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 BlockPos pos = center.add(dx, dy, dz);
-                if (!world.isChunkLoaded(pos)) return OpenWaterPositionType.INVALID;
-                OpenWaterPositionType type = classifyOpenWaterPos(world, pos);
+                if (!reads.isLoaded(pos)) return OpenWaterPositionType.INVALID;
+                OpenWaterPositionType type = classifyOpenWaterPos(reads, pos);
                 if (aggregate == null) {
                     aggregate = type;
                 } else if (aggregate != type) {
@@ -1804,39 +1891,39 @@ public final class FishingSkill implements Skill {
         return aggregate == null ? OpenWaterPositionType.INVALID : aggregate;
     }
 
-    private static OpenWaterPositionType classifyOpenWaterPos(ServerWorld world, BlockPos pos) {
-        BlockState state = world.getBlockState(pos);
+    private static OpenWaterPositionType classifyOpenWaterPos(SearchReads reads, BlockPos pos) {
+        BlockState state = reads.state(pos);
         if (state.isAir() || state.isOf(Blocks.LILY_PAD)) {
             return OpenWaterPositionType.ABOVE_WATER;
         }
         FluidState fluid = state.getFluidState();
-        if (fluid.isIn(FluidTags.WATER) && fluid.isStill() && state.getCollisionShape(world, pos).isEmpty()) {
+        if (fluid.isIn(FluidTags.WATER) && fluid.isStill() && state.getCollisionShape(reads.world, pos).isEmpty()) {
             return OpenWaterPositionType.INSIDE_WATER;
         }
         return OpenWaterPositionType.INVALID;
     }
 
-    private static int countOpenWaterSurface(ServerWorld world, BlockPos center, int radius) {
+    private static int countOpenWaterSurface(SearchReads reads, BlockPos center, int radius) {
         int count = 0;
         for (BlockPos pos : BlockPos.iterate(center.add(-radius, 0, -radius), center.add(radius, 0, radius))) {
-            if (!world.isChunkLoaded(pos)) {
+            if (!reads.isLoaded(pos)) {
                 continue;
             }
-            if (isOpenWaterSurface(world, pos)) {
+            if (isOpenWaterSurface(reads, pos)) {
                 count++;
             }
         }
         return count;
     }
 
-    private static int estimateWaterDepth(ServerWorld world, BlockPos surface, int maxDepth) {
+    private static int estimateWaterDepth(SearchReads reads, BlockPos surface, int maxDepth) {
         int depth = 0;
         for (int i = 0; i < maxDepth; i++) {
             BlockPos pos = surface.down(i);
-            if (!world.isChunkLoaded(pos)) {
+            if (!reads.isLoaded(pos)) {
                 break;
             }
-            if (!world.getFluidState(pos).isIn(FluidTags.WATER)) {
+            if (!reads.isWater(pos)) {
                 break;
             }
             depth++;
@@ -1873,8 +1960,9 @@ public final class FishingSkill implements Skill {
             return false;
         }
         BlockPos origin = bot.getBlockPos();
+        SearchReads reads = new SearchReads(world);
         for (int[] off : nearestColumnOffsets(radius)) {
-            if (findOpenWaterSurfaceAt(world, origin.getX() + off[0], origin.getZ() + off[1],
+            if (findOpenWaterSurfaceAt(reads, origin.getX() + off[0], origin.getZ() + off[1],
                     origin.getY(), WATER_SEARCH_Y_SPAN) != null) {
                 return true;
             }
@@ -1903,13 +1991,13 @@ public final class FishingSkill implements Skill {
      * spent on the closest water first; each column costs at most {@code 2*ySpan+1}
      * cheap surface probes.
      */
-    private static List<BlockPos> nearestWaterColumns(ServerWorld world, BlockPos origin, int radius, int ySpan) {
-        if (world == null || origin == null || radius < 0) {
+    private static List<BlockPos> nearestWaterColumns(SearchReads reads, BlockPos origin, int radius, int ySpan) {
+        if (reads == null || origin == null || radius < 0) {
             return List.of();
         }
         List<BlockPos> columns = new ArrayList<>();
         for (int[] off : nearestColumnOffsets(radius)) {
-            BlockPos surface = findOpenWaterSurfaceAt(world, origin.getX() + off[0], origin.getZ() + off[1],
+            BlockPos surface = findOpenWaterSurfaceAt(reads, origin.getX() + off[0], origin.getZ() + off[1],
                     origin.getY(), ySpan);
             if (surface != null) {
                 columns.add(surface);
@@ -1923,9 +2011,9 @@ public final class FishingSkill implements Skill {
         return columns;
     }
 
-    private static List<BlockPos> findStandCandidates(ServerWorld world, BlockPos water, BlockPos botPos) {
+    private static List<BlockPos> findStandCandidates(SearchReads reads, BlockPos water, BlockPos botPos) {
         List<StandCandidate> candidates = new ArrayList<>();
-        if (world == null || water == null || botPos == null) {
+        if (reads == null || water == null || botPos == null) {
             return List.of();
         }
         
@@ -1940,14 +2028,14 @@ public final class FishingSkill implements Skill {
             if (!adjacent && !canCastFrom(candidate, water)) {
                 continue;
             }
-            if (!isStandable(world, candidate)) {
+            if (!isStandable(reads, candidate)) {
                 continue;
             }
             candidates.add(new StandCandidate(candidate.toImmutable(), adjacent));
         }
         if (candidates.isEmpty()) {
             BlockPos above = water.up();
-            if (isStandable(world, above)) {
+            if (isStandable(reads, above)) {
                 candidates.add(new StandCandidate(above.toImmutable(), true));
             }
         }
@@ -2120,30 +2208,39 @@ public final class FishingSkill implements Skill {
         BotActions.stop(bot);
     }
 
+    /** Cast-time check outside a spot search (bot footing, nudges): reads through a one-off reader. */
     private static boolean isStandable(ServerWorld world, BlockPos pos) {
-        if (world == null || pos == null) {
+        return world != null && isStandable(new SearchReads(world), pos);
+    }
+
+    private static boolean isStandable(SearchReads reads, BlockPos pos) {
+        if (reads == null || pos == null) {
+            return false;
+        }
+        // pos, below and above share a column: an unloaded chunk is never a stand (and is not loaded).
+        if (!reads.isLoaded(pos)) {
             return false;
         }
         BlockPos below = pos.down();
-        BlockState belowState = world.getBlockState(below);
-        if (world.getFluidState(pos).isIn(FluidTags.WATER) || world.getFluidState(pos.up()).isIn(FluidTags.WATER)) {
+        BlockState belowState = reads.state(below);
+        if (reads.isWater(pos) || reads.isWater(pos.up())) {
             return false;
         }
-        if (!isSpaceClear(world, pos) || !isSpaceClear(world, pos.up())) {
+        if (!isSpaceClear(reads, pos) || !isSpaceClear(reads, pos.up())) {
             return false;
         }
-        return !belowState.isAir() && !belowState.getCollisionShape(world, below).isEmpty();
+        return !belowState.isAir() && !belowState.getCollisionShape(reads.world, below).isEmpty();
     }
 
-    private static boolean isSpaceClear(World world, BlockPos pos) {
-        if (world == null || pos == null) {
+    private static boolean isSpaceClear(SearchReads reads, BlockPos pos) {
+        if (reads == null || pos == null) {
             return false;
         }
-        BlockState state = world.getBlockState(pos);
+        BlockState state = reads.state(pos);
         if (state.isAir()) {
             return true;
         }
-        return state.getCollisionShape(world, pos).isEmpty();
+        return state.getCollisionShape(reads.world, pos).isEmpty();
     }
 
     private static void aimTowardWater(ServerPlayerEntity bot, BlockPos water) {

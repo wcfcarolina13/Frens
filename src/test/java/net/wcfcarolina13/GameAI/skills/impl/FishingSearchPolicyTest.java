@@ -89,4 +89,28 @@ class FishingSearchPolicyTest {
         assertTrue(FishingSearchPolicy.snapshotNeeded(24, 2, -24, 24, 2, 2.25D));
         assertTrue(FishingSearchPolicy.snapshotNeeded(-5, -2, 0, 24, 2, 2.25D));
     }
+
+    @Test
+    void castScoreIsZeroAtTheIdealDistanceOverDryLand() {
+        assertEquals(0.0D, FishingSearchPolicy.castScore(36.0D, 36, 0, 0, 0.0D));
+    }
+
+    @Test
+    void castScoreRewardsOpenDeepVanillaWater() {
+        double shallowEdge = FishingSearchPolicy.castScore(36.0D, 36, 3, 1, 0.0D);
+        double openDeep = FishingSearchPolicy.castScore(36.0D, 36, 9, 6, -5.0D);
+        assertTrue(openDeep < shallowEdge);
+        assertEquals(-3.0D * 0.35 - 0.55, shallowEdge, 1e-12);
+    }
+
+    @Test
+    void castScoreMatchesTheInlineFormulaItReplaced() {
+        // The exact expression FishingSkill computed inline before finding 43.
+        double distSq = 50.0D;
+        int ideal = 36;
+        double inline = Math.abs(distSq - ideal) / (double) ideal - 7 * 0.35 - 4 * 0.55 + -3.0D;
+        assertEquals(inline, FishingSearchPolicy.castScore(distSq, ideal, 7, 4, -3.0D));
+        assertTrue(FishingSearchPolicy.castScore(16.0D, ideal, 0, 0, 0.0D) > 0.0D);
+        assertTrue(FishingSearchPolicy.castScore(100.0D, ideal, 0, 0, 0.0D) > 0.0D);
+    }
 }
