@@ -11,6 +11,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.wcfcarolina13.GameAI.services.follow.FollowStepTransitionPolicy;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -756,14 +757,17 @@ public final class FollowPathService {
             return true;
         }
 
-        if (dY <= 0) {
+        // Steps that change Y cross a third cell the standable endpoints do not cover: a step up
+        // needs the launch block's from.up(2) (A* otherwise proposes y+1 nodes that are unjumpable
+        // under low canopy leaves); a step down needs the destination's to.up(2), where the head is
+        // before the feet drop (finding 47: an oak-canopy step-down stalled follow 40+ s).
+        FollowStepTransitionPolicy.HeadroomCell cellKind = FollowStepTransitionPolicy.headroomCell(dY);
+        if (cellKind == FollowStepTransitionPolicy.HeadroomCell.NONE) {
             return true;
         }
-
-        // Upward steps require extra headroom at the launch block. Without this, A* can propose
-        // "standable" y+1 nodes that are practically unjumpable under low canopy leaves.
-        BlockPos jumpClearance = from.up(2);
-        if (!snapshot.inBounds(jumpClearance) || !snapshot.isPassable(jumpClearance)) {
+        BlockPos headroom = cellKind == FollowStepTransitionPolicy.HeadroomCell.FROM_UP2 ? from.up(2) : to.up(2);
+        boolean inBounds = snapshot.inBounds(headroom);
+        if (!FollowStepTransitionPolicy.allows(dY, inBounds, inBounds && snapshot.isPassable(headroom))) {
             if (transitionRejects != null && transitionRejects.length > 0) {
                 transitionRejects[0]++;
             }

@@ -3336,7 +3336,7 @@ public class modCommandRegistry {
         SkillResumeService.clearAndNotify(bot.getUuid());
         net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.clearSession(bot.getUuid());
         // Commands already emit a system summary; avoid redundant bot-authored chat acks.
-        BotEventHandler.setFollowMode(bot, target, false);
+        BotEventHandler.setFollowMode(bot, target, false, true);
         boolean following = isFollowingTarget(bot, target);
         if (following) {
             CompanionContextReactionService.playFollowAck(bot);
@@ -4205,7 +4205,7 @@ public class modCommandRegistry {
             if (safe != null) goal = safe;
         }
         // No recovery skills — pure pathfinding only
-        BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false);
+        BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false, true);
         return 1;
     }
 
@@ -4311,7 +4311,7 @@ public class modCommandRegistry {
                 // After a commander-directed move, wait longer before starting idle hobbies.
                 BotIdleHobbiesService.snoozeFor(bot, 3_600L);
                 // Non-destructive move: do not trigger come-recovery digging skills while repositioning.
-                BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false);
+                BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false, true);
                 successes++;
             }
         }
@@ -4459,7 +4459,7 @@ public class modCommandRegistry {
 
         // Use async movement to the position, then run the shelter skill
         // Non-destructive move: do not trigger come-recovery digging skills while repositioning.
-        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, false);
+        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, false, true);
 
         // Schedule the shelter skill to run after the bot arrives
         // We'll do a simple approach: run the skill after a short delay / when bot is close
@@ -4584,7 +4584,7 @@ public class modCommandRegistry {
 
         // Use async movement to the position, then run the build skill
         // Non-destructive move: do not trigger come-recovery digging skills while repositioning.
-        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, false);
+        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, false, true);
 
         // Schedule the build skill to run after the bot arrives
         server.execute(() -> {
@@ -4645,7 +4645,7 @@ public class modCommandRegistry {
                     goal = safe;
                 }
             }
-            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, allowRecoverySkills);
+            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, allowRecoverySkills, true);
             return 1;
         }
 
@@ -4804,7 +4804,7 @@ public class modCommandRegistry {
         }
 
         // Non-destructive move: do not trigger come-recovery digging skills while coming to the commander.
-        String result = BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false);
+        String result = BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false, true);
         ChatUtils.sendSystemMessage(source, result);
         return 1;
     }
@@ -7348,7 +7348,7 @@ public class modCommandRegistry {
                 BotEventHandler.stopFollowing(bot, false);
             } else {
                 TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot follow toggle.");
-                BotEventHandler.setFollowMode(bot, followTarget, false);
+                BotEventHandler.setFollowMode(bot, followTarget, false, true);
                 if (isFollowingTarget(bot, followTarget)) {
                     turnedOn++;
                 }

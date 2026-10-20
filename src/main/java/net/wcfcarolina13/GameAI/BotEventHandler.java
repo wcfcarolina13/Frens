@@ -1388,12 +1388,28 @@ public class BotEventHandler {
      *                 that already emit a system summary to avoid redundant messages).
      */
     public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target, boolean announce) {
+        return setFollowMode(bot, target, announce, false);
+    }
+
+    /**
+     * @param supersedesStop true only for a player-issued follow command: the new order supersedes an
+     *                       earlier abort (the command's own forceAbort, a /bot stop, an external
+     *                       teleport), so the abort latch is cleared like guard/patrol do. Without
+     *                       this every follow-time leaf clear aborted on its first tick (finding 47).
+     *                       Internal resumes (stand-down expiry, skill hand-back) pass false and leave
+     *                       the latch alone.
+     */
+    public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target, boolean announce,
+                                       boolean supersedesStop) {
         if (bot != null && TaskService.hasActiveTask(bot.getUuid())) {
             sendBotMessage(bot, "Busy with another task right now.");
             return "Bot is busy executing another task. Try again after it finishes.";
         }
         if (target == null) {
             return "Unable to follow, target not found.";
+        }
+        if (supersedesStop && bot != null) {
+            TaskService.clearAbortLatch(bot.getUuid());
         }
         registerBot(bot);
         setFollowTarget(bot, target.getUuid());
@@ -1447,8 +1463,26 @@ public class BotEventHandler {
                                         BlockPos fixedGoal,
                                         double stopRange,
                                         boolean allowRecoverySkills) {
+        return setComeModeWalk(bot, commander, fixedGoal, stopRange, allowRecoverySkills, false);
+    }
+
+    /**
+     * @param supersedesStop true only for a player-issued come/regroup/go-to command; clears the abort
+     *                       latch so the walk's own leaf clears are not aborted (finding 47). Callers
+     *                       inside a skill (ShelterSkill) or the planner pass false: there the latch
+     *                       must still stop the parent task.
+     */
+    public static String setComeModeWalk(ServerPlayerEntity bot,
+                                        ServerPlayerEntity commander,
+                                        BlockPos fixedGoal,
+                                        double stopRange,
+                                        boolean allowRecoverySkills,
+                                        boolean supersedesStop) {
         if (bot == null || fixedGoal == null) {
             return "Unable to come, destination not found.";
+        }
+        if (supersedesStop) {
+            TaskService.clearAbortLatch(bot.getUuid());
         }
         registerBot(bot);
         setFollowTarget(bot, commander != null ? commander.getUuid() : null);
