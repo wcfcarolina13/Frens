@@ -373,27 +373,57 @@ public final class PocketInstaller {
      * not be mistaken for a passing version probe.
      */
     private static String runForOutput(List<String> cmd) {
+        return runForOutput(cmd, TimeUnit.SECONDS.toMillis(PROBE_TIMEOUT_SECONDS));
+    }
+
+    /**
+     * {@link #runForOutput(List)} with an explicit timeout. Output is drained on a daemon
+     * thread so a child that keeps its stdout open (or a grandchild that inherited it) can't
+     * block us past the timeout; on timeout the process tree is killed and {@code ""} returned.
+     */
+    static String runForOutput(List<String> cmd, long timeoutMs) {
         Process p = null;
         try {
             p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            byte[] out = p.getInputStream().readAllBytes();
-            if (!p.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                p.destroyForcibly();
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            java.io.InputStream in = p.getInputStream();
+            Thread drain = new Thread(() -> {
+                try {
+                    in.transferTo(buf);
+                } catch (IOException ignored) {
+                }
+            }, "frens-pocket-probe-drain");
+            drain.setDaemon(true);
+            drain.start();
+            long deadline = System.currentTimeMillis() + timeoutMs;
+            if (!p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                destroyTree(p);
                 return "";
             }
+            // The process exited; give the reader what's left of the budget to hit EOF.
+            drain.join(Math.max(1L, deadline - System.currentTimeMillis()));
             if (p.exitValue() != 0) {
                 return "";
             }
-            return new String(out, StandardCharsets.UTF_8);
+            return buf.toString(StandardCharsets.UTF_8);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             if (p != null) {
-                p.destroyForcibly();
+                destroyTree(p);
             }
             return "";
         } catch (Exception ex) {
             return "";
         }
+    }
+
+    /** Kills the process and everything it spawned (descendants first, while still reachable). */
+    private static void destroyTree(Process p) {
+        try {
+            p.descendants().forEach(ProcessHandle::destroyForcibly);
+        } catch (Exception ignored) {
+        }
+        p.destroyForcibly();
     }
 
     public static Plan detect() {
@@ -485,27 +515,59 @@ public final class PocketInstaller {
      * line, trimmed to 70 chars) so the user sees pip working rather than a frozen bar.
      */
     private static void runLogged(List<String> cmd, PiperInstaller.Progress progress) throws Exception {
+        runLogged(cmd, progress, TimeUnit.MINUTES.toMillis(STEP_TIMEOUT_MINUTES));
+    }
+
+    /**
+     * {@link #runLogged(List, PiperInstaller.Progress)} with an explicit timeout. The progress
+     * loop reads on a daemon thread so the timed {@code waitFor} is what bounds the step: a
+     * child holding its output open can't wedge the install job.
+     */
+    static void runLogged(List<String> cmd, PiperInstaller.Progress progress, long timeoutMs) throws Exception {
         Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-        String lastLine = "";
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty()) {
-                    continue;
+        AtomicReference<String> lastLine = new AtomicReference<>("");
+        java.io.InputStream in = p.getInputStream();
+        Thread reader = new Thread(() -> {
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    String trimmed = line.trim();
+                    if (trimmed.isEmpty()) {
+                        continue;
+                    }
+                    String shown = trimmed.length() > 70 ? trimmed.substring(0, 70) : trimmed;
+                    lastLine.set(shown);
+                    progress.update("pip: " + shown, 0, 0);
                 }
-                lastLine = trimmed.length() > 70 ? trimmed.substring(0, 70) : trimmed;
-                progress.update("pip: " + lastLine, 0, 0);
+            } catch (IOException ignored) {
             }
+        }, "frens-pocket-install-output");
+        reader.setDaemon(true);
+        reader.start();
+        boolean finished;
+        try {
+            finished = p.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ex) {
+            destroyTree(p);
+            throw ex;
         }
-        if (!p.waitFor(STEP_TIMEOUT_MINUTES, TimeUnit.MINUTES)) {
-            p.destroyForcibly();
-            throw new IOException(cmd.get(0) + " timed out after " + STEP_TIMEOUT_MINUTES + " minutes");
+        if (!finished) {
+            destroyTree(p);
+            reader.join(2_000);
+            throw new IOException(cmd.get(0) + " timed out after " + formatTimeout(timeoutMs));
         }
+        reader.join(2_000);
         int code = p.exitValue();
         if (code != 0) {
-            throw new IOException(cmd.get(0) + " failed (exit " + code + "): " + lastLine);
+            throw new IOException(cmd.get(0) + " failed (exit " + code + "): " + lastLine.get());
         }
+    }
+
+    private static String formatTimeout(long timeoutMs) {
+        long minutes = TimeUnit.MILLISECONDS.toMinutes(timeoutMs);
+        if (minutes > 0 && TimeUnit.MINUTES.toMillis(minutes) == timeoutMs) {
+            return minutes + " minutes";
+        }
+        return timeoutMs + " ms";
     }
 }
