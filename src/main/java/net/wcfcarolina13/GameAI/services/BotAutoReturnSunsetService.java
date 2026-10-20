@@ -515,7 +515,7 @@ public final class BotAutoReturnSunsetService {
         // Try bot-to-bot artifact teleport if far from home — a receiver bot at base
         // with tier-2 artifacts can summon this bot instantly instead of walking.
         if (bot.getBlockPos().getSquaredDistance(anchor.pos()) > PRACTICAL_HOME_RANGE_SQ) {
-            if (NavigationArtifactService.tryBotToBotArtifactTeleport(server, bot, anchor.pos())) {
+            if (NavigationArtifactService.tryBotToBotArtifactTeleport(server, bot, anchor.pos(), true)) {
                 LOGGER.info("Sunset return for {} handled via bot-to-bot artifact teleport", bot.getName().getString());
                 return;
             }
@@ -1421,7 +1421,7 @@ public final class BotAutoReturnSunsetService {
                 NavigationArtifactService.clearTravelCooldown(bot.getUuid());
 
                 // Fast-travel first, THEN schedule post-arrival only if it started
-                boolean started = NavigationArtifactService.beginDelayedTravel(
+                boolean started = NavigationArtifactService.beginAutomaticTravel(
                         server, bot, botAlias, dest, dim, delayTicks, ownerUuid);
                 if (started) {
                     String command = "bot skill " + resume.skillName()

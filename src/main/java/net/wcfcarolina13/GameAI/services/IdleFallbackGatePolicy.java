@@ -21,6 +21,10 @@ final class IdleFallbackGatePolicy {
         return startedWoodcut || moved || crafted;
     }
 
+    static boolean allowsHobby(boolean enabled, long nowTick, long backoffUntilTick) {
+        return enabled && nowTick >= backoffUntilTick;
+    }
+
     /**
      * True when the resources woodcut must not start: the bot has no usable axe and the wooden
      * fallback is still waiting, either inside its per-hobby failure backoff or its flat cooldown.

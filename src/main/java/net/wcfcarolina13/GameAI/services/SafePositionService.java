@@ -134,7 +134,7 @@ public final class SafePositionService {
         }
 
         boolean standable = isSpawnable(world, feet);
-        boolean openSky = world.isSkyVisible(feet.up(2));
+        boolean openSky = world.isSkyVisible(feet.up(2)) || hasOnlyCanopyAbove(world, feet);
         boolean nearSurface = feet.getY() >= wideSurfaceFeetY(world, feet.getX(), feet.getZ()) - 2;
 
         int cardinalStandableNeighbors = 0;
@@ -197,13 +197,10 @@ public final class SafePositionService {
         if (assessment == null) {
             return false;
         }
-        return assessment.openSky()
-                && assessment.standable()
-                && assessment.nearSurface()
-                && assessment.cardinalStandableNeighbors() >= 2
-                && assessment.totalStandableNeighbors() >= 4
-                && assessment.steepDropNeighbors() <= 1
-                && assessment.blockedCardinals() <= 2;
+        return SurfaceReadinessPolicy.isOperational(
+                assessment.openSky(), false, assessment.standable(), assessment.nearSurface(),
+                assessment.cardinalStandableNeighbors(), assessment.totalStandableNeighbors(),
+                assessment.steepDropNeighbors(), assessment.blockedCardinals());
     }
 
     public static boolean isRecoveryReadySurface(ServerWorld world, BlockPos feet) {
@@ -524,6 +521,14 @@ public final class SafePositionService {
         }
         java.util.Arrays.sort(samples);
         return samples[samples.length / 2]; // median
+    }
+
+    private static boolean hasOnlyCanopyAbove(ServerWorld world, BlockPos feet) {
+        int topY = world.getTopY(Heightmap.Type.MOTION_BLOCKING, feet.getX(), feet.getZ());
+        return SurfaceReadinessPolicy.canopyColumn(topY, feet.getY(), y -> {
+            BlockState state = world.getBlockState(new BlockPos(feet.getX(), y, feet.getZ()));
+            return state.isAir() || state.isIn(BlockTags.LEAVES) || state.isIn(BlockTags.LOGS);
+        });
     }
 
     private static boolean hasLowRoofCover(ServerWorld world, BlockPos feet, int maxBlocksAboveHead) {

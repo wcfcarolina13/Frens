@@ -10,6 +10,15 @@ class IdleFallbackGatePolicyTest {
     private static final long NOW = 10_000L;
 
     @Test
+    void everyHobbyUsesItsOwnBackoffRegardlessOfTools() {
+        // Hunt and collect_dirt use the same gate as any other picker hobby.
+        assertFalse(IdleFallbackGatePolicy.allowsHobby(true, NOW, NOW + 1200L));
+        assertTrue(IdleFallbackGatePolicy.allowsHobby(true, NOW, NOW));
+        assertTrue(IdleFallbackGatePolicy.allowsHobby(true, NOW, 0L));
+        assertFalse(IdleFallbackGatePolicy.allowsHobby(false, NOW, 0L));
+    }
+
+    @Test
     void cooldownOrBackoffPassWithNoWorkDoesNotClaimTheTick() {
         assertFalse(IdleFallbackGatePolicy.reportsWork(false, false, false));
     }

@@ -855,7 +855,7 @@ public final class TaskService {
                         return;
                     }
                     LOGGER.info("Post-task return: {} fast-traveling to {}", alias, destination.toShortString());
-                    NavigationArtifactService.beginDelayedTravel(
+                    NavigationArtifactService.beginAutomaticTravel(
                             srv, bot, alias, destination, dimension, 40, commander.getUuid());
                 }
             }

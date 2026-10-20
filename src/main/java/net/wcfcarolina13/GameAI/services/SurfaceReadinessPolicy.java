@@ -1,14 +1,18 @@
 package net.wcfcarolina13.GameAI.services;
 
+import java.util.function.IntPredicate;
+
 /**
  * Pure "is this an operational surface" rule over the fields of
  * {@code SafePositionService.SurfaceCandidateAssessment}, with one extension: a tile where only
- * leaves are overhead (forest floor under a canopy) counts like open sky, so surface recovery does
+ * leaves and logs are overhead (forest floor under a canopy) counts like open sky, so surface recovery does
  * not pillar a bot up through the leaves.
  *
  * <p>No {@code net.minecraft.*} types.</p>
  */
 public final class SurfaceReadinessPolicy {
+
+    public static final int MAX_CANOPY_HEIGHT = 16;
 
     private SurfaceReadinessPolicy() {}
 
@@ -19,6 +23,19 @@ public final class SurfaceReadinessPolicy {
      */
     public static boolean canopyOnly(int topYNoLeaves, int feetY) {
         return topYNoLeaves <= feetY;
+    }
+
+    /** The entire overhead column must be air, leaves or logs, not just its nearest block. */
+    public static boolean canopyColumn(int topY, int feetY, IntPredicate isAirLeavesOrLogsAtY) {
+        if (isAirLeavesOrLogsAtY == null || topY - feetY > MAX_CANOPY_HEIGHT) {
+            return false;
+        }
+        for (int y = feetY + 2; y < topY; y++) {
+            if (!isAirLeavesOrLogsAtY.test(y)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

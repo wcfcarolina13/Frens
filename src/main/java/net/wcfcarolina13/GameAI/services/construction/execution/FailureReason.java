@@ -33,7 +33,9 @@ public enum FailureReason {
         if (r.startsWith("no-line-of-sight-to-support") || r.startsWith("no-line-of-sight")) {
             return NO_LOS;
         }
-        if (r.startsWith("occupied=") || r.startsWith("occupied")) {
+        if (r.startsWith("occupied=") || r.startsWith("occupied")
+                || r.startsWith("clearing-occupied") || r.startsWith("failed-to-clear-occupied")
+                || r.equals("clearing-busy")) {
             return BLOCKED_BY_SOLID;
         }
         if (r.startsWith("place-rejected")) {

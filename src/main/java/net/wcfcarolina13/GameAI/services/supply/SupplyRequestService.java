@@ -828,7 +828,7 @@ public final class SupplyRequestService {
         if (!(state.getBlock() instanceof ChestBlock) || state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
             return null;
         }
-        BlockPos partner = pos.offset(ChestBlock.getFacing(state));
+        BlockPos partner = declaredPartnerOf(state, pos);
         if (!world.isChunkLoaded(partner) || !isPartner(state, world.getBlockState(partner))) {
             return null;
         }

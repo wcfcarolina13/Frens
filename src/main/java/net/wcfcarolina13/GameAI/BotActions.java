@@ -62,6 +62,7 @@ import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
 import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
+import net.wcfcarolina13.GameAI.services.PlacementClutterClearingService;
 
 
 
@@ -76,11 +77,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -989,7 +992,8 @@ public final class BotActions {
     public static PlaceResult tryPlaceBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks,
                                               boolean allowIntersecting, boolean ownScaffold) {
         PlaceResult fallback = new PlaceResult(false, "timeout-or-thread-error");
-        return callOnServerThread(bot, () -> {
+        AtomicReference<CompletableFuture<String>> clearing = new AtomicReference<>();
+        PlaceResult placement = callOnServerThread(bot, () -> {
             ServerWorld world = bot.getCommandSource().getWorld();
             if (world == null || target == null) {
                 return new PlaceResult(false, "no-world-or-target");
@@ -1031,9 +1035,19 @@ public final class BotActions {
                 if (!allowReplace) {
                     return new PlaceResult(false, "occupied=" + state.getBlock().getName().getString());
                 }
-                boolean cleared = world.breakBlock(target, false);
-                if (!cleared && !world.getBlockState(target).isAir()) {
-                    return new PlaceResult(false, "failed-to-clear-occupied=" + state.getBlock().getName().getString());
+                if (state.getHardness(world, target) == 0.0F) {
+                    // Instant hand breaks must still let one-shot server callers place this tick.
+                    boolean cleared = world.breakBlock(target, false);
+                    if (!cleared && !world.getBlockState(target).isAir()) {
+                        return new PlaceResult(false, "failed-to-clear-occupied=" + state.getBlock().getName().getString());
+                    }
+                } else {
+                    CompletableFuture<String> mining = PlacementClutterClearingService.start(bot, target);
+                    if ("clearing-busy".equals(mining.getNow(null))) {
+                        return new PlaceResult(false, "clearing-busy");
+                    }
+                    clearing.set(mining);
+                    return new PlaceResult(false, "clearing-occupied=" + state.getBlock().getName().getString());
                 }
             }
 
@@ -1140,6 +1154,27 @@ public final class BotActions {
                     placementContext.getBlockPos().toShortString());
             PlaceResult fail = new PlaceResult(false, reason);
             return fail;
+        }, 3500L, fallback);
+        CompletableFuture<String> mining = clearing.get();
+        if (mining == null || onServerThread(bot)) {
+            return placement;
+        }
+        // Workers can wait for physical mining; the server tick must remain free to advance it.
+        try {
+            mining.get(10_000L, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            mining.cancel(false);
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (ExecutionException | TimeoutException | CancellationException e) {
+            mining.cancel(false);
+            return new PlaceResult(false, "failed-to-clear-occupied");
+        }
+        return callOnServerThread(bot, () -> {
+            if (!bot.getEntityWorld().getBlockState(target).isAir()) {
+                return new PlaceResult(false, "failed-to-clear-occupied");
+            }
+            return tryPlaceBlockAt(bot, target, face, prioritizedBlocks, allowIntersecting, ownScaffold);
         }, 3500L, fallback);
     }
 

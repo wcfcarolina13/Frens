@@ -4,7 +4,14 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.287) — next session starts here
+## Session Handoff 2026-10-20 (1.1.288) — next session starts here
+
+**State:** main = origin/main @ 1.1.288. Suite 3428 green. Deployed to Nirn. 1.1.288 = backlog 147, 148, 145, 217, 272, 187 partial (Codex; fix wave from a Fable review, scoped re-review). 210 skipped as written: the preference receivers already run on the server thread and the payloads are self-only booleans, so nothing cheap to reject earlier. Field checklist phases 6bt-6by (1.1.282-1.1.287) added in `09c689a3`; older phases grep `leaf-cleared`, renamed `leaf-action:` in 1.1.286. Deferred: `/bot place` keeps its own instant snow clear (the shared timed path would fail in-tick on the server thread); a timed clutter clear cancelled with a sword held leaves the harmless fallback in hand; one-shot server-thread placements onto snow/carpet fail once and retry next tick.
+
+**Pending sandbox check:** see the 1.1.286 and 1.1.287 lists below, plus:
+- 1.1.288: fortify/shelter inside a mapped village places onto short grass, snow and carpet (timed mining for snow/carpet, instant for grass); an automatic return refused for combat repeats its line only after 3 min or a reason change; a bot under an oak canopy counts as at surface but not in a cave under one leaf; `/bot place` onto snow still works in one command.
+
+## Session Handoff 2026-10-20 (1.1.287) — superseded
 
 **State:** main = origin/main @ 1.1.287. Suite 3419 green. Deployed to Nirn. 1.1.287 = backlog 199, 200, 201, 219, 222 and finding 59 (Codex, fix wave and follow-up from two Fable reviews). Rulings: an unowned wall is claimable by op/host only (saved walls record no builder); a double chest whose other half is unloaded is refused at take time (`DENY_UNLOADED`, lock unknown); base auto-zones stay admin-only to edit. Finding 59's cause is not proven (bookkeeping defects fixed); it needs a two-bot sandbox rerun. Deferred: an owner who unclaims a wall on a dedicated server with no ops can't reclaim it; walk-abort guard also skips the un-sneak/door-open steps of an aborted walk (next walk resets them).
 
@@ -222,10 +229,10 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "hand-dig stair escape for a bot with no blocks." (1.1.236 handoff; also 1.1.239 handoff, 2026-10-14; 1.1.240 `TerrainMovePolicy` places dirt stairs but has no no-blocks dig)
 - [x] "BotActions.moveRelative same-cell teleport" ("probable IN_WALL root, shared hot file"; 1.1.233 handoff; also 1.1.229 handoff, 2026-10-13) — ✅ 1.1.279 2a42404b + 5eb24b38 (sandbox 6bq: drowning/drop/door/stair PASS, kiting a field item)
 - [ ] "MovementService off-thread tool swaps" (1.1.233 handoff, 2026-10-13)
-- [ ] "isAtSurface strict under canopy" (1.1.234 handoff, 2026-10-14)
+- [x] "isAtSurface strict under canopy" (1.1.234 handoff, 2026-10-14) — ✅ 1.1.288
 - [ ] "RL breakBlockAhead ... still instant" (RL is gone since 1.1.244 but `BotActions.breakBlockAhead` is still called by `BotStuckService` `escapeStairs`; 1.1.234 handoff, 2026-10-14) — 2026-10-20: unreachable (`BotStuckService.updateStuckTracker` has no callers); delete the dead path or wire it, then revisit.
-- [ ] "clutter clears ... still instant" (snow/carpet clutter; 1.1.234 handoff, 2026-10-14)
-- [ ] "long automatic return refusals (combat/cooldown/food) still in chat." (1.1.234 handoff, 2026-10-14)
+- [x] "clutter clears ... still instant" (snow/carpet clutter; 1.1.234 handoff, 2026-10-14) — ✅ 1.1.288
+- [x] "long automatic return refusals (combat/cooldown/food) still in chat." (1.1.234 handoff, 2026-10-14) — ✅ 1.1.288
 - [x] "Return-base door/escape server-thread traverses (BEH ~3603/~3630): let the tripwire name them first." (1.1.223 handoff, 2026-09-25) — stale (triage 2026-10-19): Mode.RETURNING_BASE is never set; return-to-base runs via FOLLOW (BEH:1336, :3165)
 - [ ] "redstone step 2 (use plates and buttons, iron doors with triggers)" (1.1.223 handoff, 2026-09-25)
 - [ ] "`LeafClearAction`/`LeafClearResult` still on MovementService." (2026-09-05 late night handoff; also 2026-09-05 night and later handoffs)
@@ -264,7 +271,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "The MutualAid recipient's inventory is mutated from the donor's tick while its own skill worker may run (pre-existing)." (1.1.222 handoff, 2026-09-25)
 - [x] "`dropCheapStackForSpace` drops the LARGEST stack when nothing is cheap, and the dropped stack can be re-picked after 2 s." ("Needs a cheap-only mode or a longer pickup delay"; 1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 (restated: aid make-room never drops valuables; sandbox 6bq PASS)
 - [x] "A flower keeps targeting a full preferred recipient (cosmetic)." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.283 003fd626
-- [ ] "the per-hobby backoff state is written for hunt and collect_dirt but read only by woodcut — ready if a later item gates `pickHobby` on tool availability." (1.1.216 handoff, 2026-09-07)
+- [ ] "the per-hobby backoff state is written for hunt and collect_dirt but read only by woodcut — ready if a later item gates `pickHobby` on tool availability." (1.1.216 handoff, 2026-09-07) — 1.1.288: both idle pickers now read it (cook and hangout never record attempts; the axe-bearer woodcut bypass at IdleFallbackGatePolicy:38 remains)
 - [ ] "Farm manual placement still has multiple `Heightmap.Type.WORLD_SURFACE` / `findSurfaceY` call sites outside `assessFarmSite`." ("If they misbehave in forests, apply the same walkable-ground-Y treatment"; Farm Pipeline next-session notes, 2026-04-08)
 - [ ] (uncertain) "PvE only. ... Alliances feature is the planned PvP gate, not yet built." (Tamed-animal defense notes, 2026-04-11)
 - [ ] Field check (from .ralph/progress.md, 2026-03-27, never moved to a field phase; re-check against current hunger/cooking code first): spawn bot, give sword, set hunger to 3, verify it hunts and doesn't stop until 4+ food items (.ralph/progress.md, now in docs/handoffs/ARCHIVE_2026.md)
@@ -294,7 +301,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "Worker skills can't craft from chest materials. There is one prompt per bot, so a plank ask blocks the tool ask. Fixing it needs WaitMode through `ensure*`/`craftGeneric` plus need-bundling, which is Phase 4 and needs a ruling." (1.1.221 handoff; also 1.1.222 handoff, 2026-09-25)
 - [ ] "Supplies Phase 4: the storage-room walkthrough, need-driven armour requests while following, and the WaitMode/need-bundling ruling above." (1.1.221 handoff; also 1.1.222 handoff, 2026-09-25)
 - [x] "`grantableEstimate` works per chest half, so it under-counts double chests." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.286 77df45d2
-- [ ] "Three \"other half of a double chest\" helpers could be one." (1.1.221 handoff, 2026-09-25)
+- [x] "Three \"other half of a double chest\" helpers could be one." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.288
 - [x] "CraftingHelper pull hint maps aren't cleared at stop (bounded wall-clock hints)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c
 - [x] "A double chest whose other half is unloaded reads as unreadable (skipped for that pass)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.287
 - [x] "A grant-covered ask while the owner is away is still refused (only Always skips the owner-range check)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
@@ -349,7 +356,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] (uncertain) "(mention the REI/EMI/JEI note)" in the Modrinth changelog (1.1.228 handoff, 2026-10-13)
 - [ ] (uncertain) "Session cards: task_43ec92da (merged finder, now largely done) and task_e6032cb8 (audit) can be dismissed or re-scoped by Bradley." (1.1.242 handoff, 2026-10-15)
 - [ ] Tamed-animal defense "Manual verification checklist (15 items) is in the spec" (`docs/superpowers/specs/2026-04-11-tamed-animal-defense-design.md`), not in the field checklist (Tamed-animal defense notes, 2026-04-11)
-- [ ] fabric.mod.json still declares ~1.21.10 though the 1.21.10 instances were removed 2026-10-11 (audit side finding)
+- [x] fabric.mod.json still declares ~1.21.10 though the 1.21.10 instances were removed 2026-10-11 (audit side finding) — ✅ 1.1.288
 
 ## Backlog Lineup 2026-09-03
 

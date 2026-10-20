@@ -55,6 +55,30 @@ class SurfaceReadinessPolicyTest {
     }
 
     @Test
+    void boundedLeafAndLogCanopyCountsAsSurfaceCover() {
+        assertTrue(SurfaceReadinessPolicy.canopyColumn(72, 64, y -> true));
+        assertTrue(SurfaceReadinessPolicy.canopyColumn(80, 64, y -> true));
+        assertFalse(SurfaceReadinessPolicy.canopyColumn(81, 64, y -> {
+            throw new AssertionError("over-height canopy must not scan blocks");
+        }));
+    }
+
+    @Test
+    void leafOverheadDoesNotHideACaveRoof() {
+        // The head-level leaf is allowed, but stone higher in the same column is not.
+        assertFalse(SurfaceReadinessPolicy.canopyColumn(72, 64, y -> y != 71));
+        assertFalse(SurfaceReadinessPolicy.canopyColumn(100, 40, y -> true));
+        assertFalse(SurfaceReadinessPolicy.isOperational(false,
+                SurfaceReadinessPolicy.canopyColumn(72, 64, y -> y != 71), true, true, 4, 8, 0, 0));
+    }
+
+    @Test
+    void canopyInASunkenColumnStillNeedsNearbySurfaceTerrain() {
+        assertFalse(SurfaceReadinessPolicy.isOperational(false,
+                SurfaceReadinessPolicy.canopyColumn(72, 64, y -> true), true, false, 4, 8, 0, 0));
+    }
+
+    @Test
     void lowRoofAtTheRealSurfaceIsReady() {
         // Tree overhang at ground level: same shape, but nearSurface by the wide sample.
         assertTrue(SurfaceReadinessPolicy.lowRoofReady(true, true, true, 3, 2, 3, 0, 1, 3));

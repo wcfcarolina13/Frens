@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Snow and carpet in the way are mined, not deleted; automatic return refusals said once; canopy counts as surface; one double-chest helper; 1.1.288 (2026-10-20)
+
+Codex build from the 2026-10-19 backlog triage (rows 147, 148, 145, 217, 272, 187), with a fix wave from a Fable review and a scoped re-review.
+
+- **Clutter in a placement spot is mined like a player would** (backlog 147; `PlacementClutterClearingService`): snow layers and carpets (nonzero hardness) are mined with the bot's tool over normal break time and drop their item; short grass, flowers and other hardness-0 clutter still clear instantly so placement goes on the same tick. The territory check covers both; the mapped-village veto is not applied to clutter (fix wave: it had blocked fortify and shelter placement inside villages). A worker waits for the clear; a server-thread placement onto snow or carpet fails once ("clearing-occupied") and its caller's next attempt places. `/bot place` keeps its own instant snow clear (re-review: the timed path would fail every in-tick retry).
+- **Automatic return refusals are said once** (backlog 148; `TravelRefusalNoticePolicy`): a combat, cooldown or food refusal of an automatic return repeats only when the reason changes or after 3 minutes; a typed command always gets its answer.
+- **A bot under a tree canopy is at the surface** (backlog 145): only air, leaves and logs within 16 blocks above count as open sky, with the nearby-surface checks unchanged, so stone overhead or a sunken column still reads as underground. A log-roofed cabin also reads as open sky, which only makes recovery less eager to dig.
+- **One "other half of a double chest" helper** (backlog 217): every caller derives the partner from the chest's facing (`SupplyChestRules.partnerPosition`); no behaviour change.
+- **fabric.mod.json declares Minecraft ~1.21.11** (backlog 272).
+- **Both idle hobby pickers read the per-hobby backoff** (backlog 187, partial): the axe-bearer woodcut bypass is unchanged; cook and hangout never record attempts, so they have no backoff.
+- **Not done:** backlog 210 (rejected preference packets) was wrong as written: the receivers already run on the server thread and the payloads are self-only booleans.
+- **Tests** 3419 → 3428.
+- **Deferred:** a timed clear cancelled while a sword was held leaves the harmless fallback item in hand; one-shot server-thread placements (creeper block, cliff seal) onto snow or carpet take one extra attempt.
+
+**Field checks:** SANDBOX
+
 ## Owner-only zone edits, village mapping and wall claims; double chest with an unloaded half refused; a stopped tool search stays stopped; woodcut cleanup tracks its own pillars; 1.1.287 (2026-10-20)
 
 Codex build from the 2026-10-19 backlog triage (rows 199, 200, 201, 219, 222) and sandbox finding 59, with a fix wave and a follow-up from two Fable reviews.

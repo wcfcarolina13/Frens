@@ -570,9 +570,12 @@ public final class BotIdleHobbiesService {
         return BlockPos.ORIGIN;
     }
 
-    /** Convenience: per-bot hobby toggle from BotHomeService. Default = enabled. */
+    /** Picker eligibility shares the per-hobby backoff written by ambient skill completion. */
     private static boolean hobbyAllowed(ServerPlayerEntity bot, String name) {
-        return BotHomeService.isHobbyEnabled(bot, name);
+        // Shadow companion dispatches wander, so completion records its backoff under wander.
+        String skillName = "shadow_companion".equals(name) ? "wander" : name;
+        return IdleFallbackGatePolicy.allowsHobby(BotHomeService.isHobbyEnabled(bot, name),
+                bot.getEntityWorld().getServer().getTicks(), hobbyNextAllowedTick(bot.getUuid(), skillName));
     }
 
     private static String pickHobby(ServerPlayerEntity bot, ServerWorld world, boolean preferFood) {

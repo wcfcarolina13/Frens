@@ -23,6 +23,8 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Pos;
 import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Refusal;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Scope;
@@ -862,7 +864,10 @@ public final class ChestStoreService {
                 || !state.contains(ChestBlock.FACING) || state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
             return null;
         }
-        BlockPos partner = pos.offset(ChestBlock.getFacing(state));
+        Direction facing = state.get(ChestBlock.FACING);
+        Pos partnerPos = SupplyChestRules.partnerPosition(new Pos(pos.getX(), pos.getY(), pos.getZ()),
+                facing.getOffsetX(), facing.getOffsetZ(), state.get(ChestBlock.CHEST_TYPE).name());
+        BlockPos partner = new BlockPos(partnerPos.x(), partnerPos.y(), partnerPos.z());
         return world.isChunkLoaded(partner) ? partner.toImmutable() : null;
     }
 

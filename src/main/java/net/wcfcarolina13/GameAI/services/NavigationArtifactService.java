@@ -64,6 +64,7 @@ public final class NavigationArtifactService {
     private static final long TRAVEL_COOLDOWN_TICKS = 3600L;
     /** Per-bot cooldown tracker: bot UUID -> server tick of last departure. */
     private static final Map<UUID, Long> TRAVEL_COOLDOWNS = new ConcurrentHashMap<>();
+    private static final TravelRefusalNoticePolicy REFUSAL_NOTICES = new TravelRefusalNoticePolicy();
 
     /** Clear travel cooldown for a bot (used by sunrise resume to allow immediate return travel). */
     public static void clearTravelCooldown(UUID botUuid) {
@@ -523,6 +524,12 @@ public final class NavigationArtifactService {
     public static boolean tryBotToBotArtifactTeleport(MinecraftServer server,
                                                        ServerPlayerEntity traveler,
                                                        BlockPos destination) {
+        return tryBotToBotArtifactTeleport(server, traveler, destination, false);
+    }
+
+    public static boolean tryBotToBotArtifactTeleport(MinecraftServer server,
+                                                       ServerPlayerEntity traveler,
+                                                       BlockPos destination, boolean automatic) {
         if (server == null || traveler == null || destination == null) {
             return false;
         }
@@ -586,7 +593,8 @@ public final class NavigationArtifactService {
         String receiverAlias = receiver.getName().getString();
 
         boolean started = beginDelayedTravel(server, traveler, travelerAlias, destination,
-                ((ServerWorld) receiver.getEntityWorld()).getRegistryKey(), delayTicks, ownerUuid);
+                ((ServerWorld) receiver.getEntityWorld()).getRegistryKey(), delayTicks, ownerUuid,
+                false, false, false, false, automatic);
 
         if (started) {
             LOGGER.info("Bot-to-bot summon: {} is summoning {} home via artifact (dist={}, delay={}t)",
@@ -741,6 +749,15 @@ public final class NavigationArtifactService {
         return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, false, false);
     }
 
+    /** Automatic travel retries share refusal notices; direct player requests always reply. */
+    public static boolean beginAutomaticTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                               String botAlias, BlockPos destination,
+                                               RegistryKey<World> dimension, int delayTicks,
+                                               UUID ownerUuid) {
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks,
+                ownerUuid, false, false, false, false, true);
+    }
+
     /**
      * Emergency travel path used by autonomous rescue logic.
      * Reuses the same delayed-travel pipeline but skips the normal underground gating.
@@ -763,7 +780,7 @@ public final class NavigationArtifactService {
         double distance = bot.getBlockPos().getManhattanDistance(destination);
         boolean crossDim = !((ServerWorld) bot.getEntityWorld()).getRegistryKey().equals(dimension);
         int delayTicks = calculateDelayTicks(distance, crossDim, 3.0);
-        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, true, false);
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, true, false, true);
     }
 
     /**
@@ -993,6 +1010,16 @@ public final class NavigationArtifactService {
                                               RegistryKey<World> dimension, int delayTicks,
                                               UUID ownerUuid, boolean skipGates, boolean suppressOwnerNotify,
                                               boolean skipArtifactGate, boolean magicTravel) {
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks,
+                ownerUuid, skipGates, suppressOwnerNotify, skipArtifactGate, magicTravel, false);
+    }
+
+    private static boolean beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                              String botAlias, BlockPos destination,
+                                              RegistryKey<World> dimension, int delayTicks,
+                                              UUID ownerUuid, boolean skipGates, boolean suppressOwnerNotify,
+                                              boolean skipArtifactGate, boolean magicTravel,
+                                              boolean automatic) {
         if (server == null || bot == null || botAlias == null || destination == null || dimension == null) {
             LOGGER.warn("beginDelayedTravel called with null arguments; ignoring.");
             return false;
@@ -1007,7 +1034,7 @@ public final class NavigationArtifactService {
         if (!skipGates) {
             // ── Combat gate ──────────────────────────────────────────────
             if (BotCombatCalloutService.isInCombat(bot.getUuid())) {
-                notifyOwner(server, ownerUuid,
+                notifyTravelRefusal(server, bot, ownerUuid, "combat", automatic,
                         "\u00A7c" + botAlias + " cannot fast-travel while in combat.\u00A7r");
                 return false;
             }
@@ -1021,7 +1048,7 @@ public final class NavigationArtifactService {
                     long remainingTicks = TRAVEL_COOLDOWN_TICKS - elapsed;
                     String timeStr = TravelWaitService.formatWait(remainingTicks);
                     String destLabel = destination.toShortString();
-                    notifyOwner(server, ownerUuid,
+                    notifyTravelRefusal(server, bot, ownerUuid, "cooldown", automatic,
                             "\u00A7c" + botAlias + " is resting " + timeStr + " before traveling to "
                             + destLabel + ". I'll keep busy meanwhile.\u00A7r");
                     // One retry per bot: this one replaces any earlier retry. When the earlier one was
@@ -1047,7 +1074,7 @@ public final class NavigationArtifactService {
                     TravelWaitService.enqueue(bot, remainingTicks, destLabel,
                             (srv, freshBot) -> beginDelayedTravel(srv, freshBot, botAlias, destination, dimension,
                                     retryDelayTicks, ownerUuid, skipGates, suppressOwnerNotify, skipArtifactGate,
-                                    magicTravel));
+                                    magicTravel, true));
                     return false;
                 }
             }
@@ -1074,7 +1101,7 @@ public final class NavigationArtifactService {
                 if (projectedFood < MIN_POST_TRAVEL_FOOD) {
                     int shortfall = (int) Math.ceil(hungerCost) + MIN_POST_TRAVEL_FOOD - totalBudget;
                     int steakEstimate = (int) Math.ceil(shortfall / 8.0);
-                    notifyOwner(server, ownerUuid,
+                    notifyTravelRefusal(server, bot, ownerUuid, "food", automatic,
                             "\u00A7e" + botAlias + " needs provisions for this journey, roughly "
                             + steakEstimate + " cooked steak worth of food (~"
                             + shortfall + " hunger points). Pack extra before sending them off.\u00A7r");
@@ -1765,6 +1792,7 @@ public final class NavigationArtifactService {
         PENDING_POST_ARRIVAL.clear();
         DeathRetrievalService.resetSession();
         TRAVEL_COOLDOWNS.clear();
+        REFUSAL_NOTICES.clear();
         synchronized (LOCK) {
             OTHER_WORLD_TRAVELS.clear();
             sessionWorldKey = null;
@@ -1944,6 +1972,15 @@ public final class NavigationArtifactService {
     /** {@link #notifyOwner} for other services: sends now, or queues for the player's next login. */
     public static void notifyPlayer(MinecraftServer server, UUID playerUuid, String message) {
         notifyOwner(server, playerUuid, message);
+    }
+
+    private static void notifyTravelRefusal(MinecraftServer server, ServerPlayerEntity bot,
+                                            UUID ownerUuid, String reason, boolean automatic,
+                                            String message) {
+        if (REFUSAL_NOTICES.shouldNotify(bot.getUuid(), reason, automatic,
+                server.getOverworld().getTime())) {
+            notifyOwner(server, ownerUuid, message);
+        }
     }
 
     /** Send a message to a player if online, otherwise queue it for delivery on next login. */
