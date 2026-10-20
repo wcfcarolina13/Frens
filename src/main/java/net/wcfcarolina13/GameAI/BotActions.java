@@ -13,8 +13,6 @@ import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
-import net.minecraft.entity.projectile.TridentEntity;
-import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.EntityUtil;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.BlockItem;
@@ -55,13 +53,11 @@ import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldOwnershipPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
-import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.FoodConsumptionConfirmationService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
-import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
 import net.wcfcarolina13.GameAI.services.PlacementClutterClearingService;
 
 
@@ -164,30 +160,17 @@ public final class BotActions {
         }
     }
 
-    private static <T> T callOnServerThread(ServerPlayerEntity bot, Supplier<T> action, long timeoutMs, T fallback) {
+    /** Runs an atomic action on the server, waiting only when called from a worker. */
+    public static <T> T callOnServerThread(ServerPlayerEntity bot, Supplier<T> action, long timeoutMs, T fallback) {
         if (bot == null || action == null) {
             return fallback;
         }
         var server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
-        if (server == null || server.isOnThread()) {
-            return action.get();
-        }
-        CompletableFuture<T> future = new CompletableFuture<>();
-        server.execute(() -> {
-            try {
-                future.complete(action.get());
-            } catch (Throwable t) {
-                future.completeExceptionally(t);
-            }
-        });
-        try {
-            return future.get(Math.max(250L, timeoutMs), TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return fallback;
-        } catch (ExecutionException | TimeoutException e) {
+        if (server == null) {
             return fallback;
         }
+        return net.wcfcarolina13.GameAI.services.ServerThreadCallPolicy.call(
+                server.isOnThread(), server::execute, action, Math.max(250L, timeoutMs), fallback);
     }
 
     public static void moveForward(ServerPlayerEntity bot) {
@@ -561,6 +544,10 @@ public final class BotActions {
         if (bot == null) {
             return false;
         }
+        return callOnServerThread(bot, () -> selectHarvestToolOrHandsOnServer(bot, preferKeyword), 750L, false);
+    }
+
+    private static boolean selectHarvestToolOrHandsOnServer(ServerPlayerEntity bot, String preferKeyword) {
         String normalizedPrefer = preferKeyword != null ? preferKeyword.toLowerCase(Locale.ROOT) : null;
         PlayerInventory inventory = bot.getInventory();
         int harmlessHotbarSlot = -1;
@@ -879,86 +866,6 @@ public final class BotActions {
             }
             return false;
         }, 2000L, false);
-    }
-
-    public static boolean breakBlockAhead(ServerPlayerEntity bot) {
-        ServerWorld world = bot.getCommandSource().getWorld();
-        BlockPos targetPos = getRelativeBlockPos(bot, 1, 0);
-        BlockState frontState = world.getBlockState(targetPos);
-        if (frontState.getBlock() instanceof DoorBlock) {
-            // Prefer opening doors rather than destroying them during escape routines.
-            return MovementService.tryOpenDoorAt(bot, targetPos);
-        }
-        if (!frontState.isAir() && canBreak(world, targetPos, bot, false)) {
-            boolean success = breakBlock(world, targetPos, bot);
-            if (success) {
-                return true;
-            }
-        }
-
-        // Try the block above-front if the direct block was air (stair carving)
-        BlockPos upperPos = getRelativeBlockPos(bot, 1, 1);
-        BlockState upperState = world.getBlockState(upperPos);
-        if (upperState.getBlock() instanceof DoorBlock) {
-            return MovementService.tryOpenDoorAt(bot, upperPos);
-        }
-        if (!upperState.isAir() && canBreak(world, upperPos, bot, false)) {
-            boolean success = breakBlock(world, upperPos, bot);
-            if (success) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    public static boolean placeSupportBlock(ServerPlayerEntity bot) {
-        return callOnServerThread(bot, () -> {
-            ServerWorld world = bot.getCommandSource().getWorld();
-            int slot = findPlaceableHotbarSlot(bot);
-            if (slot == -1) {
-                return false;
-            }
-
-            ItemStack stack = bot.getInventory().getStack(slot);
-            if (!(stack.getItem() instanceof BlockItem blockItem)) {
-                return false;
-            }
-
-            selectHotbarSlot(bot, slot);
-
-            BlockPos below = bot.getBlockPos().down();
-            BlockPos target = world.getBlockState(below).isAir() ? below : getRelativeBlockPos(bot, 0, -1);
-            if (!world.getBlockState(target).isAir()) {
-                // Try front-lower spot for stair stepping
-                target = getRelativeBlockPos(bot, 1, -1);
-            }
-
-            if (!world.getBlockState(target).isAir()) {
-                return false;
-            }
-
-            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target);
-            if (!auth.allowed()) {
-                return false;
-            }
-
-            BlockState stateToPlace = blockItem.getBlock().getDefaultState();
-            if (!stateToPlace.canPlaceAt(world, target)) {
-                return false;
-            }
-
-            boolean placed = world.setBlockState(target, stateToPlace);
-            if (placed) {
-                stack.decrement(1);
-                if (stack.isEmpty()) {
-                    bot.getInventory().setStack(slot, ItemStack.EMPTY);
-                }
-                bot.swingHand(Hand.MAIN_HAND, true);
-                return true;
-            }
-            return false;
-        }, 2500L, false);
     }
 
     public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target) {
@@ -1457,14 +1364,6 @@ public final class BotActions {
         };
     }
 
-    public static void escapeStairs(ServerPlayerEntity bot) {
-        boolean placed = placeSupportBlock(bot);
-        if (!placed) {
-            breakBlockAhead(bot);
-        }
-        jumpForward(bot);
-    }
-
     public static boolean digOut(ServerPlayerEntity bot) {
         return digOut(bot, false);
     }
@@ -1486,92 +1385,6 @@ public final class BotActions {
     public static boolean breakBlockAt(ServerPlayerEntity bot, BlockPos pos, boolean forceBreak) {
         // Programmatic block breaking disabled - bot must mine blocks physically using tools and time
         return false;
-    }
-
-    private static boolean canBreak(ServerWorld world, BlockPos pos, ServerPlayerEntity bot, boolean forceBreak) {
-        BlockState state = world.getBlockState(pos);
-        if (state.isAir() || state.isOf(net.minecraft.block.Blocks.BEDROCK)) {
-            return false;
-        }
-        if (state.getBlock() instanceof DoorBlock) {
-            return false;
-        }
-        // Never grief player storage / beds during generic movement/unstuck logic.
-        if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL) || state.isOf(Blocks.ENDER_CHEST)) {
-            return false;
-        }
-        if (state.isIn(BlockTags.BEDS) || state.isIn(BlockTags.SHULKER_BOXES)) {
-            return false;
-        }
-        // Avoid griefing player-built enclosures/rails: never break fences/walls/gates as part of generic "unstuck".
-        if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS) || state.isIn(BlockTags.FENCE_GATES)) {
-            return false;
-        }
-        if (ProtectedStructureBlockHelper.isProtectedGlassLike(state)) {
-            return false;
-        }
-        // Never destroy player-built roads.
-        if (state.isOf(Blocks.DIRT_PATH)) {
-            return false;
-        }
-        // Generic movement/unstuck breaking must stay conservative around player structures and villages.
-        if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS) || state.isIn(BlockTags.WOOL)) {
-            return false;
-        }
-        if (CompanionSafeZoneService.isProtected(world, pos, null)) {
-            LOGGER.info("Generic break rejected for {} at {} due to protected zone",
-                    bot != null ? bot.getName().getString() : "unknown-bot",
-                    pos.toShortString());
-            return false;
-        }
-
-        float hardness = state.getHardness(world, pos);
-        if (hardness < 0) {
-            return false;
-        }
-
-        if (forceBreak) {
-            return hardness <= 5.0f && !state.isAir() && !state.isOf(Blocks.BEDROCK);
-        }
-
-        ItemStack tool = bot.getMainHandStack();
-        if (!tool.isEmpty() && tool.isSuitableFor(state)) {
-            return true;
-        }
-
-        float allowedHardness = 0.5f; // fist baseline – dirt, sand, gravel, glass
-        if (!tool.isEmpty()) {
-            float miningSpeed = tool.getMiningSpeedMultiplier(state);
-            if (miningSpeed > 1.0f) {
-                allowedHardness = 3.0f; // capable tool, allow stone-tier
-            } else {
-                allowedHardness = 1.0f; // miscellaneous item, slightly better than fist
-            }
-        }
-
-        return hardness <= allowedHardness;
-    }
-
-    private static boolean breakBlock(ServerWorld world, BlockPos pos, ServerPlayerEntity bot) {
-        return breakBlock(world, pos, bot, false);
-    }
-
-    private static boolean breakBlock(ServerWorld world, BlockPos pos, ServerPlayerEntity bot, boolean forceBreak) {
-        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
-        if (!auth.allowed()) {
-            return false;
-        }
-        if (!canBreak(world, pos, bot, forceBreak)) {
-            return false;
-        }
-        // Face the block before breaking (vanilla parity)
-        LookController.faceBlock(bot, pos);
-        // Attempt a physical break using the interaction manager (no instant removal)
-        boolean success = bot.interactionManager.tryBreakBlock(pos);
-        if (success) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-        }
-        return success;
     }
 
     private static int meleeWeaponScore(ItemStack stack) {
@@ -2387,32 +2200,6 @@ public final class BotActions {
             }
         }
         return null;
-    }
-
-    private static BlockPos getRelativeBlockPos(ServerPlayerEntity bot, int forwardOffset, int verticalOffset) {
-        Direction facing = getFacingDirection(bot);
-        BlockPos basePos = bot.getBlockPos().add(0, verticalOffset, 0);
-        return basePos.offset(facing, forwardOffset);
-    }
-
-    private static Direction getFacingDirection(ServerPlayerEntity bot) {
-        int index = MathHelper.floor((bot.getYaw() * 4.0F / 360.0F) + 0.5D) & 3;
-        return switch (index) {
-            case 0 -> Direction.SOUTH;
-            case 1 -> Direction.WEST;
-            case 2 -> Direction.NORTH;
-            default -> Direction.EAST;
-        };
-    }
-
-    private static int findPlaceableHotbarSlot(ServerPlayerEntity bot) {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (!stack.isEmpty() && stack.getItem() instanceof BlockItem) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     private static int findPreferredBlockItemSlot(ServerPlayerEntity bot, List<Item> prioritizedBlocks) {

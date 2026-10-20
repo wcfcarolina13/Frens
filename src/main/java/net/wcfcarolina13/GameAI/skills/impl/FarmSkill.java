@@ -320,7 +320,7 @@ public class FarmSkill implements Skill {
             }
 
             ensureNotOnFarmland(bot, world, source);
-            net.wcfcarolina13.GameAI.BotEventHandler.rescueFromBurial(bot);
+            BotActions.callOnServerThread(bot, () -> net.wcfcarolina13.GameAI.BotEventHandler.rescueFromBurial(bot), 750L, false);
             logPos("postSafeMove", bot);
             abortIfRequested(bot);
 
@@ -1668,7 +1668,7 @@ public class FarmSkill implements Skill {
             if (locallyCleared > 0) {
                 LOGGER.info("escapeTree local bounded clear removed {} in-bounds blocker(s)", locallyCleared);
             }
-            net.wcfcarolina13.GameAI.BotEventHandler.rescueFromBurial(bot);
+            BotActions.callOnServerThread(bot, () -> net.wcfcarolina13.GameAI.BotEventHandler.rescueFromBurial(bot), 750L, false);
             insideTree = isInsideTree(bot, world);
             skyBlocked = !world.isSkyVisible(bot.getBlockPos().up(3));
             nearbyTreeBlocks = countBlockingTreeBlocks(world, footprint);

@@ -4,7 +4,14 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.288) — next session starts here
+## Session Handoff 2026-10-20 (1.1.289) — next session starts here
+
+**State:** main = origin/main @ 1.1.289. Suite 3440 green. Deployed to Nirn. 1.1.289 = backlog 146 (dead escapeStairs chain deleted), 138, 144, 179 (Codex; Fable review; fix wave by a Claude agent while Codex was at its usage limit). **Still open from this batch, give to Codex next:** 168 (woodcut cleanup region scan off-thread: Codex drafted `/private/tmp/frens-cleanup-scan.patch` outside the repo, not applied) and 184 (mutual aid drops recipient items while its task runs: guard on TaskService active task, server thread). Deferred: `player.teleport` before the rescue in `MovementService.moveTo` (~:843) and the `refreshPositionAndAngles`/`setVelocity` in `snapTo` still run on the worker; `runOnServerThread` (`moveForward` etc.) still uses the no-cancel path; a death during the ≤30 s resume wait drops the job without a "continue?" prompt; a 750 ms tool-swap timeout mines with the previous tool.
+
+**Pending sandbox check:** see the 1.1.286-1.1.288 lists below, plus:
+- 1.1.289: a buried or wedged bot during farm/woodcut/return is dug out with no position rubber-band; `/bot resume` (or "yes") while a bot is climbing to the surface says "<bot> will continue once it's back on the surface." and resumes after; mining tool swaps still happen while walking.
+
+## Session Handoff 2026-10-20 (1.1.288) — superseded
 
 **State:** main = origin/main @ 1.1.288. Suite 3428 green. Deployed to Nirn. 1.1.288 = backlog 147, 148, 145, 217, 272, 187 partial (Codex; fix wave from a Fable review, scoped re-review). 210 skipped as written: the preference receivers already run on the server thread and the payloads are self-only booleans, so nothing cheap to reject earlier. Field checklist phases 6bt-6by (1.1.282-1.1.287) added in `09c689a3`; older phases grep `leaf-cleared`, renamed `leaf-action:` in 1.1.286. Deferred: `/bot place` keeps its own instant snow clear (the shared timed path would fail in-tick on the server thread); a timed clutter clear cancelled with a sword held leaves the harmless fallback in hand; one-shot server-thread placements onto snow/carpet fail once and retry next tick.
 
@@ -222,15 +229,15 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "after the first shared-settings save the file stores `"pathfinder": "unified"` explicitly rather than null, so a later default change would not move that install." (1.1.261 handoff, 2026-10-17) — ✅ 1.1.286 77df45d2
 - [ ] "diagonal wall nudge (eye-box geometry)" (1.1.264 handoff, 2026-10-17)
 - [ ] "scaffold Phase 3 pillaring up while on a pillar" (1.1.264 handoff, 2026-10-17)
-- [ ] "the two off-thread `rescueFromBurial` callers (ReturnBaseStuck async mine escape, MovementService nudge loop)." (1.1.264 handoff, 2026-10-17)
+- [x] "the two off-thread `rescueFromBurial` callers (ReturnBaseStuck async mine escape, MovementService nudge loop)." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.289
 - [x] "a backup jump-sprint logged `succeeded, now at 199, 110, 202` from inside a closed stone pocket. Worth a scope." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.279 741355c8 + 5eb24b38 (sandbox 6bq PASS)
 - [x] "`ReturnBaseStuckService` counters clear only on arrival at base, so a later return inherits `backupAttempted` from an earlier stuck episode (seen in the sandbox). Worth a scope." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.279 741355c8 (sandbox 6bq PASS)
 - [ ] "blind walkDirect fallback after no path" (1.1.239 handoff, 2026-10-14)
 - [ ] "hand-dig stair escape for a bot with no blocks." (1.1.236 handoff; also 1.1.239 handoff, 2026-10-14; 1.1.240 `TerrainMovePolicy` places dirt stairs but has no no-blocks dig)
 - [x] "BotActions.moveRelative same-cell teleport" ("probable IN_WALL root, shared hot file"; 1.1.233 handoff; also 1.1.229 handoff, 2026-10-13) — ✅ 1.1.279 2a42404b + 5eb24b38 (sandbox 6bq: drowning/drop/door/stair PASS, kiting a field item)
-- [ ] "MovementService off-thread tool swaps" (1.1.233 handoff, 2026-10-13)
+- [x] "MovementService off-thread tool swaps" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.289
 - [x] "isAtSurface strict under canopy" (1.1.234 handoff, 2026-10-14) — ✅ 1.1.288
-- [ ] "RL breakBlockAhead ... still instant" (RL is gone since 1.1.244 but `BotActions.breakBlockAhead` is still called by `BotStuckService` `escapeStairs`; 1.1.234 handoff, 2026-10-14) — 2026-10-20: unreachable (`BotStuckService.updateStuckTracker` has no callers); delete the dead path or wire it, then revisit.
+- [x] "RL breakBlockAhead ... still instant" (RL is gone since 1.1.244 but `BotActions.breakBlockAhead` is still called by `BotStuckService` `escapeStairs`; 1.1.234 handoff, 2026-10-14) — 2026-10-20: unreachable (`BotStuckService.updateStuckTracker` has no callers); delete the dead path or wire it, then revisit. — ✅ 1.1.289
 - [x] "clutter clears ... still instant" (snow/carpet clutter; 1.1.234 handoff, 2026-10-14) — ✅ 1.1.288
 - [x] "long automatic return refusals (combat/cooldown/food) still in chat." (1.1.234 handoff, 2026-10-14) — ✅ 1.1.288
 - [x] "Return-base door/escape server-thread traverses (BEH ~3603/~3630): let the tripwire name them first." (1.1.223 handoff, 2026-09-25) — stale (triage 2026-10-19): Mode.RETURNING_BASE is never set; return-to-base runs via FOLLOW (BEH:1336, :3165)
@@ -263,7 +270,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 ### Survival, hunger, crafting, farming and mutual aid
 - [x] "bundle food in the no-food warning" (1.1.239 handoff, 2026-10-14) — ✅ 1.1.279 1fedf1ce (sandbox 6bq PASS)
 - [x] "the gated hunger lines in CollectDirt/StripMine" (1.1.239 handoff, 2026-10-14) — ✅ 1.1.285 9b23cffb
-- [ ] "SkillResumeService vs recovery thread" ("not waiting on an active recovery thread"; 1.1.239 handoff, 2026-10-14)
+- [x] "SkillResumeService vs recovery thread" ("not waiting on an active recovery thread"; 1.1.239 handoff, 2026-10-14) — ✅ 1.1.289
 - [x] "`SmeltingService.resolveFurnaceTarget` `Thread.sleep(150)` (SS:~810/~831) on `/bot cook` and the auto-cook tick." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 0d8cd03e (sandbox 6bq PASS)
 - [x] "A server-thread craft with a full inventory: `distributeOutput` / `craftWithPlanks` / `ensurePlanksFromLogs` → `offloadCheapItemsToNearbyChest` → deposit walk or `placeChestNearBot`. Same fix shape; needs its own scope." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 + 5eb24b38 (sandbox 6bq PASS)
 - [x] "`FoodConsumptionConfirmationService.tryHandleConfirmation` has no caller" (was to ride 1.1.225's yes/no router, which did not ship; 1.1.223 handoff, 2026-09-25) — ✅ 1.1.278 410bd6d8 (sandbox 6bp PASS)

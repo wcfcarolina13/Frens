@@ -868,7 +868,6 @@ public class BotEventHandler {
             net.wcfcarolina13.GameAI.services.MountPersistenceService.forgetHeldByBot(bot, null,
                     net.wcfcarolina13.GameAI.services.LeashTargetPolicy.Event.DIED);
         }
-        BotStuckService.resetBot(bot.getUuid());
         BotFleeService.reset(bot.getUuid());
         BotCombatCalloutService.resetCombatState(bot.getUuid());
         // Clear stale directed-mode targets from previous life so hobbies aren't

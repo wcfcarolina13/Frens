@@ -966,7 +966,7 @@ public final class ReturnBaseStuckService {
                     if (bot.isInsideWall()) {
                         LOGGER.warn("ReturnBaseStuck: bot embedded in wall after nudge at {}, attempting rescue",
                                 bot.getBlockPos().toShortString());
-                        BotRescueService.rescueFromBurial(bot);
+                        BotActions.callOnServerThread(bot, () -> BotRescueService.rescueFromBurial(bot), 750L, false);
                     }
                 }
             }
@@ -1218,7 +1218,7 @@ public final class ReturnBaseStuckService {
             LOGGER.warn("ReturnBaseStuck: quick-nudge clipped {} into a wall at {}, triggering rescue",
                     bot.getName().getString(),
                     bot.getBlockPos().toShortString());
-            BotRescueService.rescueFromBurial(bot);
+            BotActions.callOnServerThread(bot, () -> BotRescueService.rescueFromBurial(bot), 750L, false);
             return false;
         }
 

@@ -35,6 +35,7 @@ public final class SkillResumeService {
     private static final java.util.concurrent.atomic.AtomicLong ARM_IDS = new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.atomic.AtomicLong EXECUTION_IDS = new java.util.concurrent.atomic.AtomicLong();
     private static final Set<UUID> RESUME_INTENT = ConcurrentHashMap.newKeySet();
+    private static final Map<UUID, Object> DEFERRED_RESUMES = new ConcurrentHashMap<>();
     /** Bots whose last pending skill was paused for a protected-zone refusal — Resume should grant a 60s zone override. */
     private static final Set<UUID> ZONE_OVERRIDE_PENDING = ConcurrentHashMap.newKeySet();
     private static final long ZONE_OVERRIDE_DURATION_MS = 60_000L;
@@ -61,6 +62,7 @@ public final class SkillResumeService {
      */
     public static long recordExecution(ServerPlayerEntity bot, String skillName, String rawArgs, ServerCommandSource source) {
         UUID botUuid = bot.getUuid();
+        DEFERRED_RESUMES.remove(botUuid);
         PendingSkill prior = LAST_SKILL_BY_BOT.get(botUuid);
         if (prior != null) {
             notifyDecision(prior, false);
@@ -109,6 +111,14 @@ public final class SkillResumeService {
     }
 
     public static void clear(UUID botUuid) {
+        if (botUuid != null) {
+            DEFERRED_RESUMES.remove(botUuid);
+        }
+        clearPending(botUuid);
+    }
+
+    // A successful resume consumes the old record without canceling its recovery wait.
+    private static void clearPending(UUID botUuid) {
         if (botUuid == null) {
             return;
         }
@@ -134,6 +144,7 @@ public final class SkillResumeService {
     }
 
     public static void handleDeath(ServerPlayerEntity bot) {
+        DEFERRED_RESUMES.remove(bot.getUuid());
         clearSunriseResume(bot.getUuid());
         PendingSkill pending = LAST_SKILL_BY_BOT.get(bot.getUuid());
         if (pending == null) {
@@ -176,8 +187,8 @@ public final class SkillResumeService {
         } else {
             ChatUtils.sendSystemMessage(pending.source(), "Okay, " + pending.alias() + " will stand down.");
             notifyDecision(pending, false);
+            clear(pending.botUuid());
         }
-        clear(pending.botUuid());
         return true;
     }
 
@@ -257,7 +268,6 @@ public final class SkillResumeService {
             return;
         }
         resume(pending, true, pending.source());
-        clear(uuid);
     }
 
     /**
@@ -381,10 +391,6 @@ public final class SkillResumeService {
             return false;
         }
         resume(pending, false, requester != null ? requester : pending.source());
-        if (requester != null && requester != pending.source()) {
-            ChatUtils.sendSystemMessage(requester, "Resuming '" + pending.skillName() + "' for " + pending.alias() + ".");
-        }
-        clear(botUuid);
         return true;
     }
 
@@ -425,10 +431,55 @@ public final class SkillResumeService {
             return;
         }
         notifyDecision(pending, false);
+        boolean zoneOverride = ZONE_OVERRIDE_PENDING.remove(pending.botUuid());
+        clearPending(pending.botUuid());
+        Object request = new Object();
+        DEFERRED_RESUMES.put(pending.botUuid(), request);
+        long startedAt = System.nanoTime();
+        server.execute(() -> resumeAfterRecovery(pending, autoTriggered, source, server,
+                request, zoneOverride, startedAt, false));
+    }
+
+    private static void resumeAfterRecovery(PendingSkill pending, boolean autoTriggered,
+                                            ServerCommandSource source, MinecraftServer server,
+                                            Object request, boolean zoneOverride, long startedAt,
+                                            boolean waitNoticeSent) {
+        MinecraftServer currentServer = net.wcfcarolina13.Frens.serverInstance;
+        if (TaskService.isServerStopping() || server.isStopped() || !server.isOnThread()
+                || (currentServer != null && currentServer != server)) {
+            DEFERRED_RESUMES.remove(pending.botUuid(), request);
+            return;
+        }
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(pending.botUuid());
+        boolean botAvailable = bot instanceof net.wcfcarolina13.Entity.createFakePlayer
+                && !bot.isRemoved() && bot.isAlive() && bot.getGameProfile().name().equals(pending.alias());
+        long elapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+        SurfaceRecoveryResumePolicy.Action action = SurfaceRecoveryResumePolicy.action(
+                DEFERRED_RESUMES.get(pending.botUuid()) == request, botAvailable,
+                BotFleeService.isSurfaceRecoveryActive(pending.botUuid()), elapsedMs);
+        if (action == SurfaceRecoveryResumePolicy.Action.CANCEL) {
+            DEFERRED_RESUMES.remove(pending.botUuid(), request);
+            return;
+        }
+        if (action == SurfaceRecoveryResumePolicy.Action.WAIT) {
+            if (!waitNoticeSent) {
+                ChatUtils.sendSystemMessage(source, pending.alias() + " will continue once it's back on the surface.");
+            }
+            TaskService.runOnServerAfterTicks(server, 20L, () -> resumeAfterRecovery(
+                    pending, autoTriggered, source, server, request, zoneOverride, startedAt, true));
+            return;
+        }
+        if (!DEFERRED_RESUMES.remove(pending.botUuid(), request)) {
+            return;
+        }
+        if (action == SurfaceRecoveryResumePolicy.Action.RESUME_AFTER_TIMEOUT) {
+            LOGGER.warn("Surface recovery for {} is still active after 30 s; resuming skill '{}' anyway",
+                    pending.alias(), pending.skillName());
+        }
         RESUME_INTENT.add(pending.botUuid());
         // If this pending skill was paused by a protected-zone refusal,
         // grant the bot a 60s zone-override window so the re-run gets through.
-        if (ZONE_OVERRIDE_PENDING.remove(pending.botUuid())) {
+        if (zoneOverride) {
             ProtectedZoneOverrideService.grantOverride(pending.botUuid(), ZONE_OVERRIDE_DURATION_MS);
             ChatUtils.sendSystemMessage(source, pending.alias()
                     + " will ignore protected-zone refusals for the next 60s.");
@@ -440,32 +491,30 @@ public final class SkillResumeService {
         }
         command.append(" ").append(pending.alias());
         String commandLine = command.toString();
-        server.execute(() -> {
-            try {
-                ServerCommandSource execSource = source;
-                if (execSource.getEntity() instanceof ServerPlayerEntity player) {
-                    ServerPlayerEntity refreshed = server.getPlayerManager().getPlayer(player.getUuid());
-                    if (refreshed != null) {
-                        execSource = refreshed.getCommandSource();
-                    }
-                }
-                if (execSource.getEntity() instanceof ServerPlayerEntity requester
-                        && !(requester instanceof net.wcfcarolina13.Entity.createFakePlayer)
-                        && !net.wcfcarolina13.Frens.hasBotCommandPermission(execSource)) {
-                    // A player without /bot (a non-op owner, a LAN guest): authorise them on the
-                    // resolved bot, then run under the per-call grant, synchronously, right here.
-                    resumeUnderGrant(server, requester, pending, commandLine);
-                    return;
-                }
-                server.getCommandManager().getDispatcher().execute(commandLine, execSource);
-            } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
-                LOGGER.warn("Failed to resume skill '{}' for {}: {}", pending.skillName(), pending.alias(), e.getMessage());
-                RESUME_INTENT.remove(pending.botUuid());
-            }
-        });
         String reason = autoTriggered ? "Hostiles cleared." : null;
         String prefix = "Resuming '" + pending.skillName() + "' for " + pending.alias() + ".";
         ChatUtils.sendSystemMessage(source, reason == null ? prefix : prefix + " " + reason);
+        try {
+            ServerCommandSource execSource = source;
+            if (execSource.getEntity() instanceof ServerPlayerEntity player) {
+                ServerPlayerEntity refreshed = server.getPlayerManager().getPlayer(player.getUuid());
+                if (refreshed != null) {
+                    execSource = refreshed.getCommandSource();
+                }
+            }
+            if (execSource.getEntity() instanceof ServerPlayerEntity requester
+                    && !(requester instanceof net.wcfcarolina13.Entity.createFakePlayer)
+                    && !net.wcfcarolina13.Frens.hasBotCommandPermission(execSource)) {
+                // A player without /bot (a non-op owner, a LAN guest): authorise them on the
+                // resolved bot, then run under the per-call grant, synchronously, right here.
+                resumeUnderGrant(server, requester, pending, commandLine);
+                return;
+            }
+            server.getCommandManager().getDispatcher().execute(commandLine, execSource);
+        } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
+            LOGGER.warn("Failed to resume skill '{}' for {}: {}", pending.skillName(), pending.alias(), e.getMessage());
+            RESUME_INTENT.remove(pending.botUuid());
+        }
     }
 
     /**

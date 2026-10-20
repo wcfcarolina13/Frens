@@ -840,7 +840,7 @@ public final class MovementService {
         if (player.isInsideWall()) {
             LOGGER.warn("Movement teleport landed {} inside a wall at {} — triggering immediate rescue",
                     player.getName().getString(), safe.toShortString());
-            net.wcfcarolina13.GameAI.services.BotRescueService.rescueFromBurial(player);
+            BotActions.callOnServerThread(player, () -> BotRescueService.rescueFromBurial(player), 750L, false);
         }
         boolean success = true;
         String rawResult = "Teleported successfully";
@@ -4104,7 +4104,7 @@ public final class MovementService {
                             label,
                             bot.getBlockPos().toShortString());
                     BotActions.stop(bot);
-                    BotRescueService.rescueFromBurial(bot);
+                    BotActions.callOnServerThread(bot, () -> BotRescueService.rescueFromBurial(bot), 750L, false);
                     sleep(100L);
                     if (bot.isInsideWall()) {
                         return false;
@@ -5088,7 +5088,7 @@ public final class MovementService {
         if (player.isInsideWall()) {
             LOGGER.warn("Snap landed {} inside a wall at {} — triggering immediate rescue",
                     player.getName().getString(), target.toShortString());
-            net.wcfcarolina13.GameAI.services.BotRescueService.rescueFromBurial(player);
+            BotActions.callOnServerThread(player, () -> BotRescueService.rescueFromBurial(player), 750L, false);
         }
     }
 

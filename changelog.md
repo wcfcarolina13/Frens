@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Buried-bot rescue and tool swaps on the server thread, resume waits for surface recovery, dead stair-escape code removed; 1.1.289 (2026-10-20)
+
+Codex threading batch from the 2026-10-19 backlog triage (rows 146, 138, 144, 179), with a Fable review and a fix wave. Rows 168 and 184 were not finished (Codex usage limit) and stay open.
+
+- **Digging a buried bot out runs on the server thread** (backlog 138; `ServerThreadCallPolicy`): every worker-thread caller of `rescueFromBurial` (return-base escape and quick nudge, movement nudge, teleport fallback and snap, two farm paths; fix wave: five sites the first pass missed) hops to the server with a 750 ms bounded wait. The shared server-call helper now cancels a queued action that times out, so a late placement can't land after its caller already retried; it runs inline on the server thread.
+- **Tool swaps while moving run on the server thread** (backlog 144): harvest-tool selection and the hotbar swap hop from a worker.
+- **A resume waits for surface recovery** (backlog 179; `SurfaceRecoveryResumePolicy`): "yes" or `/bot resume` while the bot is climbing out retries each second for up to 30 s, says "<bot> will continue once it's back on the surface." once, then resumes (after 30 s it resumes anyway with a log line). A stop, a new skill, death or despawn cancels the wait. The old chat and manual resume no longer wipe the record that the inline dispatch had just set.
+- **Dead stair-escape code removed** (backlog 146; −600 lines): `BotStuckService.updateStuckTracker` had no callers, so `escapeStairs`, `breakBlockAhead` and its support-placement helpers were unreachable; deleted with their test.
+- **Tests** 3428 → 3440.
+- **Deferred:** the teleport before the rescue in `moveTo` and the position/velocity writes in `snapTo` still run on the worker; `runOnServerThread` (`moveForward` etc.) keeps the old no-cancel path; a death during the resume wait drops the job without the "continue?" prompt; a tool swap that times out mines with the previous tool.
+
+**Field checks:** SANDBOX
+
 ## Snow and carpet in the way are mined, not deleted; automatic return refusals said once; canopy counts as surface; one double-chest helper; 1.1.288 (2026-10-20)
 
 Codex build from the 2026-10-19 backlog triage (rows 147, 148, 145, 217, 272, 187), with a fix wave from a Fable review and a scoped re-review.
