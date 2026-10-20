@@ -50,6 +50,19 @@ public final class BotWaterEscapeService {
     private static final Map<UUID, String> CARVE_LOG_STATE = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> CARVE_LOG_TIME = new ConcurrentHashMap<>();
 
+    /** How long a floating bot gets to swim up onto the ledge it carved. */
+    static final long LEDGE_CLIMB_TIMEOUT_MS = 3_000L;
+    private static final long LEDGE_CLIMB_STEP_MS = 50L;
+    /**
+     * Push toward the ledge centre. In water BotActions caps this to its swim impulse; once the bot
+     * clears the water it is land input, where 1.0 would fling it a full block past a one-cell ledge.
+     */
+    private static final double LEDGE_CLIMB_IMPULSE = 0.2D;
+    /** Ticks of forward input after landing on the stand, to settle onto it rather than the lip. */
+    private static final int LEDGE_SETTLE_STEPS = 3;
+    /** How far above the bot's feet to look for the ceiling over its column. */
+    private static final int LEDGE_CEILING_SCAN = 4;
+
     private BotWaterEscapeService() {
     }
 
@@ -127,13 +140,159 @@ public final class BotWaterEscapeService {
             return false;
         }
 
-        boolean out = swimToShore(bot, 3, 4_000L);
+        // Floating feet sit a few tenths below the ledge top and the pocket's ceiling blocks vanilla's
+        // climb boost, so swimming at the ledge never lifts the bot onto it (finding 49): swim up onto it.
+        boolean out = climbOntoLedge(bot, world, floor.up(), dirs[chosen], LEDGE_CLIMB_TIMEOUT_MS);
         LOGGER.info("Bot {} ledge at {} ready, climbed out={} now at {}",
                 name, floor.up().toShortString(), out, bot.getBlockPos().toShortString());
         if (out) {
             clearLogThrottle(botId);
         }
         return out;
+    }
+
+    /**
+     * Swim a floating bot up onto the ledge stand it just carved (finding 49). Each step, on the
+     * server thread: face the ledge, hold jump (swim up), push toward the stand's centre, and while
+     * the bot is pressed against the lip below the ledge top give it vanilla's 0.3 climb kick without
+     * vanilla's headroom check (done here once, against the ceiling over the bot's column, by
+     * {@link LedgeClimbPolicy#canRiseOnto}). Stops when the bot stands on {@code standPos}, then
+     * holds forward a few ticks to settle. Jump is always released before returning.
+     *
+     * <p>Worker thread only (sleeps between steps).</p>
+     *
+     * @return true when the bot ends on the stand or otherwise out of the water
+     */
+    static boolean climbOntoLedge(ServerPlayerEntity bot, ServerWorld world, BlockPos standPos,
+                                  Direction dir, long timeoutMs) {
+        if (bot == null || world == null || standPos == null || bot.isRemoved() || !bot.isAlive()) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        String name = bot.getName().getString();
+        double[] start = callOnServer(server,
+                () -> new double[]{bot.getY(), ceilingAbove(world, bot.getBlockPos(), bot.getY())},
+                SERVER_READ_TIMEOUT_MS, null);
+        if (start == null) {
+            return !isInWater(bot);
+        }
+        if (!LedgeClimbPolicy.canRiseOnto(start[0], standPos.getY(), start[1])) {
+            LOGGER.info("Bot {} cannot swim up onto the ledge {} on {}: feet y={} ceiling y={}",
+                    name, standPos.toShortString(), dir == null ? "?" : dir.asString(),
+                    String.format("%.2f", start[0]), String.format("%.2f", start[1]));
+            return !isInWater(bot);
+        }
+
+        Vec3d centre = Vec3d.ofBottomCenter(standPos);
+        UUID botId = bot.getUuid();
+        long begin = System.currentTimeMillis();
+        // Wall-clock guard in case server calls stall and the policy never sees the deadline.
+        long hardDeadline = begin + timeoutMs + SERVER_READ_TIMEOUT_MS;
+        LedgeClimbPolicy.Step last = LedgeClimbPolicy.Step.HOLD_JUMP_FORWARD;
+        int boosts = 0;
+        try {
+            while (System.currentTimeMillis() < hardDeadline) {
+                if (bot.isRemoved() || !bot.isAlive() || TaskService.isAbortRequested(botId)) {
+                    return false;
+                }
+                long elapsed = System.currentTimeMillis() - begin;
+                LedgeClimbPolicy.Step step = callOnServer(server,
+                        () -> climbStep(bot, standPos, centre, elapsed, timeoutMs),
+                        SERVER_READ_TIMEOUT_MS, null);
+                if (step != null) {
+                    last = step;
+                    if (step == LedgeClimbPolicy.Step.DONE || step == LedgeClimbPolicy.Step.GIVE_UP) {
+                        break;
+                    }
+                    if (step == LedgeClimbPolicy.Step.BOOST) {
+                        boosts++;
+                    }
+                }
+                if (!sleepQuietly(LEDGE_CLIMB_STEP_MS)) {
+                    return false;
+                }
+            }
+            if (last == LedgeClimbPolicy.Step.DONE) {
+                for (int i = 0; i < LEDGE_SETTLE_STEPS; i++) {
+                    callOnServer(server, () -> {
+                        BotActions.applyMovementInput(bot, centre, LEDGE_CLIMB_IMPULSE);
+                        return Boolean.TRUE;
+                    }, SERVER_READ_TIMEOUT_MS, Boolean.FALSE);
+                    if (!sleepQuietly(LEDGE_CLIMB_STEP_MS)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            LOGGER.info("Bot {} did not get onto the ledge {}: {} after {}ms, {} lip boosts, now at {}",
+                    name, standPos.toShortString(), last, System.currentTimeMillis() - begin, boosts,
+                    bot.getBlockPos().toShortString());
+            return !isInWater(bot);
+        } finally {
+            releaseJump(server, bot);
+        }
+    }
+
+    /** One climb step. Server thread only. */
+    private static LedgeClimbPolicy.Step climbStep(ServerPlayerEntity bot, BlockPos standPos, Vec3d centre,
+                                                   long elapsedMs, long timeoutMs) {
+        if (bot.isRemoved() || !bot.isAlive()) {
+            return LedgeClimbPolicy.Step.GIVE_UP;
+        }
+        LedgeClimbPolicy.Step step = LedgeClimbPolicy.next(bot.getY(), standPos.getY(), bot.isOnGround(),
+                bot.getBlockPos().equals(standPos), bot.horizontalCollision, elapsedMs, timeoutMs);
+        if (step == LedgeClimbPolicy.Step.DONE || step == LedgeClimbPolicy.Step.GIVE_UP) {
+            bot.setJumping(false);
+            return step;
+        }
+        LookController.faceBlock(bot, standPos);
+        bot.setJumping(true);
+        BotActions.applyMovementInput(bot, centre, LEDGE_CLIMB_IMPULSE);
+        if (step == LedgeClimbPolicy.Step.BOOST) {
+            boostUp(bot);
+        }
+        return step;
+    }
+
+    /** Vanilla's water climb kick (vy 0.3) unless the bot is already rising. Server thread only. */
+    private static void boostUp(ServerPlayerEntity bot) {
+        Vec3d v = bot.getVelocity();
+        if (v.y < LedgeClimbPolicy.BOOST_BELOW_VY) {
+            bot.setVelocity(v.x, LedgeClimbPolicy.CLIMB_BOOST_VY, v.z);
+            bot.velocityDirty = true;
+        }
+    }
+
+    /**
+     * The bottom of the first solid block over the bot's column, scanning up to
+     * {@link #LEDGE_CEILING_SCAN} cells above its feet cell; far above the feet when there is none.
+     */
+    private static double ceilingAbove(ServerWorld world, BlockPos feet, double feetY) {
+        for (int i = 1; i <= LEDGE_CEILING_SCAN; i++) {
+            BlockPos cell = feet.up(i);
+            var shape = world.getBlockState(cell).getCollisionShape(world, cell);
+            if (!shape.isEmpty()) {
+                return cell.getY() + shape.getMin(Direction.Axis.Y);
+            }
+        }
+        return feetY + 64.0D;
+    }
+
+    private static void releaseJump(MinecraftServer server, ServerPlayerEntity bot) {
+        callOnServer(server, () -> {
+            bot.setJumping(false);
+            return Boolean.TRUE;
+        }, SERVER_READ_TIMEOUT_MS, Boolean.FALSE);
+    }
+
+    private static boolean sleepQuietly(long ms) {
+        try {
+            Thread.sleep(ms);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     /** The top water cell of the column at {@code feet} when the cell above it is open air, else null. */
@@ -392,6 +551,16 @@ public final class BotWaterEscapeService {
 
     private static boolean swimTowardOnce(ServerPlayerEntity bot, BlockPos target,
                                           long perCandidateMs, long overallDeadline) {
+        MinecraftServer server = bot.getEntityWorld() instanceof ServerWorld sw ? sw.getServer() : null;
+        try {
+            return swimTowardLoop(bot, server, target, perCandidateMs, overallDeadline);
+        } finally {
+            releaseJump(server, bot);
+        }
+    }
+
+    private static boolean swimTowardLoop(ServerPlayerEntity bot, MinecraftServer server, BlockPos target,
+                                          long perCandidateMs, long overallDeadline) {
         long deadline = Math.min(System.currentTimeMillis() + perCandidateMs, overallDeadline);
         int stagnantTicks = 0;
         double lastDistSq = Double.MAX_VALUE;
@@ -407,8 +576,10 @@ public final class BotWaterEscapeService {
             // "is block-below empty?" cliff check — we're already in water, so
             // the concept doesn't apply.
             BotActions.applyMovementInput(bot, targetCenter, 1.0D);
-            // Auto-jump handles climbing onto the shore block once we brush it.
+            // Auto-jump handles climbing onto the shore block once we brush it from the ground;
+            // a floating bot swims up the lip instead (autoJump skips it off the ground).
             BotActions.autoJumpIfNeeded(bot);
+            liftAtLip(server, bot, target);
 
             try {
                 Thread.sleep(100L);
@@ -422,6 +593,7 @@ public final class BotWaterEscapeService {
                 // Arrived at the stand — one extra jump-assist in case we're
                 // on the water column directly below the shore block.
                 BotActions.autoJumpIfNeeded(bot);
+                liftAtLip(server, bot, target);
                 try { Thread.sleep(150L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return false; }
                 if (!isInWater(bot)) return true;
             }
@@ -438,6 +610,35 @@ public final class BotWaterEscapeService {
             lastDistSq = distSq;
         }
         return !isInWater(bot);
+    }
+
+    /**
+     * A bot in water pressed against a block holds jump (swims up); off the wall it lets go. When the
+     * shore stand is at most one block above its feet it also gets vanilla's 0.3 climb kick, which
+     * vanilla withholds under a low ceiling (finding 49). Bounded: the kick only lifts the feet to the
+     * stand's level, and the caller releases jump when it returns. Queued on the server thread
+     * without waiting, so the swim loop keeps its timing.
+     */
+    private static void liftAtLip(MinecraftServer server, ServerPlayerEntity bot, BlockPos target) {
+        if (server == null) {
+            return;
+        }
+        Runnable lift = () -> {
+            if (bot.isRemoved() || !bot.isAlive()) {
+                return;
+            }
+            boolean atLip = bot.isTouchingWater() && bot.horizontalCollision;
+            bot.setJumping(atLip);
+            double rise = target.getY() - bot.getY();
+            if (atLip && rise > 0.0D && rise <= 1.0D) {
+                boostUp(bot);
+            }
+        };
+        if (server.isOnThread()) {
+            lift.run();
+        } else {
+            server.execute(lift);
+        }
     }
 
     /**

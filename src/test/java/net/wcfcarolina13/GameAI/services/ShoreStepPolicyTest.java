@@ -67,6 +67,13 @@ class ShoreStepPolicyTest {
     }
 
     @Test
+    void standIsOneAboveTheWaterTop() {
+        // Finding 49: the floor N stays at the top water cell W's y (never lower), so the bot stands
+        // in N.up() at W.y + 1 and a floating bot (feet ~W.y + 0.66..0.9) needs only a few tenths of rise.
+        assertEquals(103, LedgeClimbPolicy.standY(102));
+    }
+
+    @Test
     void neverMoreThanTwoBlocks() {
         assertEquals(2, ShoreStepPolicy.MAX_MINED_BLOCKS);
         assertEquals(0, ShoreStepPolicy.blocksToMine(new Side(0, true, Cell.OPEN, Cell.OPEN, false, 3)));
