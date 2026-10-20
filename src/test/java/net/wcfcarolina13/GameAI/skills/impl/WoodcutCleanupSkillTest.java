@@ -429,16 +429,18 @@ class WoodcutCleanupSkillTest {
     @Test
     void cleanupFullTreeCheckSkipsTheCanopyBuildAndIsMemoisedPerTrunkBase() throws java.io.IOException {
         String detector = sourceAt("src/main/java/net/wcfcarolina13/GameAI/skills/support/TreeDetector.java");
-        assertTrue(detector.contains("fullTree = isStandingTreeForWoodcut(world, pos, memo);"));
+        assertTrue(detector.contains("fullTree = isStandingTreeForWoodcut(reader, pos, memo);"));
         // Same verdict as detectTreeAtForWoodcut(...).isPresent(): the core wraps any resolved trunk
         // in Optional.of(buildTreeTarget(...)) and the woodcut filter reads only base and height.
-        assertTrue(detector.contains("return Optional.of(buildTreeTarget(world, basic));"));
+        assertTrue(detector.contains("return Optional.of(buildTreeTarget(reader, basic));"));
         assertTrue(detector.contains(".filter(t -> !getWoodcutProtectionDecision(world, t.base(), Math.max(4, t.height())).blocked());"));
         assertTrue(detector.contains("new TreeTarget(\n                basic.base(),\n                basic.top(),\n                basic.height(),"),
                 "the target's base and height are the resolved trunk's");
-        String body = detector.substring(detector.indexOf("public static boolean isStandingTreeForWoodcut(ServerWorld world, BlockPos logPos) {"));
+        // The ServerWorld entry delegates to the chunk-reader overload, which holds the check.
+        assertTrue(detector.contains("return world != null && isStandingTreeForWoodcut(new ChunkBlockReader(world), logPos);"));
+        String body = detector.substring(detector.indexOf("static boolean isStandingTreeForWoodcut(ChunkBlockReader reader, BlockPos logPos) {"));
         body = body.substring(0, body.indexOf("\n    }\n"));
-        assertTrue(body.contains("resolveStandingTreeBasic(world, logPos, TreeDetectionMode.STRICT_STANDING)"), body);
+        assertTrue(body.contains("resolveStandingTreeBasic(reader, logPos, TreeDetectionMode.STRICT_STANDING)"), body);
         assertTrue(body.contains("!getWoodcutProtectionDecision(world, basic.get().base(), Math.max(4, basic.get().height())).blocked()"), body);
         assertFalse(body.contains("buildTreeTarget"), body);
         String memo = detector.substring(detector.indexOf("public static final class CleanupScanMemo {"));

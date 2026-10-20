@@ -4457,12 +4457,12 @@ public final class WoodcutSkill implements Skill {
             totalLogs++;
 
             double distSq = origin.getSquaredDistance(pos);
-            boolean nearHuman = TreeDetector.isNearHumanBlocks(world, pos, 4);
+            boolean nearHuman = TreeDetector.isNearHumanBlocks(reader, pos, 4);
             TreeDetector.WoodcutProtectionDecision protectionDecision =
                     TreeDetector.getWoodcutProtectionDecision(world, pos, 4);
             boolean protectedTarget = protectionDecision.blocked();
             boolean soilValid = TreeDetector.isValidSoil(reader.state(pos.getX(), pos.getY() - 1, pos.getZ()));
-            boolean leavesNearby = TreeDetector.hasLeavesNearby(world, pos, 4, 4);
+            boolean leavesNearby = TreeDetector.hasLeavesNearby(reader, pos, 4, 4);
 
             if (nearHuman) {
                 humanProx++;
@@ -4480,7 +4480,7 @@ public final class WoodcutSkill implements Skill {
 
             if (!nearHuman && !protectedTarget) {
                 Optional<TreeDetector.TreeTarget> treeOpt = TreeDetector.detectTreeAtForWoodcut(
-                        world, pos, TreeDetector.TreeDetectionMode.STRICT_STANDING, detectMemo);
+                        reader, pos, TreeDetector.TreeDetectionMode.STRICT_STANDING, detectMemo);
                 if (treeOpt.isPresent()) {
                     TreeDetector.TreeTarget tree = treeOpt.get();
                     if (visited != null && visited.contains(tree.base())) {
@@ -4505,7 +4505,7 @@ public final class WoodcutSkill implements Skill {
                     }
                     // Hazard terrain check: reject trees fully enclosed by ravines/deep water
                     boolean hazardEnclosed = hazardEnclosedMemo.computeIfAbsent(tree.base().asLong(),
-                            () -> WoodcutHazardScanner.scan(world, tree.base()).fullyEnclosed());
+                            () -> WoodcutHazardScanner.scan(reader, tree.base()).fullyEnclosed());
                     if (hazardEnclosed) {
                         failedBaseReasons.put(tree.base().toImmutable(), "hazardous terrain on all sides");
                         failedBases.add(tree.base().toImmutable());
@@ -4520,7 +4520,7 @@ public final class WoodcutSkill implements Skill {
                 }
 
                 Optional<TreeDetector.TreeTarget> looseTreeOpt = TreeDetector.detectTreeAtForWoodcut(
-                        world, pos, TreeDetector.TreeDetectionMode.LOOSE_FRAGMENT, detectMemo);
+                        reader, pos, TreeDetector.TreeDetectionMode.LOOSE_FRAGMENT, detectMemo);
                 if (looseTreeOpt.isPresent()) {
                     TreeDetector.TreeTarget looseTree = looseTreeOpt.get();
                     if ((visited == null || !visited.contains(looseTree.base()))
@@ -4535,7 +4535,7 @@ public final class WoodcutSkill implements Skill {
                 }
 
                 TreeDetector.CleanupLogDisposition cleanupDisposition =
-                        TreeDetector.classifyCleanupLog(world, pos, false, cleanupMemo);
+                        TreeDetector.classifyCleanupLog(reader, pos, false, cleanupMemo);
                 if (cleanupDisposition.actionable() && distSq < bestFloatingDist) {
                     bestFloatingDist = distSq;
                     bestFloating = pos.toImmutable();
@@ -4553,8 +4553,8 @@ public final class WoodcutSkill implements Skill {
             if (rejectSamples.size() < 3) {
                 boolean strictStandingReject = !nearHuman
                         && !protectedTarget
-                        && TreeDetector.detectTreeAtForWoodcut(world, pos, TreeDetector.TreeDetectionMode.LOOSE_FRAGMENT, detectMemo).isPresent()
-                        && TreeDetector.detectTreeAtForWoodcut(world, pos, TreeDetector.TreeDetectionMode.STRICT_STANDING, detectMemo).isEmpty();
+                        && TreeDetector.detectTreeAtForWoodcut(reader, pos, TreeDetector.TreeDetectionMode.LOOSE_FRAGMENT, detectMemo).isPresent()
+                        && TreeDetector.detectTreeAtForWoodcut(reader, pos, TreeDetector.TreeDetectionMode.STRICT_STANDING, detectMemo).isEmpty();
                 rejectSamples.add(String.format("%s (soilFail=%s, leafFail=%s, humanFail=%s, protected=%s, protection=%s%s)",
                         pos.toShortString(),
                         !soilValid,

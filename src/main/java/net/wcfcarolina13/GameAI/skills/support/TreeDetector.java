@@ -265,7 +265,10 @@ public final class TreeDetector {
     }
 
     public static Optional<TreeTarget> detectTreeAt(ServerWorld world, BlockPos logPos) {
-        return detectTreeAtCore(world, logPos, TreeDetectionMode.STRICT_STANDING)
+        if (world == null) {
+            return Optional.empty();
+        }
+        return detectTreeAtCore(new ChunkBlockReader(world), logPos, TreeDetectionMode.STRICT_STANDING)
                 .filter(t -> !isProtected(world, t.base(), t.height()));
     }
 
@@ -274,14 +277,31 @@ public final class TreeDetector {
      * that allows trees within the base protection radius (trees are resources).
      */
     public static Optional<TreeTarget> detectTreeAtForWoodcut(ServerWorld world, BlockPos logPos) {
-        return detectTreeAtForWoodcut(world, logPos, TreeDetectionMode.STRICT_STANDING)
-                .filter(t -> !getWoodcutProtectionDecision(world, t.base(), Math.max(4, t.height())).blocked());
+        return detectTreeAtForWoodcut(world, logPos, TreeDetectionMode.STRICT_STANDING);
     }
 
     public static Optional<TreeTarget> detectTreeAtForWoodcut(ServerWorld world,
                                                               BlockPos logPos,
                                                               TreeDetectionMode mode) {
-        return detectTreeAtCore(world, logPos, mode)
+        if (world == null) {
+            return Optional.empty();
+        }
+        return detectTreeAtForWoodcut(new ChunkBlockReader(world), logPos, mode);
+    }
+
+    /**
+     * {@link #detectTreeAtForWoodcut(ServerWorld, BlockPos, TreeDetectionMode)} through a scan's
+     * chunk reader: every block read is a palette lookup instead of a server round trip from a
+     * worker. A cell in an unloaded chunk reads as no log, no leaf, no soil.
+     */
+    public static Optional<TreeTarget> detectTreeAtForWoodcut(ChunkBlockReader reader,
+                                                              BlockPos logPos,
+                                                              TreeDetectionMode mode) {
+        if (reader == null) {
+            return Optional.empty();
+        }
+        ServerWorld world = reader.world();
+        return detectTreeAtCore(reader, logPos, mode)
                 .filter(t -> !getWoodcutProtectionDecision(world, t.base(), Math.max(4, t.height())).blocked());
     }
 
@@ -316,37 +336,48 @@ public final class TreeDetector {
                                                               BlockPos logPos,
                                                               TreeDetectionMode mode,
                                                               DetectScanMemo memo) {
-        if (memo == null || world == null || logPos == null || !isLog(world.getBlockState(logPos))) {
-            return detectTreeAtForWoodcut(world, logPos, mode);
+        if (world == null) {
+            return Optional.empty();
         }
-        BaseVerdictMemo<Optional<TreeTarget>> cache = mode == TreeDetectionMode.STRICT_STANDING ? memo.strict : memo.loose;
-        return cache.computeIfAbsent(trunkBaseOf(world, logPos).asLong(),
-                () -> detectTreeAtForWoodcut(world, logPos, mode));
+        return detectTreeAtForWoodcut(new ChunkBlockReader(world), logPos, mode, memo);
     }
 
-    private static Optional<TreeTarget> detectTreeAtCore(ServerWorld world,
+    /** {@link #detectTreeAtForWoodcut(ServerWorld, BlockPos, TreeDetectionMode, DetectScanMemo)} through a scan's chunk reader. */
+    public static Optional<TreeTarget> detectTreeAtForWoodcut(ChunkBlockReader reader,
+                                                              BlockPos logPos,
+                                                              TreeDetectionMode mode,
+                                                              DetectScanMemo memo) {
+        if (memo == null || reader == null || logPos == null || !isLog(reader.state(logPos))) {
+            return detectTreeAtForWoodcut(reader, logPos, mode);
+        }
+        BaseVerdictMemo<Optional<TreeTarget>> cache = mode == TreeDetectionMode.STRICT_STANDING ? memo.strict : memo.loose;
+        return cache.computeIfAbsent(trunkBaseOf(reader, logPos).asLong(),
+                () -> detectTreeAtForWoodcut(reader, logPos, mode));
+    }
+
+    private static Optional<TreeTarget> detectTreeAtCore(ChunkBlockReader reader,
                                                          BlockPos logPos,
                                                          TreeDetectionMode mode) {
-        Optional<BasicTreeInfo> basicOpt = resolveStandingTreeBasic(world, logPos, mode);
+        Optional<BasicTreeInfo> basicOpt = resolveStandingTreeBasic(reader, logPos, mode);
         if (basicOpt.isEmpty()) {
             return Optional.empty();
         }
         BasicTreeInfo basic = basicOpt.get();
-        return Optional.of(buildTreeTarget(world, basic));
+        return Optional.of(buildTreeTarget(reader, basic));
     }
 
-    private static Optional<BasicTreeInfo> resolveStandingTreeBasic(ServerWorld world,
+    private static Optional<BasicTreeInfo> resolveStandingTreeBasic(ChunkBlockReader reader,
                                                                     BlockPos logPos,
                                                                     TreeDetectionMode mode) {
-        if (world == null || logPos == null) {
+        if (reader == null || logPos == null) {
             return Optional.empty();
         }
-        BlockState state = world.getBlockState(logPos);
+        BlockState state = reader.state(logPos);
         if (!isLog(state)) {
             return Optional.empty();
         }
 
-        BlockPos base = trunkBaseOf(world, logPos);
+        BlockPos base = trunkBaseOf(reader, logPos);
 
         // Scan downward up to 8 blocks for valid soil — handles cherry trees and
         // hillside trees whose trunks start above ground with air/stone gaps below.
@@ -354,8 +385,8 @@ public final class TreeDetector {
         boolean foundSoil = false;
         for (int dy = 1; dy <= 8; dy++) {
             BlockPos probe = base.down(dy);
-            if (!world.isChunkLoaded(probe)) break;
-            BlockState soilCandidate = world.getBlockState(probe);
+            if (!reader.isLoaded(probe.getX(), probe.getZ())) break;
+            BlockState soilCandidate = reader.state(probe);
             if (isValidSoil(soilCandidate)) {
                 foundSoil = true;
                 break;
@@ -366,14 +397,14 @@ public final class TreeDetector {
                 return Optional.empty();
             }
             // Allow re-run in branch cleanup: treat as valid if leaves present and no human blocks
-            if (!hasLeavesNearby(world, base, 4, 4) || isNearHumanBlocks(world, base, 4)) {
+            if (!hasLeavesNearby(reader, base, 4, 4) || isNearHumanBlocks(reader, base, 4)) {
                 return Optional.empty();
             }
         }
 
         int height = 1;
         BlockPos cursor = base.up();
-        while (height < MAX_TREE_HEIGHT && isLog(world.getBlockState(cursor))) {
+        while (height < MAX_TREE_HEIGHT && isLog(reader.state(cursor))) {
             height++;
             cursor = cursor.up();
         }
@@ -382,10 +413,10 @@ public final class TreeDetector {
             return Optional.empty();
         }
 
-        if (!hasLeavesNearby(world, base, height)) {
+        if (!hasLeavesNearby(reader, base, height)) {
             return Optional.empty();
         }
-        if (isNearHumanBlocks(world, base, height)) {
+        if (isNearHumanBlocks(reader, base, height)) {
             return Optional.empty();
         }
 
@@ -393,9 +424,10 @@ public final class TreeDetector {
     }
 
     /** The lowest log of the straight column {@code logPos} stands in (the trunk base the tree checks start from). */
-    private static BlockPos trunkBaseOf(ServerWorld world, BlockPos logPos) {
+    private static BlockPos trunkBaseOf(ChunkBlockReader reader, BlockPos logPos) {
         BlockPos base = logPos.toImmutable();
-        while (isLog(world.getBlockState(base.down())) && base.getY() > world.getBottomY()) {
+        int bottomY = reader.world().getBottomY();
+        while (isLog(reader.state(base.down())) && base.getY() > bottomY) {
             base = base.down();
         }
         return base;
@@ -410,7 +442,16 @@ public final class TreeDetector {
      * skipped here.
      */
     public static boolean isStandingTreeForWoodcut(ServerWorld world, BlockPos logPos) {
-        Optional<BasicTreeInfo> basic = resolveStandingTreeBasic(world, logPos, TreeDetectionMode.STRICT_STANDING);
+        return world != null && isStandingTreeForWoodcut(new ChunkBlockReader(world), logPos);
+    }
+
+    /** {@link #isStandingTreeForWoodcut(ServerWorld, BlockPos)} through a scan's chunk reader. */
+    static boolean isStandingTreeForWoodcut(ChunkBlockReader reader, BlockPos logPos) {
+        if (reader == null) {
+            return false;
+        }
+        ServerWorld world = reader.world();
+        Optional<BasicTreeInfo> basic = resolveStandingTreeBasic(reader, logPos, TreeDetectionMode.STRICT_STANDING);
         return basic.isPresent()
                 && !getWoodcutProtectionDecision(world, basic.get().base(), Math.max(4, basic.get().height())).blocked();
     }
@@ -420,23 +461,23 @@ public final class TreeDetector {
      * none). The verdict is a function of the trunk base alone (the trunk is re-walked up from the
      * base), so it is cached per base and every log of one column reuses it.
      */
-    static boolean isStandingTreeForWoodcut(ServerWorld world, BlockPos logPos, CleanupScanMemo memo) {
-        if (memo == null || world == null || logPos == null || !isLog(world.getBlockState(logPos))) {
-            return isStandingTreeForWoodcut(world, logPos);
+    static boolean isStandingTreeForWoodcut(ChunkBlockReader reader, BlockPos logPos, CleanupScanMemo memo) {
+        if (memo == null || reader == null || logPos == null || !isLog(reader.state(logPos))) {
+            return isStandingTreeForWoodcut(reader, logPos);
         }
-        long key = trunkBaseOf(world, logPos).asLong();
+        long key = trunkBaseOf(reader, logPos).asLong();
         Boolean cached = memo.standingTrees.get(key);
         if (cached != null) {
             return cached;
         }
-        boolean verdict = isStandingTreeForWoodcut(world, logPos);
+        boolean verdict = isStandingTreeForWoodcut(reader, logPos);
         memo.standingTrees.put(key, verdict);
         return verdict;
     }
 
-    private static TreeTarget buildTreeTarget(ServerWorld world, BasicTreeInfo basic) {
-        Map<BlockPos, Integer> nearbyRootedBases = findNearbyRootedBases(world, basic);
-        Set<BlockPos> canopyLeaves = collectLeafEnvelope(world, basic, nearbyRootedBases);
+    private static TreeTarget buildTreeTarget(ChunkBlockReader reader, BasicTreeInfo basic) {
+        Map<BlockPos, Integer> nearbyRootedBases = findNearbyRootedBases(reader, basic);
+        Set<BlockPos> canopyLeaves = collectLeafEnvelope(reader, basic, nearbyRootedBases);
         BlockPos envelopeMin = basic.base().add(-1, -1, -1);
         BlockPos envelopeMax = basic.top().add(1, 1, 1);
         if (!canopyLeaves.isEmpty()) {
@@ -468,9 +509,9 @@ public final class TreeDetector {
         );
     }
 
-    private static Map<BlockPos, Integer> findNearbyRootedBases(ServerWorld world, BasicTreeInfo selected) {
+    private static Map<BlockPos, Integer> findNearbyRootedBases(ChunkBlockReader reader, BasicTreeInfo selected) {
         Map<BlockPos, Integer> bases = new HashMap<>();
-        if (world == null || selected == null) {
+        if (reader == null || selected == null) {
             return bases;
         }
         BlockPos scanMin = selected.base().add(-TREE_ENVELOPE_SCAN_HORIZONTAL, -1, -TREE_ENVELOPE_SCAN_HORIZONTAL);
@@ -480,10 +521,10 @@ public final class TreeDetector {
                 selected.base().getZ() + TREE_ENVELOPE_SCAN_HORIZONTAL
         );
         for (BlockPos candidate : BlockPos.iterate(scanMin, scanMax)) {
-            if (!isLog(world.getBlockState(candidate))) {
+            if (!isLog(reader.state(candidate))) {
                 continue;
             }
-            Optional<BasicTreeInfo> infoOpt = resolveStandingTreeBasic(world, candidate, TreeDetectionMode.STRICT_STANDING);
+            Optional<BasicTreeInfo> infoOpt = resolveStandingTreeBasic(reader, candidate, TreeDetectionMode.STRICT_STANDING);
             if (infoOpt.isEmpty()) {
                 continue;
             }
@@ -495,11 +536,11 @@ public final class TreeDetector {
         return bases;
     }
 
-    private static Set<BlockPos> collectLeafEnvelope(ServerWorld world,
+    private static Set<BlockPos> collectLeafEnvelope(ChunkBlockReader reader,
                                                      BasicTreeInfo selected,
                                                      Map<BlockPos, Integer> nearbyRootedBases) {
         Set<BlockPos> leaves = new HashSet<>();
-        if (world == null || selected == null) {
+        if (reader == null || selected == null) {
             return leaves;
         }
         BlockPos scanMin = selected.base().add(-TREE_ENVELOPE_SCAN_HORIZONTAL, -TREE_ENVELOPE_SCAN_VERTICAL_BELOW, -TREE_ENVELOPE_SCAN_HORIZONTAL);
@@ -520,7 +561,7 @@ public final class TreeDetector {
                         if (!isWithinBounds(seed, scanMin, scanMax)) {
                             continue;
                         }
-                        if (!world.getBlockState(seed).isIn(BlockTags.LEAVES)) {
+                        if (!isLeaf(reader.state(seed))) {
                             continue;
                         }
                         if (!leafBelongsToSelectedTree(seed, selected.base(), nearbyRootedBases)) {
@@ -547,7 +588,7 @@ public final class TreeDetector {
                         if (!isWithinBounds(neighbor, scanMin, scanMax)) {
                             continue;
                         }
-                        if (!world.getBlockState(neighbor).isIn(BlockTags.LEAVES)) {
+                        if (!isLeaf(reader.state(neighbor))) {
                             continue;
                         }
                         if (!leafBelongsToSelectedTree(neighbor, selected.base(), nearbyRootedBases)) {
@@ -620,11 +661,11 @@ public final class TreeDetector {
         return dx * dx + dz * dz;
     }
 
-    private static boolean hasLeavesNearby(ServerWorld world, BlockPos base, int height) {
+    private static boolean hasLeavesNearby(ChunkBlockReader reader, BlockPos base, int height) {
         BlockPos min = base.add(-LEAF_SCAN_RADIUS, -1, -LEAF_SCAN_RADIUS);
         BlockPos max = base.add(LEAF_SCAN_RADIUS, height + 2, LEAF_SCAN_RADIUS);
         for (BlockPos pos : BlockPos.iterate(min, max)) {
-            if (world.getBlockState(pos).isIn(BlockTags.LEAVES)) {
+            if (isLeaf(reader.state(pos))) {
                 return true;
             }
         }
@@ -632,10 +673,15 @@ public final class TreeDetector {
     }
 
     public static boolean hasLeavesNearby(ServerWorld world, BlockPos base, int horizontalRadius, int verticalRadius) {
+        return hasLeavesNearby(new ChunkBlockReader(world), base, horizontalRadius, verticalRadius);
+    }
+
+    /** {@link #hasLeavesNearby(ServerWorld, BlockPos, int, int)} through a scan's chunk reader; an unloaded cell holds no leaves. */
+    public static boolean hasLeavesNearby(ChunkBlockReader reader, BlockPos base, int horizontalRadius, int verticalRadius) {
         BlockPos min = base.add(-horizontalRadius, -verticalRadius, -horizontalRadius);
         BlockPos max = base.add(horizontalRadius, verticalRadius + 2, horizontalRadius);
         for (BlockPos pos : BlockPos.iterate(min, max)) {
-            if (world.getBlockState(pos).isIn(BlockTags.LEAVES)) {
+            if (isLeaf(reader.state(pos))) {
                 return true;
             }
         }
@@ -643,10 +689,26 @@ public final class TreeDetector {
     }
 
     public static boolean isNearHumanBlocks(ServerWorld world, BlockPos base, int height) {
+        return isNearHumanBlocks(new ChunkBlockReader(world), base, height);
+    }
+
+    /**
+     * {@link #isNearHumanBlocks(ServerWorld, BlockPos, int)} through a scan's chunk reader. A cell
+     * in an unloaded chunk counts as a human block (conservative, as {@code WorldTerrainView}): the
+     * tree waits until its surroundings are loaded. A cell above or below the world height is air.
+     */
+    public static boolean isNearHumanBlocks(ChunkBlockReader reader, BlockPos base, int height) {
         BlockPos min = base.add(-HUMAN_SCAN_RADIUS, -1, -HUMAN_SCAN_RADIUS);
         BlockPos max = base.add(HUMAN_SCAN_RADIUS, height + 2, HUMAN_SCAN_RADIUS);
         for (BlockPos pos : BlockPos.iterate(min, max)) {
-            if (isHumanBlock(world.getBlockState(pos))) {
+            BlockState state = reader.state(pos);
+            if (state == null) {
+                if (!reader.isLoaded(pos.getX(), pos.getZ())) {
+                    return true;
+                }
+                continue;
+            }
+            if (isHumanBlock(state)) {
                 return true;
             }
         }
@@ -779,9 +841,21 @@ public final class TreeDetector {
      * gives the same disposition.
      */
     public static CleanupLogDisposition classifyCleanupLog(ServerWorld world, BlockPos pos, boolean rememberedLeftover, CleanupScanMemo memo) {
-        if (world == null || pos == null || !world.getBlockState(pos).isIn(BlockTags.LOGS)) {
+        if (world == null) {
             return new CleanupLogDisposition(CleanupLogDispositionKind.REJECTED_NON_LOG, false, "not-log");
         }
+        return classifyCleanupLog(new ChunkBlockReader(world), pos, rememberedLeftover, memo);
+    }
+
+    /**
+     * {@link #classifyCleanupLog(ServerWorld, BlockPos, boolean, CleanupScanMemo)} through a scan's
+     * chunk reader. The reader is the caller's (one per scan and thread); the memo never holds it.
+     */
+    public static CleanupLogDisposition classifyCleanupLog(ChunkBlockReader reader, BlockPos pos, boolean rememberedLeftover, CleanupScanMemo memo) {
+        if (reader == null || pos == null || !isTaggedLog(reader.state(pos))) {
+            return new CleanupLogDisposition(CleanupLogDispositionKind.REJECTED_NON_LOG, false, "not-log");
+        }
+        ServerWorld world = reader.world();
 
         if (rememberedLeftover) {
             WoodcutProtectionDecision decision = getWoodcutProtectionDecision(world, pos, 4);
@@ -800,20 +874,20 @@ public final class TreeDetector {
             );
         }
 
-        boolean humanAdjacent = isNearHumanBlocks(world, pos, 3);
+        boolean humanAdjacent = isNearHumanBlocks(reader, pos, 3);
         WoodcutProtectionDecision protectionDecision = getWoodcutProtectionDecision(world, pos, 4);
         boolean protectedTarget = protectionDecision.blocked();
         boolean fullTree = false;
         if (TreeCleanupClassifier.needsFullTreeCheck(humanAdjacent, protectedTarget)) {
             try {
-                fullTree = isStandingTreeForWoodcut(world, pos, memo);
+                fullTree = isStandingTreeForWoodcut(reader, pos, memo);
             } catch (Exception ignored) {
             }
         }
 
-        boolean loneFloating = isCleanupLoneFloatingLog(world, pos);
+        boolean loneFloating = isCleanupLoneFloatingLog(reader, pos);
         CleanupComponentProfile profile = TreeCleanupClassifier.needsComponentProfile(humanAdjacent, protectedTarget, fullTree, loneFloating)
-                ? cleanupComponentProfile(world, pos, memo)
+                ? cleanupComponentProfile(reader, pos, memo)
                 : UNREAD_PROFILE;
         return classifyCleanupLogFromSignals(
                 false,
@@ -861,15 +935,15 @@ public final class TreeDetector {
         );
     }
 
-    private static boolean isCleanupLoneFloatingLog(ServerWorld world, BlockPos candidate) {
-        if (world == null || candidate == null) {
+    private static boolean isCleanupLoneFloatingLog(ChunkBlockReader reader, BlockPos candidate) {
+        if (reader == null || candidate == null) {
             return false;
         }
-        if (hasLeavesNearby(world, candidate, 2, 2)) {
+        if (hasLeavesNearby(reader, candidate, 2, 2)) {
             return false;
         }
         for (Direction dir : Direction.values()) {
-            if (world.getBlockState(candidate.offset(dir)).isIn(BlockTags.LOGS)) {
+            if (isTaggedLog(reader.state(candidate.offset(dir)))) {
                 return false;
             }
         }
@@ -877,7 +951,7 @@ public final class TreeDetector {
     }
 
     /** The component profile for {@code pos}, from the memo when an explored rejected component holds it. */
-    private static CleanupComponentProfile cleanupComponentProfile(ServerWorld world, BlockPos pos, CleanupScanMemo memo) {
+    private static CleanupComponentProfile cleanupComponentProfile(ChunkBlockReader reader, BlockPos pos, CleanupScanMemo memo) {
         if (memo != null) {
             CleanupComponentProfile cached = memo.profiles.get(pos.asLong());
             if (cached != null) {
@@ -885,7 +959,7 @@ public final class TreeDetector {
             }
         }
         Set<BlockPos> visited = new HashSet<>();
-        CleanupComponentProfile profile = inspectCleanupLogComponent(world, pos, CLEANUP_COMPONENT_LIMIT, visited);
+        CleanupComponentProfile profile = inspectCleanupLogComponent(reader, pos, CLEANUP_COMPONENT_LIMIT, visited);
         if (memo != null
                 && !profile.tooLarge()
                 && TreeCleanupClassifier.profileRejects(profile.size(), profile.grounded(), profile.leavesNearby(),
@@ -897,8 +971,8 @@ public final class TreeDetector {
         return profile;
     }
 
-    private static CleanupComponentProfile inspectCleanupLogComponent(ServerWorld world, BlockPos start, int limit, Set<BlockPos> visited) {
-        if (world == null || start == null || !world.getBlockState(start).isIn(BlockTags.LOGS)) {
+    private static CleanupComponentProfile inspectCleanupLogComponent(ChunkBlockReader reader, BlockPos start, int limit, Set<BlockPos> visited) {
+        if (reader == null || start == null || !isTaggedLog(reader.state(start))) {
             return new CleanupComponentProfile(0, false, false, false, false);
         }
         Queue<BlockPos> queue = new ArrayDeque<>();
@@ -911,16 +985,21 @@ public final class TreeDetector {
 
         while (!queue.isEmpty()) {
             BlockPos pos = queue.poll();
-            leavesNearby = leavesNearby || hasLeavesNearby(world, pos, 3, 3);
+            leavesNearby = leavesNearby || hasLeavesNearby(reader, pos, 3, 3);
 
             BlockPos below = pos.down();
-            BlockState belowState = world.getBlockState(below);
-            boolean belowIsLog = belowState.isIn(BlockTags.LOGS);
-            boolean belowIsSolid = !belowState.getCollisionShape(world, below).isEmpty() && !belowState.isIn(BlockTags.LEAVES);
-            boolean belowUnsupported = belowState.isAir()
+            BlockState belowState = reader.state(below);
+            // Same column as a log just read, so null means below the world: void air, as
+            // world.getBlockState gave (not a log, no collision, unsupported).
+            WorldChunk belowView = belowState == null ? null : reader.chunk(below.getX() >> 4, below.getZ() >> 4);
+            boolean belowIsLog = belowState != null && belowState.isIn(BlockTags.LOGS);
+            boolean belowCollisionEmpty = belowView == null || belowState.getCollisionShape(belowView, below).isEmpty();
+            boolean belowIsSolid = !belowCollisionEmpty && !belowState.isIn(BlockTags.LEAVES);
+            boolean belowUnsupported = belowState == null
+                    || belowState.isAir()
                     || belowState.isReplaceable()
                     || belowState.isIn(BlockTags.LEAVES)
-                    || belowState.getCollisionShape(world, below).isEmpty();
+                    || belowCollisionEmpty;
 
             if (!belowIsLog && belowIsSolid) {
                 grounded = true;
@@ -931,7 +1010,7 @@ public final class TreeDetector {
 
             for (Direction dir : Direction.values()) {
                 BlockPos neighbor = pos.offset(dir);
-                if (visited.contains(neighbor) || !world.getBlockState(neighbor).isIn(BlockTags.LOGS)) {
+                if (visited.contains(neighbor) || !isTaggedLog(reader.state(neighbor))) {
                     continue;
                 }
                 BlockPos immutable = neighbor.toImmutable();
@@ -1137,6 +1216,16 @@ public final class TreeDetector {
                 || state.isOf(Blocks.CHERRY_LOG);
     }
 
+    /** A leaf block; null (unloaded or outside the world height) is not. */
+    private static boolean isLeaf(BlockState state) {
+        return state != null && state.isIn(BlockTags.LEAVES);
+    }
+
+    /** A {@code BlockTags.LOGS} block; null (unloaded or outside the world height) is not. */
+    private static boolean isTaggedLog(BlockState state) {
+        return state != null && state.isIn(BlockTags.LOGS);
+    }
+
     public static boolean isValidSoil(BlockState state) {
         if (state == null) {
             return false;
@@ -1171,7 +1260,7 @@ public final class TreeDetector {
                         continue;
                     }
                     BlockPos candidate = new BlockPos(cx, y, cz);
-                    Optional<TreeTarget> treeOpt = detectTreeAtForWoodcut(world, candidate);
+                    Optional<TreeTarget> treeOpt = detectTreeAtForWoodcut(reader, candidate, TreeDetectionMode.STRICT_STANDING);
                     if (treeOpt.isEmpty()) {
                         continue;
                     }
