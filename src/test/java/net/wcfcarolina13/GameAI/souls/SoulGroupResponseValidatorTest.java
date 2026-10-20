@@ -534,4 +534,46 @@ class SoulGroupResponseValidatorTest {
                 new SoulGroupTypes.SceneLine(0, "Rain again."));
         assertEquals(solo, SoulGroupResponseValidator.mergeSpeakerRuns(solo, true));
     }
+
+    // === Stage directions (1.1.277) ===
+
+    @Test
+    void stageDirectionsAreStrippedFromSceneLines() {
+        var parse = validator.parse("Jake: (chuckles) Fair enough.\nSara: Sure. (dryly)",
+                List.of("Jake", "Sara"));
+        assertTrue(parse.accepted());
+        assertEquals("Fair enough.", parse.lines().get(0).text());
+        assertEquals("Sure.", parse.lines().get(1).text());
+    }
+
+    @Test
+    void ordinaryParenthesesSurviveInSceneLines() {
+        var parse = validator.parse("Bob: Meet me there (near the river).", List.of("Bob", "Sara"));
+        assertTrue(parse.accepted());
+        assertEquals("Meet me there (near the river).", parse.lines().getFirst().text());
+    }
+
+    @Test
+    void soloStageDirectionOnlyLineIsDroppedAsNoise() {
+        var parse = validator.parse("Bob: Morning.\n(sighs)\n*sighs* Fine.", List.of("Bob"));
+        assertTrue(parse.accepted());
+        assertEquals(2, parse.lines().size());
+        assertEquals("Morning.", parse.lines().get(0).text());
+        assertEquals("Fine.", parse.lines().get(1).text());
+        assertEquals(1, parse.dropped().size());
+        assertEquals(SoulGroupResponseValidator.DropReason.NOISE, parse.dropped().getFirst().reason());
+
+        var only = validator.parse("(sighs)", List.of("Bob"));
+        assertFalse(only.accepted());
+        assertEquals(SoulGroupResponseValidator.DropReason.NOISE, only.dropped().getFirst().reason());
+    }
+
+    @Test
+    void taggedStageDirectionOnlyLineIsDroppedAsNoise() {
+        var parse = validator.parse("Jake: (shrugs)\nSara: Fine.", List.of("Jake", "Sara"));
+        assertTrue(parse.accepted());
+        assertEquals(1, parse.lines().size());
+        assertEquals(1, parse.lines().getFirst().participantIndex());
+        assertEquals(SoulGroupResponseValidator.DropReason.NOISE, parse.dropped().getFirst().reason());
+    }
 }

@@ -623,6 +623,7 @@ public final class SoulPromptAssembler {
                 "Respond now, in character, to the player's message that follows this line.",
                 "Speak only -- do not narrate or invent world actions, and rely only on the",
                 "authoritative state and witnessed events above for anything about the world.",
+                "No stage directions in parentheses or asterisks.",
                 rightNow.toString()));
     }
 }

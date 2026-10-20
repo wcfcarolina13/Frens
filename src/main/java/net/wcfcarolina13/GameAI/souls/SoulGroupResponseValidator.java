@@ -243,6 +243,9 @@ public final class SoulGroupResponseValidator {
                 dropped.add(new DroppedLine(rawIndex, DropReason.UNTAGGED, line));
                 continue;
             }
+            // 1.1.277: "(chuckles) Fair enough." was spoken, voiced and replayed into party
+            // history. A line that was only a stage direction is dropped as NOISE below.
+            body = stripWrappingQuotes(SoulResponseValidator.stripStageDirections(body));
             if (body.isEmpty()) {
                 dropped.add(new DroppedLine(rawIndex, DropReason.NOISE, line));
                 continue;

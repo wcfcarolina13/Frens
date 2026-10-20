@@ -157,4 +157,48 @@ class SoulResponseValidatorTest {
         assertTrue(result.accepted());
         assertEquals("Hello there.", result.text());
     }
+
+    // === Stage directions (1.1.277) ===
+
+    @Test
+    void stripsLeadingAndTrailingStageDirections() {
+        assertEquals("Fair enough.", validator.validate("Bob: (chuckles) Fair enough.", "Bob").text());
+        assertEquals("Sure.", validator.validate("Bob: Sure. (dryly)", "Bob").text());
+        assertEquals("Fine.", validator.validate("*sighs* Fine.", "Bob").text());
+        assertEquals("Fine.", validator.validate("(sighs) (shrugs) Fine.", "Bob").text());
+        assertEquals("Fine.", validator.validate("Fine (sighs).", "Bob").text());
+        assertEquals("Okay.", validator.validate("**grins** Okay.", "Bob").text());
+        assertEquals("Okay.", validator.validate("_laughs softly_ Okay.", "Bob").text());
+    }
+
+    @Test
+    void stripsMidTextAsteriskStageDirection() {
+        assertEquals("Well, fine. Let's go.",
+                SoulResponseValidator.stripStageDirections("Well, fine. *sighs heavily* Let's go."));
+    }
+
+    @Test
+    void stageDirectionOnlyReplyIsRejectedAsBlank() {
+        SoulResponseValidator.ValidationResult result = validator.validate("(laughs)", "Bob");
+        assertFalse(result.accepted());
+        assertEquals(SoulTypes.FailureCode.MALFORMED, result.failureCode());
+        assertEquals("blank output", result.reason());
+        assertFalse(validator.validate("Bob: *sighs*...", "Bob").accepted());
+    }
+
+    @Test
+    void ordinaryParenthesesSurvive() {
+        assertEquals("Meet me there (near the river).",
+                validator.validate("Bob: Meet me there (near the river).", "Bob").text());
+        assertEquals("I (think) so", validator.validate("I (think) so", "Bob").text());
+        assertEquals("(I think) we should go.", validator.validate("(I think) we should go.", "Bob").text());
+        assertEquals("Bring 3 logs (sighs 2 times)",
+                SoulResponseValidator.stripStageDirections("Bring 3 logs (sighs 2 times)"));
+        assertEquals("Fine. (sighs at the long dark river)",
+                SoulResponseValidator.stripStageDirections("Fine. (sighs at the long dark river)"));
+        assertEquals("That is *really* good.",
+                SoulResponseValidator.stripStageDirections("That is *really* good."));
+        // Untouched text keeps its exact spacing; cleanup runs only after a strip.
+        assertEquals("Hello ,  world", SoulResponseValidator.stripStageDirections("Hello ,  world"));
+    }
 }
