@@ -4,7 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.278) — next session starts here
+## Session Handoff 2026-10-20 (1.1.279) — next session starts here
+
+**State:** main = origin/main @ 1.1.279. Suite 3274 green. Deployed to Nirn. Sandbox check pending (Phase 6bq, `tools/sandbox/fix279.py`). Built autonomously overnight.
+**1.1.279** (changelog entry has rulings and costs): same-cell `moveRelative` steps collision-checked (`SubCellSnapPolicy`, backlog 143); make-room never drops food/tools/reserved/valuables for aid (cheap-only, ruling) and server-thread crafts never walk to or place a chest (181); fresh stuck counters per return (140) and jump-sprint judged after landing on a sideways move (139); no cooking sleep on the server thread (180); Pocket installer timeouts (235); bundled food counted (177). Fable review (two reviewers), fix wave `5eb24b38`, clean re-review.
+**Next build (scoped, ready to implement):** findings 47/50/51 follow canopy (waypoint reached only in its column + 0.3 stop distance, compress keeps direction/Y changes, leaf check both axes for a diagonal goal, leaf gate by anchor not same-block, /tp latch cleared when no task); 49 ledge climb (hold jump + forward while swimming, boost on horizontal collision); 52 cleanup never mines any tree's soil (shared recent-tree-soil ledger) and scaffold memory per bot; plus 1.1.278 sandbox findings 53-56.
+**Public release:** 1.1.279 is the candidate once its sandbox checks pass. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Needs Bradley:** the three 1.1.272 questions still stand (Spells key migration, chest axe before crafting, shared-server chest scan).
+**Deferred (reasons in the changelogs):** see the 1.1.279, 1.1.278 and 1.1.277 entries.
+**Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-20 (1.1.278) — superseded
 
 **State:** main = origin/main @ 1.1.278. Suite 3221 green. Deployed to Nirn. Sandbox-checked 2026-10-20 (Phase 6bp, `tools/sandbox/fix278.py`): all five fixes PASS (aid without a server freeze, golden-apple yes/no, go_to dimension, doorway, Collect messages), follow and woodcut no regression; new findings 53-56 (bow-only bot never defends; a bow defender shot its ally; admin `/bot open` beyond 8 blocks shows nothing; follow stall under leaves on an east route); 2 field items in Phase 6bp. Built autonomously overnight (Bradley 2026-10-19: "do a few more iterations autonomously").
 **1.1.278** (changelog entry has rulings and costs): defensive mutual aid tick-driven (no 1.6-2.4 s server freeze), hands off only to combat that will fight; golden-apple yes/no handled (20 s prompt window, ruling); `/bot go_to` in the bot's own dimension; following bots line up with an open doorway, no jump under a lintel, no door shut on a bot; Collect/Go owner messages (refused, replaced, cancelled, traveling, dimension fallback). Fable review (two reviewers), fix wave `d559547c`, re-review found 2 more (`0603252b`, controller read the diff).
