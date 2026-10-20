@@ -125,6 +125,7 @@ public class BotEventHandler {
     private static final double FOLLOW_BACKUP_DISTANCE = 1.05D; // trigger backup after linger
     private static final long FOLLOW_BACKUP_TRIGGER_MS = 3_000L;
     private static final double FOLLOW_SPRINT_DISTANCE_SQ = 4.0D; // >2 blocks -> sprint
+    private static final double FOLLOW_WAYPOINT_STOP_DISTANCE = 0.3D; // stop inside the waypoint column
     private static final double FOLLOW_TELEPORT_DISTANCE_SQ = 225.0D; // ~15 blocks
     private static final int FOLLOW_TELEPORT_STUCK_TICKS = 30; // ~1.5 seconds @20tps
     private static final int FOLLOW_TELEPORT_COOLDOWN_TICKS = 40; // 2 seconds @20tps
@@ -1174,8 +1175,16 @@ public class BotEventHandler {
             if (tpState != null && tpState.mode != Mode.TRAVELING) {
                 LOGGER.info("External teleport detected for {} (moved {} blocks in 1 tick) — clearing tasks and goals",
                         bot.getName().getString(), (int) Math.sqrt(currentPos.squaredDistanceTo(lastPos)));
-                // Cancel any active skill/task (forceAbort sets the abort latch that skills check)
-                TaskService.forceAbort(botId, "External teleport detected.");
+                // Cancel any active skill/task (forceAbort sets the abort latch that skills check).
+                // With no task running the latch only blocked follow's own leaf clearing until the
+                // player re-issued follow (finding 51), so release it again, but only while it still
+                // holds this teleport's reason (a /bot stop landing in between is kept).
+                String teleportAbortReason = "External teleport detected.";
+                boolean hadTask = TaskService.hasActiveTask(botId);
+                TaskService.forceAbort(botId, teleportAbortReason);
+                if (!hadTask) {
+                    TaskService.clearAbortLatchIf(botId, teleportAbortReason);
+                }
                 // Clear follow/movement goals
                 if (tpState.followFixedGoal != null) {
                     tpState.followFixedGoal = null;
@@ -2367,12 +2376,28 @@ public class BotEventHandler {
 	                        }
 	                    }
 	                }
-	                if (bot.getBlockPos().getSquaredDistance(peek) <= FollowPathService.WAYPOINT_REACH_SQ) {
+	                // Reached only once the bot is in the waypoint's column (findings 47, 50): a 3D
+	                // distance check dropped diagonal and one-down neighbours early and aimed the bot
+	                // through leaf corners, or left it stopped one block short forever.
+	                BlockPos botBlock = bot.getBlockPos();
+	                int[] nextWp = null;
+	                java.util.Iterator<BlockPos> wpIt = waypoints.iterator();
+	                wpIt.next();
+	                if (wpIt.hasNext()) {
+	                    BlockPos nextPos = wpIt.next();
+	                    if (nextPos != null) {
+	                        nextWp = new int[] {nextPos.getX(), nextPos.getY(), nextPos.getZ()};
+	                    }
+	                }
+	                if (net.wcfcarolina13.GameAI.services.follow.FollowWaypointReachPolicy.reached(
+	                        botBlock.getX(), botBlock.getY(), botBlock.getZ(),
+	                        peek.getX(), peek.getY(), peek.getZ(), nextWp)) {
 	                    waypoints.pollFirst();
 	                    FollowStateService.FOLLOW_LAST_DISTANCE_SQ.remove(botId);
 	                    FollowStateService.FOLLOW_STAGNANT_TICKS.remove(botId);
                     FollowStateService.FOLLOW_LAST_BLOCK_POS.remove(botId);
                     FollowStateService.FOLLOW_POS_STAGNANT_TICKS.remove(botId);
+                    FollowStateService.FOLLOW_LEAF_ANCHOR.remove(botId);
                     continue;
                 }
                 navGoalBlock = peek;
@@ -2529,7 +2554,9 @@ public class BotEventHandler {
         if (usingWaypoints) {
             double sprintDistanceSq = Math.max(distanceSq, progressDistSq);
             boolean sprint = sprintDistanceSq > FOLLOW_SPRINT_DISTANCE_SQ;
-            moveToward(bot, navGoalPos, 1.0D, sprint);
+            // 0.3 (was 1.0): stopping 1.0 short left the bot in the neighbouring block, so the
+            // waypoint was never reached and every replan produced the same plan (finding 50).
+            moveToward(bot, navGoalPos, FOLLOW_WAYPOINT_STOP_DISTANCE, sprint);
         } else {
             // If we're physically blocked (glass/fence/door), don't "settle" just because we're close in Euclidean distance.
             boolean allowCloseStop = canSee && !directBlocked;
@@ -4154,6 +4181,7 @@ public class BotEventHandler {
             FOLLOW_STAGNANT_TICKS.remove(id);
             FOLLOW_LAST_BLOCK_POS.remove(id);
             FOLLOW_POS_STAGNANT_TICKS.remove(id);
+            FOLLOW_LEAF_ANCHOR.remove(id);
             FollowStateService.clearVerticalClimbLock(id);
             FOLLOW_VERTICAL_LOCK_LAST_POS.remove(id);
             FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.remove(id);
@@ -4184,6 +4212,13 @@ public class BotEventHandler {
             FOLLOW_LAST_BLOCK_POS.put(id, curBlock.toImmutable());
         }
         FOLLOW_POS_STAGNANT_TICKS.put(id, posStagnant);
+        // Leaf gate stillness: within 0.75 of an anchor rather than the same block, because the
+        // local obstacle nudge rocks a bot pinned under a leaf row across a block boundary and the
+        // same-block counter never reached the threshold (finding 50).
+        net.wcfcarolina13.GameAI.services.follow.FollowLeafAnchorPolicy.Anchor leafAnchor =
+                net.wcfcarolina13.GameAI.services.follow.FollowLeafAnchorPolicy.update(
+                        FOLLOW_LEAF_ANCHOR.get(id), bot.getX(), bot.getZ());
+        FOLLOW_LEAF_ANCHOR.put(id, leafAnchor);
         int blockedTicks = FOLLOW_DIRECT_BLOCKED_TICKS.getOrDefault(id, 0);
         if (directBlocked) {
             blockedTicks++;
@@ -4199,15 +4234,29 @@ public class BotEventHandler {
         int effectiveStagnant = Math.max(movementStagnant, blockedTicks);
         int leafPosThreshold = returningToBase ? 3 : 5;
         int leafStagnantThreshold = returningToBase ? 6 : 10;
-        if (directBlocked && posStagnant >= leafPosThreshold && effectiveStagnant >= leafStagnantThreshold) {
+        if (directBlocked && leafAnchor.ticks() >= leafPosThreshold && effectiveStagnant >= leafStagnantThreshold) {
             BlockPos directionGoal = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
-            Direction towardAction = directionGoal != null
-                    ? approximateToward(bot.getBlockPos(), directionGoal)
-                    : bot.getHorizontalFacing();
-            if (MovementService.hasLeafObstruction(bot, towardAction)
-                    && MovementService.clearLeafObstruction(bot, towardAction)) {
-                maybeLogFollowDecision(bot, "leaf-cleared: toward=" + towardAction + " stagnant=" + effectiveStagnant);
-                return true;
+            // A diagonal goal checks both axis directions, larger offset first: the single
+            // tie-to-X direction looked at the wrong side of a leaf corner (finding 50).
+            List<Direction> leafDirections = new ArrayList<>(2);
+            if (directionGoal != null) {
+                BlockPos from = bot.getBlockPos();
+                for (int[] step : net.wcfcarolina13.GameAI.services.follow.FollowLeafDirectionPolicy.candidates(
+                        directionGoal.getX() - from.getX(), directionGoal.getZ() - from.getZ())) {
+                    leafDirections.add(step[0] != 0
+                            ? (step[0] > 0 ? Direction.EAST : Direction.WEST)
+                            : (step[1] > 0 ? Direction.SOUTH : Direction.NORTH));
+                }
+            }
+            if (leafDirections.isEmpty()) {
+                leafDirections.add(bot.getHorizontalFacing());
+            }
+            for (Direction towardAction : leafDirections) {
+                if (MovementService.hasLeafObstruction(bot, towardAction)
+                        && MovementService.clearLeafObstruction(bot, towardAction)) {
+                    maybeLogFollowDecision(bot, "leaf-cleared: toward=" + towardAction + " stagnant=" + effectiveStagnant);
+                    return true;
+                }
             }
         }
 
@@ -5915,6 +5964,7 @@ public class BotEventHandler {
         FOLLOW_STAGNANT_TICKS.remove(botId);
         FOLLOW_DIRECT_BLOCKED_TICKS.remove(botId);
         FOLLOW_POS_STAGNANT_TICKS.remove(botId);
+        FOLLOW_LEAF_ANCHOR.remove(botId);
         FOLLOW_LAST_BLOCK_POS.remove(botId);
         FollowStateService.clearVerticalClimbLock(botId);
         FOLLOW_VERTICAL_LOCK_LAST_POS.remove(botId);

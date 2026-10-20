@@ -11,6 +11,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.wcfcarolina13.GameAI.services.follow.FollowWaypointCompressionPolicy;
 import net.wcfcarolina13.GameAI.services.follow.FollowStepTransitionPolicy;
 
 import java.util.ArrayDeque;
@@ -39,7 +40,6 @@ public final class FollowPathService {
     public static final int MIN_REGION_MARGIN = 8;
     public static final int MIN_Y_SPAN = 6; // +/- 3 for flat terrain
     public static final int MAX_Y_SPAN_CAP = 20; // hard upper bound for dynamic Y span
-    public static final double WAYPOINT_REACH_SQ = 2.25D;
     private static final ThreadLocal<Integer> LAST_TRANSITION_REJECT_COUNT = ThreadLocal.withInitial(() -> 0);
     private static final ThreadLocal<Integer> LAST_SWIM_TRANSITION_REJECT_COUNT = ThreadLocal.withInitial(() -> 0);
 
@@ -809,21 +809,30 @@ public final class FollowPathService {
             points.add(raw.get(i).toImmutable());
         }
 
+        // Keep every corner (raw step direction changes) and the node before any Y change, so an
+        // L of "step down, then sideways" never collapses into one diagonal target (finding 50).
+        int n = raw.size();
+        int[] xs = new int[n];
+        int[] ys = new int[n];
+        int[] zs = new int[n];
+        for (int i = 0; i < n; i++) {
+            BlockPos r = raw.get(i);
+            xs[i] = r.getX();
+            ys[i] = r.getY();
+            zs[i] = r.getZ();
+        }
         BlockPos lastKept = raw.get(0);
-        Direction lastDir = null;
-        for (int i = 1; i < raw.size(); i++) {
+        for (int i = 1; i < n; i++) {
             if (i <= pinned) {
                 lastKept = raw.get(i);
                 continue;
             }
             BlockPos p = raw.get(i);
-            Direction dir = Direction.getFacing(p.getX() - lastKept.getX(), 0, p.getZ() - lastKept.getZ());
-            boolean dirChanged = lastDir != null && dir != lastDir;
+            boolean shapeNode = FollowWaypointCompressionPolicy.mustKeep(xs, ys, zs, i);
             boolean farEnough = lastKept.getSquaredDistance(p) >= 9.0D; // ~3 blocks
             boolean door = snapshot.isDoorCell(p);
-            if (door || dirChanged || farEnough) {
+            if (door || shapeNode || farEnough) {
                 points.add(p.toImmutable());
-                lastDir = dir;
                 lastKept = p;
             }
         }

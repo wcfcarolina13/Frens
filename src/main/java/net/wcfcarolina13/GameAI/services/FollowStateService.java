@@ -67,6 +67,8 @@ public final class FollowStateService {
     public static final Map<UUID, Boolean> FOLLOW_LAST_BLOCKED_PROBE_RESULT = new ConcurrentHashMap<>();
     public static final Map<UUID, BlockPos> FOLLOW_LAST_BLOCK_POS = new ConcurrentHashMap<>();
     public static final Map<UUID, Integer> FOLLOW_POS_STAGNANT_TICKS = new ConcurrentHashMap<>();
+    /** Leaf-clear stillness anchor (FollowLeafAnchorPolicy): survives the obstacle nudge's rocking. */
+    public static final Map<UUID, net.wcfcarolina13.GameAI.services.follow.FollowLeafAnchorPolicy.Anchor> FOLLOW_LEAF_ANCHOR = new ConcurrentHashMap<>();
     public static final Map<UUID, BlockPos> FOLLOW_WAYPOINT_LAST_HEAD = new ConcurrentHashMap<>();
     public static final Map<UUID, BlockPos> FOLLOW_WAYPOINT_LAST_BOT_BLOCK = new ConcurrentHashMap<>();
     public static final Map<UUID, Integer> FOLLOW_WAYPOINT_HEAD_STAGNANT_TICKS = new ConcurrentHashMap<>();
@@ -195,6 +197,7 @@ public final class FollowStateService {
         FOLLOW_REPLAN_AFTER_DOOR_MS.remove(botId);
         FOLLOW_LAST_BLOCK_POS.remove(botId);
         FOLLOW_POS_STAGNANT_TICKS.remove(botId);
+        FOLLOW_LEAF_ANCHOR.remove(botId);
         FOLLOW_DIRECT_BLOCKED_TICKS.remove(botId);
         FOLLOW_DOOR_RECOVERY.remove(botId);
         FOLLOW_AVOID_DOOR_BASE.remove(botId);
@@ -245,6 +248,7 @@ public final class FollowStateService {
         FOLLOW_STAGNANT_TICKS.remove(botId);
         FOLLOW_LAST_BLOCK_POS.remove(botId);
         FOLLOW_POS_STAGNANT_TICKS.remove(botId);
+        FOLLOW_LEAF_ANCHOR.remove(botId);
         FOLLOW_DIRECT_BLOCKED_TICKS.remove(botId);
         FOLLOW_DOOR_RECOVERY.remove(botId);
         FOLLOW_AVOID_DOOR_BASE.remove(botId);
@@ -328,6 +332,7 @@ public final class FollowStateService {
         FOLLOW_LAST_BLOCKED_PROBE_RESULT.clear();
         FOLLOW_LAST_BLOCK_POS.clear();
         FOLLOW_POS_STAGNANT_TICKS.clear();
+        FOLLOW_LEAF_ANCHOR.clear();
         FOLLOW_WAYPOINT_LAST_HEAD.clear();
         FOLLOW_WAYPOINT_LAST_BOT_BLOCK.clear();
         FOLLOW_WAYPOINT_HEAD_STAGNANT_TICKS.clear();

@@ -644,6 +644,19 @@ public final class TaskService {
     }
 
     /**
+     * Clears the abort latch only while it still holds {@code reason} (atomic compare-and-remove),
+     * so a different abort that landed in between (e.g. a {@code /bot stop}) is kept. Used after an
+     * external teleport with no task running, whose latch would otherwise block every follow-time
+     * leaf clear until the player re-issued follow (finding 51).
+     *
+     * @return true when the latch was cleared
+     */
+    public static boolean clearAbortLatchIf(UUID botUuid, String reason) {
+        if (botUuid == null) return false;
+        return ABORT_LATCH.remove(key(botUuid), reason == null ? "" : reason);
+    }
+
+    /**
      * Interrupts an ambient task immediately to make room for a command-issued skill.
      */
     public static boolean interruptAmbientTask(UUID botUuid, String reason) {

@@ -430,6 +430,13 @@ public final class FollowMovementService {
             return false;
         }
 
+        // A breakable leaf at head height ahead is for the leaf clear, not a sidestep: the nudge
+        // rocked a bot under a wall-to-wall leaf row across a block boundary and kept resetting
+        // the leaf-clear stillness gate (finding 50).
+        if (LeafClearService.isBreakableLeaf(world, front.up())) {
+            return false;
+        }
+
         BlockPos goal = BlockPos.ofFloored(targetPos);
         BlockPos current = bot.getBlockPos();
         BlockPos candidate = selectBestLocalRepositionCandidate(world, current, goal);
