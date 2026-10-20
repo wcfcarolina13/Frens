@@ -2837,10 +2837,12 @@ public class FarmSkill implements Skill {
         return score;
     }
 
+    /** Same score through a chunk reader; an unloaded neighbour is unknown and counts 0, not shore. */
     private static int shoreScore(ChunkBlockReader reader, BlockPos pos) {
         int score = 0;
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            if (!stateOrAir(reader, pos.offset(dir)).isOf(Blocks.WATER)) {
+            BlockState neighbour = reader.state(pos.offset(dir));
+            if (neighbour != null && !neighbour.isOf(Blocks.WATER)) {
                 score++;
             }
         }

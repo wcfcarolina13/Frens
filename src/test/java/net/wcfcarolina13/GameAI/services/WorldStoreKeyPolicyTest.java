@@ -374,10 +374,10 @@ class WorldStoreKeyPolicyTest {
     @Test
     void copiedChestRecordsAreKeptWhenAnyConditionFails() {
         assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(true, 7, true, 16, 0), "this save holds the claim");
-        assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 0, true, 16, 0), "no own records");
+        assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 0, true, 16, 0), "no own live records (a fully retired copy)");
         assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 7, false, 16, 0),
                 "a chest this save registered itself: never touched");
         assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 7, true, 0, 0), "nothing checked: no evidence");
-        assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 7, true, 3, 1), "a legacy chest is here");
+        assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 7, true, 3, 1), "an own recorded chest is here");
     }
 }

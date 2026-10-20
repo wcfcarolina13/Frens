@@ -1694,7 +1694,7 @@ public final class CraftingHelper {
         if (nearest == null) {
             double best = Double.MAX_VALUE;
             for (BlockPos pos : findBlocksInBox(world, botPos.add(-radius, -ySpan, -radius),
-                    botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Crafting table")) {
+                    botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Crafting table", true)) {
                 if (skipsFailedTable(bot, botPos, pos, onServerThread)) {
                     continue;
                 }
@@ -1787,7 +1787,7 @@ public final class CraftingHelper {
                 nearest = null;
                 double best2 = Double.MAX_VALUE;
                 for (BlockPos pos2 : findBlocksInBox(world, botPos.add(-radius, -ySpan, -radius),
-                        botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Alternative crafting table")) {
+                        botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Alternative crafting table", true)) {
                     if (pos2.equals(unreachable) || skipsFailedTable(bot, botPos, pos2, onServerThread)) continue;
                     List<BlockPos> altStandables = findStandableOptions(world, pos2, 3);
                     if (altStandables.isEmpty()) continue;
@@ -2026,7 +2026,7 @@ public final class CraftingHelper {
         int radius = CraftingStationPolicy.scanHorizontal(onServerThread);
         int ySpan = CraftingStationPolicy.scanVertical(onServerThread);
         for (BlockPos pos : findBlocksInBox(world, botPos.add(-radius, -ySpan, -radius),
-                botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Crafting table pre-check")) {
+                botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Crafting table pre-check", true)) {
             if (CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))
                     && !skipsFailedTable(bot, botPos, pos, onServerThread)) {
                 return true;
@@ -2099,7 +2099,6 @@ public final class CraftingHelper {
         return isLocalPlacementIntersection(placeResult) ? "place-intersects-bot" : "place-failed";
     }
 
-    /** A per-call step line: its usual INFO off the server thread, DEBUG on it. */
     private static boolean isCraftingTable(BlockState state) {
         return state.isOf(net.minecraft.block.Blocks.CRAFTING_TABLE);
     }
@@ -2115,9 +2114,13 @@ public final class CraftingHelper {
      * {@link ChunkBlockReader} and walking only the chunk sections whose palette holds a match: an
      * 81x13x81 table box is ~85k reads, each a server round trip from a worker, and most sections
      * hold no table at all. Unloaded chunks are skipped and never loaded, as before.
+     *
+     * @param stepLine log the scan as a station step ({@link #logStationStep}); false logs it at
+     *                 DEBUG only (chest scans, which run on every deposit)
      */
     private static List<BlockPos> findBlocksInBox(ServerWorld world, BlockPos from, BlockPos to,
-                                                  Predicate<BlockState> match, String label) {
+                                                  Predicate<BlockState> match, String label,
+                                                  boolean stepLine) {
         long startNs = System.nanoTime();
         List<BlockPos> hits = new ArrayList<>();
         int minX = Math.min(from.getX(), to.getX()), maxX = Math.max(from.getX(), to.getX());
@@ -2159,13 +2162,18 @@ public final class CraftingHelper {
         hits.sort((a, b) -> CraftingStationPolicy.compareScanOrder(
                 a.getX(), a.getY(), a.getZ(), b.getX(), b.getY(), b.getZ()));
         MinecraftServer server = world.getServer();
-        logStationStep(server != null && server.isOnThread(),
-                "{} scan: {} hit(s) in a {}x{}x{} box, {} section(s) walked, {} ms",
-                label, hits.size(), maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1, sectionsWalked,
-                String.format(Locale.ROOT, "%.2f", (System.nanoTime() - startNs) / 1_000_000.0D));
+        String format = "{} scan: {} hit(s) in a {}x{}x{} box, {} section(s) walked, {} ms";
+        Object[] args = {label, hits.size(), maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1, sectionsWalked,
+                String.format(Locale.ROOT, "%.2f", (System.nanoTime() - startNs) / 1_000_000.0D)};
+        if (stepLine) {
+            logStationStep(server != null && server.isOnThread(), format, args);
+        } else {
+            LOGGER.debug(format, args);
+        }
         return hits;
     }
 
+    /** A per-call step line: its usual INFO off the server thread, DEBUG on it. */
     private static void logStationStep(boolean onServerThread, String format, Object... args) {
         if (CraftingStationPolicy.logAtInfo(onServerThread)) {
             LOGGER.info(format, args);
@@ -3716,7 +3724,7 @@ public final class CraftingHelper {
             return chests;
         }
         chests.addAll(findBlocksInBox(world, origin.add(-radius, -2, -radius), origin.add(radius, 2, radius),
-                CraftingHelper::isChest, "Nearby chest"));
+                CraftingHelper::isChest, "Nearby chest", false));
         chests.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
         return chests;
     }
@@ -3727,7 +3735,7 @@ public final class CraftingHelper {
             return chests;
         }
         chests.addAll(findBlocksInBox(world, origin.add(-radius, -ySpan, -radius), origin.add(radius, ySpan, radius),
-                CraftingHelper::isChest, "Nearby chest"));
+                CraftingHelper::isChest, "Nearby chest", false));
         chests.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
         return chests;
     }

@@ -294,18 +294,21 @@ public final class WorldStoreKeyPolicy {
      * destroyed (finding 45). 1.1.274 copied the legacy entry into the first same-named save to
      * load; when 1.1.275 moved the claim to the save that really has the chests, the other save
      * kept that copy, and bots there headed for chests that are not in it. Only a pure copy is
-     * retired: every own record position is a legacy record position, and of the legacy
-     * positions checked here at least one was read and none holds a chest. A store holding any
+     * retired: every own record position is a legacy record position, and of this save's own live
+     * record positions checked here at least one was read and none holds a chest (the own records
+     * are probed, not the legacy ones, so no own live record is retired unlooked-at). A store holding any
      * chest it registered itself (a position not in the legacy entry) is never touched. Marking
      * is reversible: verifyChests or a re-registration revives a record when a chest is there.
      *
      * @param holdsClaim         this save holds the legacy claim
-     * @param ownRecordCount     every record in this save's own store (destroyed ones included)
+     * @param ownLiveRecordCount records in this save's own store not yet marked destroyed
      * @param ownSubsetOfLegacy  every own record position is among the legacy record positions
+     * @param checked            own live record positions read here
+     * @param chestLike          of those, positions holding a chest-like block
      */
-    public static boolean shouldRetireCopiedChestRecords(boolean holdsClaim, int ownRecordCount,
+    public static boolean shouldRetireCopiedChestRecords(boolean holdsClaim, int ownLiveRecordCount,
                                                          boolean ownSubsetOfLegacy, int checked, int chestLike) {
-        return !holdsClaim && ownRecordCount > 0 && ownSubsetOfLegacy && checked > 0 && chestLike <= 0;
+        return !holdsClaim && ownLiveRecordCount > 0 && ownSubsetOfLegacy && checked > 0 && chestLike <= 0;
     }
 
     /**

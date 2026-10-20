@@ -7,7 +7,9 @@ package net.wcfcarolina13.GameAI.services;
  * past hostiles it won't engage (name-tagged, behind a locked gate, non-aggro while the bot has
  * no ranged weapon). Engaging is capped: after {@link #ENGAGE_WAIT_CAP_MS} of waiting on the
  * same set of engageable hostiles the loop treats them as ignorable, so a fight that never lands
- * cannot stall mining until the skill's own timeout.
+ * cannot stall mining until the skill's own timeout. The cap never applies while an engageable
+ * hostile is targeting the bot: mining on beside a creeper or an angry iron golem would walk the
+ * bot back into what engageHostiles is fleeing or fighting.
  */
 public final class MiningThreatPolicy {
 
@@ -35,11 +37,14 @@ public final class MiningThreatPolicy {
 
     /**
      * Same as {@link #decide(int, int)}, but an ENGAGE that has already waited
-     * {@link #ENGAGE_WAIT_CAP_MS} or longer becomes IGNORE.
+     * {@link #ENGAGE_WAIT_CAP_MS} or longer becomes IGNORE, unless an engageable hostile is
+     * targeting the bot ({@code targetingBotCount > 0}): that one stays ENGAGE however long it takes.
+     *
+     * @param targetingBotCount engageable hostiles whose current target is the bot
      */
-    public static Decision decide(int hostileCount, int engageableCount, long engagedForMs) {
+    public static Decision decide(int hostileCount, int engageableCount, int targetingBotCount, long engagedForMs) {
         Decision d = decide(hostileCount, engageableCount);
-        if (d == Decision.ENGAGE && engagedForMs >= ENGAGE_WAIT_CAP_MS) {
+        if (d == Decision.ENGAGE && targetingBotCount <= 0 && engagedForMs >= ENGAGE_WAIT_CAP_MS) {
             return Decision.IGNORE;
         }
         return d;

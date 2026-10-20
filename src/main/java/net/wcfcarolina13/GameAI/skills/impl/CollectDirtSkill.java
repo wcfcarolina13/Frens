@@ -5,6 +5,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
+import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -323,7 +324,8 @@ public class CollectDirtSkill implements Skill {
 
         int currentMaxFails = this.maxFails > 0 ? this.maxFails : MAX_ATTEMPTS_WITHOUT_PROGRESS;
         // Engage budget for the current set of engageable hostiles (finding 44): reset when the
-        // area clears or a new engageable hostile shows up.
+        // area clears or the set gains an id it did not hold last iteration (a new hostile, or one
+        // that left and came back, e.g. a zombie returning beside a caged mob).
         long engageStartMs = 0L;
         Set<UUID> engageableSeen = new HashSet<>();
 
@@ -370,15 +372,24 @@ public class CollectDirtSkill implements Skill {
                 List<Entity> engageable = nearbyHostiles.stream()
                         .filter(e -> BotEventHandler.wouldEngage(loopPlayer, e))
                         .toList();
+                Set<UUID> engageableNow = new HashSet<>();
+                int targetingBot = 0;
                 for (Entity e : engageable) {
-                    if (engageableSeen.add(e.getUuid())) {
+                    engageableNow.add(e.getUuid());
+                    if (!engageableSeen.contains(e.getUuid())) {
                         engageStartMs = 0L;
                     }
+                    if (e instanceof MobEntity mob && mob.getTarget() == loopPlayer) {
+                        targetingBot++;
+                    }
                 }
+                engageableSeen.clear();
+                engageableSeen.addAll(engageableNow);
                 long nowMs = System.currentTimeMillis();
                 long engagedForMs = engageStartMs == 0L ? 0L : nowMs - engageStartMs;
+                // Never mined past while one of them is after the bot (creeper, angry golem).
                 MiningThreatPolicy.Decision threat = MiningThreatPolicy.decide(
-                        nearbyHostiles.size(), engageable.size(), engagedForMs);
+                        nearbyHostiles.size(), engageable.size(), targetingBot, engagedForMs);
                 UUID botKey = loopPlayer.getUuid();
                 if (threat == MiningThreatPolicy.Decision.NONE) {
                     HOSTILE_LOG_STATE.remove(botKey);
@@ -387,7 +398,7 @@ public class CollectDirtSkill implements Skill {
                     engageableSeen.clear();
                 } else {
                     boolean capped = threat == MiningThreatPolicy.Decision.IGNORE && !engageable.isEmpty();
-                    if (LogThrottle.changed(HOSTILE_LOG_STATE, botKey, "n=" + nearbyHostiles.size() + " " + threat)) {
+                    if (LogThrottle.changed(HOSTILE_LOG_STATE, botKey, threat.name())) {
                         LOGGER.info("{} sees {} hostile(s) nearby ({} it would fight): {}.", skillName,
                                 nearbyHostiles.size(), engageable.size(),
                                 threat == MiningThreatPolicy.Decision.ENGAGE ? "engaging"

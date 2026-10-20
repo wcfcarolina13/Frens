@@ -271,6 +271,24 @@ public class AutoFaceEntity {
                         || blockDetectionUnit.getBlockDetectionStatus()
                         || isBotExecutingTask();
 
+                // This branch only runs when updateBehavior/engageHostiles declined to act. A
+                // running task is paused only for a hostile in range the bot would fight
+                // (BotEventHandler.wouldEngage): engageHostiles can still decline one of those for
+                // a passing reason (a drowned whose shore hold found no stand this tick), and the
+                // task must not walk on into it. Hostiles it won't fight (name-tagged, behind a
+                // locked gate, non-aggro without a ranged weapon, a golem that is not after it)
+                // never pause the task, so a miner keeps working past them; no threat line either,
+                // and no facing or loadout swap that would pull the task's tool out of hand.
+                boolean anyEngageableInRange = hostileEntities.stream()
+                        .anyMatch(e -> e.squaredDistanceTo(bot) <= 100.0D
+                                && BotEventHandler.wouldEngage(bot, e));
+                if (botWasBusy && !anyEngageableInRange) {
+                    LOGGER.debug("Bot {} busy: not pausing for {} hostile(s) it would not fight",
+                            bot.getName().getString(), hostileEntities.size());
+                    hostileEntityInFront = false;
+                    return;
+                }
+
                 if (botWasBusy) {
                     LOGGER.debug("Bot is busy, stopping tasks before reacting to hostile.");
                     isBotMoving = false;
