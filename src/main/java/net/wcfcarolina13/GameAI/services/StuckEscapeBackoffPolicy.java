@@ -54,6 +54,16 @@ public final class StuckEscapeBackoffPolicy {
     private StuckEscapeBackoffPolicy() {
     }
 
+    /**
+     * The scaffold count the backoff should see. A bot floating in water cannot pillar (every
+     * pillar step needs the ground), so its blocks do not count: 0 when {@code inWater} and not
+     * {@code onGround}, else {@code count}. Without this a bot holding scaffold in a flooded pocket
+     * cleared its episode on every failure and retried every 10 s for hours (finding 48).
+     */
+    public static int effectiveScaffold(int count, boolean inWater, boolean onGround) {
+        return inWater && !onGround ? 0 : count;
+    }
+
     /** Cooldown before the next attempt after {@code failures} failures in one episode. */
     public static long cooldownTicks(int failures) {
         if (failures < FREE_ATTEMPTS) {

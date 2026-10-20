@@ -14,6 +14,7 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
+import net.wcfcarolina13.GameAI.services.LogThrottle;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutBaseAccessPolicy;
@@ -39,6 +40,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ScaffoldService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("scaffold-service");
+    /**
+     * Per-bot throttle for the "not on ground" pillar line: a bot floating in water hit it every
+     * attempt (finding 48). INFO at most once a minute per bot, DEBUG otherwise.
+     */
+    private static final long NOT_ON_GROUND_LOG_INTERVAL_MS = 60_000L;
+    private static final Map<UUID, Long> NOT_ON_GROUND_LOG_TIME = new ConcurrentHashMap<>();
 
     // Blocks suitable for scaffolding (cheap, easily broken)
     public static final List<Item> SCAFFOLD_BLOCKS = List.of(
@@ -286,6 +293,18 @@ public final class ScaffoldService {
      * Pillar up, reporting both the placed positions and (when nothing was placed)
      * the reason the per-step loop broke out.
      */
+    /** Forget one bot's "not on ground" log throttle. */
+    public static void clearLogThrottle(UUID botId) {
+        if (botId != null) {
+            NOT_ON_GROUND_LOG_TIME.remove(botId);
+        }
+    }
+
+    /** Server shutdown: forget every bot's "not on ground" log throttle. */
+    public static void clearAllLogThrottles() {
+        NOT_ON_GROUND_LOG_TIME.clear();
+    }
+
     public static PillarResult pillarUpDetailed(ServerPlayerEntity bot, int steps) {
         return pillarUpDetailed(bot, steps, false);
     }
@@ -312,7 +331,14 @@ public final class ScaffoldService {
             sleepQuiet(60L);
 
             if (!waitForOnGround(bot, LAND_TIMEOUT_MS)) {
-                LOGGER.info("pillarUp step {}/{}: not on ground (Y={})", i, steps, bot.getY());
+                if (LogThrottle.due(NOT_ON_GROUND_LOG_TIME, bot.getUuid(), System.currentTimeMillis(),
+                        NOT_ON_GROUND_LOG_INTERVAL_MS)) {
+                    LOGGER.info("pillarUp step {}/{}: {} not on ground (Y={})", i, steps,
+                            bot.getName().getString(), bot.getY());
+                } else {
+                    LOGGER.debug("pillarUp step {}/{}: {} not on ground (Y={})", i, steps,
+                            bot.getName().getString(), bot.getY());
+                }
                 breakReason = "not-on-ground";
                 break;
             }

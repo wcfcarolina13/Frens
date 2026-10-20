@@ -1516,6 +1516,11 @@ public class CollectDirtSkill implements Skill {
             return SkillExecutionResult.success("Already at or above target Y=" + targetY + ".");
         }
         
+        // A surface ascent that starts in water is escaping the flood, so the flood is no reason to
+        // pause it (finding 48: every recovery from a flooded pocket aborted on its first loop with
+        // "water flooded the area"). An ascent that starts dry still pauses when water breaks in.
+        final boolean floodIsTheReason = stopAtSurface && isTouchingWater(player);
+
         // Mark bot as in ascent mode to disable aggressive in-wall damage handling
         TaskService.setAscentMode(player.getUuid(), true);
         
@@ -1546,7 +1551,7 @@ public class CollectDirtSkill implements Skill {
                     WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                     return SkillExecutionResult.failure("Mining paused: inventory full.");
                 }
-                if (handleWaterHazard(player, source)) {
+                if (!floodIsTheReason && handleWaterHazard(player, source)) {
                     WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                     return SkillExecutionResult.failure("Mining paused: water flooded the area.");
                 }

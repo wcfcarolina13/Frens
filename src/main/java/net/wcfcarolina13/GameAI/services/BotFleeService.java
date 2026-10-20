@@ -139,6 +139,17 @@ public final class BotFleeService {
     private static final ConcurrentHashMap<UUID, AtomicBoolean> SURFACE_RECOVERY_LOCK = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> SURFACE_RECOVERY_FAILURE_TICK = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, String> SURFACE_RECOVERY_FAILURE_REASON = new ConcurrentHashMap<>();
+    /**
+     * Repeating surface-recovery failure lines (finding 48: 167 "ascent failed" WARNs in 28 minutes
+     * from one bot in a flooded pocket). A line logs at its normal level when its text changed or
+     * {@link #SURFACE_FAILURE_LOG_INTERVAL_MS} passed for that bot, else at DEBUG. Cleared on a
+     * successful surface, {@link #reset(UUID)} and server shutdown.
+     */
+    private static final long SURFACE_FAILURE_LOG_INTERVAL_MS = 60_000L;
+    private static final ConcurrentHashMap<UUID, String> ASCENT_FAIL_LOG_STATE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> ASCENT_FAIL_LOG_TIME = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, String> PILLAR_NONE_LOG_STATE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> PILLAR_NONE_LOG_TIME = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, InterruptedSurvivalAction> CURRENT_SURVIVAL_ACTION = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, InterruptedSurvivalAction> PENDING_SURVIVAL_RESUME = new ConcurrentHashMap<>();
 
@@ -3636,12 +3647,17 @@ public final class BotFleeService {
             SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
             SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
             LOGGER.info("Bot {} reached surface via dedicated surface recovery", bot.getName().getString());
+            clearSurfaceLogThrottles(bot.getUuid());
             BotUndergroundSurvivalService.recordRecoveryAttempt(bot, true, countScaffoldBlocks(bot), world.isDay(), attemptTick);
         } else {
             SURFACE_RECOVERY_FAILURE_TICK.put(bot.getUuid(), attemptTick);
             SURFACE_RECOVERY_FAILURE_REASON.put(bot.getUuid(), result != null ? String.valueOf(result.message()) : "null result");
-            LOGGER.warn("Bot {} ascent failed: {}",
-                    bot.getName().getString(), result != null ? result.message() : "null result");
+            String failMessage = result != null ? String.valueOf(result.message()) : "null result";
+            if (shouldLogSurfaceFailure(ASCENT_FAIL_LOG_STATE, ASCENT_FAIL_LOG_TIME, bot.getUuid(), failMessage)) {
+                LOGGER.warn("Bot {} ascent failed: {}", bot.getName().getString(), failMessage);
+            } else {
+                LOGGER.debug("Bot {} ascent failed: {}", bot.getName().getString(), failMessage);
+            }
             BotUndergroundSurvivalService.recordRecoveryAttempt(bot, false, countScaffoldBlocks(bot), world.isDay(), attemptTick);
         }
     }
@@ -3752,6 +3768,15 @@ public final class BotFleeService {
 
     private static boolean ensureAtSurface(ServerPlayerEntity bot, ServerWorld world,
                                            SurfaceCaller caller) {
+        boolean reached = ensureAtSurfaceAttempt(bot, world, caller);
+        if (reached && bot != null) {
+            clearSurfaceLogThrottles(bot.getUuid());
+        }
+        return reached;
+    }
+
+    private static boolean ensureAtSurfaceAttempt(ServerPlayerEntity bot, ServerWorld world,
+                                                  SurfaceCaller caller) {
         if (bot == null || world == null) {
             return false;
         }
@@ -3770,6 +3795,11 @@ public final class BotFleeService {
                         net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot.getUuid(), "surface-recovery");
                         return true;
                     }
+                }
+                // Land nav refuses to step off water (every edge reads as a cliff): swim for it.
+                if (BotWaterEscapeService.isInWater(bot) && BotWaterEscapeService.swimToShore(bot, 4, 4_000L)) {
+                    LOGGER.info("ensureAtSurface: {} swam onto dry land at {}",
+                            bot.getName().getString(), bot.getBlockPos().toShortString());
                 }
             }
         }
@@ -3808,6 +3838,22 @@ public final class BotFleeService {
         }
 
         try {
+            // Flooded pocket with no shore (finding 48): a floating bot cannot pillar, so carve a
+            // one-block ledge in natural rock beside it and climb out. Inside the lock so two callers
+            // never dig at once; on failure the ladder below still runs and stamps the failure.
+            if (BotWaterEscapeService.isInWater(bot) && !bot.isOnGround()
+                    && BotWaterEscapeService.findNearestShoreStand(bot, 12) == null
+                    && BotWaterEscapeService.carveShoreStep(bot, world)) {
+                LOGGER.info("ensureAtSurface: {} climbed out of the water onto a carved ledge at {}",
+                        bot.getName().getString(), bot.getBlockPos().toShortString());
+                if (logOperationalSurfaceState(bot, world, "ensureAtSurface:post-ledge")) {
+                    SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
+                    SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
+                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onSelfRescue(bot.getUuid(), "surface-recovery");
+                    return true;
+                }
+            }
+
             SafePositionService.SurfaceStagingCandidate nearby =
                     SafePositionService.findBestSurfaceStaging(world, bot.getBlockPos(), 10, true);
             if (nearby != null) {
@@ -4043,8 +4089,13 @@ public final class BotFleeService {
         if (placed.isEmpty()) {
             String reason = pillarResult.reason() == null || pillarResult.reason().isEmpty()
                     ? "unknown" : pillarResult.reason();
-            LOGGER.info("ensureAtSurface: {} pillar recovery placed no blocks reason={} steps={}",
-                    bot.getName().getString(), reason, pillarSteps);
+            if (shouldLogSurfaceFailure(PILLAR_NONE_LOG_STATE, PILLAR_NONE_LOG_TIME, bot.getUuid(), reason)) {
+                LOGGER.info("ensureAtSurface: {} pillar recovery placed no blocks reason={} steps={}",
+                        bot.getName().getString(), reason, pillarSteps);
+            } else {
+                LOGGER.debug("ensureAtSurface: {} pillar recovery placed no blocks reason={} steps={}",
+                        bot.getName().getString(), reason, pillarSteps);
+            }
             long nowTick = bot.getCommandSource().getServer() != null
                     ? bot.getCommandSource().getServer().getTicks() : 0L;
             SURFACE_RECOVERY_FAILURE_TICK.put(bot.getUuid(), nowTick);
@@ -4292,6 +4343,42 @@ public final class BotFleeService {
         }
     }
 
+    /** True when a repeating surface-failure line should log at its normal level (see the maps). */
+    private static boolean shouldLogSurfaceFailure(Map<UUID, String> stateMap, Map<UUID, Long> timeMap,
+                                                   UUID botId, String state) {
+        if (botId == null) {
+            return true;
+        }
+        boolean changed = LogThrottle.changed(stateMap, botId, state);
+        boolean due = LogThrottle.due(timeMap, botId, System.currentTimeMillis(), SURFACE_FAILURE_LOG_INTERVAL_MS);
+        return changed || due;
+    }
+
+    /** Forget a bot's surface-failure log throttles (this class, surface recovery, pillar-up). */
+    public static void clearSurfaceLogThrottles(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        ASCENT_FAIL_LOG_STATE.remove(botId);
+        ASCENT_FAIL_LOG_TIME.remove(botId);
+        PILLAR_NONE_LOG_STATE.remove(botId);
+        PILLAR_NONE_LOG_TIME.remove(botId);
+        SurfaceRecoveryService.clearLogThrottle(botId);
+        ScaffoldService.clearLogThrottle(botId);
+        BotWaterEscapeService.clearLogThrottle(botId);
+    }
+
+    /** Server shutdown: drop every bot's surface-failure log throttles. */
+    public static void clearAllSurfaceLogThrottles() {
+        ASCENT_FAIL_LOG_STATE.clear();
+        ASCENT_FAIL_LOG_TIME.clear();
+        PILLAR_NONE_LOG_STATE.clear();
+        PILLAR_NONE_LOG_TIME.clear();
+        SurfaceRecoveryService.clearAllLogThrottles();
+        ScaffoldService.clearAllLogThrottles();
+        BotWaterEscapeService.clearAllLogThrottles();
+    }
+
     static int countScaffoldBlocks(ServerPlayerEntity bot) {
         if (bot == null) {
             return 0;
@@ -4340,6 +4427,7 @@ public final class BotFleeService {
         SHELTER_COOLDOWN.remove(botId);
         LOGGED_SKIP_REASONS.remove(botId);
         LOGGED_MARK_SKIPS.remove(botId);
+        clearSurfaceLogThrottles(botId);
         AtomicBoolean lock = SHELTER_LOCK.get(botId);
         if (lock != null) lock.set(false);
         incrementGeneration(botId);

@@ -124,6 +124,29 @@ class StuckEscapeBackoffPolicyTest {
     }
 
     @Test
+    void scaffoldHeldWhileFloatingDoesNotCount() {
+        assertEquals(0, StuckEscapeBackoffPolicy.effectiveScaffold(12, true, false));
+        assertEquals(12, StuckEscapeBackoffPolicy.effectiveScaffold(12, true, true));
+        assertEquals(12, StuckEscapeBackoffPolicy.effectiveScaffold(12, false, false));
+        assertEquals(0, StuckEscapeBackoffPolicy.effectiveScaffold(0, false, true));
+    }
+
+    @Test
+    void floatingFailuresWithScaffoldBuildABackoff() {
+        // Finding 48: Bob floats at Y=62 holding scaffold; each failed attempt must count.
+        State s = StuckEscapeBackoffPolicy.NONE_STATE;
+        Result r = null;
+        for (int i = 0; i < 3; i++) {
+            int scaffold = StuckEscapeBackoffPolicy.effectiveScaffold(12, true, false);
+            r = StuckEscapeBackoffPolicy.recordAttempt(s, false, false, Y, scaffold, true, 1000L * i);
+            s = r.state();
+        }
+        assertEquals(3, s.failures());
+        assertTrue(StuckEscapeBackoffPolicy.inCooldown(s, 2001L));
+        assertEquals(StuckEscapeBackoffPolicy.cooldownTicks(3), r.cooldownTicks());
+    }
+
+    @Test
     void failureAtANewGroundYStartsANewEpisode() {
         State s = failTimes(3);
         Result r = StuckEscapeBackoffPolicy.recordAttempt(s, false, true, Y + 1, 0, true, 9000L);
@@ -153,6 +176,18 @@ class StuckEscapeBackoffPolicyTest {
     void resetWhenScaffoldArrives() {
         State s = failTimes(2);
         assertFalse(StuckEscapeBackoffPolicy.observe(s, true, Y, 1, true, false).active());
+    }
+
+    @Test
+    void floatingWithScaffoldKeepsTheCooldownUntilTheBotLands() {
+        State s = failTimes(2);
+        int floating = StuckEscapeBackoffPolicy.effectiveScaffold(12, true, false);
+        State observed = StuckEscapeBackoffPolicy.observe(s, false, Y, floating, true, false);
+        assertTrue(observed.active());
+        assertTrue(StuckEscapeBackoffPolicy.inCooldown(observed, 1500L));
+        // Out of the water on a carved ledge: the blocks count again and the episode ends.
+        int landed = StuckEscapeBackoffPolicy.effectiveScaffold(12, false, true);
+        assertFalse(StuckEscapeBackoffPolicy.observe(observed, true, Y, landed, true, false).active());
     }
 
     @Test

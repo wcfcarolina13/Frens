@@ -40,6 +40,9 @@ public final class BotUndergroundSurvivalService {
     /** Owner-facing line, sent once per stuck episode when the first backoff starts. */
     static final String STUCK_NOTIFY_LINE = "I'm stuck in a hole with nothing to build with.";
 
+    /** The same notice for a bot floating in a flooded pocket, whose blocks cannot be pillared. */
+    static final String STUCK_IN_WATER_NOTIFY_LINE = "I'm stuck in a flooded hole and can't climb out.";
+
     /** Per-bot stuck-escape episodes (see {@link StuckEscapeBackoffPolicy}); absent = no episode. */
     private static final Map<UUID, StuckEscapeBackoffPolicy.State> STUCK_STATE = new ConcurrentHashMap<>();
 
@@ -75,6 +78,7 @@ public final class BotUndergroundSurvivalService {
         STUCK_STATE.clear();
         NEXT_CHECK_TICK.clear();
         HOLDING_AFTER_STOP.clear();
+        BotFleeService.clearAllSurfaceLogThrottles();
     }
 
     /** Re-create the underground survival executor if it was shut down. Called from {@code SERVER_STARTED}. */
@@ -143,6 +147,7 @@ public final class BotUndergroundSurvivalService {
             // Already at surface — nothing to do
             if (BotFleeService.isAtSurface(bot, world)) {
                 STUCK_STATE.remove(botId);
+                BotFleeService.clearSurfaceLogThrottles(botId);
                 continue;
             }
 
@@ -157,7 +162,7 @@ public final class BotUndergroundSurvivalService {
             StuckEscapeBackoffPolicy.State stuck = STUCK_STATE.get(botId);
             if (stuck != null) {
                 StuckEscapeBackoffPolicy.State observed = StuckEscapeBackoffPolicy.observe(stuck,
-                        bot.isOnGround(), bot.getBlockY(), BotFleeService.countScaffoldBlocks(bot),
+                        bot.isOnGround(), bot.getBlockY(), effectiveScaffoldCount(bot),
                         world.isDay(), false);
                 if (!observed.active()) {
                     clearStuckEpisode(bot, "position, scaffold or daybreak changed");
@@ -216,7 +221,16 @@ public final class BotUndergroundSurvivalService {
         if (BotFleeService.isAtSurface(bot, world)) {
             return;
         }
-        recordRecoveryAttempt(bot, false, BotFleeService.countScaffoldBlocks(bot), world.isDay(), endTick);
+        recordRecoveryAttempt(bot, false, effectiveScaffoldCount(bot), world.isDay(), endTick);
+    }
+
+    /**
+     * Scaffold blocks the backoff should count: none while the bot floats in water, where no
+     * pillar step can run ({@link StuckEscapeBackoffPolicy#effectiveScaffold}, finding 48).
+     */
+    static int effectiveScaffoldCount(ServerPlayerEntity bot) {
+        return StuckEscapeBackoffPolicy.effectiveScaffold(BotFleeService.countScaffoldBlocks(bot),
+                BotWaterEscapeService.isInWater(bot), bot.isOnGround());
     }
 
     /** Modes only an owner command sets; leaving IDLE for one of these ends a stuck episode. */
@@ -262,10 +276,15 @@ public final class BotUndergroundSurvivalService {
             awaitLanding(bot, 800L); // an apex Y would read as a ground change and reset the episode
         }
         boolean ownerReachable = isOwnerReachable(bot);
+        // Read after landing: a floating bot's blocks cannot be pillared, so they do not end the episode.
+        boolean inWater = BotWaterEscapeService.isInWater(bot);
+        boolean onGround = bot.isOnGround();
+        boolean floating = inWater && !onGround;
+        int countedScaffold = StuckEscapeBackoffPolicy.effectiveScaffold(scaffoldCount, inWater, onGround);
         StuckEscapeBackoffPolicy.Result[] holder = new StuckEscapeBackoffPolicy.Result[1];
         STUCK_STATE.compute(botId, (id, prior) -> {
             StuckEscapeBackoffPolicy.Result r = StuckEscapeBackoffPolicy.recordAttempt(prior, succeeded,
-                    bot.isOnGround(), bot.getBlockY(), scaffoldCount, isDay, nowTick, ownerReachable);
+                    onGround, bot.getBlockY(), countedScaffold, isDay, nowTick, ownerReachable);
             holder[0] = r;
             return r.state().active() ? r.state() : null;
         });
@@ -273,12 +292,12 @@ public final class BotUndergroundSurvivalService {
         if (result == null || result.outcome() == StuckEscapeBackoffPolicy.Outcome.NONE) {
             return;
         }
-        LOGGER.info("Stuck-escape backoff: {} failed surface recovery {} times at Y={} with nothing to build with,"
-                        + " pausing retries for {} s",
+        LOGGER.info("Stuck-escape backoff: {} failed surface recovery {} times at Y={} {}, pausing retries for {} s",
                 bot.getName().getString(), result.state().failures(), result.state().groundY(),
-                result.cooldownTicks() / 20L);
+                floating ? "while floating in water" : "with nothing to build with", result.cooldownTicks() / 20L);
         if (result.outcome() == StuckEscapeBackoffPolicy.Outcome.NOTIFY_ONCE) {
-            ChatUtils.sendSystemMessage(bot.getCommandSource(), STUCK_NOTIFY_LINE);
+            ChatUtils.sendSystemMessage(bot.getCommandSource(),
+                    floating ? STUCK_IN_WATER_NOTIFY_LINE : STUCK_NOTIFY_LINE);
         } else if (!result.state().notified()) {
             LOGGER.info("Stuck-escape backoff: owner of {} offline or dead, stuck notice kept pending",
                     bot.getName().getString());

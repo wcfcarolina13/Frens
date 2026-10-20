@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Dedicated system-owned surface recovery so break-free/ascent does not masquerade as collect_dirt.
@@ -21,8 +22,27 @@ public final class SurfaceRecoveryService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("surface-recovery");
     private static final int MAX_NO_PROGRESS_STEPS = 6;
+    /** A repeated failed exit line logs at INFO once a minute per bot, or when its text changes (finding 48). */
+    private static final long EXIT_LOG_INTERVAL_MS = 60_000L;
+    private static final Map<UUID, String> EXIT_LOG_STATE = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> EXIT_LOG_TIME = new ConcurrentHashMap<>();
 
     private SurfaceRecoveryService() {
+    }
+
+    /** Forget one bot's exit-line throttle. */
+    public static void clearLogThrottle(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        EXIT_LOG_STATE.remove(botId);
+        EXIT_LOG_TIME.remove(botId);
+    }
+
+    /** Server shutdown: forget every bot's exit-line throttle. */
+    public static void clearAllLogThrottles() {
+        EXIT_LOG_STATE.clear();
+        EXIT_LOG_TIME.clear();
     }
 
     public static SkillExecutionResult runSurfaceRecovery(ServerPlayerEntity bot, ServerWorld world) {
@@ -74,12 +94,25 @@ public final class SurfaceRecoveryService {
             return result;
         } finally {
             boolean abortRequested = TaskService.isAbortRequested(botUuid);
-            LOGGER.info("Surface recovery exit: success={} abortRequested={} message='{}'",
-                    result != null && result.success(),
-                    abortRequested,
-                    result != null ? result.message() : "null");
+            boolean succeeded = result != null && result.success();
+            String exitMessage = result != null ? String.valueOf(result.message()) : "null";
+            boolean logInfo = true;
+            if (succeeded) {
+                clearLogThrottle(botUuid);
+            } else {
+                boolean changed = LogThrottle.changed(EXIT_LOG_STATE, botUuid, abortRequested + "|" + exitMessage);
+                boolean due = LogThrottle.due(EXIT_LOG_TIME, botUuid, System.currentTimeMillis(), EXIT_LOG_INTERVAL_MS);
+                logInfo = changed || due;
+            }
+            if (logInfo) {
+                LOGGER.info("Surface recovery exit: bot={} success={} abortRequested={} message='{}'",
+                        bot.getName().getString(), succeeded, abortRequested, exitMessage);
+            } else {
+                LOGGER.debug("Surface recovery exit: bot={} success={} abortRequested={} message='{}'",
+                        bot.getName().getString(), succeeded, abortRequested, exitMessage);
+            }
             AutoFaceEntity.setBotExecutingTask(false);
-            boolean success = result != null && result.success() && !abortRequested;
+            boolean success = succeeded && !abortRequested;
             TaskService.complete(ticket, success);
         }
     }
