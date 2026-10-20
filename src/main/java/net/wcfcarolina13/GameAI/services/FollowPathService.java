@@ -5,12 +5,12 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
 import net.minecraft.block.TrapdoorBlock;
+import net.minecraft.fluid.FluidState;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import static net.wcfcarolina13.GameAI.services.BotCampfireAvoidanceService.isNearExposedCampfire;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -179,34 +179,45 @@ public final class FollowPathService {
         boolean[] swimmable = new boolean[total];
         byte[] doorType = new byte[total]; // 0=none, 1=wood, 2=iron
 
+        // All reads go through one chunk cache: from a worker each world.getBlockState /
+        // getFluidState / isChunkLoaded is a server round trip, which made a 49x5x49 capture
+        // cost ~7 s (finding 43). Out-of-height cells read as null here where the world gave
+        // VOID_AIR / EMPTY; the null handling below yields the same bits.
+        ChunkBlockReader reader = new ChunkBlockReader(world);
+        // Campfire avoidance: cells near exposed campfires are blocked. Same answer per cell as
+        // BotCampfireAvoidanceService.isNearExposedCampfire(world, foot, 2), one section scan each.
+        CampfireBerthMemo campfires = BotCampfireAvoidanceService.exposedCampfireMemo(reader, 2);
+
         for (int y = minY; y < minY + sizeY; y++) {
             for (int x = minX; x < minX + sizeX; x++) {
                 for (int z = minZ; z < minZ + sizeZ; z++) {
+                    // foot, head and below share one chunk column; this replaces three isChunkLoaded calls.
+                    if (reader.chunk(x >> 4, z >> 4) == null) {
+                        continue;
+                    }
                     BlockPos foot = new BlockPos(x, y, z);
                     BlockPos head = foot.up();
                     BlockPos below = foot.down();
 
-                    if (!world.isChunkLoaded(foot) || !world.isChunkLoaded(head) || !world.isChunkLoaded(below)) {
-                        continue;
-                    }
+                    BlockState footState = reader.state(foot);
+                    BlockState headState = reader.state(head);
+                    BlockState belowState = reader.state(below);
 
-                    BlockState footState = world.getBlockState(foot);
-                    BlockState headState = world.getBlockState(head);
-                    BlockState belowState = world.getBlockState(below);
-
-                    boolean solidBelow = !belowState.getCollisionShape(world, below).isEmpty();
+                    boolean solidBelow = belowState != null && !belowState.getCollisionShape(world, below).isEmpty();
                     boolean footPassable = isPassableForPlan(world, foot, footState);
                     boolean headPassable = isPassableForPlan(world, head, headState);
-                    boolean footWater = world.getFluidState(foot).isOf(Fluids.WATER);
-                    boolean headWater = world.getFluidState(head).isOf(Fluids.WATER);
-                    
-                    // Campfire avoidance: mark cells near exposed campfires as non-standable
-                    boolean nearCampfire = isNearExposedCampfire(world, foot, 2);
+                    boolean footWater = isWater(reader.fluid(foot));
+                    boolean headWater = isWater(reader.fluid(head));
+
+                    boolean nearCampfire = campfires.isNear(x, y, z);
 
                     int idx = ((y - minY) * sizeX + (x - minX)) * sizeZ + (z - minZ);
                     passable[idx] = footPassable && !nearCampfire;
                     standable[idx] = solidBelow && footPassable && headPassable && !nearCampfire;
                     swimmable[idx] = (footWater || headWater) && footPassable && headPassable && !nearCampfire;
+                    if (footState == null) {
+                        continue;
+                    }
                     if (footState.getBlock() instanceof DoorBlock) {
                         doorType[idx] = footState.isOf(Blocks.IRON_DOOR) ? (byte) 2 : (byte) 1;
                     } else if (footState.getBlock() instanceof FenceGateBlock) {
@@ -230,6 +241,10 @@ public final class FollowPathService {
         int value = LAST_SWIM_TRANSITION_REJECT_COUNT.get();
         LAST_SWIM_TRANSITION_REJECT_COUNT.set(0);
         return value;
+    }
+
+    private static boolean isWater(FluidState fluid) {
+        return fluid != null && fluid.isOf(Fluids.WATER);
     }
 
     private static boolean isPassableForPlan(ServerWorld world, BlockPos pos, BlockState state) {

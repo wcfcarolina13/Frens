@@ -6,6 +6,8 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.world.chunk.WorldChunk;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import org.slf4j.Logger;
@@ -265,5 +267,61 @@ public final class BotCampfireAvoidanceService {
         
         // Campfire is exposed if any side is open
         return solidCount < 4;
+    }
+
+    /**
+     * {@link #isCampfireExposed(ServerWorld, BlockPos)} read through a chunk cache. A neighbor
+     * the reader cannot see (unloaded chunk) is skipped, as there.
+     */
+    public static boolean isCampfireExposed(ChunkBlockReader reader, int x, int y, int z) {
+        int solidCount = 0;
+        if (isSolidNeighbor(reader.state(x, y, z - 1))) solidCount++;
+        if (isSolidNeighbor(reader.state(x, y, z + 1))) solidCount++;
+        if (isSolidNeighbor(reader.state(x + 1, y, z))) solidCount++;
+        if (isSolidNeighbor(reader.state(x - 1, y, z))) solidCount++;
+        return solidCount < 4;
+    }
+
+    private static boolean isSolidNeighbor(BlockState state) {
+        return state != null && state.isOpaque() && !state.isAir();
+    }
+
+    /**
+     * A per-scan memo answering {@link #isNearExposedCampfire(ServerWorld, BlockPos, int)} for
+     * many cells: same answer per cell, but each chunk section is checked once (palette
+     * {@code hasAny(campfire)}, then a walk only where one exists) instead of reading a
+     * (2r+1)×3×(2r+1) box per cell. All reads go through {@code reader}, so from a worker the
+     * cost is the reader's per-chunk fetch, not a server round trip per read. Use it for one
+     * scan with the same reader; neither is thread-safe.
+     */
+    public static CampfireBerthMemo exposedCampfireMemo(ChunkBlockReader reader, int radius) {
+        return new CampfireBerthMemo(radius, (sx, sy, sz, sink) -> {
+            WorldChunk chunk = reader.chunk(sx, sz);
+            if (chunk == null) {
+                return;
+            }
+            int index = chunk.getSectionIndex(sy << 4);
+            if (index < 0 || index >= chunk.countVerticalSections()) {
+                return;
+            }
+            ChunkSection section = chunk.getSection(index);
+            if (section == null || section.isEmpty() || !section.hasAny(BotCampfireAvoidanceService::isCampfire)) {
+                return;
+            }
+            int baseX = sx << 4, baseY = sy << 4, baseZ = sz << 4;
+            for (int ly = 0; ly < 16; ly++) {
+                for (int lz = 0; lz < 16; lz++) {
+                    for (int lx = 0; lx < 16; lx++) {
+                        if (!isCampfire(section.getBlockState(lx, ly, lz))) {
+                            continue;
+                        }
+                        int x = baseX + lx, y = baseY + ly, z = baseZ + lz;
+                        if (isCampfireExposed(reader, x, y, z)) {
+                            sink.accept(x, y, z);
+                        }
+                    }
+                }
+            }
+        });
     }
 }
