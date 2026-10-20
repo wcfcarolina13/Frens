@@ -8,7 +8,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 **State:** main = origin/main @ 1.1.281. Suite 3380 green. Deployed to Nirn. 1.1.281 not sandbox-checked yet (Phase 6bs; repro `tools/sandbox/fix279.py craft full|rotten|mats`); the 1.1.280 sandbox check (6br) was running at release. Built autonomously overnight.
 **1.1.281** (changelog entry has rulings and costs): findings 57/58: idle stone upgrade strict stone only (ruling), batch reserve keeps its cobblestone, main-slot room checks, idle crafts quiet except the throttled full-pack line (ruling). Fable review clean; small follow-up `095b3028` read by the controller.
-**Next:** sandbox-check 1.1.281 (craft stage) and finish reading the 1.1.280 results; then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout).
+**Next:** sandbox-check 1.1.281 (craft stage); finding 56 (one-block step up into oak leaves at feet and head: `leaf-cleared` logs but no leaf is mined), 59, 60 from the 1.1.280 check (6br: all other items pass, findings 47-55 closed); then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout).
 **Public release:** 1.1.281 is the candidate once its sandbox checks pass. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
 **Needs Bradley:** the three 1.1.272 questions still stand (Spells key migration, chest axe before crafting, shared-server chest scan).
 **Deferred (reasons in the changelogs):** see the 1.1.277-1.1.281 entries.
