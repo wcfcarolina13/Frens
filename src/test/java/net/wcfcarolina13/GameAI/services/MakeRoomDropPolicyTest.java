@@ -155,4 +155,10 @@ class MakeRoomDropPolicyTest {
         }
         throw new IOException(relative + " not found above " + dir);
     }
+
+    @Test
+    void batchCobbleStackTheRestOfTheBatchNeedsIsKept() {
+        // Finding 57 (1.1.279): the only cobblestone, 13 of it, while the rest of the batch needs 6.
+        assertTrue(MakeRoomDropPolicy.reservedKeepsStack(13, 13, 6));
+    }
 }

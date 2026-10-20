@@ -394,7 +394,7 @@ class CraftingStationPolicyTest {
         String body = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
         String split = blockAfter(body, body.indexOf(TICK_GATE));
         String usable = blockAfter(split, split.indexOf("if (ensureStationInteractable("));
-        for (String clear : List.of("CRAFT_TABLE_MSG_COOLDOWN.remove(", "CRAFT_TABLE_REACH_FAILURE.remove(")) {
+        for (String clear : List.of("clearTableLineCooldown(bot)", "CRAFT_TABLE_REACH_FAILURE.remove(")) {
             assertTrue(usable.contains(clear), clear + " must run once the in-reach table is usable");
             assertEquals(1, count(split, clear),
                     clear + " must not run for a blocked table, or its caller chats every call");
@@ -644,5 +644,72 @@ class CraftingStationPolicyTest {
         assertEquals(10, CraftingStationPolicy.bedPlanksNeeded(2, true));
         assertEquals(6, CraftingStationPolicy.bedPlanksNeeded(2, false));
         assertTrue(CraftingStationPolicy.bedPlanksNeeded(1, true) > 4);
+    }
+
+    // ── idle stone upgrade: strict stone, quiet (finding 58, 1.1.279) ──────────────────────
+
+    private record Mat(String name, String item) {
+    }
+
+    private static final List<Mat> TOOL_MATERIALS = List.of(
+            new Mat("diamond", "diamond"), new Mat("iron", "iron_ingot"), new Mat("stone", "cobblestone"),
+            new Mat("stone", "cobbled_deepslate"), new Mat("stone", "blackstone"), new Mat("wood", "oak_planks"));
+
+    @Test
+    void strictStoneWithOnlyDiamondHeldTriesOnlyStone() {
+        List<Mat> strict = CraftingStationPolicy.strictMaterials(TOOL_MATERIALS, Mat::name, "stone",
+                () -> new Mat("gold", "gold_ingot"));
+        List<Mat> toTry = CraftingStationPolicy.materialsToTry(strict, m -> m.name().equals("diamond"), true);
+        assertEquals(List.of("cobblestone", "cobbled_deepslate", "blackstone"), toTry.stream().map(Mat::item).toList());
+        // The non-strict path is what crafted the diamond tools: held diamond goes first.
+        assertEquals("diamond", CraftingStationPolicy.materialsToTry(TOOL_MATERIALS, m -> m.name().equals("diamond"), false)
+                .get(0).name());
+    }
+
+    @Test
+    void strictGoldIsOfferedOnlyWhenNamed() {
+        assertEquals(List.of(new Mat("gold", "gold_ingot")),
+                CraftingStationPolicy.strictMaterials(TOOL_MATERIALS, Mat::name, "gold", () -> new Mat("gold", "gold_ingot")));
+        assertTrue(CraftingStationPolicy.strictMaterials(TOOL_MATERIALS, Mat::name, "stone", () -> new Mat("gold", "gold_ingot"))
+                .stream().noneMatch(m -> m.name().equals("gold")));
+    }
+
+    @Test
+    void quietSuppressesTheTableLineForAnAutomaticCraft() {
+        assertFalse(CraftingStationPolicy.shouldSendTableLine(false, false, false, true));
+        assertTrue(CraftingStationPolicy.shouldSendTableLine(false, false, false, false));
+        // A player's own craft is never quiet.
+        assertTrue(CraftingStationPolicy.shouldSendTableLine(true, false, false, true));
+        assertTrue(CraftingStationPolicy.chatSuppressed(true, false));
+        assertFalse(CraftingStationPolicy.chatSuppressed(true, true));
+        assertFalse(CraftingStationPolicy.chatSuppressed(false, false));
+    }
+
+    @Test
+    void onlyAnExplicitCraftClearsTheTableLineThrottle() {
+        assertTrue(CraftingStationPolicy.mayClearTableLineCooldown(true));
+        assertFalse(CraftingStationPolicy.mayClearTableLineCooldown(false));
+    }
+
+    @Test
+    void idleStoneUpgradeCraftsNamedStoneToolsQuietly() throws IOException {
+        String idle = bodyOf(mainSource("src/main/java/net/wcfcarolina13/GameAI/services/BotIdleHobbiesService.java"),
+                "private static boolean maybeHandleIdleStoneToolUpgrades(");
+        for (String tool : List.of("stone_pickaxe", "stone_sword", "stone_axe", "stone_shovel")) {
+            assertTrue(idle.contains("CraftingHelper.craftQuietlyKeeping(source, bot, commander, \"" + tool + "\""),
+                    tool + " not crafted through the quiet strict path");
+        }
+        assertFalse(idle.contains("CraftingHelper.craftGeneric("), "idle upgrade still calls the non-strict craftGeneric");
+        assertTrue(idle.contains("StoneUpgradePolicy.batchReserve("), "idle upgrade does not reserve for the batch");
+        String helper = craftingHelperSource();
+        String quiet = bodyOf(helper, "public static int craftQuietlyKeeping(");
+        assertTrue(quiet.contains("QUIET.set(Boolean.TRUE)") && quiet.contains("finally"), "quiet not set with try/finally");
+        assertTrue(bodyOf(helper, "private static void say(").contains("QUIET.get()"), "say() ignores quiet");
+        assertEquals(1, count(helper, "CRAFT_TABLE_MSG_COOLDOWN.remove("),
+                "the table-line throttle is cleared outside clearTableLineCooldown");
+        assertTrue(bodyOf(helper, "private static boolean keepsStackForCraft(").contains("keepsStackForBatch("),
+                "the make-room drop ignores the batch reserve");
+        assertTrue(bodyOf(helper, "private static boolean hasRoomForItem(").contains("PlayerInventory.MAIN_SIZE"),
+                "hasRoomForItem counts armor/offhand slots as room");
     }
 }

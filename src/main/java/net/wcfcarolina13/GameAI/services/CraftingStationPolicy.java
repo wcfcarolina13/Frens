@@ -2,7 +2,9 @@ package net.wcfcarolina13.GameAI.services;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * Pure decisions behind {@code CraftingHelper.ensureCraftingStation}'s thread split: what a call on
@@ -124,6 +126,57 @@ public final class CraftingStationPolicy {
                                               boolean saidTableLineThisCall,
                                               boolean cooldownActive) {
         return explicitRequest ? !saidTableLineThisCall : !cooldownActive;
+    }
+
+    /**
+     * {@link #shouldSendTableLine(boolean, boolean, boolean)}, but an automatic craft in quiet mode
+     * (the idle stone upgrade, finding 58) sends no table or materials line at all; it only logs.
+     */
+    public static boolean shouldSendTableLine(boolean explicitRequest,
+                                              boolean saidTableLineThisCall,
+                                              boolean cooldownActive,
+                                              boolean quiet) {
+        if (chatSuppressed(quiet, explicitRequest)) {
+            return false;
+        }
+        return shouldSendTableLine(explicitRequest, saidTableLineThisCall, cooldownActive);
+    }
+
+    /** Whether a craft line goes to the log only: quiet mode, and no player asked for this craft. */
+    public static boolean chatSuppressed(boolean quiet, boolean explicitRequest) {
+        return quiet && !explicitRequest;
+    }
+
+    /**
+     * Whether finding a usable table may clear the 30 s table-line throttle. Only during a player's
+     * own craft: an automatic craft that cleared it re-armed "Missing materials" for every material
+     * it tried (finding 58, 1.1.279).
+     */
+    public static boolean mayClearTableLineCooldown(boolean explicitRequest) {
+        return explicitRequest;
+    }
+
+    /**
+     * The materials a name-qualified tool craft ("stone_axe") may use: only the named one, never
+     * another tier. Gold is not in the usual list, so it comes from {@code gold} and only when named.
+     */
+    public static <T> List<T> strictMaterials(List<T> ordered,
+                                              Function<T, String> nameOf,
+                                              String material,
+                                              Supplier<T> gold) {
+        if ("gold".equalsIgnoreCase(material)) {
+            return List.of(gold.get());
+        }
+        if (ordered == null || material == null) {
+            return List.of();
+        }
+        List<T> out = new ArrayList<>();
+        for (T entry : ordered) {
+            if (material.equalsIgnoreCase(nameOf.apply(entry))) {
+                out.add(entry);
+            }
+        }
+        return out;
     }
 
     /**

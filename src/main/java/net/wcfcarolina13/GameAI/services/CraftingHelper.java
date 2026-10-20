@@ -126,6 +126,15 @@ public final class CraftingHelper {
     // sub-craft it then judges, so a refused stick craft is not read as missing sticks. Refusals only
     // happen on the server thread, and the caller reads the flag on that same thread.
     private static final ThreadLocal<Boolean> LAST_CRAFT_REFUSED_FULL_PACK = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    /**
+     * Quiet mode for an automatic craft (the idle stone upgrade): craft lines go to the log, not
+     * chat (finding 58, 1.1.279). Set and cleared by {@link #craftQuietlyKeeping}; the idle tick and
+     * its crafts run synchronously on one thread, so a ThreadLocal reaches every nested line.
+     */
+    private static final ThreadLocal<Boolean> QUIET = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    /** What the rest of the idle upgrade batch still needs; the make-room drop keeps it (finding 57). */
+    private static final ThreadLocal<StoneUpgradePolicy.BatchReserve> BATCH_RESERVE =
+            ThreadLocal.withInitial(() -> StoneUpgradePolicy.BatchReserve.NONE);
 
     // Cooldown after crafting a new table — prevents spam-crafting when placement/reach keeps failing.
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
@@ -300,6 +309,10 @@ public final class CraftingHelper {
     /** Every craft line to the player goes through here, so an explicit craft knows it answered. */
     private static void say(ServerCommandSource source, String msg) {
         if (source == null) return;
+        if (CraftingStationPolicy.chatSuppressed(QUIET.get(), false)) {
+            LOGGER.info("craft (quiet): {}", msg);
+            return;
+        }
         ChatUtils.sendSystemMessage(source, msg);
         for (ExplicitCraftCall call : EXPLICIT_CRAFTS.values()) {
             if (call.source == source) {
@@ -345,10 +358,16 @@ public final class CraftingHelper {
     private static void sendCraftTableNeededOnce(ServerPlayerEntity bot, ServerCommandSource source, String msg) {
         if (bot == null || source == null) return;
         ExplicitCraftCall call = explicitCall(bot);
+        if (CraftingStationPolicy.chatSuppressed(QUIET.get(), call != null)) {
+            // Quiet: log only, and leave the throttle alone so it does not hold a later line back.
+            LOGGER.info("craft (quiet) {}: {}", bot.getName().getString(), msg);
+            return;
+        }
         Long last = CRAFT_TABLE_MSG_COOLDOWN.get(bot.getUuid());
         long now = System.currentTimeMillis();
         boolean cooldownActive = last != null && (now - last) < CRAFT_TABLE_MSG_COOLDOWN_MS;
-        if (!CraftingStationPolicy.shouldSendTableLine(call != null, call != null && call.saidTableLine, cooldownActive)) {
+        if (!CraftingStationPolicy.shouldSendTableLine(call != null, call != null && call.saidTableLine, cooldownActive,
+                QUIET.get())) {
             return;
         }
         if (call != null) {
@@ -357,6 +376,16 @@ public final class CraftingHelper {
         }
         CRAFT_TABLE_MSG_COOLDOWN.put(bot.getUuid(), now);
         say(source, msg);
+    }
+
+    /**
+     * A usable table was found: clear the table-line throttle, but only during a player's own craft
+     * ({@link CraftingStationPolicy#mayClearTableLineCooldown}). An automatic craft keeps its 30 s.
+     */
+    private static void clearTableLineCooldown(ServerPlayerEntity bot) {
+        if (bot != null && CraftingStationPolicy.mayClearTableLineCooldown(explicitCall(bot) != null)) {
+            CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+        }
     }
 
     /**
@@ -449,6 +478,29 @@ public final class CraftingHelper {
             UNKNOWN_CRAFT_EXPLICIT_MSG.keySet().removeIf(k -> k.startsWith(prefix));
         }
         return crafted;
+    }
+
+    /**
+     * An automatic craft (the idle stone upgrade): {@link #craftGeneric} in quiet mode, its lines go
+     * to the log only, and while it runs the make-room drop also keeps {@code keep}, what the rest
+     * of the batch still needs. Both are cleared again when it returns.
+     */
+    public static int craftQuietlyKeeping(ServerCommandSource source,
+                                          ServerPlayerEntity bot,
+                                          ServerPlayerEntity commander,
+                                          String item,
+                                          String materialPreference,
+                                          StoneUpgradePolicy.BatchReserve keep) {
+        Boolean previousQuiet = QUIET.get();
+        StoneUpgradePolicy.BatchReserve previousKeep = BATCH_RESERVE.get();
+        QUIET.set(Boolean.TRUE);
+        BATCH_RESERVE.set(keep == null ? StoneUpgradePolicy.BatchReserve.NONE : keep);
+        try {
+            return craftGeneric(source, bot, commander, item, 1, materialPreference);
+        } finally {
+            QUIET.set(previousQuiet);
+            BATCH_RESERVE.set(previousKeep);
+        }
     }
 
     private static int craftGenericInternal(ServerCommandSource source,
@@ -1411,9 +1463,8 @@ public final class CraftingHelper {
         if (strictMaterial) {
             // A named material is never swapped for another tier. Gold is offered only when named,
             // so a bare "axe" never spends gold ingots.
-            materials = "gold".equalsIgnoreCase(materialPreference)
-                    ? List.of(new ToolMaterial(Items.GOLD_INGOT, 3, "gold"))
-                    : materials.stream().filter(m -> m.name().equalsIgnoreCase(materialPreference)).toList();
+            materials = CraftingStationPolicy.strictMaterials(materials, ToolMaterial::name, materialPreference,
+                    () -> new ToolMaterial(Items.GOLD_INGOT, 3, "gold"));
         } else if (materialPreference != null && !materialPreference.isBlank()) {
             // Determine preferred material order
             materials = materials.stream()
@@ -1793,7 +1844,7 @@ public final class CraftingHelper {
                 // the table is usable: a blocked one keeps the "I need a crafting table" chat throttled.
                 if (ensureStationInteractable(bot, nearest, STATION_REACH_SQ)) {
                     CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
-                    CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                    clearTableLineCooldown(bot);
                     CRAFT_STATION_DECLINE_LOGGED.remove(bot.getUuid());
                     return true;
                 }
@@ -1828,7 +1879,7 @@ public final class CraftingHelper {
                     if (res.success() || bot.getBlockPos().getSquaredDistance(nearest) <= STATION_REACH_SQ) {
                         if (ensureStationInteractable(bot, nearest, STATION_REACH_SQ)) {
                             CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
-                            CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                            clearTableLineCooldown(bot);
                             return true;
                         }
                     }
@@ -1867,7 +1918,7 @@ public final class CraftingHelper {
                 LOGGER.info("Selected approach {} (dist={})", approach.toShortString(), Math.sqrt(approach.getSquaredDistance(nearest)));
                 if (bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
                     CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
-                    CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                    clearTableLineCooldown(bot);
                     return ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
                 }
 
@@ -1886,7 +1937,7 @@ public final class CraftingHelper {
                 if (res.success() || bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
                     LOGGER.info("Reached crafting table approach {}", approach.toShortString());
                     CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
-                    CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                    clearTableLineCooldown(bot);
                     return ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
                 }
                 ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(nearest));
@@ -1903,7 +1954,7 @@ public final class CraftingHelper {
                 }
                 if (close && ensureStationInteractable(bot, nearest, STATION_REACH_SQ)) {
                     CRAFT_TABLE_REACH_FAILURE.remove(bot.getUuid());
-                    CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                    clearTableLineCooldown(bot);
                     return true;
                 }
                 // Fall through to placement/crafting path instead of giving up.
@@ -1951,7 +2002,7 @@ public final class CraftingHelper {
             MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
             if (res.success() || bot.getBlockPos().getSquaredDistance(placeAt) <= STATION_REACH_SQ) {
                 LOGGER.info("Reached newly placed crafting table at {}", placeAt.toShortString());
-                CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                clearTableLineCooldown(bot);
                 return true;
             }
             LOGGER.warn("Failed to step to newly placed crafting table at {}: {}", placeAt.toShortString(), res.detail());
@@ -2041,13 +2092,13 @@ public final class CraftingHelper {
                     bot.getHorizontalFacing());
             MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
             if (res.success() || bot.getBlockPos().getSquaredDistance(placeAt) <= STATION_REACH_SQ) {
-                CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+                clearTableLineCooldown(bot);
                 return true;
             }
             ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(placeAt));
             MovementService.clearRecentWalkAttempt(bot.getUuid());
             boolean close = MovementService.nudgeTowardUntilClose(bot, placeAt, STATION_REACH_SQ, 1500L, 0.14, "craft-crafted-table-nudge");
-            if (close) CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+            if (close) clearTableLineCooldown(bot);
             return close;
         }
 
@@ -2146,7 +2197,7 @@ public final class CraftingHelper {
      */
     private static boolean usePlacedTableWithoutWalking(ServerPlayerEntity bot, BlockPos placeAt) {
         if (ensureStationInteractable(bot, placeAt, STATION_REACH_SQ)) {
-            CRAFT_TABLE_MSG_COOLDOWN.remove(bot.getUuid());
+            clearTableLineCooldown(bot);
             CRAFT_STATION_DECLINE_LOGGED.remove(bot.getUuid());
             return true;
         }
@@ -3083,7 +3134,9 @@ public final class CraftingHelper {
         debugChest("Distribute output item=" + output.getName().getString() + " count=" + count
                 + " emptySlot=" + bot.getInventory().getEmptySlot());
         // After the craft: on the server thread this only drops a cheap stack, and an output that
-        // still does not fit is dropped below rather than walking to a chest.
+        // still does not fit is dropped below rather than walking to a chest. No per-craft reserve
+        // here (the ingredients are spent), but keepsStackForCraft still keeps an idle batch's
+        // BATCH_RESERVE in both calls, the forced retry included (finding 57).
         makeRoomForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of(), false, true, true);
         ItemStack stack = new ItemStack(output, count);
         boolean added = bot.getInventory().insertStack(stack);
@@ -3414,6 +3467,9 @@ public final class CraftingHelper {
         if (stack == null || stack.isEmpty()) {
             return false;
         }
+        if (keepsStackForBatch(bot, stack, reserveItems)) {
+            return true;
+        }
         if (reserveItems != null && reserveItems.containsKey(stack.getItem())) {
             Integer needed = reserveItems.get(stack.getItem());
             int total = InventoryIterator.countDirect(bot, s -> s.isOf(stack.getItem()));
@@ -3450,6 +3506,47 @@ public final class CraftingHelper {
         }
         return false;
     }
+    /**
+     * The idle upgrade batch's reserve ({@link #BATCH_RESERVE}) on top of the current craft's: the
+     * stone pool (cobblestone, cobbled deepslate, blackstone counted together), sticks, and the
+     * planks that make up a stick shortfall. Empty outside a batch.
+     */
+    private static boolean keepsStackForBatch(ServerPlayerEntity bot, ItemStack stack, Map<Item, Integer> reserveItems) {
+        StoneUpgradePolicy.BatchReserve batch = BATCH_RESERVE.get();
+        if (batch == null || batch.isEmpty()) {
+            return false;
+        }
+        if (batch.stone() > 0 && isStoneToolMaterial(stack)) {
+            int current = 0;
+            if (reserveItems != null) {
+                for (Item poolItem : List.of(Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.BLACKSTONE)) {
+                    current = Math.max(current, reserveItems.getOrDefault(poolItem, 0));
+                }
+            }
+            int pool = InventoryIterator.countDirect(bot, CraftingHelper::isStoneToolMaterial);
+            return MakeRoomDropPolicy.reservedKeepsStack(pool, stack.getCount(), batch.stone() + current);
+        }
+        if (batch.sticks() <= 0) {
+            return false;
+        }
+        int stickNeed = batch.sticks() + (reserveItems == null ? 0 : reserveItems.getOrDefault(Items.STICK, 0));
+        int sticksHeld = InventoryIterator.countDirect(bot, s -> s.isOf(Items.STICK));
+        if (stack.isOf(Items.STICK)) {
+            return MakeRoomDropPolicy.reservedKeepsStack(sticksHeld, stack.getCount(), stickNeed);
+        }
+        if (isPlank(stack)) {
+            int planksNeeded = StoneUpgradePolicy.planksForSticks(stickNeed, sticksHeld);
+            return MakeRoomDropPolicy.reservedKeepsStack(
+                    InventoryIterator.countDirect(bot, CraftingHelper::isPlank), stack.getCount(), planksNeeded);
+        }
+        return false;
+    }
+
+    private static boolean isStoneToolMaterial(ItemStack stack) {
+        return stack != null && (stack.isOf(Items.COBBLESTONE) || stack.isOf(Items.COBBLED_DEEPSLATE)
+                || stack.isOf(Items.BLACKSTONE));
+    }
+
     private static boolean isProtectedItem(ItemStack stack) {
         if (stack == null || stack.isEmpty()) {
             return true;
@@ -3465,7 +3562,9 @@ public final class CraftingHelper {
             return true;
         }
         ItemStack probe = new ItemStack(item, 1);
-        for (int i = 0; i < bot.getInventory().size(); i++) {
+        // Main slots only: size() also counts armor, offhand, body and saddle (43 in 1.21.11), where
+        // insertStack never puts an output, so an empty one was "room" the insert then lacked (finding 57).
+        for (int i = 0; i < net.minecraft.entity.player.PlayerInventory.MAIN_SIZE; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty()) {
                 return true;

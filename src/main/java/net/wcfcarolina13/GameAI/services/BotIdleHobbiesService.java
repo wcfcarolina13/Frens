@@ -1604,11 +1604,18 @@ public final class BotIdleHobbiesService {
         ServerPlayerEntity commander = resolveWoodenFallbackHistoryOwner(bot);
         boolean crafted = false;
 
-        // Upgrade order: pickaxe → sword → axe → shovel
-        if (canUpgradePickaxe) crafted |= CraftingHelper.craftGeneric(source, bot, commander, "pickaxe", 1, "stone") > 0;
-        if (canUpgradeSword)   crafted |= CraftingHelper.craftGeneric(source, bot, commander, "sword", 1, "stone") > 0;
-        if (canUpgradeAxe)     crafted |= CraftingHelper.craftGeneric(source, bot, commander, "axe", 1, "stone") > 0;
-        if (canUpgradeShovel)  crafted |= CraftingHelper.craftGeneric(source, bot, commander, "shovel", 1, "stone") > 0;
+        // Upgrade order: pickaxe → sword → axe → shovel. Strictly stone ("stone_pickaxe"): an idle
+        // upgrade never spends iron, gold or diamond (finding 58, 1.1.279; the player can /bot craft
+        // a better tool). Each craft is quiet (log only) and keeps what the later crafts still need,
+        // so its make-room drop does not throw away their cobblestone (finding 57).
+        if (canUpgradePickaxe) crafted |= CraftingHelper.craftQuietlyKeeping(source, bot, commander, "stone_pickaxe", "stone",
+                StoneUpgradePolicy.batchReserve(false, canUpgradeSword, canUpgradeAxe, canUpgradeShovel)) > 0;
+        if (canUpgradeSword)   crafted |= CraftingHelper.craftQuietlyKeeping(source, bot, commander, "stone_sword", "stone",
+                StoneUpgradePolicy.batchReserve(false, false, canUpgradeAxe, canUpgradeShovel)) > 0;
+        if (canUpgradeAxe)     crafted |= CraftingHelper.craftQuietlyKeeping(source, bot, commander, "stone_axe", "stone",
+                StoneUpgradePolicy.batchReserve(false, false, false, canUpgradeShovel)) > 0;
+        if (canUpgradeShovel)  crafted |= CraftingHelper.craftQuietlyKeeping(source, bot, commander, "stone_shovel", "stone",
+                StoneUpgradePolicy.BatchReserve.NONE) > 0;
 
         if (crafted) {
             CombatInventoryManager.ensureCombatLoadout(bot);
