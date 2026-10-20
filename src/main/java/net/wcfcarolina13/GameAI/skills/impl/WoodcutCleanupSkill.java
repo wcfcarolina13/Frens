@@ -1950,7 +1950,9 @@ public final class WoodcutCleanupSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return 0;
         }
-        selectLeafTool(bot);
+        if (!selectLeafTool(bot)) {
+            return 0;
+        }
         return LeafClearService.clearLineOfSight(
                 bot,
                 target,
@@ -1995,8 +1997,8 @@ public final class WoodcutCleanupSkill implements Skill {
             BotActions.selectHotbarSlot(bot, i);
             return true;
         }
-        BotActions.selectHotbarSlot(bot, 0);
-        return true;
+        // Every hotbar slot holds a tool or weapon: never swing one at leaves (it was slot 0).
+        return false;
     }
 
     private void breakLeaf(ServerPlayerEntity bot, BlockPos pos) {

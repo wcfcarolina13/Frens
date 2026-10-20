@@ -583,6 +583,8 @@ public final class ChestStoreService {
         CraftingHelper.PreparedPlacement prepared = CraftingHelper.prepareNearbyUtilityPlacement(
                 source, bot, world, bot.getBlockPos(), "chest", 4.5D * 4.5D);
         if (prepared == null) {
+            LOGGER.info("Store chest placement miss: no placeable spot near {} (bot={})",
+                    bot.getBlockPos().toShortString(), bot.getName().getString());
             return null;
         }
         BotActions.PlaceResult placeResult = BotActions.tryPlaceBlockAt(bot, prepared.placePos(), Direction.UP, List.of(Items.CHEST));
@@ -595,6 +597,10 @@ public final class ChestStoreService {
         BlockState now = world.getBlockState(prepared.placePos());
         if (now.isOf(Blocks.CHEST) || now.isOf(Blocks.TRAPPED_CHEST)) {
             placed = prepared.placePos().toImmutable();
+        } else {
+            LOGGER.info("Store chest placement miss: placed at {} but found {} (bot={})",
+                    prepared.placePos().toShortString(), now.getBlock().getName().getString(),
+                    bot.getName().getString());
         }
 
         if (placed != null && announce) {

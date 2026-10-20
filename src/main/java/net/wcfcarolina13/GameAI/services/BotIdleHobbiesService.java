@@ -173,6 +173,8 @@ public final class BotIdleHobbiesService {
         // The chest tool search pauses this service's fallback shares; ToolProvisionService has no
         // lifecycle hook of its own, and this runs at SERVER_STOPPED.
         ToolProvisionService.resetSession();
+        // Same for CraftingHelper's chest pull pauses and pending pulls.
+        CraftingHelper.resetSession();
     }
 
     /** Returns the last idle-hobby skill name (e.g. "fish"/"hangout"), or null if unknown. */

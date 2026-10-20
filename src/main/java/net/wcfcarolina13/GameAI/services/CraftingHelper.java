@@ -147,9 +147,9 @@ public final class CraftingHelper {
     // Chest pulls (withdrawFromNearbyChests). A pull the owner's decision ended, or that found the
     // owner away, and that got nothing and holds nothing pauses that material for the bot
     // (CraftChestPullPolicy.shouldPause, PAUSE_MS), keyed "<bot uuid>|<material>".
-    // Neither map is cleared at server stop (this class has no lifecycle hook): both are hints with
-    // wall-clock deadlines — a pause ends after PAUSE_MS, a held ticket is forgotten after the
-    // facade's ticket lifetime — and at most one entry per bot (per material for pauses).
+    // Both are cleared at SERVER_STOPPED by resetSession(); they are also hints with wall-clock
+    // deadlines — a pause ends after PAUSE_MS, a held ticket is forgotten after the facade's ticket
+    // lifetime — and at most one entry per bot (per material for pauses).
     private static final Map<String, Long> CHEST_PULL_PAUSED_UNTIL = new ConcurrentHashMap<>();
     // The chest and item a bot's open supply ticket is about (a prompt not yet answered, or a yes
     // the bot has not reached yet). While the prompt is open the facade answers an ask about
@@ -1459,6 +1459,8 @@ public final class CraftingHelper {
     /** First reason a name-qualified tool craft failed, told once at the end instead of per variant. */
     private static final class ToolShortfall {
         String message;
+        /** A material's craft was refused for a full pack; that line already said why (finding 61). */
+        boolean packFull;
     }
 
     /**
@@ -1513,6 +1515,10 @@ public final class CraftingHelper {
             int crafts = craftToolWithMaterial(bot, source, commander, kind, amount, mat, shortfall);
             if (crafts > 0) {
                 return crafts;
+            }
+            if (shortfall != null && shortfall.packFull) {
+                // The pack is full for every material: no per-material shortfall line after it.
+                return 0;
             }
             if (crafts == STATION_UNAVAILABLE) {
                 // No table for one material is no table for any: stop here, the station already
@@ -1677,11 +1683,13 @@ public final class CraftingHelper {
         reserveItems.put(Items.STICK, crafts * stickCount);
         if (mat.headItem().equals(Items.OAK_PLANKS)) {
             if (!ensureInventorySpaceForOutput(bot, source, output, crafts, crafts * headCount, 0, reserveItems)) {
+                if (shortfall != null) shortfall.packFull = true;
                 return 0;
             }
         } else {
             reserveItems.put(mat.headItem(), crafts * headCount);
             if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
+                if (shortfall != null) shortfall.packFull = true;
                 return 0;
             }
         }
@@ -3650,6 +3658,15 @@ public final class CraftingHelper {
      * Whether the sub-craft run since the flag was last cleared (ensureSticks, the fence's stick
      * craft) was refused for a full pack. Read once: the flag is cleared here.
      */
+    /**
+     * Forgets every bot's chest pull pause and pending pull. Called at SERVER_STOPPED through
+     * {@link BotIdleHobbiesService#resetSession()}, so neither carries into the next world.
+     */
+    public static void resetSession() {
+        CHEST_PULL_PAUSED_UNTIL.clear();
+        CHEST_PULL_PENDING.clear();
+    }
+
     private static boolean takeFullPackRefusal() {
         boolean refused = LAST_CRAFT_REFUSED_FULL_PACK.get();
         LAST_CRAFT_REFUSED_FULL_PACK.set(Boolean.FALSE);
