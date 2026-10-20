@@ -7,6 +7,8 @@ stage builds on a floating stone platform far from the base so terrain never var
                                Pass: "Terminating all current tasks due to threat detections" at most once per bot.
   fix275.py threat2            variant of threat: an awake invulnerable zombie in a glass cell, W1 and W2 woodcutting 4 trees.
   fix275.py threat3            variant: an ordinary zombie walks up to W1 and W2 while they mine.
+  fix275.py skeleton           the pause path: an invulnerable skeleton on a 4-high pillar 8 blocks from W1 and W2 woodcutting.
+                               Pass: one threat line per bot with a 'pause requested', no repeat while it lives.
   fix275.py soil               finding 38: Axer (stone axe, wooden pickaxe, 24 dirt) fells a 9-log oak standing on one dirt
                                block in a stone deck. Pass: the dirt is still there after cleanup, any bot pillar removed.
   fix275.py onetree            finding 41 (after soil + clean Axer): Axer2, the only tree on the 300,300 deck (6 logs). Pass: "Cut 1 tree(s). No more trees
@@ -269,6 +271,32 @@ elif st == "threat3":
     for h in hits:
         print(h[:200])
     print("pauses:", [l[:200] for l in since(m, r"pause requested|Pausing|[Cc]ombat|Killed|killed")][:12])
+    print(f"Terminating lines in {time.time()-t0:.0f} s: {len(hits)} per minute {per_minute(hits)} "
+          f"W1={sum('W1' in h for h in hits)} W2={sum('W2' in h for h in hits)}")
+    chat("/bot stop W1", 1); chat("/bot stop W2", 1)
+elif st == "skeleton":
+    # the pause path itself: a skeleton (shoots, so its hits pause a task) on a pillar 8 blocks from W1 and W2 woodcutting
+    sx = X - 60
+    chat(f"/tp @p {sx} {Y} {Z+6} 0 0", 4)
+    chat("/kill @e[type=zombie]", 1); chat("/kill @e[type=skeleton]", 1)
+    chat(f"/fill {sx-7} {Y} {Z-8} {sx+8} {Y+8} {Z-1} air", 1)
+    for tx, tz in ((sx + 4, Z - 6), (sx + 7, Z - 3), (sx + 1, Z - 7)):
+        tree(tx, tz, 5)
+    for b, dx in (("W1", 2), ("W2", 4)):
+        chat(f"/tp {b} {sx + dx} {Y} {Z - 2}", 1); chat(f"/clear {b}", 1)
+        give(b, "stone_axe 1", "dirt 16", "bread 8")
+    chat(f"/fill {sx-7} {Y} {Z-5} {sx-5} {Y+3} {Z-3} stone", 1)  # a 3x3 pillar, fenced on top so it cannot step off
+    chat(f"/fill {sx-7} {Y+4} {Z-5} {sx-5} {Y+4} {Z-3} oak_fence", 1); chat(f"/setblock {sx-6} {Y+4} {Z-4} air", 1)
+    m = mark()
+    chat("/bot skill woodcut W1", 2); chat("/bot skill woodcut W2", 4)
+    chat(f"/summon skeleton {sx-6} {Y+4} {Z-4} {{Invulnerable:1b,PersistenceRequired:1b}}", 1)
+    t0 = time.time(); time.sleep(60)
+    hits = since(m, r"Terminating all current tasks")
+    chat("/kill @e[type=skeleton]", 1)
+    for h in hits:
+        print(h[:200])
+    for l in since(m, r"pause requested|did not pause|hit paused|Pausing")[:12]:
+        print("  >", l[:220])
     print(f"Terminating lines in {time.time()-t0:.0f} s: {len(hits)} per minute {per_minute(hits)} "
           f"W1={sum('W1' in h for h in hits)} W2={sum('W2' in h for h in hits)}")
     chat("/bot stop W1", 1); chat("/bot stop W2", 1)

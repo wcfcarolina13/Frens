@@ -83,7 +83,7 @@ JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (
 
 ## Findings (backlog for a fix build)
 
-**Fixed in 1.1.275** (2026-10-19, sandbox-checked, replays `frens_1_1_275_6bm_fix_checks.zip`, `frens_1_1_275_6bm_fix_checks_chest_owner.zip` and `frens_1_1_275_6bm_fix_checks_chest_foreign.zip`, `tools/sandbox/fix275.py`; Phase 6bm): 37 (0 threat lines in 61 s near a frozen zombie, was 16; the once-per-pause announcement was not reached because no run paused a task, field item), 38 (the dirt under the felled trunk stays, the bot's 7 scaffold blocks removed), 40 (Sweep Souls3 starts empty with `chestLike=0`, AB R1 adopts with `chestLike=1`, also over Sweep Souls3's 1.1.274 claim, deposit works), 41 (one-tree run ends `success=true`, no "Repeated failures"; the plain command prints "Cleared the local woodcut area after 1 target(s)."), 42 ("Desperate food" 1-2 lines in 45 s, no starvation pause while eating). Partial: 39 (snapshot skipped, 1781 ms, but 8392 ms when one stand needs A*; finding 43). New: 43-45. Still open: 3, 14 (as 39/43), 43-45.
+**Fixed in 1.1.275** (2026-10-19, sandbox-checked, replays `frens_1_1_275_6bm_fix_checks.zip`, `frens_1_1_275_6bm_fix_checks_chest_owner.zip`, `frens_1_1_275_6bm_fix_checks_chest_foreign.zip` and `frens_1_1_275_6bm_fix_checks_threat_skeleton.zip`, `tools/sandbox/fix275.py`; Phase 6bm): 37 (0 threat lines in 61 s near a frozen zombie, was 16; the once-per-pause announcement was not reached because no run paused a task, finding 46), 38 (the dirt under the felled trunk stays, the bot's 7 scaffold blocks removed), 40 (Sweep Souls3 starts empty with `chestLike=0`, AB R1 adopts with `chestLike=1`, also over Sweep Souls3's 1.1.274 claim, deposit works), 41 (one-tree run ends `success=true`, no "Repeated failures"; the plain command prints "Cleared the local woodcut area after 1 target(s)."), 42 ("Desperate food" 1-2 lines in 45 s, no starvation pause while eating). Partial: 39 (snapshot skipped, 1781 ms, but 8392 ms when one stand needs A*; finding 43). New: 43-46. Still open: 3, 14 (as 39/43), 43-46.
 
 **Fixed in 1.1.274** (2026-10-19, sandbox-checked, replays `frens_1_1_274_6bl_fix_checks.zip`, `frens_1_1_274_6bl_fix_checks_minds_relaunch.zip` and `frens_1_1_274_6bl_fix_checks_chest_registry.zip`, `tools/sandbox/fix274.py`; Phase 6bl): 7, 13, 20, 21, 26 (for the save that owns the chests; see finding 40), plus the 1.1.273 axe re-equip (the AutoFaceEntity cliff loadout) and the idle leather-armor fallback. Not fixed: 14 (the search still takes 11.6 s, finding 39). Partial: the farm no-hoe line on a half-planted farm (the start gate answers when there is no hoe at all; the half-planted path is a field item). Not checked: 3 (merged scene speakers), the idle cobblestone-tools fallback, the re-poll timeout extension. Finding 37 repro: still 16 lines a minute. Still open: 3, 14, 37, 38, 39-42.
 
@@ -271,6 +271,13 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     holds four records under `New World#3644a587:minecraft:overworld`, chests that are not in that save (smokey's is leaf litter
     there). A save that adopted wrongly under 1.1.274 keeps pointing its bots at missing chests; "an own store with records is
     never overwritten" protects it. Not loaded again to see what its bots do with them.
+46. **The threat line's once-per-pause path was not reached by any hostile in the sandbox (minor, unverified).** 1.1.275 sandbox
+    2026-10-19: two bots running mining or woodcut beside a frozen zombie, a caged awake zombie, an ordinary zombie that hit them,
+    and an invulnerable skeleton (melee, then fenced on a pillar where it never shot): no `pause requested`, no threat line. Melee
+    hits log `hostile hit did not pause task: reason=not-projectile`; the ranged-hit pause (`Frens.pauseTaskForRangedHit`) pauses
+    without the line. The line now lives only in `AutoFaceEntity` (phantom pause, busy branch, danger-zone branch), and whether its
+    busy branch runs while a skill is active (`BotEventHandler.updateBehavior` returns first?) is not known. Next step: a skeleton
+    that really shoots a working bot, or the debug log for `AutoFaceEntity`.
 
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
