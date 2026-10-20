@@ -2,6 +2,19 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## The idle stone-tool upgrade crafts only stone, keeps the cobblestone it still needs, and stays quiet; 1.1.281 (2026-10-20)
+
+Fix build from the 1.1.279 sandbox check (findings 57, 58). Scoped read-only first; the cobblestone drop came from the after-craft retry, not the pre-craft room check.
+
+- **The idle stone upgrade crafts only stone tools** (finding 58; `c1ab350e`): it called the generic tool craft with "stone" as a preference only, so once the cobblestone was gone it made a diamond sword, a diamond shovel and an iron axe from the bot's valuables. It now asks for `stone_pickaxe`/`stone_sword`/`stone_axe`/`stone_shovel` (strict). Ruling (made on Bradley's behalf): an idle upgrade never uses iron, gold or diamond; cost if wrong: none (`/bot craft` makes better tools on request).
+- **The upgrade keeps the cobblestone the rest of the batch needs** (finding 57; `c1ab350e`, `StoneUpgradePolicy.batchReserve`): after the pickaxe, a full-pack make-room retry with no reserves dropped the 13 cobblestone the sword, axe and shovel needed. The batch's remaining stone (cobblestone, cobbled deepslate and blackstone pooled), sticks and planks for a stick shortfall are kept while it runs. Room checks look at the 36 main slots only (`size()` is 43 with armor, offhand, body and saddle, which an empty one counted as room; also in the bundle craft-space check, `095b3028`).
+- **Idle crafts stay quiet** (finding 57; `c1ab350e`, `095b3028`): 18 "Missing materials for ..." lines in one second came from the table-line cooldown being cleared every time a table was in reach. Idle crafts log instead of speaking, and the cooldown is no longer cleared by automatic crafts. The full-pack line ("My pack's full, so I can't craft X right now.") still reaches the owner, once per 30 s (ruling: a bot that silently never upgrades is worse than one line).
+- **Review** (Fable, one reviewer): merge-ready; the full-pack ruling above and the bundle-check slot fix were taken from it (`095b3028`, controller read the diff).
+- **Tests** 3370 → 3380.
+- **Deferred:** strict stone needs 3 of one stone type (mixed types aren't combined, pre-existing); a stackable output that would merge into the offhand now triggers one needless cheap drop.
+
+**Field checks:** SANDBOX
+
 ## Follow under oak canopies (waypoints, corners, leaves, /tp), flooded-pocket ledge climb, cleanup leaves other trees' soil and pillars alone, bow defenders and friendly fire, admin remote open; 1.1.280 (2026-10-20)
 
 Fix build from the 1.1.277 and 1.1.278 sandbox checks (findings 47 and 49-55). Scoped read-only first; the 1.1.277 canopy fix had failed its repro, and the rescope found three separate causes.
