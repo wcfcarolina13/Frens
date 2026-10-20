@@ -85,6 +85,7 @@ public final class BotMutualAidService {
     private static final long SEEK_AID_COOLDOWN_TICKS = 20L * 6L;
     private static final long REGROUP_COOLDOWN_TICKS = 20L * 20L;
     private static final long DEFENSE_COOLDOWN_TICKS = 20L * 4L;
+    private static final long DEFENSE_FAILURE_COOLDOWN_TICKS = 40L;
     private static final long FLOWER_COOLDOWN_TICKS = 20L * 90L;
     private static final long STATE_CLEANUP_INTERVAL_TICKS = 20L * 60L;
 
@@ -114,6 +115,15 @@ public final class BotMutualAidService {
     private static final Map<UUID, UUID> LAST_INTERACTION_BOT = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_INTERACTION_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<UUID, Long>> BOT_AID_CHECK_COOLDOWNS = new ConcurrentHashMap<>();
+    /**
+     * Approaches in progress, one per moving bot, advanced one step per server tick
+     * ({@link #advanceEngagements}). Replaces the blocking nudge that froze the server thread. Server thread.
+     */
+    private static final Map<UUID, Engagement> ENGAGEMENTS = new ConcurrentHashMap<>();
+    private static final double DEFENSE_IMPULSE = 0.20D;
+    private static final double APPROACH_BOT_IMPULSE = 0.18D;
+    private static final double JUMP_RISE = 0.6D;
+    private static final double AUTO_JUMP_BEYOND_SQ = 2.25D;
     private static volatile long NEXT_STATE_CLEANUP_TICK = 0L;
 
     private BotMutualAidService() {
@@ -126,6 +136,31 @@ public final class BotMutualAidService {
     }
 
     private record DefenseRequest(ServerPlayerEntity ally, Entity hostile, int priority) {
+    }
+
+    private enum EngagementKind {
+        /** A defender closing on the hostile near an ally; attacks on arrival. */
+        DEFEND_HOSTILE,
+        /** A defender closing on the ally when the hostile was already gone. */
+        DEFEND_ALLY,
+        /** A hungry bot walking to a donor bot; asks for food on arrival. */
+        SEEK_FOOD
+    }
+
+    /**
+     * @param targetId the entity walked toward: the hostile, the ally, or the donor
+     * @param allyId   the defended ally (defense kinds); the donor again for {@link EngagementKind#SEEK_FOOD}
+     */
+    private record Engagement(EngagementKind kind,
+                              UUID targetId,
+                              UUID allyId,
+                              long deadlineTick,
+                              double reachSq,
+                              double bestDistSq,
+                              int noProgressTicks) {
+        Engagement next(MutualAidDefensePolicy.Step step) {
+            return new Engagement(kind, targetId, allyId, deadlineTick, reachSq, step.bestDistSq(), step.noProgressTicks());
+        }
     }
 
     private record PendingHandoff(UUID donorId,
@@ -198,6 +233,14 @@ public final class BotMutualAidService {
             return false;
         }
         long nowTick = server.getTicks();
+        // On the server thread the walk to the donor is an engagement advanced one step per tick
+        // (a nudge here would freeze the tick and the bot with it); off it, the caller's worker walks.
+        boolean onServerThread = server.isOnThread();
+        Engagement active = ENGAGEMENTS.get(seeker.getUuid());
+        if (active != null) {
+            // Still walking to a donor: the seek is under way. Any other engagement: busy.
+            return active.kind() == EngagementKind.SEEK_FOOD;
+        }
         long nextAllowed = NEXT_SEEK_AID_TICK.getOrDefault(seeker.getUuid(), 0L);
         if (nowTick < nextAllowed || isPendingParticipant(seeker.getUuid())) {
             return false;
@@ -222,12 +265,29 @@ public final class BotMutualAidService {
         }
 
         rememberInteraction(seeker, donor, nowTick);
-        if (!approachBot(seeker, donor, SHARE_RADIUS_SQ, 3_200L, "mutual-aid-seek-food")) {
-            setAidCheckCooldown(seeker, donor, nowTick + AID_CHECK_COOLDOWN_TICKS);
-            NEXT_SEEK_AID_TICK.put(seeker.getUuid(), nowTick + SEEK_AID_COOLDOWN_TICKS);
+        if (onServerThread) {
+            if (seeker.squaredDistanceTo(donor) > SHARE_RADIUS_SQ) {
+                startEngagement(seeker, EngagementKind.SEEK_FOOD, donor, donor.getUuid(),
+                        nowTick + MutualAidDefensePolicy.SEEK_FOOD_DEADLINE_TICKS, SHARE_RADIUS_SQ);
+                LOGGER.info("Mutual aid: {} is walking to {} for food support",
+                        seeker.getName().getString(),
+                        donor.getName().getString());
+                return true;
+            }
+        } else if (!approachBot(seeker, donor, SHARE_RADIUS_SQ, 3_200L, "mutual-aid-seek-food")) {
+            seekFoodApproachFailed(seeker, donor, nowTick);
             return false;
         }
+        return askDonorForFood(seeker, donor, nowTick);
+    }
 
+    private static void seekFoodApproachFailed(ServerPlayerEntity seeker, ServerPlayerEntity donor, long nowTick) {
+        setAidCheckCooldown(seeker, donor, nowTick + AID_CHECK_COOLDOWN_TICKS);
+        NEXT_SEEK_AID_TICK.put(seeker.getUuid(), nowTick + SEEK_AID_COOLDOWN_TICKS);
+    }
+
+    /** The seeker is within {@link #SHARE_RADIUS} of the donor: register a food handoff if the donor has spare food. */
+    private static boolean askDonorForFood(ServerPlayerEntity seeker, ServerPlayerEntity donor, long nowTick) {
         rememberInteraction(seeker, donor, nowTick);
         if (pickAidInventorySlot(donor, seeker, AidKind.FOOD) < 0) {
             setAidCheckCooldown(seeker, donor, nowTick + AID_CHECK_COOLDOWN_TICKS);
@@ -326,6 +386,7 @@ public final class BotMutualAidService {
         pruneMap(NEXT_SEEK_AID_TICK, knownBots);
         pruneMap(NEXT_REGROUP_TICK, knownBots);
         pruneMap(NEXT_DEFENSE_TICK, knownBots);
+        pruneMap(ENGAGEMENTS, knownBots);
         pruneMap(NEXT_FLOWER_TICK, knownBots);
         pruneMap(NEXT_MAKE_ROOM_TICK, knownBots);
         pruneMap(DONOR_PENDING, knownBots);
@@ -355,7 +416,12 @@ public final class BotMutualAidService {
     }
 
     private static void processDefensiveSupport(MinecraftServer server, long nowTick) {
+        // Approaches already under way take their step before any new one starts.
+        advanceEngagements(server, nowTick);
         for (ServerPlayerEntity defender : BotEventHandler.getRegisteredBots(server)) {
+            if (defender == null || ENGAGEMENTS.containsKey(defender.getUuid())) {
+                continue;
+            }
             if (!isDefenseEligible(defender)) {
                 continue;
             }
@@ -378,14 +444,10 @@ public final class BotMutualAidService {
                 continue;
             }
             if (!prepareForDefense(defender)) {
-                NEXT_DEFENSE_TICK.put(defender.getUuid(), nowTick + 40L);
+                NEXT_DEFENSE_TICK.put(defender.getUuid(), nowTick + DEFENSE_FAILURE_COOLDOWN_TICKS);
                 continue;
             }
-            if (respondToDefenseRequest(defender, request, nowTick)) {
-                NEXT_DEFENSE_TICK.put(defender.getUuid(), nowTick + DEFENSE_COOLDOWN_TICKS);
-            } else {
-                NEXT_DEFENSE_TICK.put(defender.getUuid(), nowTick + 40L);
-            }
+            respondToDefenseRequest(defender, request, nowTick);
         }
     }
 
@@ -553,42 +615,182 @@ public final class BotMutualAidService {
         return !TaskService.hasActiveTask(defender.getUuid());
     }
 
-    private static boolean respondToDefenseRequest(ServerPlayerEntity defender, DefenseRequest request, long nowTick) {
-        if (defender == null || request == null || request.ally() == null) {
-            return false;
+    /**
+     * Answers a defense request without blocking the tick: a defender already within reach strikes
+     * now; otherwise an engagement starts and {@link #advanceEngagements} moves it one step per tick.
+     * Server thread.
+     */
+    private static void respondToDefenseRequest(ServerPlayerEntity defender, DefenseRequest request, long nowTick) {
+        if (defender == null) {
+            return;
+        }
+        if (request == null || request.ally() == null) {
+            endDefense(defender, false, nowTick);
+            return;
         }
         Entity hostile = request.hostile();
         ServerPlayerEntity ally = request.ally();
         if (hostile == null || hostile.isRemoved() || !hostile.isAlive()) {
-            return approachBot(defender, ally, REGROUP_RADIUS_SQ, 1_600L, "mutual-aid-defend-ally");
-        }
-        boolean closeEnough = defender.squaredDistanceTo(hostile) <= DEFENSE_ENGAGE_REACH_SQ;
-        if (!closeEnough) {
-            closeEnough = MovementService.nudgeTowardUntilClose(
-                    defender,
-                    hostile.getBlockPos(),
-                    DEFENSE_ENGAGE_REACH_SQ,
-                    2_400L,
-                    0.20D,
-                    "mutual-aid-defend-threat"
-            );
-        }
-        if (closeEnough) {
-            if (!BotCombatPolicyService.shouldBotAttack(hostile, defender)) {
-                // Target is name-tagged — bot is forbidden from engaging even in mutual aid.
-                return false;
+            if (defender.squaredDistanceTo(ally) <= REGROUP_RADIUS_SQ) {
+                endDefense(defender, true, nowTick);
+                return;
             }
-            LookController.faceEntity(defender, hostile);
-            BotActions.selectBestWeapon(defender);
-            BotActions.attackTarget(defender, hostile);
-            rememberInteraction(defender, ally, nowTick);
-            LOGGER.info("Mutual aid: {} moved to defend {} against {}",
-                    defender.getName().getString(),
-                    ally.getName().getString(),
-                    hostile.getName().getString());
-            return true;
+            startEngagement(defender, EngagementKind.DEFEND_ALLY, ally, ally.getUuid(),
+                    nowTick + MutualAidDefensePolicy.ALLY_DEADLINE_TICKS, REGROUP_RADIUS_SQ);
+            return;
         }
-        return false;
+        if (defender.squaredDistanceTo(hostile) <= DEFENSE_ENGAGE_REACH_SQ) {
+            endDefense(defender, strikeHostile(defender, ally, hostile, nowTick), nowTick);
+            return;
+        }
+        startEngagement(defender, EngagementKind.DEFEND_HOSTILE, hostile, ally.getUuid(),
+                nowTick + MutualAidDefensePolicy.HOSTILE_DEADLINE_TICKS, DEFENSE_ENGAGE_REACH_SQ);
+    }
+
+    /** The defender is within reach of the hostile: attack once. @return whether it attacked */
+    private static boolean strikeHostile(ServerPlayerEntity defender, ServerPlayerEntity ally, Entity hostile, long nowTick) {
+        if (!BotCombatPolicyService.shouldBotAttack(hostile, defender)) {
+            // Target is name-tagged — bot is forbidden from engaging even in mutual aid.
+            return false;
+        }
+        LookController.faceEntity(defender, hostile);
+        BotActions.selectBestWeapon(defender);
+        BotActions.attackTarget(defender, hostile);
+        rememberInteraction(defender, ally, nowTick);
+        LOGGER.info("Mutual aid: {} moved to defend {} against {}",
+                defender.getName().getString(),
+                ally.getName().getString(),
+                hostile.getName().getString());
+        return true;
+    }
+
+    /** The defense cooldown a finished response leaves: 4 s after a success, 2 s after a failure. */
+    private static void endDefense(ServerPlayerEntity defender, boolean succeeded, long nowTick) {
+        NEXT_DEFENSE_TICK.put(defender.getUuid(),
+                nowTick + (succeeded ? DEFENSE_COOLDOWN_TICKS : DEFENSE_FAILURE_COOLDOWN_TICKS));
+    }
+
+    private static void startEngagement(ServerPlayerEntity bot, EngagementKind kind, Entity target, UUID allyId,
+                                        long deadlineTick, double reachSq) {
+        ENGAGEMENTS.put(bot.getUuid(),
+                new Engagement(kind, target.getUuid(), allyId, deadlineTick, reachSq, bot.squaredDistanceTo(target), 0));
+    }
+
+    /**
+     * One step for every approach under way, at most one movement input per bot per tick. A bot
+     * that left the server is dropped; every other end goes through {@link #endEngagement}, which
+     * stops the bot so it is never left walking. Server thread.
+     */
+    private static void advanceEngagements(MinecraftServer server, long nowTick) {
+        if (ENGAGEMENTS.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<UUID, Engagement> entry : ENGAGEMENTS.entrySet()) {
+            UUID botId = entry.getKey();
+            Engagement engagement = entry.getValue();
+            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botId);
+            if (bot == null || bot.isRemoved() || !BotEventHandler.isRegisteredBot(bot)) {
+                ENGAGEMENTS.remove(botId);
+                continue;
+            }
+            advanceEngagement(server, bot, engagement, nowTick);
+        }
+    }
+
+    private static void advanceEngagement(MinecraftServer server, ServerPlayerEntity bot, Engagement engagement,
+                                          long nowTick) {
+        Entity target = resolveEngagementTarget(server, bot, engagement);
+        if (target == null || !canContinueEngagement(bot, engagement)) {
+            endEngagement(server, bot, engagement, target, false, nowTick);
+            return;
+        }
+        double distSq = bot.squaredDistanceTo(target);
+        MutualAidDefensePolicy.Step step = MutualAidDefensePolicy.step(distSq, engagement.reachSq(),
+                engagement.bestDistSq(), engagement.noProgressTicks(), nowTick, engagement.deadlineTick());
+        switch (step.decision()) {
+            case ARRIVED -> endEngagement(server, bot, engagement, target, true, nowTick);
+            case ABORT -> endEngagement(server, bot, engagement, target, false, nowTick);
+            case CONTINUE -> {
+                ENGAGEMENTS.put(bot.getUuid(), engagement.next(step));
+                double baseImpulse = engagement.kind() == EngagementKind.DEFEND_HOSTILE ? DEFENSE_IMPULSE : APPROACH_BOT_IMPULSE;
+                stepToward(bot, target, distSq, baseImpulse);
+            }
+        }
+    }
+
+    /** The entity walked toward, if it is still alive in the bot's world. */
+    private static Entity resolveEngagementTarget(MinecraftServer server, ServerPlayerEntity bot, Engagement engagement) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return null;
+        }
+        Entity target = engagement.kind() == EngagementKind.DEFEND_HOSTILE
+                ? world.getEntity(engagement.targetId())
+                : server.getPlayerManager().getPlayer(engagement.targetId());
+        if (target == null || target.isRemoved() || !target.isAlive() || target.getEntityWorld() != world) {
+            return null;
+        }
+        return target;
+    }
+
+    private static boolean canContinueEngagement(ServerPlayerEntity bot, Engagement engagement) {
+        if (bot.isInsideWall()) {
+            return false;
+        }
+        if (engagement.kind() != EngagementKind.SEEK_FOOD) {
+            return isDefenseEligible(bot);
+        }
+        // Not TaskService.isAbortRequested: interrupting an ambient task latches it, and the hobby
+        // starvation path interrupts one right before seeking food.
+        return bot.isAlive()
+                && !bot.isSleeping()
+                && BotEventHandler.getCurrentMode(bot) == BotEventHandler.Mode.IDLE
+                && !BotFleeService.isBreakingFree(bot.getUuid())
+                && !BotFleeService.isInShelter(bot.getUuid());
+    }
+
+    /** One tick of the old nudge's input: face, sprint when far, jump up a rise, one push toward the target. */
+    private static void stepToward(ServerPlayerEntity bot, Entity target, double distSq, double baseImpulse) {
+        LookController.faceEntity(bot, target);
+        BotActions.sprint(bot, MutualAidDefensePolicy.shouldSprint(distSq));
+        if (target.getY() - bot.getY() > JUMP_RISE) {
+            BotActions.jump(bot);
+        } else if (distSq > AUTO_JUMP_BEYOND_SQ) {
+            BotActions.autoJumpIfNeeded(bot);
+        }
+        BotActions.applyMovementInput(bot, new Vec3d(target.getX(), target.getY(), target.getZ()),
+                MutualAidDefensePolicy.impulse(distSq, baseImpulse));
+    }
+
+    /**
+     * Ends an approach: removes it, stops the bot (velocity and sprint cleared, as the old nudge did
+     * on every exit), then acts on arrival or backs off. {@code target} may be null when it was lost.
+     */
+    private static void endEngagement(MinecraftServer server, ServerPlayerEntity bot, Engagement engagement,
+                                      Entity target, boolean arrived, long nowTick) {
+        ENGAGEMENTS.remove(bot.getUuid());
+        BotActions.stop(bot);
+        switch (engagement.kind()) {
+            case DEFEND_HOSTILE -> {
+                ServerPlayerEntity ally = server.getPlayerManager().getPlayer(engagement.allyId());
+                boolean struck = arrived && ally != null && strikeHostile(bot, ally, target, nowTick);
+                endDefense(bot, struck, nowTick);
+            }
+            case DEFEND_ALLY -> endDefense(bot, arrived, nowTick);
+            case SEEK_FOOD -> {
+                ServerPlayerEntity donor = target instanceof ServerPlayerEntity player ? player : null;
+                if (arrived && donor != null) {
+                    askDonorForFood(bot, donor, nowTick);
+                } else {
+                    if (donor == null) {
+                        donor = server.getPlayerManager().getPlayer(engagement.targetId());
+                    }
+                    seekFoodApproachFailed(bot, donor, nowTick);
+                    LOGGER.info("Mutual aid: {} could not reach {} for food support",
+                            bot.getName().getString(),
+                            donor != null ? donor.getName().getString() : "a donor");
+                }
+            }
+        }
     }
 
     private static boolean hasNearbyThreats(ServerPlayerEntity bot, double radius) {
@@ -1674,7 +1876,7 @@ public final class BotMutualAidService {
         if (botId == null) {
             return false;
         }
-        return PENDING_HANDOFFS.containsKey(botId) || DONOR_PENDING.containsKey(botId);
+        return PENDING_HANDOFFS.containsKey(botId) || DONOR_PENDING.containsKey(botId) || ENGAGEMENTS.containsKey(botId);
     }
 
     private static void registerPendingHandoff(PendingHandoff handoff) {

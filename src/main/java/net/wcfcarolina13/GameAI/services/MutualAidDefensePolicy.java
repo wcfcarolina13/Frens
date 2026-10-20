@@ -1,0 +1,77 @@
+package net.wcfcarolina13.GameAI.services;
+
+/**
+ * Pure decisions for a mutual-aid approach that moves one step per server tick (a defender closing
+ * on a hostile or an ally, a hungry bot walking to a donor). It replaces the old blocking nudge,
+ * which slept on the server thread for up to 2.4-3.2 s while the bot it was moving could not tick.
+ * The numbers keep that nudge's budgets: its millisecond deadlines at 20 ticks per second, and its
+ * stall limit of 7 sleeps of 90 ms (about 14 ticks).
+ */
+public final class MutualAidDefensePolicy {
+
+    /** Old nudge budget for closing on a hostile: 2.4 s. */
+    public static final long HOSTILE_DEADLINE_TICKS = 48L;
+    /** Old nudge budget for closing on the ally when the hostile was gone: 1.6 s. */
+    public static final long ALLY_DEADLINE_TICKS = 32L;
+    /** Old nudge budget for a hungry bot walking to a donor: 3.2 s. */
+    public static final long SEEK_FOOD_DEADLINE_TICKS = 64L;
+    /** Ticks without getting closer before the approach gives up. */
+    public static final int NO_PROGRESS_LIMIT_TICKS = 14;
+    /** A step counts as progress only when it closes the best distance by more than this (squared blocks). */
+    public static final double PROGRESS_EPSILON_SQ = 0.05D;
+    /** Sprint when further than 3 blocks. */
+    public static final double SPRINT_BEYOND_SQ = 9.0D;
+    /** Beyond 4 blocks the push is at least {@link #FAR_MIN_IMPULSE}. */
+    public static final double FAR_BEYOND_SQ = 16.0D;
+    public static final double FAR_MIN_IMPULSE = 0.16D;
+
+    public enum Decision {
+        /** Within reach: stop and act. */
+        ARRIVED,
+        /** Take one more step this tick. */
+        CONTINUE,
+        /** Out of time or stalled: stop and back off. */
+        ABORT
+    }
+
+    /** The decision and the progress bookkeeping to carry into the next tick. */
+    public record Step(Decision decision, double bestDistSq, int noProgressTicks) {
+    }
+
+    private MutualAidDefensePolicy() {
+    }
+
+    /**
+     * One tick of the approach. Arrival wins over everything; otherwise the step updates the best
+     * distance seen (a step that does not beat it by {@link #PROGRESS_EPSILON_SQ} counts as no
+     * progress) and aborts when the deadline has passed or the bot has stalled for
+     * {@link #NO_PROGRESS_LIMIT_TICKS}.
+     */
+    public static Step step(double distSq, double reachSq, double bestDistSq, int noProgressTicks,
+                            long nowTick, long deadlineTick) {
+        if (distSq <= reachSq) {
+            return new Step(Decision.ARRIVED, Math.min(bestDistSq, distSq), 0);
+        }
+        double best = bestDistSq;
+        int stalled = noProgressTicks;
+        if (distSq + PROGRESS_EPSILON_SQ >= bestDistSq) {
+            stalled++;
+        } else {
+            best = distSq;
+            stalled = 0;
+        }
+        if (nowTick >= deadlineTick || stalled >= NO_PROGRESS_LIMIT_TICKS) {
+            return new Step(Decision.ABORT, best, stalled);
+        }
+        return new Step(Decision.CONTINUE, best, stalled);
+    }
+
+    public static boolean shouldSprint(double distSq) {
+        return distSq > SPRINT_BEYOND_SQ;
+    }
+
+    /** The old nudge's push: its base impulse, raised to {@link #FAR_MIN_IMPULSE} when far away. */
+    public static double impulse(double distSq, double baseImpulse) {
+        return distSq > FAR_BEYOND_SQ ? Math.max(baseImpulse, FAR_MIN_IMPULSE) : baseImpulse;
+    }
+}
