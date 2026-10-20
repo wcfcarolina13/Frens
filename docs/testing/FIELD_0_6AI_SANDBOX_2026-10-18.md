@@ -83,6 +83,8 @@ JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (
 
 ## Findings (backlog for a fix build)
 
+**Fixed in 1.1.275** (2026-10-19, sandbox-checked, replays `frens_1_1_275_6bm_fix_checks.zip`, `frens_1_1_275_6bm_fix_checks_chest_owner.zip` and `frens_1_1_275_6bm_fix_checks_chest_foreign.zip`, `tools/sandbox/fix275.py`; Phase 6bm): 37 (0 threat lines in 61 s near a frozen zombie, was 16; the once-per-pause announcement was not reached because no run paused a task, field item), 38 (the dirt under the felled trunk stays, the bot's 7 scaffold blocks removed), 40 (Sweep Souls3 starts empty with `chestLike=0`, AB R1 adopts with `chestLike=1`, also over Sweep Souls3's 1.1.274 claim, deposit works), 41 (one-tree run ends `success=true`, no "Repeated failures"; the plain command prints "Cleared the local woodcut area after 1 target(s)."), 42 ("Desperate food" 1-2 lines in 45 s, no starvation pause while eating). Partial: 39 (snapshot skipped, 1781 ms, but 8392 ms when one stand needs A*; finding 43). New: 43-45. Still open: 3, 14 (as 39/43), 43-45.
+
 **Fixed in 1.1.274** (2026-10-19, sandbox-checked, replays `frens_1_1_274_6bl_fix_checks.zip`, `frens_1_1_274_6bl_fix_checks_minds_relaunch.zip` and `frens_1_1_274_6bl_fix_checks_chest_registry.zip`, `tools/sandbox/fix274.py`; Phase 6bl): 7, 13, 20, 21, 26 (for the save that owns the chests; see finding 40), plus the 1.1.273 axe re-equip (the AutoFaceEntity cliff loadout) and the idle leather-armor fallback. Not fixed: 14 (the search still takes 11.6 s, finding 39). Partial: the farm no-hoe line on a half-planted farm (the start gate answers when there is no hoe at all; the half-planted path is a field item). Not checked: 3 (merged scene speakers), the idle cobblestone-tools fallback, the re-poll timeout extension. Finding 37 repro: still 16 lines a minute. Still open: 3, 14, 37, 38, 39-42.
 
 **Fixed in 1.1.273** (2026-10-19, sandbox-checked for 4, 9, 11, 17 (short run), 18, 23, 27 and the re-poll swap, all pass, replays `frens_1_1_273_6bk_fix_checks.zip` and `frens_1_1_273_6bk_fix_checks_rate0.zip`, `tools/sandbox/fix273.py`; not checked there: 10, 24, 28, 29, 34, 36 and the tree-punch line; field items in Phase 6bk): 4, 9, 10, 11, 17, 18, 23, 24, 27, 28, 29, 34, 36, plus the two 1.1.272-check minors (the "Time to punch some trees." line after a chest axe, and the stone axe / oak log re-poll swap). Still open: 3, 7, 13, 14, 20, 21, 26.
@@ -254,6 +256,21 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
 42. **"Desperate food: eating rotten flesh" logs every tick while a bot suffocates (minor, log).** 1.1.274 sandbox 2026-10-19
     17:09:32-17:09:39: Jake and Bob entombed in stone (by the test's deck fill) logged it 147 times in 7 s, with "Bot X is stuck!"
     each second, until they died. `HealingService` line 478, no throttle.
+43. **The fishing spot search still takes 1.8-8.4 s on a fresh 7x7 pond (medium).** 1.1.275 sandbox 2026-10-19: `Fishing spot
+    search: columns=49 evaluated=5 stands=0 aStar=0 ... elapsed=1781ms (snapshot=skipped snapshotMs=0 chests=0 chestMs=12
+    columnsMs=194 evalMs=1572)` 19:13:17, and at an identical pond `stands=1 aStar=1 ... elapsed=8392ms (snapshot=built
+    snapshotMs=6837 ... evalMs=1356)` 19:14:22. The chest scan is fixed; evaluating 5 columns still costs 1.4-1.6 s (off-thread
+    block reads, the root cause in the 1.1.275 changelog) and the snapshot 6.8 s whenever one stand needs A*. A remembered spot
+    skips the search ("Reusing remembered fishing spot"), so it bites on the first cast at a new pond.
+44. **Mining logs "mining detected 1 hostile(s) nearby" several times a second while it keeps mining (minor, log).** 1.1.275
+    sandbox 2026-10-19 19:00-19:08: W1 and W2 mining beside a zombie logged 444 WARN lines `mining detected 1 hostile(s) nearby
+    during iteration N` (about 5 a second per bot, the same iteration number repeated) and kept mining; the hit itself logged
+    `hostile hit did not pause task: reason=not-projectile`. One line per iteration (or per hostile) would do.
+45. **The save that lost the chest claim keeps its 1.1.274 copy of the records (minor).** 1.1.275 sandbox 2026-10-19 19:24:46:
+    AB R1 took the claim back from Sweep Souls3 ("over the claim of 'New World#3644a587'"), but `bot_chest_registry.json` still
+    holds four records under `New World#3644a587:minecraft:overworld`, chests that are not in that save (smokey's is leaf litter
+    there). A save that adopted wrongly under 1.1.274 keeps pointing its bots at missing chests; "an own store with records is
+    never overwritten" protects it. Not loaded again to see what its bots do with them.
 
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
