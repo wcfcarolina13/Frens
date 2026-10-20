@@ -4,7 +4,16 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-19 (1.1.275) — next session starts here
+## Session Handoff 2026-10-19 (1.1.276) — next session starts here
+
+**State:** main = origin/main @ 1.1.276. Suite 3111 green. Deployed to Nirn. Sandbox check of 1.1.276 dispatched at release (Phase 6bn; result recorded by that run, or redo it with `tools/sandbox/fix275.py` as the model).
+**1.1.276** (changelog entry has rulings and costs): `ChunkBlockReader` (one chunk fetch per scan instead of a server round trip per block) used by the path snapshot (hangout start, fishing), fishing evaluation, woodcut detection/beehives/relocation sampling, crafting table and chest searches (section skip), farm/harvest/planting/cleanup-chest/hangout-campfire scans; finding 44 a miner fights what it would fight and works past the rest (ruling), the AutoFace busy-pause no longer cancels a skill for a mob it won't fight (closes 46); finding 45 copied chest records retired. Fable review (three reviewers), one fix wave (`11e8ed2c`), clean re-review.
+**Public release:** 1.1.276 is the candidate once its sandbox checks pass. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Needs Bradley:** the three 1.1.272 questions still stand (Spells key migration, chest axe before crafting, shared-server chest scan).
+**Deferred (reasons in the changelogs):** name-tagged mob attacking a busy bot is neither fought nor paused for; per-log woodcut checks and dynamic-shape collision reads still hop; `crossesLockedGate` ray samples hop with locks present; chest record revival is partial; spare-table placement miss; craft call that hits a failed reach still makes a spare; A* node cap; axe-bearer's failing woodcut ignores the per-hobby backoff; merged scene lines truncated at 300 chars; Wither boss reads "withering"; 2×2 trunk on a slope; off-thread `consumeFood` slot swaps; chest deposit vs verify disagree on barrels/copper.
+**Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-19 (1.1.275) — superseded
 
 **State:** main = origin/main @ 1.1.275. Suite 3089 green. Deployed to Nirn. **1.1.275 sandbox-checked** (Phase 6bm, `tools/sandbox/fix275.py`, replays `frens_1_1_275_6bm_fix_checks`, `_chest_owner`, `_chest_foreign`, `_threat_skeleton`): PASS threat line (repro, 0 lines; the pause path not reached, finding 46), tree soil, one-tree woodcut, chest adoption, desperate eating; PARTIAL fishing (1781 ms with the snapshot skipped, 8392 ms when built); new findings 43-46 in `FIELD_0_6AI_SANDBOX_2026-10-18.md`. Open field items: 125. 1.1.273 (Phase 6bk) and 1.1.274 (Phase 6bl) were sandbox-checked this session.
 **1.1.275** (changelog entry has rulings and costs): findings 37-42 from the 1.1.273/274 sandbox checks: 37 threat line once per threat per bot, 38 woodcut leaves the felled tree's soil, 39 fishing search (root cause: off-thread getBlockState round-trips to the server thread; snapshot lazy, chest scan bounded and chunk-local), 40 chest list adopted only where the chests are (also over a 1.1.274 foreign claim or an empty own store), 41 woodcut that ran out of trees reports success, 42 desperate eat every 2 s and no starvation pause mid-eat. Fable review (two reviewers), one fix wave (`e7d5dd55`), clean re-review.
