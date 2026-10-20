@@ -4,7 +4,15 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.282) — next session starts here
+## Session Handoff 2026-10-20 (1.1.283) — next session starts here
+
+**State:** main = origin/main @ 1.1.283. Suite 3382 green. Deployed to Nirn. 1.1.283 = backlog 409, 186, 231 (Codex-implemented, `003fd626`); 135 skipped (not small). Not sandbox-checked.
+**Next:** finding 56 (one-block step up into oak leaves at feet and head: `leaf-cleared` logs but no leaf is mined), 59, 60; then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout).
+**Public release:** 1.1.283 is the candidate. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Needs Bradley:** the three 1.1.272 questions still stand.
+**Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-20 (1.1.282) — superseded
 
 **State:** main = origin/main @ 1.1.282. Suite 3380 green. Deployed to Nirn. 1.1.282 is four small fixes (backlog 169, 218, 227; finding 61), not sandbox-checked; 1.1.281 sandbox (6bs) passed.
 **Next:** finding 56 (one-block step up into oak leaves at feet and head: `leaf-cleared` logs but no leaf is mined), 59, 60; then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout; 169, 218, 227 done).
@@ -242,7 +250,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "Defensive-aid tick freeze (`BotMutualAidService:558`)" ("a 1.6–2.4 s tick freeze when a hostile is near an ally. Needs a one-impulse or worker design."; 1.1.223 handoff, = 1.1.222 deferral 3, 2026-09-25) — ✅ 1.1.278 fdc7690a (sandbox 6bp PASS)
 - [ ] "The MutualAid recipient's inventory is mutated from the donor's tick while its own skill worker may run (pre-existing)." (1.1.222 handoff, 2026-09-25)
 - [x] "`dropCheapStackForSpace` drops the LARGEST stack when nothing is cheap, and the dropped stack can be re-picked after 2 s." ("Needs a cheap-only mode or a longer pickup delay"; 1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 (restated: aid make-room never drops valuables; sandbox 6bq PASS)
-- [ ] "A flower keeps targeting a full preferred recipient (cosmetic)." (1.1.222 handoff, 2026-09-25)
+- [x] "A flower keeps targeting a full preferred recipient (cosmetic)." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.283 003fd626
 - [ ] "the per-hobby backoff state is written for hunt and collect_dirt but read only by woodcut — ready if a later item gates `pickHobby` on tool availability." (1.1.216 handoff, 2026-09-07)
 - [ ] "Farm manual placement still has multiple `Heightmap.Type.WORLD_SURFACE` / `findSurfaceY` call sites outside `assessFarmSite`." ("If they misbehave in forests, apply the same walkable-ground-Y treatment"; Farm Pipeline next-session notes, 2026-04-08)
 - [ ] (uncertain) "PvE only. ... Alliances feature is the planned PvP gate, not yet built." (Tamed-animal defense notes, 2026-04-11)
@@ -287,7 +295,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 
 ### Souls, dialogue and audio
 - [ ] "Audio for \"Hey, incoming!\"." (also listed in untracked `AUDIO_NEEDED.md`; 1.1.261 handoff, 2026-10-17)
-- [ ] "Extend the punctuation guard to the JSON resources." (1.1.261 handoff, 2026-10-17)
+- [x] "Extend the punctuation guard to the JSON resources." (1.1.261 handoff, 2026-10-17) — ✅ 1.1.283 003fd626
 - [ ] (uncertain) "#10 audio regeneration (needs Bradley's triage)" = "The missing `snow_golem_ammo` and other voice clips." (1.1.239 `ef4ea499` added empty-sound stubs only; 1.1.239 handoff, 2026-10-14; 1.1.223 handoff, 2026-09-25)
 - [ ] "Later: scene smoothing step 2 (scene boundaries in history)" (1.1.223 handoff, 2026-09-25)
 - [ ] "self-directed goals (proposer-only)." (1.1.223 handoff, 2026-09-25)
@@ -465,7 +473,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [ ] Playtest Learning Mode v1 on a live fortify/scaffold scenario (`pillaring_to_roof`) and confirm trace quality + overhead at `detail=balanced`; tune snapshot radius/tick rates if needed.
 - [ ] Capture at least one intentional failed pillar/summit demo (`/bot learn stop fail`) to tune generalized scaffold retry/recenter thresholds from trace timing.
 - [ ] Playtest fortify tower cavity-ignore flow (`report_cavities` particles + user-guided repair) on live server and adjust thresholds if needed.
-- [ ] Generate and map audio for fortify cavity callouts (5 variants) listed in `AUDIO_NEEDED.md`.
+- [x] Generate and map audio for fortify cavity callouts (5 variants) listed in `AUDIO_NEEDED.md`. — ✅ 1.1.283 003fd626
 
 
 - [ ] **Construction parity baseline**: Establish measurable parity for generic schematic builds, shelter/hovel/burrow, fortify wall/patch/moat, and other block-placement paths

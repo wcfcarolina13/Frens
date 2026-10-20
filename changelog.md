@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Fortify cavity callouts voiced, flower gifts skip a full pack, punctuation guard covers JSON lines; 1.1.283 (2026-10-20)
+
+Small-items build from the backlog triage, implemented by Codex (with Bradley's permission for this task); controller read the diff and ran the suite.
+
+- **The five fortify cavity callouts are voiced** (backlog 409; `003fd626`): their OGGs and sounds.json entries existed but had no sound events or text mapping.
+- **A flower gift skips a recipient with no room for the flower** (backlog 186; `003fd626`): it kept targeting the previous recipient with a full inventory.
+- **The punctuation guard test also scans player-facing JSON resources** (backlog 231; `003fd626`): no existing violations.
+- **Skipped:** backlog 135 (first settings save pins the default pathfinder): the same capture path serves network sync and disconnect restore, so it isn't small.
+- **Tests** 3380 → 3382. Not sandbox-checked.
+
+**Field checks:** a fortify run that finds a cavity speaks the callout aloud.
+
 ## Small fixes: cleanup never swings a weapon at leaves, chest placement misses logged, no wrong-material line after a full pack, chest-pull hints reset per world; 1.1.282 (2026-10-20)
 
 Small-items build from the backlog triage and the 1.1.281 sandbox check (one implementer, controller read the diff).
