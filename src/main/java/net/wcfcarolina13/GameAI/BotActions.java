@@ -1829,8 +1829,14 @@ public final class BotActions {
             }
         }
 
-        if (world != null && !canOccupyPosition(bot, world, newX, newY, newZ)) {
-            return;
+        if (world != null) {
+            Vec3d resolved = resolveOccupiablePosition(bot, world, newX, newY, newZ);
+            if (resolved == null) {
+                return;
+            }
+            newX = resolved.x;
+            newY = resolved.y;
+            newZ = resolved.z;
         }
 
         bot.refreshPositionAndAngles(newX, newY, newZ, bot.getYaw(), bot.getPitch());
@@ -1886,7 +1892,7 @@ public final class BotActions {
      * because the bot stands ON those (its blockpos floors into the partial cell). Adding
      * horizontal velocity from a stair-feet position is safe; vanilla physics will auto-step
      * via {@code stepHeight=0.6} and arbitrate the actual collision. The stricter
-     * {@link #canOccupyPosition} stays in use for teleport-style movers like
+     * {@link #resolveOccupiablePosition} stays in use for teleport-style movers like
      * {@code moveRelative}.
      */
     private static boolean isFeetPassableForMovement(BlockState state, ServerWorld world, BlockPos pos) {
@@ -1916,26 +1922,77 @@ public final class BotActions {
                 && isPassableForMovement(headState, world, head);
     }
 
-    private static boolean canOccupyPosition(ServerPlayerEntity bot,
-                                             ServerWorld world,
-                                             double x,
-                                             double y,
-                                             double z) {
+    /**
+     * Where {@code moveRelative} may put the bot when it asks for (x, y, z): the target itself,
+     * a shortened same-cell step that stops flush with a wall, or null to stay put.
+     */
+    private static Vec3d resolveOccupiablePosition(ServerPlayerEntity bot,
+                                                   ServerWorld world,
+                                                   double x,
+                                                   double y,
+                                                   double z) {
         if (bot == null || world == null) {
-            return false;
+            return null;
         }
         BlockPos feet = BlockPos.ofFloored(x, y, z);
-        // Sub-cell motion within the bot's current feet cell is always legal. Vanilla
-        // physics has already accepted the bot at its current position, so a tiny nudge
-        // that stays in the same cell cannot violate any invariant our stricter cell-
-        // based passability check enforces. Without this short-circuit, a bot standing
-        // in a wedge cell (closed door, stair-adjacent precision boundary, etc.) has
-        // every impulse rejected, freezing it in place. Cell crossings still go through
-        // the gates below; vanilla Entity.move() also runs its own collision check when
-        // velocity actually carries the bot across a cell boundary.
         if (feet.equals(bot.getBlockPos())) {
-            return true;
+            return resolveSameCellStep(bot, world, x, y, z);
         }
+        return canOccupyNewCell(bot, world, feet, x, y, z) ? new Vec3d(x, y, z) : null;
+    }
+
+    private static final ConcurrentHashMap<UUID, Long> LAST_SAME_CELL_SNAP_LOG_TICK = new ConcurrentHashMap<>();
+    private static final long SAME_CELL_SNAP_LOG_THROTTLE_TICKS = 10L;
+
+    /**
+     * A step that stays in the bot's current feet cell. This used to be accepted unchecked
+     * (so a wedged bot, e.g. in a closed door cell, could still move), which let a 0.45 step
+     * put the hitbox 0.25 into a solid neighbour and suffocate the bot. Now
+     * {@link SubCellSnapPolicy} allows it only when it ends clear or with less overlap than
+     * it started with, and otherwise shortens it to stop flush with the wall. Blocks in the
+     * bot's own feet and head cells are left out: the bot already stands in them (a door it
+     * is wedged in, the upper half of a stair) and vanilla accepted that.
+     */
+    private static Vec3d resolveSameCellStep(ServerPlayerEntity bot, ServerWorld world, double x, double y, double z) {
+        Box current = bot.getBoundingBox();
+        double dx = x - bot.getX();
+        double dz = z - bot.getZ();
+        Box target = current.offset(dx, y - bot.getY(), dz);
+        List<double[]> solids = new ArrayList<>();
+        for (Box solid : collectSolidBoxes(world, current.union(target), bot.getBlockPos())) {
+            solids.add(SubCellSnapPolicy.box(solid.minX, solid.minY, solid.minZ, solid.maxX, solid.maxY, solid.maxZ));
+        }
+        if (solids.isEmpty()) {
+            return new Vec3d(x, y, z);
+        }
+        double[] from = SubCellSnapPolicy.box(current.minX, current.minY, current.minZ, current.maxX, current.maxY, current.maxZ);
+        double[] step = SubCellSnapPolicy.resolve(from, dx, dz, solids);
+        Vec3d resolved = step == null ? null : new Vec3d(bot.getX() + step[0], y, bot.getZ() + step[1]);
+        boolean changed = step == null || Math.abs(step[0] - dx) > 1.0E-6 || Math.abs(step[1] - dz) > 1.0E-6;
+        if (changed && LOGGER.isDebugEnabled()
+                && net.wcfcarolina13.GameAI.services.LogThrottle.due(LAST_SAME_CELL_SNAP_LOG_TICK, bot.getUuid(),
+                world.getTime(), SAME_CELL_SNAP_LOG_THROTTLE_TICKS)) {
+            LOGGER.debug("moveRelative-same-cell bot={} from=({}, {}) to=({}, {}) result={} penetrationBefore={} penetrationTarget={}",
+                    bot.getName().getString(),
+                    String.format(Locale.ROOT, "%.3f", bot.getX()),
+                    String.format(Locale.ROOT, "%.3f", bot.getZ()),
+                    String.format(Locale.ROOT, "%.3f", x),
+                    String.format(Locale.ROOT, "%.3f", z),
+                    resolved == null ? "refused"
+                            : String.format(Locale.ROOT, "clamped(%.3f, %.3f)", resolved.x, resolved.z),
+                    String.format(Locale.ROOT, "%.4f", SubCellSnapPolicy.penetration(from, solids)),
+                    String.format(Locale.ROOT, "%.4f",
+                            SubCellSnapPolicy.penetration(SubCellSnapPolicy.offset(from, dx, dz), solids)));
+        }
+        return resolved;
+    }
+
+    private static boolean canOccupyNewCell(ServerPlayerEntity bot,
+                                            ServerWorld world,
+                                            BlockPos feet,
+                                            double x,
+                                            double y,
+                                            double z) {
         if (!hasMovementClearance(world, feet)) {
             return false;
         }
@@ -1960,16 +2017,35 @@ public final class BotActions {
      * non-empty collision shapes but never obstruct horizontal movement in practice.
      */
     private static boolean isBoxClearIgnoringWalkablePartials(ServerWorld world, Box targetBox) {
-        int minX = (int) Math.floor(targetBox.minX);
-        int minY = (int) Math.floor(targetBox.minY);
-        int minZ = (int) Math.floor(targetBox.minZ);
-        int maxX = (int) Math.floor(targetBox.maxX - 1.0E-7);
-        int maxY = (int) Math.floor(targetBox.maxY - 1.0E-7);
-        int maxZ = (int) Math.floor(targetBox.maxZ - 1.0E-7);
+        for (Box shapeBox : collectSolidBoxes(world, targetBox, null)) {
+            if (shapeBox.intersects(targetBox)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * World-space collision boxes of the blocks in the cells {@code area} touches, skipping
+     * walkable partials (see {@link #isBoxClearIgnoringWalkablePartials}) and, when
+     * {@code ownFeet} is given, the bot's own feet and head cells.
+     */
+    private static List<Box> collectSolidBoxes(ServerWorld world, Box area, BlockPos ownFeet) {
+        int minX = (int) Math.floor(area.minX);
+        int minY = (int) Math.floor(area.minY);
+        int minZ = (int) Math.floor(area.minZ);
+        int maxX = (int) Math.floor(area.maxX - 1.0E-7);
+        int maxY = (int) Math.floor(area.maxY - 1.0E-7);
+        int maxZ = (int) Math.floor(area.maxZ - 1.0E-7);
+        List<Box> boxes = new ArrayList<>();
         BlockPos.Mutable pos = new BlockPos.Mutable();
         for (int y = minY; y <= maxY; y++) {
             for (int x = minX; x <= maxX; x++) {
                 for (int z = minZ; z <= maxZ; z++) {
+                    if (ownFeet != null && x == ownFeet.getX() && z == ownFeet.getZ()
+                            && (y == ownFeet.getY() || y == ownFeet.getY() + 1)) {
+                        continue;
+                    }
                     pos.set(x, y, z);
                     BlockState state = world.getBlockState(pos);
                     if (isPassableForMovement(state, world, pos)) {
@@ -1979,19 +2055,13 @@ public final class BotActions {
                     if (collisionShape.isEmpty()) {
                         continue;
                     }
-                    // Non-walkable block with a real collision shape — check exact overlap.
-                    double ox = x;
-                    double oy = y;
-                    double oz = z;
                     for (Box shapeBox : collisionShape.getBoundingBoxes()) {
-                        if (shapeBox.offset(ox, oy, oz).intersects(targetBox)) {
-                            return false;
-                        }
+                        boxes.add(shapeBox.offset(x, y, z));
                     }
                 }
             }
         }
-        return true;
+        return boxes;
     }
 
     // Diagnostic: re-evaluate canOccupyPosition and log the specific rejection reason.
