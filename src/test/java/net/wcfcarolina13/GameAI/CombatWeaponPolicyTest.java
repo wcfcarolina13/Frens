@@ -9,6 +9,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CombatWeaponPolicyTest {
 
     @Test
+    void swordAndBowDefenderUsesMeleeInsideFiveBlocks() {
+        assertFalse(CombatWeaponPolicy.shouldEngageRanged(true, true, 2.0));
+        assertFalse(CombatWeaponPolicy.shouldEngageRanged(true, true, 4.99));
+    }
+
+    @Test
+    void swordAndBowDefenderCanRepositionAtFiveBlocks() {
+        assertTrue(CombatWeaponPolicy.shouldEngageRanged(true, true, 5.0));
+        assertTrue(CombatWeaponPolicy.shouldEngageRanged(true, true, 8.0));
+    }
+
+    @Test
+    void bowOnlyDefenderCanSidestepAndShootInsideFiveBlocks() {
+        assertTrue(CombatWeaponPolicy.shouldEngageRanged(true, false, 2.0));
+        assertFalse(CombatWeaponPolicy.shouldEngageRanged(false, false, 2.0));
+        assertFalse(CombatWeaponPolicy.shouldEngageRanged(false, true, 8.0));
+    }
+
+    @Test
     void unloadedRangedWeaponWithoutAProjectileIsNotUsable() {
         assertFalse(CombatWeaponPolicy.isUsableRangedWeapon(true, false, false, false));
     }

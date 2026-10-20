@@ -1,7 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.ChestBlock;
-import net.minecraft.block.enums.ChestType;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.inventory.DoubleInventory;
 import net.minecraft.item.Item;
@@ -1432,13 +1431,10 @@ public final class ToolProvisionService {
                     continue;
                 }
                 BlockPos otherHalf = ChestStoreService.otherChestHalf(world, pos);
-                if (state.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE && otherHalf == null) {
-                    continue;
-                }
                 inv = ChestBlock.getInventory(chestBlock, state, world, pos, true);
                 if (inv == null) continue;
                 // Vanilla falls back to a single inventory for stale/mismatched double states.
-                if (otherHalf != null && !(inv instanceof DoubleInventory)) continue;
+                if (!(inv instanceof DoubleInventory)) otherHalf = null;
                 visited.add(pos.toImmutable());
                 if (otherHalf != null) visited.add(otherHalf);
             } else {

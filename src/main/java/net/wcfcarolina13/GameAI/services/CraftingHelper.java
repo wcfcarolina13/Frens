@@ -3,7 +3,6 @@ package net.wcfcarolina13.GameAI.services;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ChestBlock;
-import net.minecraft.block.enums.ChestType;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.inventory.DoubleInventory;
@@ -3969,11 +3968,10 @@ public final class CraftingHelper {
                 continue;
             }
             BlockPos otherHalf = ChestStoreService.otherChestHalf(world, chestPos);
-            if (state.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE && otherHalf == null) continue;
             Inventory chest = ChestBlock.getInventory(chestBlock, state, world, chestPos, true);
             if (chest == null) continue;
-            // A stale double state must not hide an independent chest at the alleged partner.
-            if (otherHalf != null && !(chest instanceof DoubleInventory)) continue;
+            // A stale double state still exposes this chest, without hiding the alleged partner.
+            if (!(chest instanceof DoubleInventory)) otherHalf = null;
             visited.add(chestPos);
             if (otherHalf != null) visited.add(otherHalf);
             List<PullCandidate> inChest = new ArrayList<>();

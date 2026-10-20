@@ -10,6 +10,10 @@ final class CombatWeaponPolicy {
 
     private CombatWeaponPolicy() {}
 
+    static boolean shouldEngageRanged(boolean hasRanged, boolean hasMelee, double distance) {
+        return hasRanged && (!hasMelee || distance >= 5.0D);
+    }
+
     static boolean isUsableRangedWeapon(
             boolean weaponPresent,
             boolean charged,

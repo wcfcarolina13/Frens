@@ -62,7 +62,6 @@ import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
 import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
-import net.wcfcarolina13.PlayerUtils.MiningTool;
 
 
 
@@ -121,7 +120,6 @@ public final class BotActions {
 
     private static final Map<UUID, RangedAttackState> RANGED_STATE = new HashMap<>();
     private static final Map<UUID, String> LAST_COMBAT_PROFILE = new HashMap<>();
-    private static final Map<UUID, CompletableFuture<String>> MOVEMENT_MINING = new ConcurrentHashMap<>();
 
     private BotActions() {}
 
@@ -881,13 +879,6 @@ public final class BotActions {
     }
 
     public static boolean breakBlockAhead(ServerPlayerEntity bot) {
-        return callOnServerThread(bot, () -> breakBlockAheadOnServer(bot), 2000L, false);
-    }
-
-    private static boolean breakBlockAheadOnServer(ServerPlayerEntity bot) {
-        if (isMovementMining(bot)) {
-            return true;
-        }
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos targetPos = getRelativeBlockPos(bot, 1, 0);
         BlockState frontState = world.getBlockState(targetPos);
@@ -1431,18 +1422,12 @@ public final class BotActions {
         };
     }
 
-    public static boolean escapeStairs(ServerPlayerEntity bot) {
-        return callOnServerThread(bot, () -> {
-            if (isMovementMining(bot)) {
-                return true;
-            }
-            boolean placed = placeSupportBlock(bot);
-            if (!placed && breakBlockAheadOnServer(bot)) {
-                return true;
-            }
-            jumpForward(bot);
-            return placed;
-        }, 2500L, false);
+    public static void escapeStairs(ServerPlayerEntity bot) {
+        boolean placed = placeSupportBlock(bot);
+        if (!placed) {
+            breakBlockAhead(bot);
+        }
+        jumpForward(bot);
     }
 
     public static boolean digOut(ServerPlayerEntity bot) {
@@ -1544,23 +1529,14 @@ public final class BotActions {
         if (!canBreak(world, pos, bot, forceBreak)) {
             return false;
         }
-        return startMovementMining(bot, pos);
-    }
-
-    private static boolean isMovementMining(ServerPlayerEntity bot) {
-        CompletableFuture<String> mining = MOVEMENT_MINING.get(bot.getUuid());
-        return mining != null && !mining.isDone();
-    }
-
-    /** Server thread only; a movement retry must not stack another mining job. */
-    private static boolean startMovementMining(ServerPlayerEntity bot, BlockPos pos) {
-        if (isMovementMining(bot)) {
-            return true;
+        // Face the block before breaking (vanilla parity)
+        LookController.faceBlock(bot, pos);
+        // Attempt a physical break using the interaction manager (no instant removal)
+        boolean success = bot.interactionManager.tryBreakBlock(pos);
+        if (success) {
+            bot.swingHand(Hand.MAIN_HAND, true);
         }
-        CompletableFuture<String> mining = MiningTool.mineBlock(bot, pos.toImmutable());
-        MOVEMENT_MINING.put(bot.getUuid(), mining);
-        mining.whenComplete((result, error) -> MOVEMENT_MINING.remove(bot.getUuid(), mining));
-        return !mining.isDone();
+        return success;
     }
 
     private static int meleeWeaponScore(ItemStack stack) {

@@ -5,8 +5,7 @@ public final class FollowLeafCellPolicy {
     private FollowLeafCellPolicy() {}
 
     public static int[] heights(boolean raisedSupport) {
-        // A raised support's walking surface needs both feet and head cleared. Do not
-        // extend into the high canopy on level ground.
-        return raisedSupport ? new int[] {0, 1, 2, 3} : new int[] {0, 1, 2};
+        // A one-block step puts feet one cell above the current feet and head two above.
+        return raisedSupport ? new int[] {1, 2} : new int[] {0, 1, 2};
     }
 }

@@ -74,8 +74,7 @@ public final class LeafClearService {
     }
 
     private static boolean hasRaisedSupport(ServerWorld world, BlockPos front) {
-        BlockPos support = front.up();
-        return world.getBlockState(support).isSolidBlock(world, support);
+        return world.getBlockState(front).isSolidBlock(world, front);
     }
 
     public static boolean isLeafBlock(ServerWorld world, BlockPos pos) {
@@ -155,17 +154,11 @@ public final class LeafClearService {
             return LeafMineResult.NONE;
         }
 
-        LEAF_MINE_LAST_MS.put(id, now);
         LEAF_MINE_TARGET.put(id, leafPos.toImmutable());
-        selectHarmlessForLeaves(bot);
-
-        // UX: when foliage is actually blocking us, show a short overhead line (not chat).
-        CompanionOverheadDialogueService.tryShowLeafStuck(bot, label);
-
-        LOGGER.debug("leaf-mine start [{}]: bot={} pos={}",
-                label,
-                bot.getName().getString(),
-                leafPos.toShortString());
+        boolean mounted = "mounted".equals(label);
+        if (!mounted) {
+            selectHarmlessForLeaves(bot);
+        }
 
         CompletableFuture<String> future = MiningTool.mineBlock(bot, leafPos, true);
         LEAF_MINE_INFLIGHT.put(id, future);
@@ -176,6 +169,14 @@ public final class LeafClearService {
         if (future.isDone() && isLeafBlock(MovementService.getWorld(bot), leafPos)) {
             return LeafMineResult.NONE;
         }
+        LEAF_MINE_LAST_MS.put(id, now);
+        if (!mounted) {
+            CompanionOverheadDialogueService.tryShowLeafStuck(bot, label);
+        }
+        LOGGER.debug("leaf-mine start [{}]: bot={} pos={}",
+                label,
+                bot.getName().getString(),
+                leafPos.toShortString());
         return LeafMineResult.STARTED;
     }
 

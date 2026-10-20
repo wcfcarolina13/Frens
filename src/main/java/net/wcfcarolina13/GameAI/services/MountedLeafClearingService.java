@@ -1,6 +1,5 @@
 package net.wcfcarolina13.GameAI.services;
 
-import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -61,8 +60,7 @@ public final class MountedLeafClearingService {
         Direction toward = Direction.fromHorizontalDegrees(yaw);
 
         for (BlockPos leaf : mountedLeafCandidates(bot.getBlockPos(), toward)) {
-            BlockState leafState = world.getBlockState(leaf);
-            if (!leafState.isIn(BlockTags.LEAVES)) {
+            if (!LeafClearService.isBreakableLeaf(world, leaf)) {
                 continue;
             }
             if (ProtectedZoneService.isProtected(leaf, world, BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot))) {
@@ -78,7 +76,7 @@ public final class MountedLeafClearingService {
             if (bot.squaredDistanceTo(Vec3d.ofCenter(leaf)) > LEAF_REACH_SQ) {
                 continue;
             }
-            if (!holdLeafTool(bot, leafState)) {
+            if (!holdLeafTool(bot, world.getBlockState(leaf))) {
                 return;
             }
             if (LeafClearService.startLeafMining(bot, leaf, "mounted")) {

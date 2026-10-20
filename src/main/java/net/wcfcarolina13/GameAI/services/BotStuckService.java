@@ -360,7 +360,7 @@ public final class BotStuckService {
             // First try to escape by moving to a nearby open/standable spot (handles corner wedging).
             boolean escaped = tryEscapeHop(bot, "primary") || tryEscapeHop(bot, "fallback");
             if (!escaped) {
-                escaped = BotActions.escapeStairs(bot);
+                BotActions.escapeStairs(bot);
             }
 
             // If horizontally enclosed (all 4 walls blocked) and hop/stairs didn't help, mine out

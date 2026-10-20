@@ -3919,13 +3919,13 @@ public class BotEventHandler {
             return true;
         }
 
-        if (hasRanged && closest instanceof LivingEntity living) {
+        if (CombatWeaponPolicy.shouldEngageRanged(hasRanged, BotActions.hasMeleeWeapon(bot), distance)
+                && closest instanceof LivingEntity living) {
             if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
                 return true;
             }
             // A bow-only defender still needs to fire after a sidestep inside five blocks.
-            if ((distance >= 5.0D || !BotActions.hasMeleeWeapon(bot))
-                    && BotActions.performRangedAttack(bot, living, server.getTicks())) {
+            if (BotActions.performRangedAttack(bot, living, server.getTicks())) {
                 return true;
             }
         } else {
