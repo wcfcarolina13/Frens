@@ -1854,8 +1854,13 @@ public class BotEventHandler {
         if (hostiles.isEmpty()) {
             return false;
         }
+        // Queue the engage pass on the full list (it re-filters and adds defended-animal
+        // attackers), but only report true when at least one hostile is one the bot would
+        // fight. Callers that wait on a true result would otherwise spin beside a name-tagged,
+        // caged or non-aggro mob forever (finding 44).
+        boolean anyEngageable = hostiles.stream().anyMatch(e -> wouldEngage(bot, e));
         srv.execute(() -> engageHostiles(bot, srv, hostiles));
-        return true;
+        return anyEngageable;
     }
 
     public static Vec3d getGuardCenterVec() {
@@ -3395,6 +3400,55 @@ public class BotEventHandler {
                 .defenseBoost(bot, entity);
     }
 
+    /**
+     * The per-mob filters {@link #engageHostiles} applies after its iron-golem rules: the bot
+     * may attack it (not name-tagged), the dangerous-pursuit gate lets it start the fight
+     * (non-aggro mobs need a ranged weapon; a mob already targeting the bot always passes), and
+     * no locked gate or trapdoor stands between them.
+     */
+    private static boolean passesEngageFilters(ServerPlayerEntity bot, Entity e) {
+        if (!net.wcfcarolina13.GameAI.services.BotCombatPolicyService.shouldBotAttack(e, bot)) {
+            // Name-tagged mob — bot is forbidden from engaging.
+            return false;
+        }
+        // Dangerous-pursuit gate: don't initiate combat against a non-aggroed
+        // mob unless the bot has a long-range weapon. Self-defense (mob is
+        // already targeting the bot) always passes through.
+        if (!net.wcfcarolina13.GameAI.services.DangerousPursuitGate.shouldEngageNonAggro(bot, e)) {
+            return false;
+        }
+        // Locked-gate enclosure respect: don't run through a locked
+        // gate (or under a locked trapdoor) to fight a mob on the
+        // far side. Same predicate the drop-sweep filter uses.
+        return !net.wcfcarolina13.GameAI.services.DangerousPursuitGate
+                .crossesLockedGate(bot, e.getBlockPos(), bot.getEntityWorld());
+    }
+
+    /**
+     * True when {@link #engageHostiles} would act on {@code e}: an iron golem only when it is
+     * targeting the bot (engageHostiles flees from it), any other mob when it passes
+     * {@link #passesEngageFilters} and engageHostiles' phantom/drowned "actionable" filters. Reads entity and block state, so worker-thread callers get
+     * the same best-effort snapshot the off-thread entity scans already give (finding 44).
+     */
+    public static boolean wouldEngage(ServerPlayerEntity bot, Entity e) {
+        if (bot == null || e == null) {
+            return false;
+        }
+        if (e instanceof net.minecraft.entity.passive.IronGolemEntity golem) {
+            return golem.getTarget() == bot;
+        }
+        if (!passesEngageFilters(bot, e)) {
+            return false;
+        }
+        // The same "actionable" filters engageHostiles applies before picking a target:
+        // a phantom circling out of reach and an unreachable drowned are not fought.
+        boolean botArmed = BotActions.hasMeleeWeapon(bot) || BotActions.hasRangedWeapon(bot);
+        return (e.getType() != EntityType.PHANTOM
+                        || BotActions.isPhantomDiving(bot, e)
+                        || (e.getY() - bot.getY()) <= 3.0)
+                && isActionableDrownedThreat(bot, e, botArmed);
+    }
+
     private static boolean engageHostiles(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
         // Tamed-animal defense: inject any defended attackers into the hostile
         // list (dedup by UUID, returns same reference if no defense targets).
@@ -3419,21 +3473,7 @@ public class BotEventHandler {
                     // Accidental hit: drop the golem from the engage list.
                     continue;
                 }
-                if (!net.wcfcarolina13.GameAI.services.BotCombatPolicyService.shouldBotAttack(e, bot)) {
-                    // Name-tagged mob — bot is forbidden from engaging.
-                    continue;
-                }
-                // Dangerous-pursuit gate: don't initiate combat against a non-aggroed
-                // mob unless the bot has a long-range weapon. Self-defense (mob is
-                // already targeting the bot) always passes through.
-                if (!net.wcfcarolina13.GameAI.services.DangerousPursuitGate.shouldEngageNonAggro(bot, e)) {
-                    continue;
-                }
-                // Locked-gate enclosure respect: don't run through a locked
-                // gate (or under a locked trapdoor) to fight a mob on the
-                // far side. Same predicate the drop-sweep filter uses.
-                if (net.wcfcarolina13.GameAI.services.DangerousPursuitGate
-                        .crossesLockedGate(bot, e.getBlockPos(), bot.getEntityWorld())) {
+                if (!passesEngageFilters(bot, e)) {
                     continue;
                 }
                 filtered.add(e);

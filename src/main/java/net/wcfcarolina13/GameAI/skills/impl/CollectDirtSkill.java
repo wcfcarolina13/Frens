@@ -33,6 +33,8 @@ import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.LavaHazardService;
+import net.wcfcarolina13.GameAI.services.LogThrottle;
+import net.wcfcarolina13.GameAI.services.MiningThreatPolicy;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
@@ -67,6 +69,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -90,6 +93,11 @@ public class CollectDirtSkill implements Skill {
     private static final Map<UUID, Long> LAST_INVENTORY_FULL_MESSAGE = new HashMap<>();
     private static final Map<UUID, Long> LAST_ESCAPE_ATTEMPT = new HashMap<>();
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-collect-dirt");
+    // Finding 44: the hostile line prints once per change in count, and the "still fighting"
+    // line at most every 10 s, per bot. Entries are removed when the mining loop exits.
+    private static final Map<UUID, String> HOSTILE_LOG_STATE = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> HOSTILE_ENGAGE_LOG = new ConcurrentHashMap<>();
+    private static final long HOSTILE_ENGAGE_LOG_INTERVAL_MS = 10_000L;
 
     private final String skillName;
     private final String harvestLabel;
@@ -314,6 +322,10 @@ public class CollectDirtSkill implements Skill {
         try {
 
         int currentMaxFails = this.maxFails > 0 ? this.maxFails : MAX_ATTEMPTS_WITHOUT_PROGRESS;
+        // Engage budget for the current set of engageable hostiles (finding 44): reset when the
+        // area clears or a new engageable hostile shows up.
+        long engageStartMs = 0L;
+        Set<UUID> engageableSeen = new HashSet<>();
 
         while (collected < targetCount
                 && failuresInRow < currentMaxFails
@@ -353,20 +365,50 @@ public class CollectDirtSkill implements Skill {
                         .stream()
                         .filter(EntityUtil::isHostile)
                         .toList();
-                if (!nearbyHostiles.isEmpty()) {
-                    LOGGER.warn("{} detected {} hostile(s) nearby during iteration {}.", skillName, nearbyHostiles.size(), attempt + 1);
-                    boolean engaged = BotEventHandler.engageImmediateThreats(loopPlayer);
-                    if (engaged) {
+                // Finding 44: fight the hostiles the bot would engage (then mine again), mine on
+                // past the ones it won't (name-tagged, caged, non-aggro without a ranged weapon).
+                List<Entity> engageable = nearbyHostiles.stream()
+                        .filter(e -> BotEventHandler.wouldEngage(loopPlayer, e))
+                        .toList();
+                for (Entity e : engageable) {
+                    if (engageableSeen.add(e.getUuid())) {
+                        engageStartMs = 0L;
+                    }
+                }
+                long nowMs = System.currentTimeMillis();
+                long engagedForMs = engageStartMs == 0L ? 0L : nowMs - engageStartMs;
+                MiningThreatPolicy.Decision threat = MiningThreatPolicy.decide(
+                        nearbyHostiles.size(), engageable.size(), engagedForMs);
+                UUID botKey = loopPlayer.getUuid();
+                if (threat == MiningThreatPolicy.Decision.NONE) {
+                    HOSTILE_LOG_STATE.remove(botKey);
+                    HOSTILE_ENGAGE_LOG.remove(botKey);
+                    engageStartMs = 0L;
+                    engageableSeen.clear();
+                } else {
+                    boolean capped = threat == MiningThreatPolicy.Decision.IGNORE && !engageable.isEmpty();
+                    if (LogThrottle.changed(HOSTILE_LOG_STATE, botKey, "n=" + nearbyHostiles.size() + " " + threat)) {
+                        LOGGER.info("{} sees {} hostile(s) nearby ({} it would fight): {}.", skillName,
+                                nearbyHostiles.size(), engageable.size(),
+                                threat == MiningThreatPolicy.Decision.ENGAGE ? "engaging"
+                                        : capped ? "gave up after " + engagedForMs + " ms, mining on" : "mining on");
+                    }
+                    if (threat == MiningThreatPolicy.Decision.ENGAGE
+                            && BotEventHandler.engageImmediateThreats(loopPlayer)) {
+                        if (engageStartMs == 0L) {
+                            // the "sees ... engaging" line just covered this moment
+                            engageStartMs = nowMs;
+                            HOSTILE_ENGAGE_LOG.put(botKey, nowMs);
+                        } else if (LogThrottle.due(HOSTILE_ENGAGE_LOG, botKey, nowMs, HOSTILE_ENGAGE_LOG_INTERVAL_MS)) {
+                            LOGGER.info("{} fighting {} hostile(s) before mining again ({} ms so far).",
+                                    skillName, engageable.size(), engagedForMs);
+                        }
                         try {
                             Thread.sleep(250L);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
                         continue;
-                    }
-                    if (SkillManager.requestSkillPause(loopPlayer, "§cPausing " + skillName + " due to nearby threat.")) {
-                        outcome = SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
-                        break;
                     }
                 }
             }
@@ -552,6 +594,10 @@ public class CollectDirtSkill implements Skill {
         return outcome;
         } finally {
             ServerPlayerEntity cleanupPlayer = source.getPlayer();
+            if (cleanupPlayer != null) {
+                HOSTILE_LOG_STATE.remove(cleanupPlayer.getUuid());
+                HOSTILE_ENGAGE_LOG.remove(cleanupPlayer.getUuid());
+            }
             boolean inventoryFull = cleanupPlayer != null && isInventoryFull(cleanupPlayer);
             if (cleanupRequested
                     && cleanupPlayer != null
