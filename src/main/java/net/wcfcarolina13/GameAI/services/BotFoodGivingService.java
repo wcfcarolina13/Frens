@@ -249,6 +249,9 @@ public final class BotFoodGivingService {
         }
 
         BotActions.selectHotbarSlot(bot, hotbarSlot);
+        // The player already agreed (this hand-feed, its [Yes] click, or auto-accept): the rare-
+        // consumable guard in useSelectedItem must not ask a second time.
+        FoodConsumptionConfirmationService.preApprove(bot, taken);
         BotActions.useSelectedItem(bot);
         bot.getInventory().markDirty();
 

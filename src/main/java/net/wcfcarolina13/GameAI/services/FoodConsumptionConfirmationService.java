@@ -11,7 +11,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,7 +29,9 @@ public final class FoodConsumptionConfirmationService {
     private static final ConcurrentHashMap<UUID, Long> LAST_PROMPT_MS_BY_BOT = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> DENIED_UNTIL_MS_BY_BOT = new ConcurrentHashMap<>();
 
-    // Per commander: last-insertion-ordered map of pending confirmations by bot alias.
+    // Per commander (controller player UUID): pending confirmations by normalized bot alias.
+    // Each map is guarded by synchronizing on itself; entries expire after
+    // FoodConfirmReplyPolicy.PENDING_TTL_MS.
     private static final ConcurrentHashMap<UUID, LinkedHashMap<String, FoodConfirmationState>> PENDING = new ConcurrentHashMap<>();
 
     // One-shot approvals: allow the next consumption attempt for this bot+item within a short window.
@@ -93,13 +94,8 @@ public final class FoodConsumptionConfirmationService {
         UUID botId = bot.getUuid();
         long now = System.currentTimeMillis();
 
-        // If the player recently denied, don't spam.
-        long deniedUntil = DENIED_UNTIL_MS_BY_BOT.getOrDefault(botId, 0L);
-        if (now < deniedUntil) {
-            return false;
-        }
-
-        // If already approved (one-shot within a short window), allow and consume the approval.
+        // An approval (chat "yes", or a hand-feed the player already confirmed) is checked before the
+        // deny cooldown: a hand-fed [Yes] after an earlier chat "no" is the newer, explicit answer.
         String itemId = toItemId(expensiveStack);
         ApprovedConsumption approved = APPROVED_BY_BOT.get(botId);
         if (approved != null && now <= approved.expiresAtMs && approved.itemId != null && approved.itemId.equals(itemId)) {
@@ -107,8 +103,28 @@ public final class FoodConsumptionConfirmationService {
             return true;
         }
 
+        // If the player recently denied, don't spam.
+        long deniedUntil = DENIED_UNTIL_MS_BY_BOT.getOrDefault(botId, 0L);
+        if (now < deniedUntil) {
+            return false;
+        }
+
         requestConfirmation(bot, expensiveStack, reason);
         return false;
+    }
+
+    /**
+     * Records that the player already agreed to this bot consuming {@code stack} (a hand-feed confirmed
+     * with [Yes], or auto-accepted by config), so the next use of that item is not asked about again.
+     * One-shot, same window as a chat "yes". Clears a chat "no" cooldown for the bot.
+     */
+    public static void preApprove(ServerPlayerEntity bot, ItemStack stack) {
+        if (bot == null || stack == null || stack.isEmpty() || !isRareOrExpensiveConsumable(stack)) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        DENIED_UNTIL_MS_BY_BOT.remove(botId);
+        APPROVED_BY_BOT.put(botId, new ApprovedConsumption(toItemId(stack), System.currentTimeMillis() + APPROVAL_WINDOW_MS));
     }
 
     private static void requestConfirmation(ServerPlayerEntity bot, ItemStack stack, String reason) {
@@ -117,6 +133,10 @@ public final class FoodConsumptionConfirmationService {
             return;
         }
 
+        // Stored under the controller's player UUID; tryHandleConfirmation looks up the chat
+        // sender's player UUID, so the controller's own reply finds it (same key space as the
+        // skill-resume prompt's responderKey). An unowned, unrecruited bot has no controller and
+        // is never prompted.
         ServerPlayerEntity controller = CompanionCommunicationPolicy.resolveController(server, bot);
         if (controller == null || controller.isRemoved()) {
             return;
@@ -131,21 +151,24 @@ public final class FoodConsumptionConfirmationService {
         }
 
         String botName = bot.getName().getString();
-        String aliasKey = normalizeAlias(botName);
+        String aliasKey = FoodConfirmReplyPolicy.normalizeAlias(botName);
         if (aliasKey.isEmpty()) {
             aliasKey = "bot";
         }
 
-        // If there's already a pending confirmation for this bot+commander, don't repeat.
-        LinkedHashMap<String, FoodConfirmationState> map = PENDING.computeIfAbsent(controller.getUuid(), id -> new LinkedHashMap<>());
-        FoodConfirmationState existing = map.get(aliasKey);
         String itemId = toItemId(stack);
         String display = stack.getName() != null ? stack.getName().getString() : itemId;
-        if (existing != null && itemId.equals(existing.itemId)) {
-            return;
+        LinkedHashMap<String, FoodConfirmationState> map = PENDING.computeIfAbsent(controller.getUuid(), id -> new LinkedHashMap<>());
+        synchronized (map) {
+            pruneExpired(map, now);
+            // A live, unanswered prompt for the same bot+item is not repeated; once it expires
+            // (FoodConfirmReplyPolicy.PENDING_TTL_MS) the bot may ask again.
+            FoodConfirmationState existing = map.get(aliasKey);
+            if (existing != null && itemId.equals(existing.itemId)) {
+                return;
+            }
+            map.put(aliasKey, new FoodConfirmationState(botId, botName, itemId, display, now));
         }
-
-        map.put(aliasKey, new FoodConfirmationState(botId, botName, itemId, display, now));
         LAST_PROMPT_MS_BY_BOT.put(botId, now);
 
         String prompt = "I can eat " + display + ", but it's rare. Use it anyway? (yes/no)";
@@ -160,47 +183,46 @@ public final class FoodConsumptionConfirmationService {
 
     /**
      * Attempts to consume a yes/no message as a response to a pending expensive-consumption prompt.
+     * Called from the chat handler after the respawn and skill-resume prompts. A bare answer goes to
+     * the most recently asked prompt for this player; {@code "<bot> yes"} picks one.
      * Returns true if the chat message was consumed.
      */
     public static boolean tryHandleConfirmation(ServerPlayerEntity commander, String message) {
-        if (commander == null || commander.isRemoved()) {
-            return false;
-        }
-        if (message == null) {
-            return false;
-        }
-        String raw = message.trim();
-        if (raw.isEmpty()) {
+        if (commander == null || commander.isRemoved() || message == null || message.isBlank()) {
             return false;
         }
 
-        LinkedHashMap<String, FoodConfirmationState> pending = PENDING.get(commander.getUuid());
-        if (pending == null || pending.isEmpty()) {
+        UUID commanderId = commander.getUuid();
+        LinkedHashMap<String, FoodConfirmationState> pending = PENDING.get(commanderId);
+        if (pending == null) {
             return false;
         }
 
-        AliasToken token = extractAliasToken(raw, pending);
-        FoodConfirmationState state = token != null ? pending.get(token.normalizedAlias()) : lastValue(pending);
-        if (state == null) {
-            return false;
-        }
-
-        String response = stripAliasToken(raw, token);
-        Boolean decision = parseDecision(response);
-        if (decision == null) {
-            // Only consume the message if the user was obviously replying to the prompt.
-            // If they said something else ("follow", etc.), let other chat routing handle it.
-            return false;
-        }
-
-        // Consume and clear.
-        if (token != null) {
-            pending.remove(token.normalizedAlias());
-        } else {
-            removeLast(pending);
-        }
-        if (pending.isEmpty()) {
-            PENDING.remove(commander.getUuid());
+        FoodConfirmationState state;
+        boolean decision;
+        synchronized (pending) {
+            pruneExpired(pending, System.currentTimeMillis());
+            if (pending.isEmpty()) {
+                // The empty map stays registered (one per player): removing it here could race a
+                // prompt being added to this same map instance.
+                return false;
+            }
+            FoodConfirmReplyPolicy.Reply reply = FoodConfirmReplyPolicy.parse(message, pending.keySet());
+            if (reply == null) {
+                // Not an answer ("follow", etc.): let other chat routing handle it.
+                return false;
+            }
+            String key = reply.alias();
+            if (key == null) {
+                Map<String, Long> createdAt = new LinkedHashMap<>();
+                pending.forEach((alias, s) -> createdAt.put(alias, s.createdAtMs));
+                key = FoodConfirmReplyPolicy.mostRecent(createdAt);
+            }
+            state = key == null ? null : pending.remove(key);
+            if (state == null) {
+                return false;
+            }
+            decision = reply.approve();
         }
 
         MinecraftServer server = commander.getCommandSource().getServer();
@@ -214,6 +236,7 @@ public final class FoodConsumptionConfirmationService {
         }
 
         if (decision) {
+            DENIED_UNTIL_MS_BY_BOT.remove(bot.getUuid());
             APPROVED_BY_BOT.put(bot.getUuid(), new ApprovedConsumption(state.itemId, System.currentTimeMillis() + APPROVAL_WINDOW_MS));
             ChatUtils.sendChatMessages(bot.getCommandSource(), "Understood. Using it.", false);
         } else {
@@ -222,6 +245,10 @@ public final class FoodConsumptionConfirmationService {
         }
 
         return true;
+    }
+
+    private static void pruneExpired(Map<String, FoodConfirmationState> map, long now) {
+        map.values().removeIf(s -> FoodConfirmReplyPolicy.isExpired(s.createdAtMs, now));
     }
 
     private static String toItemId(ItemStack stack) {
@@ -236,103 +263,6 @@ public final class FoodConsumptionConfirmationService {
             return String.valueOf(Registries.ITEM.getId(item));
         } catch (Throwable ignored) {
             return item.getTranslationKey();
-        }
-    }
-
-    private static Boolean parseDecision(String message) {
-        if (message == null) {
-            return null;
-        }
-        String normalized = message.trim().toLowerCase(Locale.ROOT);
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        // Keep this deliberately strict so we don't eat chat.
-        if (normalized.equals("yes") || normalized.equals("y")) {
-            return true;
-        }
-        if (normalized.equals("no") || normalized.equals("n")) {
-            return false;
-        }
-        return null;
-    }
-
-    private static String normalizeAlias(String text) {
-        if (text == null) {
-            return "";
-        }
-        String cleaned = text.replaceAll("[^A-Za-z0-9]", "");
-        return cleaned.toLowerCase(Locale.ROOT);
-    }
-
-    private record AliasToken(String rawToken, String normalizedAlias) {
-    }
-
-    private static AliasToken extractAliasToken(String message, Map<String, FoodConfirmationState> pending) {
-        if (message == null || message.isBlank() || pending == null || pending.isEmpty()) {
-            return null;
-        }
-        String trimmed = message.trim();
-        int breakIndex = findAliasBreakIndex(trimmed);
-        if (breakIndex <= 0) {
-            return null;
-        }
-        String rawToken = trimmed.substring(0, breakIndex);
-        String sanitized = rawToken.replaceAll("^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "");
-        if (sanitized.isEmpty()) {
-            return null;
-        }
-        String normalized = sanitized.toLowerCase(Locale.ROOT);
-        if (!pending.containsKey(normalized)) {
-            return null;
-        }
-        return new AliasToken(rawToken, normalized);
-    }
-
-    private static int findAliasBreakIndex(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (Character.isWhitespace(c)) {
-                return i;
-            }
-            if (c == ':' || c == ',' || c == ';' || c == '-') {
-                return i + 1;
-            }
-        }
-        return -1;
-    }
-
-    private static String stripAliasToken(String message, AliasToken token) {
-        if (message == null) {
-            return "";
-        }
-        String trimmed = message.trim();
-        if (token == null) {
-            return trimmed;
-        }
-        if (trimmed.length() <= token.rawToken.length()) {
-            return "";
-        }
-        String remainder = trimmed.substring(token.rawToken.length()).trim();
-        remainder = remainder.replaceFirst("^[,:;-]+", "").trim();
-        return remainder;
-    }
-
-    private static FoodConfirmationState lastValue(LinkedHashMap<String, FoodConfirmationState> map) {
-        FoodConfirmationState last = null;
-        for (FoodConfirmationState v : map.values()) {
-            last = v;
-        }
-        return last;
-    }
-
-    private static void removeLast(LinkedHashMap<String, FoodConfirmationState> map) {
-        String lastKey = null;
-        for (String key : map.keySet()) {
-            lastKey = key;
-        }
-        if (lastKey != null) {
-            map.remove(lastKey);
         }
     }
 }

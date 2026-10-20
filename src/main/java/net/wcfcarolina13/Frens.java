@@ -1391,6 +1391,13 @@ public class Frens implements ModInitializer {
                 return;
             }
             boolean resumeAnswered = SkillResumeService.handleChat(sender, raw);
+            // Rare-food prompt ("I can eat Golden Apple, but it's rare... (yes/no)"): answered after the
+            // respawn and skill-resume prompts, so one "yes" answers one prompt. A consumed answer
+            // goes no further (not to souls, not to the DM follow-up window).
+            if (net.wcfcarolina13.GameAI.services.FoodConfirmReplyPolicy.foodMayClaim(resumeAnswered)
+                    && net.wcfcarolina13.GameAI.services.FoodConsumptionConfirmationService.tryHandleConfirmation(sender, raw)) {
+                return;
+            }
 
             // Banter quiet-window: any typed line (plain chat, DM turn, scene trigger) counts
             // as the player actively conversing.

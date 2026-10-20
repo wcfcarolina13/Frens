@@ -507,7 +507,7 @@ public final class HealingService {
         if (slot.isPresent()) {
             if (DesperateEatPolicy.logDue(LAST_DESPERATE_LOG, botId, System.currentTimeMillis())) {
                 String itemId = inventory.getStack(slot.getAsInt()).getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-                LOGGER.info("Desperate food: eating precious food {} (slot {})", itemId, slot.getAsInt());
+                LOGGER.info("Desperate food: trying precious food {} (slot {}); a rare item waits for the owner's yes unless health <= 6 or food <= 2", itemId, slot.getAsInt());
             }
         }
         return slot;
