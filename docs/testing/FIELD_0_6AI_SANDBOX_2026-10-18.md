@@ -83,6 +83,8 @@ JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (
 
 ## Findings (backlog for a fix build)
 
+**Fixed in 1.1.278** (2026-10-20, sandbox-checked on the 1.1.278 jar (md5 b2ea36c5...), replays `frens_1_1_278_6bp_aid_apple.zip` (00:31-00:42), `frens_1_1_278_6bp_goto_door.zip` (00:42-00:49), `frens_1_1_278_6bp_collect.zip` (00:49-00:56) and `frens_1_1_278_6bp_regress.zip` (00:56-01:00), `tools/sandbox/fix278.py`; Phase 6bp): defensive mutual aid (Jake with a sword ran 8 blocks to Bob's zombie in about 1.3 s, `Mutual aid: Jake moved to defend Bob against Zombie` twice, the zombie dead in 9.2 s, Jake still afterwards; with a bow and 6 armor `Mutual aid: Jake hands its defend_hostile approach to its own combat` and he shot it dead; 0 `nudgeTowardUntilClose on the server thread` WARN lines and 0 "Can't keep up!" in all runs), the golden-apple prompt ("yes" → "Understood. Using it." and the apple eaten within 3 s, food 5 → 9; "no" → "Alright. I'll save it." and the apple kept; an unanswered prompt is asked again after its 20 s; hand-fed with [Yes]: `accepted food`, no "(yes/no)"), `/bot go_to` ("Nethy can't go there across dimensions." from the Overworld; in the Nether a FULL 18-node path on the netherrack floor through a wall's gap, never inside the wall), the doorway (one bot through a closed 1x2 oak door in 3.2 s, two bots in 2.9 and 5.5 s, hinge flipped about 5 s; 0 `door-plan abort`, 0 `head-not-passable`, the door closed behind them, `door-close wait: bot too close` / `another player at the door` while one was in it), Collect messages through the Bot Storage screen ("Coll is resting 17s before traveling to 760, 120, 799. I'll keep busy meanwhile." with no ETA line, then "Replaced the collect at 760, 120, 799 with 625, 120, 799.", the queued retry went to the new chest), and no regression in follow over hills (the 1.1.277 route, ended 1.1 blocks from the player) or woodcut (detect 7-25 ms, all four trees felled). Partial: the hand-fed prompt showed twice for one right-click tap (Phase 6bp field item). New: 53-56. Still open: 3, 47, 48, 49-56.
+
 **Fixed in 1.1.277** (2026-10-19/20, sandbox-checked on the 1.1.277 jar (md5 45aa2300...), replays `frens_1_1_277_6bo_canopy_flood.zip` (23:30-00:07) and `frens_1_1_277_6bo_souls_woodcut_follow_mine.zip` (00:07-00:19), `tools/sandbox/fix277.py`; Phase 6bo): 48's backoff (a floating bot backs off from its 2nd failure, `Stuck-escape backoff: Flood1 failed surface recovery 2 times at Y=102 while floating in water, pausing retries for 30 s`, then 60 s and 120 s; `ascent failed` every 75-90 s instead of every 10 s; Bob reached the 600 s step at his 9th failure (00:06:47), was 167 WARN lines in 28 minutes; "I'm stuck in a flooded hole and can't climb out." once), soul stage directions (none in 34 soul chat lines from 6 DMs and 7 scenes, but the model wrote none either: 0 in 14 raw replies through the Ollama tap, only "(get it?)", dialogue the punctuation rule keeps), woodcut detect (24 and 12 ms with four trees standing, `logs=20 ... nearest=246, 120, 417 bases=4`, was 374-394 ms; all four felled, both bots `success=true`), and no regression in follow over hills or mining beside a zombie. Partial: 48's ledge (carved in 11 s with a stone pickaxe, 80 s bare-handed, but the bot never climbs onto it: `climbed out=false`, finding 49). Not fixed: 47 on the staged canopy. With a detour the bot stalls on a diagonal step down past the end leaf (finding 50); with a wall-to-wall leaf row the old `head-not-passable` loop is unchanged, 75-77 lines a minute with no leaf clear. At the original spot near 61, 77, 266 Fol followed 46 blocks south and ended 1.1 blocks from the player. New: 49-52. Still open: 3, 47, 48 (backoff half fixed; its escape half continues as 49), 49-52.
 
 **Fixed in 1.1.276** (2026-10-19, sandbox-checked, replays `frens_1_1_276_6bn_fix_checks.zip`, `frens_1_1_276_6bn_fix_checks_fishing.zip`, `frens_1_1_276_6bn_fix_checks_abr1.zip` and `frens_1_1_276_6bn_fix_checks_follow_275.zip`, `tools/sandbox/fix276.py`; Phase 6bn): 43 (fishing search 13-31 ms on fresh ponds with the snapshot built in 5-8 ms, was 1781 / 8392 ms; hangout scan 2 ms and its first move within a second), 44 (one "sees 1 hostile(s) nearby" line, 0 WARN lines, was 444; a caged zombie: mined on to 10 stone; a free zombie: fought, then mined; a creeper: fled and stayed clear), 45 (Sweep Souls3 retires its 4 copied records, `destroyed=true`; AB R1 untouched, deposit works), 39 and 14 with 43. 46 closed by 44's ruling (its pause line still unseen). Partial: woodcut detect with trees standing 374-394 ms (was 1091-1541), the per-log checks still read the world (deferred); empty detects 0-1 ms, relocation sampling reaches 117/120 in 1-10 ms. Craft table scan 1.47 ms and farm water scans 4-6 ms (new lines, no before). New: 47, 48. Still open: 3, 47, 48.
@@ -322,6 +324,27 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     4-tree deck: W2 felled the tree at 244, 120, 414; W1 then logged `Mining ... 244, 119, 414 with minecraft:dirt` 00:14:57 and
     `woodcut_cleanup: fallback sweep removed 1 extra items (logs+scaffold)`, leaving a hole in the deck where the trunk stood.
     Finding 38's fix keeps a bot's own tree soil; the sweep does not know another bot's tree.
+53. **Mutual aid never sends a bow-only bot to defend (minor).** 1.1.278 sandbox 2026-10-20 00:35:47, Jake with a bow, 32 arrows
+    and bread, Bob bare-handed at health 13 with a zombie beside him: no `Mutual aid:` line, Jake never moved, Bob killed the zombie
+    himself. `BotMutualAidService.weaponScore` counts only swords, axes, tridents, maces and daggers, so a bow-only bot is neither
+    combat-capable (`isCombatCapable` needs a weapon or 6 armor) nor "meaningfully stronger". With an iron chestplate added
+    (00:37:06) he did defend, with the bow.
+54. **A bow defender's arrow hits the ally it defends (medium).** 1.1.278 sandbox 2026-10-20 00:37:06-00:37:16, the run above with
+    the chestplate: `Mutual aid: Jake hands its defend_hostile approach to its own combat` (twice), Jake shot from about 10 blocks
+    while the zombie stood beside Bob; Bob said "Ow. That was you." (`ff_received_ow_that_was_you`, 00:37:12) and dropped from 13 to
+    4.5 health over the fight ("Bot Bob fleeing from 1 hostiles (health=4.5/20.0)"), part of it the zombie's. Jake killed the
+    zombie at 00:37:16. The own-combat bow shot does not check for an ally in the line of fire.
+55. **An admin's `/bot open <bot>` beyond 8 blocks shows nothing (minor).** 1.1.278 sandbox 2026-10-20 00:53-00:54: with Coll 16
+    blocks away (Apple 220), `/bot open Coll` logged `[bot-inv-open] bot=Coll viewer=RotiWokeman` four times and no screen opened,
+    no message; at 4 blocks it opened. `BotInventoryAccess.openBotInventory` lets a server admin open at any distance, but
+    `BotPlayerInventoryScreenHandler.canUse` needs reach (8 blocks) unless the open was remote-authorized, so the screen likely
+    closes at once (read from the code, not traced). The "Failed to open bot inventory." error is never sent because the open itself returned true.
+56. **Follow stalls 8 blocks behind under leaves on an eastward route (medium, not known whether pre-existing).** 1.1.278 sandbox
+    2026-10-20 00:56-00:57, `fix277.py follow` with its default east route from 60, 72, 230 (earlier checks went south): the
+    player stopped at 84, 72, 230 and Fol stayed at 76, 73, 233 for over 20 s, `Follow status: ... dist=8.35 canSee=false
+    directBlocked=true usingWaypoints=false`, `leaf-cleared: toward=east stagnant=10` 4 times, `Follow path planning: transition
+    rejects=32 ... no path found`, 1 `head-not-passable`. Same family as 47 and 50 (follow in canopy terrain); the south route
+    passed in the same session.
 
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat (1.1.277 strips a word list; raw scene replies from the 1.1.275/276 tap sessions also used words not on it: skeptical, cautious, curious, smirking, muttering, absent-mindedly, trails off, calling, turns); two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
@@ -735,3 +758,15 @@ Pass 4 notes:
 - Mashing escape out of Music & Sounds left an Options screen that reopened on every Done/escape; only save-and-quit got out. Use the
   fork's `sound` command for volume instead (added 2026-10-19).
 - `ft.py grep` reads the whole log each call; with a log flood it gets slow. Check the file size first.
+
+1.1.278 notes:
+
+- Never use `@p` under `execute in <dimension>`: it picks the nearest player in that dimension, and bots are players (Fisher and
+  Axer2 were sent to the Nether that way; Fisher suffocated). Name the player.
+- The Bot Storage screen is drivable: `/bot open <bot>` within 8 blocks (finding 55), click "Actions", click the search field,
+  fork `type_text text=storage`, click the row's arrow; Go / Collect / Dismiss and the Collect popup are custom-drawn, so click by
+  screenshot pixels (`ft.py shot` + `ft.py clickr`). The game pauses while it is open, so cooldown seconds do not run out mid-click.
+- A bot only registers a chest it places (`/bot store deposit` with no registered chest to walk to); it walks to a registered
+  chest from 120 blocks away, so remove the first chest briefly to get a second record.
+- Right-click a bot with the fork's `keybind id=key.use` after `/tp <player> x y z <yaw> <pitch>` (the `facing entity` form left
+  the camera on the sky). Fast travel needs a lodestone compass (pass 4 notes) or a map and compass.
