@@ -742,7 +742,7 @@ public final class WoodcutCleanupSkill implements Skill {
                             LOGGER.debug("woodcut_cleanup: heuristic scaffold skip {} (tree soil)", pos.toShortString());
                             continue;
                         }
-                        if (isPlayerStandingOnColumn(world, pos)) {
+                        if (isPlayerStandingOnColumn(world, pos, bot)) {
                             LOGGER.debug("woodcut_cleanup: heuristic scaffold skip {} (player on column)", pos.toShortString());
                             continue;
                         }
@@ -833,7 +833,7 @@ public final class WoodcutCleanupSkill implements Skill {
                                 anyTreeSoil)) {
                             continue;
                         }
-                        if (isPlayerStandingOnColumn(world, pos)) {
+                        if (isPlayerStandingOnColumn(world, pos, bot)) {
                             continue;
                         }
                         MineAttemptResult mineResult = mineWithRetries(bot, source, pos, placedPillar, scaffoldMemory, false);
@@ -941,11 +941,12 @@ public final class WoodcutCleanupSkill implements Skill {
     }
 
     /**
-     * Whether any player, bot or human (this bot included), stands on the column through
-     * {@code pos} (finding 52). Phase 1 still takes down this bot's remembered pillar. A
-     * read-only position scan; a list that changes mid-copy counts as occupied.
+     * Whether any other player, bot or human, stands on the column through {@code pos}
+     * (finding 52). The cleaning bot itself does not count: its own pillar, even one that
+     * dropped out of its memory, still comes down under it. A read-only position scan; a list
+     * that changes mid-copy counts as occupied.
      */
-    private static boolean isPlayerStandingOnColumn(ServerWorld world, BlockPos pos) {
+    private static boolean isPlayerStandingOnColumn(ServerWorld world, BlockPos pos, ServerPlayerEntity bot) {
         List<ServerPlayerEntity> players;
         try {
             players = new ArrayList<>(world.getPlayers());
@@ -956,7 +957,8 @@ public final class WoodcutCleanupSkill implements Skill {
             if (player == null || player.isRemoved() || player.isSpectator()) {
                 continue;
             }
-            if (WoodcutCleanupDiagnostics.standsOnColumn(
+            if (WoodcutCleanupDiagnostics.blocksColumnCleanup(
+                    player == bot,
                     player.getBlockX(), player.getBlockY(), player.getBlockZ(),
                     pos.getX(), pos.getY(), pos.getZ(),
                     WoodcutCleanupDiagnostics.STANDS_ON_COLUMN_MAX_ABOVE)) {

@@ -2347,9 +2347,15 @@ public class BotEventHandler {
         BlockPos navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
         Vec3d navGoalPos = targetPos;
         boolean usingWaypoints = false;
-        // Last waypoint of a live follow: reached at the old 1.5 and stopped at personal space,
-        // so a bot without line of sight does not walk into the player's block.
+        // Last waypoint of a live follow: stopped at personal space, so a bot without line of
+        // sight does not walk into the player's block, and reached once within that stop distance
+        // so it is dropped there and direct pursuit takes over (no freeze short of it).
         boolean lastLiveWaypoint = false;
+        // Personal space / standoff: where a live follow stops, also on its last waypoint.
+        double desiredSpace = FOLLOW_PERSONAL_SPACE;
+        if (target != null && state != null && state.followStandoffRange > 0.0D) {
+            desiredSpace = Math.max(desiredSpace, state.followStandoffRange);
+        }
         // The path turns or changes height at the current waypoint: no sprint into it.
         boolean waypointTurns = false;
         ArrayDeque<BlockPos> waypoints = FollowStateService.FOLLOW_WAYPOINTS.get(botId);
@@ -2397,8 +2403,10 @@ public class BotEventHandler {
 	                boolean peekLastLive = nextWp == null && fixedGoal == null && target != null;
 	                boolean peekReached = peekLastLive
 	                        ? net.wcfcarolina13.GameAI.services.follow.FollowWaypointReachPolicy.reachedLastLive(
-	                                botBlock.getX(), botBlock.getY(), botBlock.getZ(),
-	                                peek.getX(), peek.getY(), peek.getZ())
+	                                bot.getX(), botBlock.getY(), bot.getZ(),
+	                                peek.getX(), peek.getY(), peek.getZ(),
+	                                net.wcfcarolina13.GameAI.services.follow.FollowWaypointReachPolicy.stopDistance(
+	                                        true, desiredSpace, FOLLOW_WAYPOINT_STOP_DISTANCE))
 	                        : net.wcfcarolina13.GameAI.services.follow.FollowWaypointReachPolicy.reached(
 	                                botBlock.getX(), botBlock.getY(), botBlock.getZ(),
 	                                peek.getX(), peek.getY(), peek.getZ(), nextWp);
@@ -2487,10 +2495,6 @@ public class BotEventHandler {
         }
         // Personal space / standoff applies even when following waypoints; otherwise the bot can "pile onto" the commander
         // when the final waypoint is near the player.
-        double desiredSpace = FOLLOW_PERSONAL_SPACE;
-        if (target != null && state != null && state.followStandoffRange > 0.0D) {
-            desiredSpace = Math.max(desiredSpace, state.followStandoffRange);
-        }
         double personalSpaceSq = desiredSpace * desiredSpace;
         // Personal space only applies when following an actual entity. For fixed-goal follow,
         // stopping early based on Euclidean distance can strand the bot behind doors/walls.

@@ -63,14 +63,29 @@ class FollowWaypointReachPolicyTest {
     }
 
     @Test
-    void lastLiveWaypointUsesTheOldReach() {
-        // Player's block one level step away: reached without entering the player's column.
-        assertTrue(FollowWaypointReachPolicy.reachedLastLive(5, 64, 5, 6, 64, 5));
-        assertTrue(FollowWaypointReachPolicy.reachedLastLive(5, 64, 5, 5, 64, 5));
-        // Diagonal (distSq 2) and two away (distSq 4).
-        assertTrue(FollowWaypointReachPolicy.reachedLastLive(5, 64, 5, 6, 64, 6));
-        assertFalse(FollowWaypointReachPolicy.reachedLastLive(5, 64, 5, 7, 64, 5));
-        assertFalse(FollowWaypointReachPolicy.reachedLastLive(5, 64, 5, 6, 65, 6));
+    void lastLiveWaypointIsReachedWithinItsStopDistance() {
+        // Bot at 5.5/5.5 (centre of block 5,5); stop distance 3.0 (personal space).
+        assertTrue(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 6, 64, 5, 3.0));
+        assertTrue(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 5, 64, 5, 3.0));
+        assertTrue(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 6, 64, 6, 3.0));
+        assertTrue(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 6, 65, 6, 3.0));
+        // Too far horizontally, or two levels off.
+        assertFalse(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 9, 64, 5, 3.0));
+        assertFalse(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 6, 66, 5, 3.0));
+        assertFalse(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 6, 62, 5, 3.0));
+    }
+
+    @Test
+    void botHaltedThreeShortOfTheLastWaypointCountsAsReached() {
+        // The freeze: moveToward halts at horizontal distance 3.0 from the waypoint centre
+        // (8.5, 5.5), and the old 3D <= 2.25 reach never dropped it.
+        assertTrue(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 8, 64, 5, 3.0));
+        // Off-axis halt at exactly 3.0 as well.
+        double h = 3.0 / Math.sqrt(2.0);
+        assertTrue(FollowWaypointReachPolicy.reachedLastLive(8.5 - h, 64, 5.5 - h, 8, 64, 5, 3.0));
+        // A standoff of 5 is honoured too.
+        assertTrue(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 10, 64, 5, 5.0));
+        assertFalse(FollowWaypointReachPolicy.reachedLastLive(5.5, 64, 5.5, 10, 64, 5, 3.0));
     }
 
     @Test

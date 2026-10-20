@@ -488,4 +488,17 @@ class WoodcutCleanupSkillTest {
         assertFalse(WoodcutCleanupDiagnostics.standsOnColumn(10, 60, 20, 10, 64, 20, max));
         assertFalse(WoodcutCleanupDiagnostics.standsOnColumn(10, 73, 20, 10, 64, 20, max));
     }
+
+    @Test
+    void theCleaningBotOnItsOwnPillarDoesNotBlockCleanupButAnyOtherPlayerDoes() throws java.io.IOException {
+        int max = WoodcutCleanupDiagnostics.STANDS_ON_COLUMN_MAX_ABOVE;
+        assertFalse(WoodcutCleanupDiagnostics.blocksColumnCleanup(true, 10, 65, 20, 10, 64, 20, max));
+        assertTrue(WoodcutCleanupDiagnostics.blocksColumnCleanup(false, 10, 65, 20, 10, 64, 20, max));
+        assertFalse(WoodcutCleanupDiagnostics.blocksColumnCleanup(false, 11, 65, 20, 10, 64, 20, max));
+        String cleanup = source("WoodcutCleanupSkill.java");
+        assertTrue(cleanup.contains("blocksColumnCleanup(\n                    player == bot,"),
+                "the column guard exempts the cleaning bot itself");
+        assertEquals(2, cleanup.split("isPlayerStandingOnColumn\\(world, pos, bot\\)", -1).length - 1,
+                "both cleanup mine sites pass the cleaning bot");
+    }
 }

@@ -15,23 +15,34 @@ package net.wcfcarolina13.GameAI.services.follow;
  */
 public final class FollowWaypointReachPolicy {
 
-    /** The pre-finding-47 reach (3D block distance squared), kept for the last waypoint. */
-    public static final double LAST_LIVE_REACH_SQ = 2.25D;
+    /** Slack on the last live waypoint's reach, so a bot halted exactly at its stop distance counts. */
+    public static final double LAST_LIVE_REACH_EPSILON = 0.25D;
 
     private FollowWaypointReachPolicy() {}
 
     /**
      * Reach for the last waypoint of a plan that follows a live player. That waypoint is usually
-     * the player's own block, so the in-column rule drove the bot into the player whenever the
-     * line of sight was blocked (personal space only stops a bot that can see). The old 3D
-     * distance (&le; 2.25) applies instead.
+     * the player's own block (or the player's old block, or the end of a path that stops short),
+     * and the bot halts {@code stopDistance} (personal space) before it. So it counts as reached
+     * once the bot is within that stop distance horizontally (plus a small slack) and at most one
+     * level away; it is then dropped and direct pursuit, which keeps personal space, takes over.
+     * Anything tighter freezes the bot short of a waypoint it will never walk closer to.
+     *
+     * @param botX         bot's exact X
+     * @param botZ         bot's exact Z
+     * @param botBlockY    bot's block Y
+     * @param stopDistance the distance the bot stops at for this waypoint
      */
-    public static boolean reachedLastLive(int botX, int botY, int botZ,
-                                          int peekX, int peekY, int peekZ) {
-        long dx = peekX - botX;
-        long dy = peekY - botY;
-        long dz = peekZ - botZ;
-        return dx * dx + dy * dy + dz * dz <= LAST_LIVE_REACH_SQ;
+    public static boolean reachedLastLive(double botX, int botBlockY, double botZ,
+                                          int peekX, int peekY, int peekZ,
+                                          double stopDistance) {
+        if (Math.abs(peekY - botBlockY) > 1) {
+            return false;
+        }
+        double dx = (peekX + 0.5D) - botX;
+        double dz = (peekZ + 0.5D) - botZ;
+        double reach = Math.max(0.0D, stopDistance) + LAST_LIVE_REACH_EPSILON;
+        return dx * dx + dz * dz <= reach * reach;
     }
 
     /**

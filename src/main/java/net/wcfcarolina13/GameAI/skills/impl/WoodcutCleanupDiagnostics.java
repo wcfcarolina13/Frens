@@ -217,6 +217,16 @@ final class WoodcutCleanupDiagnostics {
         return px == x && pz == z && py > y && py - y <= maxAbove;
     }
 
+    /**
+     * Whether a player on the column stops cleanup from mining it: any player but the cleaning
+     * bot itself. Its own pillar may have dropped out of its memory (restart, memory trim) and
+     * still has to come down under it, as descending cleanup already does.
+     */
+    static boolean blocksColumnCleanup(boolean cleaningBot, int px, int py, int pz,
+                                       int x, int y, int z, int maxAbove) {
+        return !cleaningBot && standsOnColumn(px, py, pz, x, y, z, maxAbove);
+    }
+
     /** Time the post-loop fallback sweep (scan plus any mining it finds) may take. */
     static final long FALLBACK_SWEEP_BUDGET_MS = 3_000L;
 
