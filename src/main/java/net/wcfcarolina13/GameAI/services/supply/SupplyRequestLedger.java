@@ -439,6 +439,15 @@ public final class SupplyRequestLedger {
         return fp.owner() != null && always.contains(new AlwaysScope(fp.owner(), fp.chest()));
     }
 
+    /** Whether the policy-normalized request is already covered, without opening or spending anything. */
+    public synchronized boolean isRequestPermitted(RequestFingerprint fp, Stock stock, int need) {
+        if (fp == null) {
+            return false;
+        }
+        Assessment assessment = SupplyRequestPolicy.assess(fp, stock, need, config);
+        return assessment.eligible() && isPermitted(fp.withQty(assessment.quantity()));
+    }
+
     /** A live single-use grant for {@code fp}'s exact target, for at least {@code fp.qty()}: read, never spent or dropped. */
     private boolean grantCovers(RequestFingerprint fp, long now) {
         Grant grant = grants.get(Target.of(fp));

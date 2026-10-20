@@ -97,7 +97,7 @@ public final class StripMineSkill implements Skill {
             if (net.wcfcarolina13.GameAI.services.HealingService.shouldPauseForStarvation(player)) {
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
-                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
+                ChatUtils.sendSystemMessage(player.getCommandSource(),
                         "I'm starving and out of food. Stripmine paused. Feed me, then /bot resume.");
                 return SkillExecutionResult.failure("Stripmine paused: starving with no food.");
             }

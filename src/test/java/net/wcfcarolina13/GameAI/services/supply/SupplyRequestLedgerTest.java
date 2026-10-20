@@ -78,6 +78,29 @@ class SupplyRequestLedgerTest {
         return r.requestId();
     }
 
+    @Test
+    void requestPermissionUsesTheApprovedQuantityWithoutSpendingTheGrant() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        assertTrue(ledger.isRequestPermitted(cobble(20), Stock.of(24), 20));
+        assertTrue(ledger.isRequestPermitted(cobble(20), PLENTY, 8));
+        assertFalse(ledger.isRequestPermitted(cobble(20), PLENTY, 20));
+        assertFalse(ledger.isRequestPermitted(cobble(8), Stock.of(16), 8));
+        assertFalse(ledger.isRequestPermitted(fp(OWNER, BOT_2, CHEST, COBBLE, 8), PLENTY, 8));
+        assertTrue(ledger.isPermitted(cobble(1)), "memo probe recognizes an unspent grant");
+        assertEquals(ConsumeStatus.ONCE, ledger.consumeGrant(cobble(8), PLENTY, 8).status());
+        assertFalse(ledger.isRequestPermitted(cobble(8), PLENTY, 8));
+    }
+
+    @Test
+    void requestPermissionExpiresWithTheGrant() {
+        UUID id = openOk(cobble(8));
+        ledger.respond(id, OWNER, false, Choice.ALLOW_ONCE);
+        advance(60_000L);
+        assertFalse(ledger.isRequestPermitted(cobble(8), PLENTY, 8));
+        assertFalse(ledger.isPermitted(cobble(1)), "expired grants do not bypass the memo");
+    }
+
     // ── happy path and replay ────────────────────────────────────────────────────────────────
 
     @Test

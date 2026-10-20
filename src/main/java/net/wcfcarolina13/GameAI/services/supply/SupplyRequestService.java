@@ -369,13 +369,13 @@ public final class SupplyRequestService {
      * the chest at {@code chestPos}. Called only by {@link SupplyWithdrawals} (see the class comment).
      *
      * <p>Order: owner (none → the policy's {@code NO_OWNER}; never the recruiter or controller) →
-     * chest access ({@link SupplyChestRules#access}) → unless a standing permission already covers
+     * chest access ({@link SupplyChestRules#access}) → unless a standing permission or live grant covers
      * this owner and chest, the owner online, in the bot's world and within
      * {@link #OWNER_PROMPT_RANGE_BLOCKS} → the ledger. So {@link RequestStatus#DENIED} comes before
      * {@link RequestStatus#OWNER_NOT_NEARBY}, and "always" really means without asking: the owner
      * need not be anywhere near. The ledger answers {@link RequestStatus#COVERED_BY_GRANT} instead
      * of prompting when the owner's unspent "Allow once" already covers the ask (a request made
-     * after the ticket that held it was dropped); that one still needs the owner in range here.
+     * after the ticket that held it was dropped); that grant needs no owner in range either.
      * On {@link RequestStatus#OPENED} the owner gets one message with three clickable answers.
      *
      * @param sample a stack of the exact item wanted (id and components), usually read from the chest
@@ -418,18 +418,17 @@ public final class SupplyRequestService {
         if (chest.access() != Access.OK) {
             return new RequestOutcome(RequestStatus.DENIED, null, chest.access(), null);
         }
-        // A standing permission needs no prompt, so it needs no owner nearby either. Only an
+        Stock stock = SupplyChestRules.stock(slotViews(chest.inventory(), item.itemId(), ops), item, book.config());
+        RequestFingerprint fp = new RequestFingerprint(owner, bot.getUuid(), chest.key(), item, qty);
+        // A covered request needs no prompt, so it needs no owner nearby either. Only an
         // uncovered request, the one that may prompt, requires the owner in range.
         ServerPlayerEntity ownerPlayer = null;
-        if (!book.hasAlways(owner, chest.key())) {
+        if (!book.hasAlways(owner, chest.key()) && !book.isRequestPermitted(fp, stock, need)) {
             ownerPlayer = ownerInPromptRange(srv, bot, owner);
             if (ownerPlayer == null) {
                 return RequestOutcome.of(RequestStatus.OWNER_NOT_NEARBY);
             }
         }
-        Stock stock = SupplyChestRules.stock(slotViews(chest.inventory(), item.itemId(), ops), item, book.config());
-        RequestFingerprint fp = new RequestFingerprint(owner, bot.getUuid(), chest.key(), item, qty);
-
         book.sweep();
         OpenResult opened = book.open(fp, stock, need);
         RequestOutcome outcome = new RequestOutcome(statusOf(opened.status()), opened, Access.OK, opened.verdict());

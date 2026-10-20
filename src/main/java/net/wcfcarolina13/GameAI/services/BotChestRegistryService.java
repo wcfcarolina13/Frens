@@ -336,8 +336,9 @@ public final class BotChestRegistryService {
      * its own checked live positions holds a chest here, so bots stop heading for chests that are
      * not in this save. The own records are probed, not the legacy ones: a legacy check skips
      * destroyed legacy positions, so an own live record there was never looked at and could be
-     * retired with a chest standing on it. Marked, never removed: verifyChests and registerChest
-     * revive a record when a chest is there. Nothing runs (no chunk is loaded) while the own store
+     * retired with a chest standing on it. Marked, never removed: registerChest can revive a
+     * record after a bot places a chest there. Verification alone cannot establish ownership.
+     * Nothing runs (no chunk is loaded) while the own store
      * has no live record, so a fully retired copy costs nothing at later starts. Server thread
      * only; caller holds {@link #LOCK}.
      *
@@ -562,7 +563,7 @@ public final class BotChestRegistryService {
 
     /**
      * The recorded owner of every owned record, under any bot alias, at exactly {@code pos} in
-     * {@code world} — destroyed records included, since re-placing a chest revives them. One
+     * {@code world} — destroyed records included, since a bot re-registering a chest revives them. One
      * element per record. A record with no owner ({@link ChestRecord#ownerUuid} {@code null}:
      * written before 1.1.219, or placed by an un-owned bot) is skipped, so a position holding only
      * such records returns an empty list, the same as no record at all. Input for
@@ -740,7 +741,10 @@ public final class BotChestRegistryService {
         return "bot:" + alias.trim().toLowerCase(Locale.ROOT);
     }
 
-    /** Verify chest records against the actual world, marking destroyed ones. */
+    /**
+     * Mark missing chests destroyed. A destroyed record stays retired until a bot places and
+     * registers a chest again: a chest at the same position alone does not prove ownership.
+     */
     public static void verifyChests(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null) return;
         MinecraftServer server = world.getServer();
@@ -760,10 +764,9 @@ public final class BotChestRegistryService {
                 if (!isChest && !r.destroyed) {
                     r.destroyed = true;
                     changed = true;
-                } else if (isChest && r.destroyed) {
-                    r.destroyed = false;
-                    changed = true;
                 }
+                // A replacement may belong to someone else. Only registerChest, after a bot
+                // places the chest, may revive a destroyed record and stamp its current owner.
             }
         }
         if (changed) flush();

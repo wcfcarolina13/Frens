@@ -91,6 +91,15 @@ class ChestRegistryAccessPolicyTest {
     }
 
     @Test
+    void collectRequesterLosesAccessWhenOwnershipChangesDuringTravel() {
+        assertTrue(ChestRegistryAccessPolicy.authorize(OWNER, OWNER, true, false, false).allowed());
+        assertEquals(Access.DENY_NOT_OWNER,
+                ChestRegistryAccessPolicy.authorize(OWNER, STRANGER, true, false, false));
+        assertEquals(Access.DENY_UNOWNED,
+                ChestRegistryAccessPolicy.authorize(OWNER, null, true, false, false));
+    }
+
+    @Test
     void onlyAllowOutcomesAreAllowed() {
         assertTrue(Access.ALLOW_OWNER.allowed());
         assertTrue(Access.ALLOW_OPERATOR.allowed());

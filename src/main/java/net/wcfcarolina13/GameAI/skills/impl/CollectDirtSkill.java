@@ -357,8 +357,8 @@ public class CollectDirtSkill implements Skill {
                 // Hunger-aware interruption: don't grind a CollectDirt/Mining loop until death.
                 if (net.wcfcarolina13.GameAI.services.HealingService.shouldPauseForStarvation(loopPlayer)) {
                     net.wcfcarolina13.GameAI.services.SkillResumeService.flagManualResume(loopPlayer);
-                    net.wcfcarolina13.ChatUtils.ChatUtils.sendChatMessages(
-                            loopPlayer.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
+                    net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                            loopPlayer.getCommandSource(),
                             "I'm starving and out of food. Paused. Feed me, then /bot resume.");
                     outcome = SkillExecutionResult.failure(skillName + " paused: starving with no food.");
                     break;

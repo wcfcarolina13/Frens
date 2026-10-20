@@ -326,10 +326,11 @@ public final class SupplyWithdrawals {
                 break;
         }
 
-        // A request just found the owner away from this bot; a standing permission needs nobody nearby.
+        // Any live grant for this exact target must reach the request's stock/need normalization.
+        // The one-item probe only bypasses the memo; the request still checks the full approved quantity.
         boolean notedAway = OWNER_AWAY.isAway(botId, now);
         switch (SupplyWithdrawalPolicy.ownerAwayStep(notedAway,
-                notedAway && SupplyRequestService.hasAlways(owner, chestKey),
+                notedAway && SupplyRequestService.isPermitted(new RequestFingerprint(owner, botId, chestKey, item, 1)),
                 notedAway && SupplyRequestService.isOwnerInPromptRange(bot, owner))) {
             case REFUSE_QUIETLY:
                 return Step.quiet(Result.refused(Refusal.OWNER_NOT_NEARBY));
