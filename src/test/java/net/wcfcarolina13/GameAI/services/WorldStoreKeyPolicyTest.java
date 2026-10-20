@@ -364,4 +364,20 @@ class WorldStoreKeyPolicyTest {
         assertFalse(WorldStoreKeyPolicy.shouldReleaseChestClaim("y#2", "x#1", 4, 0), "another save's claim");
         assertFalse(WorldStoreKeyPolicy.shouldReleaseChestClaim(null, "x#1", 4, 0));
     }
+
+    @Test
+    void copiedChestRecordsAreRetiredWhenTheClaimIsElsewhereAndNoChestIsHere() {
+        assertTrue(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 7, true, 16, 0));
+        assertTrue(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 1, true, 1, 0));
+    }
+
+    @Test
+    void copiedChestRecordsAreKeptWhenAnyConditionFails() {
+        assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(true, 7, true, 16, 0), "this save holds the claim");
+        assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 0, true, 16, 0), "no own records");
+        assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 7, false, 16, 0),
+                "a chest this save registered itself: never touched");
+        assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 7, true, 0, 0), "nothing checked: no evidence");
+        assertFalse(WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, 7, true, 3, 1), "a legacy chest is here");
+    }
 }

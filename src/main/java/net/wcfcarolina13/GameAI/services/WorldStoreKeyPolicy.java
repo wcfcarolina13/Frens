@@ -290,6 +290,25 @@ public final class WorldStoreKeyPolicy {
     }
 
     /**
+     * Whether a save that does not hold the chest-registry claim should mark its own records
+     * destroyed (finding 45). 1.1.274 copied the legacy entry into the first same-named save to
+     * load; when 1.1.275 moved the claim to the save that really has the chests, the other save
+     * kept that copy, and bots there headed for chests that are not in it. Only a pure copy is
+     * retired: every own record position is a legacy record position, and of the legacy
+     * positions checked here at least one was read and none holds a chest. A store holding any
+     * chest it registered itself (a position not in the legacy entry) is never touched. Marking
+     * is reversible: verifyChests or a re-registration revives a record when a chest is there.
+     *
+     * @param holdsClaim         this save holds the legacy claim
+     * @param ownRecordCount     every record in this save's own store (destroyed ones included)
+     * @param ownSubsetOfLegacy  every own record position is among the legacy record positions
+     */
+    public static boolean shouldRetireCopiedChestRecords(boolean holdsClaim, int ownRecordCount,
+                                                         boolean ownSubsetOfLegacy, int checked, int chestLike) {
+        return !holdsClaim && ownRecordCount > 0 && ownSubsetOfLegacy && checked > 0 && chestLike <= 0;
+    }
+
+    /**
      * Decide what a world with the given fingerprint does at load.
      *
      * @param hasOwnStore             the fingerprinted store already exists

@@ -298,6 +298,9 @@ public final class BotChestRegistryService {
      *   <li>this save's own store has no records at all and a checked legacy position holds a
      *       chest here: copy the legacy entry over it and take the claim. An own store with any
      *       record is never overwritten.</li>
+     *   <li>this save does not hold the claim (or just released it) and its own store is the
+     *       1.1.274 copy of the legacy records: mark them destroyed when none of the checked
+     *       legacy positions holds a chest here ({@link #retireCopiedRecords}, finding 45).</li>
      * </ul>
      * Server thread only (reading a position may load its chunk); caller holds {@link #LOCK}.
      */
@@ -306,7 +309,7 @@ public final class BotChestRegistryService {
         boolean holdsClaim = fingerprint.equals(claimant);
         int ownRecords = recordCount(DATA.worlds.get(key));
         if (!holdsClaim && ownRecords > 0) {
-            return false;
+            return retireCopiedRecords(world, legacy, legacyKey, key, claimant, ownRecords, null);
         }
         WorldStoreKeyPolicy.ChestCheck check = checkLegacyChests(world, legacy, true);
         if (WorldStoreKeyPolicy.shouldAdoptOverEmptyOwnChestStore(ownRecords, true, check.chestLike())) {
@@ -322,6 +325,70 @@ public final class BotChestRegistryService {
         DATA.legacyWorldClaims.remove(legacyKey);
         LOGGER.info("Released claim on legacy chest registry '{}' held by '{}' (checked={}, chestLike={}): its chests are not in this save",
                 legacyKey, key, check.checked(), check.chestLike());
+        // This save no longer holds the claim; its own store may be the 1.1.274 copy.
+        retireCopiedRecords(world, legacy, legacyKey, key, null, ownRecords, check);
+        return true;
+    }
+
+    /**
+     * Finding 45: a save that does not hold the claim but still has the 1.1.274 copy of the
+     * legacy records (every own position is a legacy position) marks them destroyed when none of
+     * the checked legacy positions holds a chest here, so bots stop heading for chests that are
+     * not in this save. Marked, never removed: verifyChests and registerChest revive a record
+     * when a chest is there. Only live records are marked; nothing to mark means no save and no
+     * log. Server thread only; caller holds {@link #LOCK}.
+     *
+     * @param check the legacy check already made this pass, or {@code null} to make it here
+     *              (only after the subset test passes, so a store with its own chests loads no chunk)
+     */
+    private static boolean retireCopiedRecords(ServerWorld world, WorldData legacy, String legacyKey, String key,
+                                               String claimant, int ownRecords, WorldStoreKeyPolicy.ChestCheck check) {
+        WorldData own = DATA.worlds.get(key);
+        if (own == null || own.chestsByBot == null || legacy.chestsByBot == null) {
+            return false;
+        }
+        Set<Long> legacyPositions = new HashSet<>();
+        for (List<ChestRecord> records : legacy.chestsByBot.values()) {
+            if (records == null) continue;
+            for (ChestRecord r : records) {
+                if (r != null) legacyPositions.add(BlockPos.asLong(r.x, r.y, r.z));
+            }
+        }
+        boolean subset = true;
+        for (List<ChestRecord> records : own.chestsByBot.values()) {
+            if (records == null) continue;
+            for (ChestRecord r : records) {
+                if (r != null && !legacyPositions.contains(BlockPos.asLong(r.x, r.y, r.z))) {
+                    subset = false;
+                    break;
+                }
+            }
+            if (!subset) break;
+        }
+        if (!subset) {
+            return false;
+        }
+        if (check == null) {
+            check = checkLegacyChests(world, legacy, true);
+        }
+        if (!WorldStoreKeyPolicy.shouldRetireCopiedChestRecords(false, ownRecords, true, check.checked(), check.chestLike())) {
+            return false;
+        }
+        int marked = 0;
+        for (List<ChestRecord> records : own.chestsByBot.values()) {
+            if (records == null) continue;
+            for (ChestRecord r : records) {
+                if (r != null && !r.destroyed) {
+                    r.destroyed = true;
+                    marked++;
+                }
+            }
+        }
+        if (marked == 0) {
+            return false;
+        }
+        LOGGER.info("Retired {} of {} copied chest record(s) in '{}' (marked destroyed, not removed): legacy '{}' is claimed by '{}' and none of its checked chests is in this save (checked={}, chestLike={})",
+                marked, ownRecords, key, legacyKey, claimant, check.checked(), check.chestLike());
         return true;
     }
 
