@@ -4,7 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-19 (1.1.277) — next session starts here
+## Session Handoff 2026-10-20 (1.1.278) — next session starts here
+
+**State:** main = origin/main @ 1.1.278. Suite 3221 green. Deployed to Nirn. Sandbox check pending (Phase 6bp, `tools/sandbox/fix278.py`). Built autonomously overnight (Bradley 2026-10-19: "do a few more iterations autonomously").
+**1.1.278** (changelog entry has rulings and costs): defensive mutual aid tick-driven (no 1.6-2.4 s server freeze), hands off only to combat that will fight; golden-apple yes/no handled (20 s prompt window, ruling); `/bot go_to` in the bot's own dimension; following bots line up with an open doorway, no jump under a lintel, no door shut on a bot; Collect/Go owner messages (refused, replaced, cancelled, traveling, dimension fallback). Fable review (two reviewers), fix wave `d559547c`, re-review found 2 more (`0603252b`, controller read the diff).
+**Next build candidates (triage CODE rows):** 143 moveRelative snaps (bots in walls); 185 full-inventory craft drops the largest stack; 139 jump-sprint escape counts a Y bump as success; 140 stuck-return counters carry over; 235 Pocket TTS installer hang; 180 cook sleeps on the server thread; 181 server-thread craft walks to a chest; 177 "no food" ignores bundles; 206 End exit companion state; the 1.1.278 deferrals.
+**Public release:** 1.1.278 is the candidate once its sandbox checks pass. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Needs Bradley:** the three 1.1.272 questions still stand (Spells key migration, chest axe before crafting, shared-server chest scan).
+**Deferred (reasons in the changelogs):** see the 1.1.278 and 1.1.277 entries.
+**Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-19 (1.1.277) — superseded
 
 **State:** main = origin/main @ 1.1.277. Suite 3159 green. Deployed to Nirn. Sandbox check pending (Phase 6bo, `tools/sandbox/fix277.py`). Backlog triaged this session: 190 open RALPH items (`.superpowers/backlog-triage/split182.txt` in the base checkout: 113 code / 51 play-test / 17 Bradley); 9 Codex "done" calls rejected stay open (156, 255, 294, 459, 476, 500, 507, 509, 515).
 **1.1.277** (changelog entry has rulings and costs): finding 47 follow checks headroom on a step down and every follow/come command clears the abort latch (leaf clearing had aborted on its first tick after every follow start); finding 48 a floating bot in a flooded pocket carves a two-block ledge (ruling) and failed surface recovery backs off, logs throttled; soul stage directions stripped (word list); woodcut per-log checks through the chunk reader. Fable review (two reviewers), one fix wave (`2f736b46`), clean re-review.
