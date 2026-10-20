@@ -110,6 +110,54 @@ public final class MutualAidDefensePolicy {
         return Handoff.NONE;
     }
 
+    /** Armor points that make a bot without any weapon fit to defend. */
+    public static final int ARMOR_ONLY_COMBAT_MIN = 6;
+    /** Readiness weight of a usable ranged weapon: a stone-tier melee weapon. */
+    public static final int RANGED_READINESS_SCORE = 20;
+
+    /**
+     * Whether a bot is fit to go defend an ally: fed, and armed with a melee or a usable ranged
+     * weapon, or armored enough to fight bare-handed. A bow-only bot used to fail this, so it
+     * never went (finding 53).
+     */
+    public static boolean isCombatCapable(boolean foodOk, boolean hasMelee, boolean hasRanged, int armor) {
+        return foodOk && (hasMelee || hasRanged || armor >= ARMOR_ONLY_COMBAT_MIN);
+    }
+
+    /** A defender with any usable weapon is stronger than an ally with none. */
+    public static boolean outArmsAlly(boolean defenderMelee, boolean defenderRanged,
+                                      boolean allyMelee, boolean allyRanged) {
+        return (defenderMelee || defenderRanged) && !allyMelee && !allyRanged;
+    }
+
+    /** The weapon part of a readiness score: the best melee score, or a usable ranged weapon. */
+    public static int readinessWeaponScore(int bestMeleeScore, boolean hasRanged) {
+        return Math.max(bestMeleeScore, hasRanged ? RANGED_READINESS_SCORE : 0);
+    }
+
+    /**
+     * Whether an item translation key names a melee weapon. "axe" alone also matched every
+     * pickaxe, so a bot with only a pickaxe counted as armed; an axe now needs "axe" not preceded
+     * by "pick".
+     */
+    public static boolean isMeleeWeaponKey(String key) {
+        if (key == null || key.isEmpty()) {
+            return false;
+        }
+        if (key.contains("sword") || key.contains("trident") || key.contains("mace") || key.contains("dagger")) {
+            return true;
+        }
+        int from = 0;
+        int at;
+        while ((at = key.indexOf("axe", from)) >= 0) {
+            if (at < 4 || !key.startsWith("pick", at - 4)) {
+                return true;
+            }
+            from = at + 3;
+        }
+        return false;
+    }
+
     public static boolean shouldSprint(double distSq) {
         return distSq > SPRINT_BEYOND_SQ;
     }

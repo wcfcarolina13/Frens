@@ -516,8 +516,11 @@ public final class BotMutualAidService {
 
     private static boolean isCombatCapable(ServerPlayerEntity bot) {
         return bot != null
-                && bot.getHungerManager().getFoodLevel() > STARVING_THRESHOLD
-                && (hasUsableWeapon(bot) || bot.getArmor() >= 6);
+                && MutualAidDefensePolicy.isCombatCapable(
+                        bot.getHungerManager().getFoodLevel() > STARVING_THRESHOLD,
+                        hasUsableWeapon(bot),
+                        BotActions.hasRangedWeapon(bot),
+                        bot.getArmor());
     }
 
     private static DefenseRequest findDefenseRequest(ServerPlayerEntity defender, ServerWorld world) {
@@ -590,7 +593,8 @@ public final class BotMutualAidService {
         if (defender == null || ally == null) {
             return false;
         }
-        if (hasUsableWeapon(defender) && !hasUsableWeapon(ally)) {
+        if (MutualAidDefensePolicy.outArmsAlly(hasUsableWeapon(defender), BotActions.hasRangedWeapon(defender),
+                hasUsableWeapon(ally), BotActions.hasRangedWeapon(ally))) {
             return true;
         }
         return combatReadinessScore(defender) >= combatReadinessScore(ally) + 4;
@@ -604,6 +608,7 @@ public final class BotMutualAidService {
         for (int i = 0; i < bot.getInventory().size(); i++) {
             bestWeapon = Math.max(bestWeapon, weaponScore(bot.getInventory().getStack(i)));
         }
+        bestWeapon = MutualAidDefensePolicy.readinessWeaponScore(bestWeapon, BotActions.hasRangedWeapon(bot));
         return bestWeapon + bot.getArmor() + Math.round(bot.getHealth() / 2.0F) + (bot.getHungerManager().getFoodLevel() / 3);
     }
 
@@ -1803,9 +1808,7 @@ public final class BotMutualAidService {
             return 0;
         }
         String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-        boolean weapon = key.contains("sword") || key.contains("axe") || key.contains("trident")
-                || key.contains("mace") || key.contains("dagger");
-        if (!weapon) {
+        if (!MutualAidDefensePolicy.isMeleeWeaponKey(key)) {
             return 0;
         }
         int base;

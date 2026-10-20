@@ -180,6 +180,76 @@ class MutualAidDefensePolicyTest {
                 "a dead or despawned target is no target");
     }
 
+    // ── combat capability (finding 53) ───────────────────────────────────────────────────────
+
+    @Test
+    void aBowOnlyBotIsCombatCapable() {
+        assertTrue(MutualAidDefensePolicy.isCombatCapable(true, false, true, 0));
+    }
+
+    @Test
+    void aMeleeBotIsCombatCapableAndAnUnarmedUnarmoredOneIsNot() {
+        assertTrue(MutualAidDefensePolicy.isCombatCapable(true, true, false, 0));
+        assertFalse(MutualAidDefensePolicy.isCombatCapable(true, false, false, 5));
+        assertTrue(MutualAidDefensePolicy.isCombatCapable(true, false, false, 6));
+    }
+
+    @Test
+    void aStarvingBotIsNeverCombatCapable() {
+        assertFalse(MutualAidDefensePolicy.isCombatCapable(false, true, true, 20));
+    }
+
+    @Test
+    void aBowDefenderOutArmsABareHandedAlly() {
+        assertTrue(MutualAidDefensePolicy.outArmsAlly(false, true, false, false));
+        assertTrue(MutualAidDefensePolicy.outArmsAlly(true, false, false, false));
+        assertFalse(MutualAidDefensePolicy.outArmsAlly(false, true, false, true));
+        assertFalse(MutualAidDefensePolicy.outArmsAlly(true, true, true, false));
+        assertFalse(MutualAidDefensePolicy.outArmsAlly(false, false, false, false));
+    }
+
+    @Test
+    void aRangedWeaponCountsAsAStoneTierWeaponInReadiness() {
+        assertEquals(20, MutualAidDefensePolicy.readinessWeaponScore(0, true));
+        assertEquals(0, MutualAidDefensePolicy.readinessWeaponScore(0, false));
+        assertEquals(40, MutualAidDefensePolicy.readinessWeaponScore(40, true));
+        assertEquals(10, MutualAidDefensePolicy.readinessWeaponScore(10, false));
+    }
+
+    @Test
+    void aPickaxeIsNotAMeleeWeapon() {
+        assertFalse(MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.iron_pickaxe"));
+        assertFalse(MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.wooden_pickaxe"));
+        assertFalse(MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.bow"));
+        assertFalse(MutualAidDefensePolicy.isMeleeWeaponKey(""));
+        assertFalse(MutualAidDefensePolicy.isMeleeWeaponKey(null));
+    }
+
+    @Test
+    void axesSwordsAndOtherMeleeWeaponsStillCount() {
+        assertTrue(MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.iron_axe"));
+        assertTrue(MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.stone_sword"));
+        assertTrue(MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.trident"));
+        assertTrue(MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.mace"));
+        assertTrue(MutualAidDefensePolicy.isMeleeWeaponKey("item.somemod.flint_dagger"));
+        assertTrue(MutualAidDefensePolicy.isMeleeWeaponKey("item.somemod.battleaxe"));
+    }
+
+    @Test
+    void aPickaxeOnlyBotIsNotCombatCapable() {
+        boolean hasMelee = MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.diamond_pickaxe");
+        assertFalse(MutualAidDefensePolicy.isCombatCapable(true, hasMelee, false, 0));
+    }
+
+    @Test
+    void theServiceAsksTheRangedCheckInAllThreeDefenseDecisions() throws IOException {
+        String source = mutualAidSource();
+        assertTrue(bodyOf(source, "boolean isCombatCapable(").contains("BotActions.hasRangedWeapon(bot)"));
+        assertTrue(bodyOf(source, "boolean isMeaningfullyStronger(").contains("BotActions.hasRangedWeapon(defender)"));
+        assertTrue(bodyOf(source, "int combatReadinessScore(").contains("BotActions.hasRangedWeapon(bot)"));
+        assertTrue(bodyOf(source, "int weaponScore(").contains("MutualAidDefensePolicy.isMeleeWeaponKey(key)"));
+    }
+
     // ── source guards ────────────────────────────────────────────────────────────────────────
 
     @Test
