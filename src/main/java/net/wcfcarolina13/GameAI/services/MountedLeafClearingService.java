@@ -4,7 +4,6 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
@@ -25,7 +24,6 @@ public final class MountedLeafClearingService {
     private static final Logger LOGGER = LoggerFactory.getLogger("mount-leaf");
     private static final long CLEAR_INTERVAL_TICKS = 2L;
     private static final double LEAF_REACH_SQ = 4.5 * 4.5;
-    private static final int MAX_BREAKS_PER_PASS = 3;
     private static final Map<UUID, Long> LAST_CLEAR_TICK = new ConcurrentHashMap<>();
 
     private MountedLeafClearingService() {}
@@ -44,6 +42,10 @@ public final class MountedLeafClearingService {
         if (server == null) {
             return;
         }
+        if (!server.isOnThread()) {
+            server.execute(() -> maybeClear(bot, commander));
+            return;
+        }
         long now = server.getTicks();
         long last = LAST_CLEAR_TICK.getOrDefault(bot.getUuid(), 0L);
         if (now - last < CLEAR_INTERVAL_TICKS) {
@@ -58,8 +60,6 @@ public final class MountedLeafClearingService {
         float yaw = (float) Math.toDegrees(Math.atan2(-delta.x, delta.z));
         Direction toward = Direction.fromHorizontalDegrees(yaw);
 
-        int broken = 0;
-        boolean toolChosen = false;
         for (BlockPos leaf : mountedLeafCandidates(bot.getBlockPos(), toward)) {
             BlockState leafState = world.getBlockState(leaf);
             if (!leafState.isIn(BlockTags.LEAVES)) {
@@ -78,25 +78,14 @@ public final class MountedLeafClearingService {
             if (bot.squaredDistanceTo(Vec3d.ofCenter(leaf)) > LEAF_REACH_SQ) {
                 continue;
             }
-            if (!toolChosen) {
-                toolChosen = true;
-                if (!holdLeafTool(bot, leafState)) {
-                    return;
-                }
+            if (!holdLeafTool(bot, leafState)) {
+                return;
             }
-            try {
-                bot.swingHand(Hand.MAIN_HAND);
-                if (bot.interactionManager.tryBreakBlock(leaf)) {
-                    broken++;
-                }
-            } catch (Exception ignored) {
+            if (LeafClearService.startLeafMining(bot, leaf, "mounted")) {
+                LOGGER.debug("Leaf clear: bot={} mining={} toward={}",
+                        bot.getName().getString(), leaf, toward);
+                return;
             }
-            if (broken >= MAX_BREAKS_PER_PASS) {
-                break;
-            }
-        }
-        if (broken > 0) {
-            LOGGER.debug("Leaf clear: bot={} broke={} toward={}", bot.getName().getString(), broken, toward);
         }
     }
 

@@ -2,6 +2,7 @@ package net.wcfcarolina13.FilingSystem;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import com.google.gson.annotations.SerializedName;
 import com.google.gson.reflect.TypeToken;
 import net.wcfcarolina13.LauncherDetection.LauncherEnvironment;
@@ -84,6 +85,9 @@ public class ManualConfig {
     // Saved finder choice since 1.1.261: null = the default (unified), else "unified",
     // "baritone" or "classic" (an explicit pick, never touched by a migration).
     private String pathfinder = null;
+    // Null infers legacy files' explicit choice from the saved token. Sync can carry an
+    // effective token without turning an untouched default into a saved preference.
+    private transient Boolean pathfinderExplicitlySet;
     // One-time 1.1.261 migration marker (unified becomes the default). Same rules as
     // baritoneDefaultMigrated: false initializer so an older file reads as "not migrated yet".
     private boolean unifiedDefaultMigrated = false;
@@ -254,11 +258,18 @@ public class ManualConfig {
         synchronized (SAVE_LOCK) {
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
             try (FileWriter writer = new FileWriter(filePath())) {
-                gson.toJson(this, writer);
+                gson.toJson(toSavedJson(), writer);
             } catch (IOException e) {
                 LOGGER.error("Failed to save config file: {}", e.getMessage());
             }
         }
+    }
+
+    /** File-only projection; shared snapshots must still carry the effective finder. */
+    JsonObject toSavedJson() {
+        JsonObject saved = new Gson().toJsonTree(this).getAsJsonObject();
+        if (!isPathfinderExplicitlySet()) saved.remove("pathfinder");
+        return saved;
     }
 
     /**
@@ -719,7 +730,17 @@ public class ManualConfig {
     /** Stores an explicit pick (or null for the default) and re-syncs the legacy flag. */
     public void setPathfinder(String value) {
         this.pathfinder = (value == null || value.isBlank()) ? null : value.trim().toLowerCase(Locale.ROOT);
+        pathfinderExplicitlySet = this.pathfinder != null;
         syncLegacyPathfinderFlag();
+    }
+
+    public boolean isPathfinderExplicitlySet() {
+        return pathfinderExplicitlySet != null ? pathfinderExplicitlySet : pathfinder != null;
+    }
+
+    void setPathfinder(String value, boolean explicitlySet) {
+        setPathfinder(value);
+        pathfinderExplicitlySet = explicitlySet && pathfinder != null;
     }
 
     /** Stores an explicit pick as its saved token ("unified", "baritone", "classic"). */

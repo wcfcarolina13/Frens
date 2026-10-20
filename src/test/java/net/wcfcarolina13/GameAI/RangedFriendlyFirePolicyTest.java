@@ -69,4 +69,32 @@ class RangedFriendlyFirePolicyTest {
         assertTrue(RangedFriendlyFirePolicy.mayReposition(9.0, minSq, true));
         assertTrue(RangedFriendlyFirePolicy.mayReposition(36.0, minSq, false));
     }
+
+    @Test
+    void aClearSidewaysStanceWinsOverClosingPastTheAlly() {
+        double sideways = RangedFriendlyFirePolicy.repositionScore(true, 0, 0, 36, true, 0);
+        double closing = RangedFriendlyFirePolicy.repositionScore(true, 0, 0, 9, true, 3);
+        assertTrue(sideways > closing);
+    }
+
+    @Test
+    void closingToAClearShotWinsWhenTheSidewaysStanceIsBlocked() {
+        double sideways = RangedFriendlyFirePolicy.repositionScore(false, 10, 0, 9, true, 0);
+        double closing = RangedFriendlyFirePolicy.repositionScore(true, 0, 0, 36, true, 6);
+        assertTrue(closing > sideways);
+    }
+
+    @Test
+    void terrainRepositionKeepsItsExistingMovementCostPreference() {
+        double sideways = RangedFriendlyFirePolicy.repositionScore(true, 1_000_000, 0, 36, false, 0);
+        double closing = RangedFriendlyFirePolicy.repositionScore(true, 1_000_000, 0, 9, false, 3);
+        assertTrue(closing > sideways);
+    }
+
+    @Test
+    void theFieldDefenderNeedsTheExtendedSidewaysRing() {
+        // Jake starts 15 blocks from Bob, with the zombie another four blocks past Bob.
+        assertTrue(RangedFriendlyFirePolicy.inLineOfFire(0, 0, 1.45, 19, 0, 0, 15, 0, 0, true));
+        assertFalse(RangedFriendlyFirePolicy.inLineOfFire(0, 0, 6, 19, 0, 0, 15, 0, 0, true));
+    }
 }

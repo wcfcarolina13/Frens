@@ -62,6 +62,7 @@ import net.wcfcarolina13.GameAI.services.DurabilityFallbackService;
 import net.wcfcarolina13.GameAI.services.DurabilityPolicyService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
 import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
+import net.wcfcarolina13.PlayerUtils.MiningTool;
 
 
 
@@ -120,6 +121,7 @@ public final class BotActions {
 
     private static final Map<UUID, RangedAttackState> RANGED_STATE = new HashMap<>();
     private static final Map<UUID, String> LAST_COMBAT_PROFILE = new HashMap<>();
+    private static final Map<UUID, CompletableFuture<String>> MOVEMENT_MINING = new ConcurrentHashMap<>();
 
     private BotActions() {}
 
@@ -879,6 +881,13 @@ public final class BotActions {
     }
 
     public static boolean breakBlockAhead(ServerPlayerEntity bot) {
+        return callOnServerThread(bot, () -> breakBlockAheadOnServer(bot), 2000L, false);
+    }
+
+    private static boolean breakBlockAheadOnServer(ServerPlayerEntity bot) {
+        if (isMovementMining(bot)) {
+            return true;
+        }
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos targetPos = getRelativeBlockPos(bot, 1, 0);
         BlockState frontState = world.getBlockState(targetPos);
@@ -1422,12 +1431,18 @@ public final class BotActions {
         };
     }
 
-    public static void escapeStairs(ServerPlayerEntity bot) {
-        boolean placed = placeSupportBlock(bot);
-        if (!placed) {
-            breakBlockAhead(bot);
-        }
-        jumpForward(bot);
+    public static boolean escapeStairs(ServerPlayerEntity bot) {
+        return callOnServerThread(bot, () -> {
+            if (isMovementMining(bot)) {
+                return true;
+            }
+            boolean placed = placeSupportBlock(bot);
+            if (!placed && breakBlockAheadOnServer(bot)) {
+                return true;
+            }
+            jumpForward(bot);
+            return placed;
+        }, 2500L, false);
     }
 
     public static boolean digOut(ServerPlayerEntity bot) {
@@ -1529,14 +1544,23 @@ public final class BotActions {
         if (!canBreak(world, pos, bot, forceBreak)) {
             return false;
         }
-        // Face the block before breaking (vanilla parity)
-        LookController.faceBlock(bot, pos);
-        // Attempt a physical break using the interaction manager (no instant removal)
-        boolean success = bot.interactionManager.tryBreakBlock(pos);
-        if (success) {
-            bot.swingHand(Hand.MAIN_HAND, true);
+        return startMovementMining(bot, pos);
+    }
+
+    private static boolean isMovementMining(ServerPlayerEntity bot) {
+        CompletableFuture<String> mining = MOVEMENT_MINING.get(bot.getUuid());
+        return mining != null && !mining.isDone();
+    }
+
+    /** Server thread only; a movement retry must not stack another mining job. */
+    private static boolean startMovementMining(ServerPlayerEntity bot, BlockPos pos) {
+        if (isMovementMining(bot)) {
+            return true;
         }
-        return success;
+        CompletableFuture<String> mining = MiningTool.mineBlock(bot, pos.toImmutable());
+        MOVEMENT_MINING.put(bot.getUuid(), mining);
+        mining.whenComplete((result, error) -> MOVEMENT_MINING.remove(bot.getUuid(), mining));
+        return !mining.isDone();
     }
 
     private static int meleeWeaponScore(ItemStack stack) {
@@ -2877,7 +2901,12 @@ public final class BotActions {
             return false;
         }
 
+        boolean friendlyInLine = isFriendlyInRangedLine(world, bot, bot.getEyePos(), target);
         RangedAttackState state = RANGED_STATE.get(bot.getUuid());
+        if (friendlyInLine) {
+            state = RANGED_STATE.computeIfAbsent(bot.getUuid(), uuid -> new RangedAttackState());
+            state.ensureTarget(target);
+        }
         if (state == null || !state.isCurrentTarget(target)) {
             return false;
         }
@@ -2897,7 +2926,9 @@ public final class BotActions {
                 return false;
             }
             double distSq = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).squaredDistanceTo(state.committedRepositionTarget);
-            if (distSq <= COMMITTED_REPOSITION_ARRIVE_SQ) {
+            // Stopping 1.5 blocks short can leave the ally inside the firing cone.
+            double arriveSq = friendlyInLine ? 0.35D * 0.35D : COMMITTED_REPOSITION_ARRIVE_SQ;
+            if (distSq <= arriveSq) {
                 state.committedRepositionTarget = null;
                 state.repositioningUntilTick = serverTick + RANGED_REPOSITION_SUPPRESS_FIRE_TICKS;
                 state.repositionCooldownTick = serverTick + RANGED_REPOSITION_COOLDOWN_TICKS;
@@ -2909,10 +2940,10 @@ public final class BotActions {
             return true;
         }
 
-        if (bot.hasVehicle() || bot.isUsingItem()) {
+        if (bot.hasVehicle() || (bot.isUsingItem() && !friendlyInLine)) {
             return false;
         }
-        if (state.repositionCooldownTick > serverTick || state.repositioningUntilTick > serverTick) {
+        if (!friendlyInLine && (state.repositionCooldownTick > serverTick || state.repositioningUntilTick > serverTick)) {
             return false;
         }
 
@@ -2923,19 +2954,19 @@ public final class BotActions {
         // Decay miss streak if we've gone a while without additional miss signals.
         state.decayMisses(serverTick);
 
-        if (state.missStreak < RANGED_MISSES_BEFORE_REPOSITION && state.blockedShotStreak < RANGED_BLOCKED_BEFORE_REPOSITION) {
+        if (!friendlyInLine && state.missStreak < RANGED_MISSES_BEFORE_REPOSITION
+                && state.blockedShotStreak < RANGED_BLOCKED_BEFORE_REPOSITION) {
             return false;
         }
 
         // Don't waste time shuffling when already close enough to just melee, unless the shot is
         // held for a friend in the line: then a sidestep is the only way to shoot.
-        boolean friendlyInLine = blockedNow && isFriendlyInRangedLine(world, bot, bot.getEyePos(), target);
         if (!RangedFriendlyFirePolicy.mayReposition(bot.squaredDistanceTo(target),
                 RANGED_REPOSITION_MIN_DISTANCE_SQ, friendlyInLine)) {
             return false;
         }
 
-        Vec3d best = pickRangedReposition(world, bot, target);
+        Vec3d best = pickRangedReposition(world, bot, target, friendlyInLine);
         if (best == null) {
             return false;
         }
@@ -2943,8 +2974,8 @@ public final class BotActions {
         Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         double distToBest = botPos.distanceTo(best);
 
-        // Distant repositions (>2 blocks): commit to reaching the target over multiple ticks.
-        if (distToBest > 2.0D) {
+        // A friendly-fire sidestep must finish before pursuit takes over, even for a nearby stance.
+        if (distToBest > 2.0D || friendlyInLine) {
             state.committedRepositionTarget = best;
             state.committedRepositionStartTick = serverTick;
             cancelRangedUseSafely(bot);
@@ -2974,7 +3005,8 @@ public final class BotActions {
 
     private record ScoredPosition(Vec3d stand, double score) {}
 
-    private static Vec3d pickRangedReposition(ServerWorld world, ServerPlayerEntity bot, LivingEntity target) {
+    private static Vec3d pickRangedReposition(ServerWorld world, ServerPlayerEntity bot, LivingEntity target,
+                                              boolean friendlyInLine) {
         // Compute a local strafe basis around the target.
         Vec3d toTarget = new Vec3d(target.getX() - bot.getX(), 0.0D, target.getZ() - bot.getZ());
         double lenSq = toTarget.lengthSquared();
@@ -3001,14 +3033,14 @@ public final class BotActions {
         );
 
         for (Vec3d off : closeOffsets) {
-            ScoredPosition sp = scoreCandidate(world, bot, target, botPos, eyeHeight, off);
+            ScoredPosition sp = scoreCandidate(world, bot, target, botPos, eyeHeight, off, friendlyInLine, dir);
             if (sp != null && (best == null || sp.score > best.score)) {
                 best = sp;
             }
         }
 
         // --- Phase 2: Extended ring (12 directions × 3 distances) when close ring lacks clear LoS ---
-        if (best == null || best.score < 1_000_000.0D) {
+        if (friendlyInLine || best == null || best.score < 1_000_000.0D) {
             double angleStep = 2.0D * Math.PI / EXTENDED_SEARCH_DIRECTIONS;
             for (int i = 0; i < EXTENDED_SEARCH_DIRECTIONS; i++) {
                 double angle = i * angleStep;
@@ -3016,7 +3048,7 @@ public final class BotActions {
                 double oz = Math.sin(angle);
                 for (double dist : EXTENDED_SEARCH_DISTANCES) {
                     Vec3d off = new Vec3d(ox * dist, 0.0D, oz * dist);
-                    ScoredPosition sp = scoreCandidate(world, bot, target, botPos, eyeHeight, off);
+                    ScoredPosition sp = scoreCandidate(world, bot, target, botPos, eyeHeight, off, friendlyInLine, dir);
                     if (sp != null && (best == null || sp.score > best.score)) {
                         best = sp;
                     }
@@ -3031,7 +3063,7 @@ public final class BotActions {
         Vec3d curEye = bot.getEyePos();
         double curVisibility = rangedVisibilityScore(world, bot, curEye, target);
         double curCover = defiladeScore(world, botPos, eyeHeight, target);
-        double curScore = curVisibility + curCover;
+        double curScore = (friendlyInLine ? Math.min(curVisibility, 999.0D) : curVisibility) + curCover;
         if (best.score <= curScore + 0.5D) {
             return null;
         }
@@ -3044,7 +3076,8 @@ public final class BotActions {
      * and movement cost (how far do we have to move?).
      */
     private static ScoredPosition scoreCandidate(ServerWorld world, ServerPlayerEntity bot, LivingEntity target,
-                                                  Vec3d botPos, double eyeHeight, Vec3d offset) {
+                                                  Vec3d botPos, double eyeHeight, Vec3d offset,
+                                                  boolean friendlyInLine, Vec3d targetDirection) {
         BlockPos base = BlockPos.ofFloored(botPos.x + offset.x, botPos.y, botPos.z + offset.z);
         Vec3d stand = resolveNearbyStandPos(world, base);
         if (stand == null) {
@@ -3053,9 +3086,15 @@ public final class BotActions {
         double moveCost = stand.squaredDistanceTo(botPos);
         Vec3d eye = stand.add(0.0D, eyeHeight, 0.0D);
 
+        boolean clearShot = !isRangedLineBlocked(world, bot, eye, target);
+        if (friendlyInLine && !clearShot) {
+            return null;
+        }
         double visibility = rangedVisibilityScore(world, bot, eye, target);
         double cover = defiladeScore(world, stand, eyeHeight, target);
-        double score = visibility + cover - moveCost * 2.0D;
+        double forwardProgress = stand.subtract(botPos).dotProduct(targetDirection);
+        double score = RangedFriendlyFirePolicy.repositionScore(clearShot, visibility, cover,
+                moveCost, friendlyInLine, forwardProgress);
         return new ScoredPosition(stand, score);
     }
 

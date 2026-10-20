@@ -3919,11 +3919,13 @@ public class BotEventHandler {
             return true;
         }
 
-        if (hasRanged && distance >= 5.0D && closest instanceof LivingEntity living) {
+        if (hasRanged && closest instanceof LivingEntity living) {
             if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
                 return true;
             }
-            if (BotActions.performRangedAttack(bot, living, server.getTicks())) {
+            // A bow-only defender still needs to fire after a sidestep inside five blocks.
+            if ((distance >= 5.0D || !BotActions.hasMeleeWeapon(bot))
+                    && BotActions.performRangedAttack(bot, living, server.getTicks())) {
                 return true;
             }
         } else {
@@ -4275,9 +4277,13 @@ public class BotEventHandler {
                 leafDirections.add(bot.getHorizontalFacing());
             }
             for (Direction towardAction : leafDirections) {
-                if (MovementService.hasLeafObstruction(bot, towardAction)
-                        && MovementService.clearLeafObstruction(bot, towardAction)) {
-                    maybeLogFollowDecision(bot, "leaf-cleared: toward=" + towardAction + " stagnant=" + effectiveStagnant);
+                if (!MovementService.hasLeafObstruction(bot, towardAction)) {
+                    continue;
+                }
+                MovementService.LeafClearResult leafClear = MovementService.clearLeafObstructionDetailed(bot, towardAction);
+                if (leafClear.countsAsCleared() || leafClear.action() == MovementService.LeafClearAction.BYPASS_STEP) {
+                    maybeLogFollowDecision(bot, "leaf-action: toward=" + towardAction + " action=" + leafClear.action()
+                            + " target=" + leafClear.leafTarget() + " stagnant=" + effectiveStagnant);
                     return true;
                 }
             }

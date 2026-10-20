@@ -1,7 +1,9 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.ChestBlock;
+import net.minecraft.block.enums.ChestType;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.inventory.DoubleInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.BedItem;
 import net.minecraft.item.BundleItem;
@@ -1080,10 +1082,10 @@ public final class ToolProvisionService {
     /**
      * How many of the stacks {@code wanted} accepts the supply policy could let this bot take from
      * the chests around it ({@code reachableOnly}: only those it can reach from where it stands):
-     * each chest half's count of each exact item through
+     * each merged chest's count of each exact item through
      * {@link SupplyWithdrawals#grantableEstimate}, so an item the policy never grants counts 0 and
-     * an allowlisted one counts what lies above its reserve. Per half, so a double chest can only
-     * be undercounted. Counts nothing the owner has not been asked about yet; the facade still
+     * an allowlisted one counts what lies above its reserve, applied once across both halves.
+     * Counts nothing the owner has not been asked about yet; the facade still
      * decides at the take.
      *
      * <p>Server thread only. Off it (a skill worker or the durability executor asking before a
@@ -1099,9 +1101,7 @@ public final class ToolProvisionService {
         if (server == null || !server.isOnThread()) {
             return 0;
         }
-        List<ContainerSlot> slots = reachableOnly
-                ? scanAccessibleContainers(bot, world, bot.getBlockPos())
-                : scanContainers(world, bot.getBlockPos());
+        List<ContainerSlot> slots = scanContainerSlots(world, bot.getBlockPos(), reachableOnly ? bot : null, true);
         int total = 0;
         for (ChestItemGroup group : groupByChestAndItem(slots, wanted)) {
             total += SupplyWithdrawals.grantableEstimate(world, group.sample, group.count);
@@ -1406,19 +1406,44 @@ public final class ToolProvisionService {
      * or furnace, so nothing else is offered or counted. Reads the world: server thread.
      */
     private static List<ContainerSlot> scanContainers(ServerWorld world, BlockPos origin) {
+        return scanContainerSlots(world, origin, null, false);
+    }
+
+    /** Merged mode is only for estimates; tool slot scans retain their per-half slot indices. */
+    private static List<ContainerSlot> scanContainerSlots(ServerWorld world, BlockPos origin,
+                                                       ServerPlayerEntity reachableBy, boolean merged) {
         List<ContainerSlot> out = new ArrayList<>();
+        Set<BlockPos> visited = new HashSet<>();
         int r = CONTAINER_RADIUS;
         int y = CONTAINER_YSPAN;
         for (BlockPos pos : BlockPos.iterate(origin.add(-r, -y, -r), origin.add(r, y, r))) {
             if (!world.isChunkLoaded(pos)) {
                 continue;
             }
-            if (!(world.getBlockState(pos).getBlock() instanceof ChestBlock)) {
+            var state = world.getBlockState(pos);
+            if (!(state.getBlock() instanceof ChestBlock chestBlock)) {
                 continue;
             }
-            var be = world.getBlockEntity(pos);
-            if (!(be instanceof Inventory inv)) {
-                continue;
+            Inventory inv;
+            if (merged) {
+                // Reach is checked before either half is marked: the partner can be reachable
+                // even when this scan encounters the farther half first.
+                if (visited.contains(pos) || reachableBy != null && !BlockInteractionService.canInteract(reachableBy, pos)) {
+                    continue;
+                }
+                BlockPos otherHalf = ChestStoreService.otherChestHalf(world, pos);
+                if (state.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE && otherHalf == null) {
+                    continue;
+                }
+                inv = ChestBlock.getInventory(chestBlock, state, world, pos, true);
+                if (inv == null) continue;
+                // Vanilla falls back to a single inventory for stale/mismatched double states.
+                if (otherHalf != null && !(inv instanceof DoubleInventory)) continue;
+                visited.add(pos.toImmutable());
+                if (otherHalf != null) visited.add(otherHalf);
+            } else {
+                if (!(world.getBlockEntity(pos) instanceof Inventory inventory)) continue;
+                inv = inventory;
             }
             for (int i = 0; i < inv.size(); i++) {
                 ItemStack stack = inv.getStack(i);

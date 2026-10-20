@@ -137,4 +137,68 @@ class SharedConfigSnapshotTest {
         assertNull(cfg.getRemoteWorldKey());
         assertEquals("Local#1", cfg.botControlEditWorldKey("Local#1"));
     }
+
+    @Test
+    void sharedSaveKeepsUntouchedDefaultOutOfTheFile() throws Exception {
+        ManualConfig cfg = newRealConfig();
+        SharedConfig snapshot = new Gson().fromJson(
+                net.wcfcarolina13.network.ConfigJsonUtil.configToJson(cfg), SharedConfig.class);
+        assertEquals("unified", snapshot.pathfinder);
+        assertEquals(Boolean.FALSE, snapshot.pathfinderExplicitlySet);
+
+        snapshot.applyTo(cfg);
+
+        assertEquals("unified", cfg.getPathfinder());
+        assertFalse(cfg.isPathfinderExplicitlySet());
+        assertFalse(cfg.toSavedJson().has("pathfinder"));
+        assertFalse(cfg.toSavedJson().has("pathfinderExplicitlySet"));
+        assertTrue(cfg.toSavedJson().has("textDialogueEnabled"));
+    }
+
+    @Test
+    void explicitDefaultSurvivesSharedSaveAndFileReload() throws Exception {
+        ManualConfig cfg = newRealConfig();
+        cfg.setPathfinder("unified");
+        SharedConfig.capture(cfg).applyTo(cfg);
+
+        assertTrue(cfg.isPathfinderExplicitlySet());
+        assertEquals("unified", cfg.toSavedJson().get("pathfinder").getAsString());
+        ManualConfig reloaded = new Gson().fromJson(cfg.toSavedJson(), ManualConfig.class);
+        assertTrue(reloaded.isPathfinderExplicitlySet());
+        assertEquals("unified", reloaded.getPathfinder());
+    }
+
+    @Test
+    void legacyFilesAndPeersKeepTheirExplicitChoice() throws Exception {
+        for (String choice : List.of("unified", "baritone", "classic")) {
+            String json = "{\"pathfinder\":\"" + choice + "\"}";
+            ManualConfig loaded = new Gson().fromJson(json, ManualConfig.class);
+            assertTrue(loaded.isPathfinderExplicitlySet());
+            assertEquals(choice, loaded.toSavedJson().get("pathfinder").getAsString());
+
+            ManualConfig target = newRealConfig();
+            new Gson().fromJson(json, SharedConfig.class).applyTo(target);
+            assertTrue(target.isPathfinderExplicitlySet());
+            assertEquals(choice, target.toSavedJson().get("pathfinder").getAsString());
+        }
+    }
+
+    @Test
+    void disconnectRestoresImplicitDefaultWithoutPinningIt() throws Exception {
+        ManualConfig cfg = newRealConfig();
+        SharedConfig local = SharedConfig.capture(cfg);
+        ManualConfig remote = newRealConfig();
+        remote.setPathfinder("baritone");
+        SharedConfig.capture(remote).applyTo(cfg);
+        assertEquals("baritone", cfg.getPathfinder());
+        assertTrue(cfg.isPathfinderExplicitlySet());
+
+        local.applyTo(cfg);
+
+        assertEquals("unified", cfg.getPathfinder());
+        assertFalse(cfg.isPathfinderExplicitlySet());
+        assertFalse(cfg.toSavedJson().has("pathfinder"));
+        cfg.setPathfinderChoice(net.wcfcarolina13.PathFinding.PathFinderChoice.UNIFIED);
+        assertEquals("unified", cfg.toSavedJson().get("pathfinder").getAsString());
+    }
 }

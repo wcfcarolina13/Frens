@@ -83,8 +83,8 @@ class SupplyBypassClosedTest {
                 "supply adapter: checks both chest halves and moves what the owner granted (transferNow)");
         allow(SUPPLY + "SupplyWithdrawals.java", 1,
                 "facade: re-reads the merged chest after a move to refresh the registry snapshot (read-only)");
-        allow(TPS, 1,
-                "scanContainers: read-only ChestBlock listing for pullFromReachableChests / grantableChestCount (facade)");
+        allow(TPS, 2,
+                "scanContainerSlots: read-only per-half tool listing plus merged double-chest estimate; all takes use the facade");
         allow(CSS, 5,
                 "owner-initiated /bot withdraw + Quick Fetch (performStoreTransferWithBotDetailed) + deposits; read-only "
                         + "item-type snapshot; askBeforeWalking's read before the facade (1.1.220 fix wave: dead "
@@ -276,7 +276,7 @@ class SupplyBypassClosedTest {
     @Test
     void chokePointsAndTheirChestListingsHoldNoRawMove() {
         Map<String, List<String>> methods = new LinkedHashMap<>();
-        methods.put(TPS, List.of("pullFromReachableChests", "grantableChestCount", "scanContainers"));
+        methods.put(TPS, List.of("pullFromReachableChests", "grantableChestCount", "scanContainers", "scanContainerSlots"));
         methods.put(CSS, List.of("askBeforeWalking", "withdrawMatchingWalkOnly"));
         methods.put(MUTUAL_AID, List.of("tryTakeFoodFromSharedChest", "takeFoodFromChest", "askForFood", "listChestFood",
                 "hasGrantableChestFood", "scanForGrantableChestFood", "mergedChestAt"));

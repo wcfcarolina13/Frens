@@ -3,9 +3,10 @@ package net.wcfcarolina13.GameAI.services;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ChestBlock;
-import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.entity.ItemEntity;
+import net.minecraft.inventory.Inventory;
+import net.minecraft.inventory.DoubleInventory;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -3946,7 +3947,7 @@ public final class CraftingHelper {
 
     /**
      * Server thread only (a block entity reads as absent anywhere else). The stacks worth asking
-     * for in each chest half near the bot: nearest chest first, then slot order, one entry per
+     * for in each merged chest near the bot: nearest chest first, then slot order, one entry per
      * distinct item (id and components), each with its double chest's other half. {@code inReachOnly}
      * keeps chests the bot can use from where it stands.
      */
@@ -3957,14 +3958,24 @@ public final class CraftingHelper {
         if (server == null || !server.isOnThread() || bot.isRemoved()) {
             return candidates;
         }
+        Set<BlockPos> visited = new HashSet<>();
         for (BlockPos chestPos : findNearbyChests(world, bot.getBlockPos(), CHEST_SEARCH_RADIUS)) {
             if (inReachOnly && !BlockInteractionService.canInteract(bot, chestPos, STATION_REACH_SQ)) {
                 continue;
             }
-            if (!(world.getBlockEntity(chestPos) instanceof ChestBlockEntity chest)) {
+            if (visited.contains(chestPos)) continue;
+            BlockState state = world.getBlockState(chestPos);
+            if (!(state.getBlock() instanceof ChestBlock chestBlock)) {
                 continue;
             }
-            BlockPos otherHalf = otherHalfOf(world.getBlockState(chestPos), chestPos);
+            BlockPos otherHalf = ChestStoreService.otherChestHalf(world, chestPos);
+            if (state.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE && otherHalf == null) continue;
+            Inventory chest = ChestBlock.getInventory(chestBlock, state, world, chestPos, true);
+            if (chest == null) continue;
+            // A stale double state must not hide an independent chest at the alleged partner.
+            if (otherHalf != null && !(chest instanceof DoubleInventory)) continue;
+            visited.add(chestPos);
+            if (otherHalf != null) visited.add(otherHalf);
             List<PullCandidate> inChest = new ArrayList<>();
             for (int i = 0; i < chest.size(); i++) {
                 ItemStack stack = chest.getStack(i);
@@ -4033,19 +4044,6 @@ public final class CraftingHelper {
     private static boolean isSamePull(PendingPull pending, PullCandidate candidate) {
         return pending != null && candidate != null && candidate.isInChest(pending.chestPos())
                 && ItemStack.areItemsAndComponentsEqual(pending.sample(), candidate.sample());
-    }
-
-    /**
-     * The other half of the double chest whose one half is at {@code pos}, from the block state
-     * alone (no block entity, no merged inventory); {@code null} for a single chest or a block
-     * that is not a chest.
-     */
-    private static BlockPos otherHalfOf(BlockState state, BlockPos pos) {
-        if (state == null || pos == null || !state.contains(ChestBlock.CHEST_TYPE) || !state.contains(ChestBlock.FACING)
-                || state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
-            return null;
-        }
-        return pos.offset(ChestBlock.getFacing(state)).toImmutable();
     }
 
     private static boolean containsSameItem(List<ItemStack> stacks, ItemStack stack) {

@@ -66,4 +66,15 @@ public final class RangedFriendlyFirePolicy {
     public static boolean mayReposition(double distSqToTarget, double minDistSq, boolean friendlyInLine) {
         return friendlyInLine || distSqToTarget > minDistSq;
     }
+
+    /** Prefer a clear sidestep or retreat over closing through the ally's line. */
+    public static double repositionScore(boolean clearShot, double blockedVisibility, double cover,
+                                         double moveCostSq, boolean friendlyInLine, double forwardProgress) {
+        if (!friendlyInLine) {
+            return blockedVisibility + cover - moveCostSq * 2.0D;
+        }
+        double visibility = clearShot ? 1_000_000.0D : Math.min(blockedVisibility, 999.0D);
+        double spacing = clearShot && forwardProgress <= 0.5D ? 1_000_000.0D : 0.0D;
+        return visibility + spacing + cover - moveCostSq * 2.0D;
+    }
 }
