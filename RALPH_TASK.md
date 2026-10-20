@@ -179,18 +179,18 @@ Deferrals that lived only in superseded handoffs (Ralph retirement audit, `.supe
 open. "Needs Bradley" items are decisions, not code. The source handoffs are in `docs/handoffs/ARCHIVE_2026.md`.
 
 ### Navigation, pathfinding and stuck escape
-- [ ] "go_to plans in `server.getOverworld()` whatever the bot's dimension." (still `server.getOverworld()` in `modCommandRegistry`; 1.1.265 handoff, 2026-10-17)
+- [x] "go_to plans in `server.getOverworld()` whatever the bot's dimension." (still `server.getOverworld()` in `modCommandRegistry`; 1.1.265 handoff, 2026-10-17) — ✅ 1.1.278 8d6a7880 (sandbox 6bp PASS)
 - [ ] "unified sunset probes returned `pathLen=0` or `7` with `next=none` inside 200 ms, so the return fell back to a direct follow plan to the far anchor. Worth a scope before Slice D." (1.1.265 handoff, 2026-10-17)
 - [ ] "Slice D (remove the legacy boolean and bidir) once the default has held." (1.1.261 handoff; also 1.1.263 and 1.1.242 handoffs, 2026-10-15/17)
 - [ ] "after the first shared-settings save the file stores `"pathfinder": "unified"` explicitly rather than null, so a later default change would not move that install." (1.1.261 handoff, 2026-10-17)
 - [ ] "diagonal wall nudge (eye-box geometry)" (1.1.264 handoff, 2026-10-17)
 - [ ] "scaffold Phase 3 pillaring up while on a pillar" (1.1.264 handoff, 2026-10-17)
 - [ ] "the two off-thread `rescueFromBurial` callers (ReturnBaseStuck async mine escape, MovementService nudge loop)." (1.1.264 handoff, 2026-10-17)
-- [ ] "a backup jump-sprint logged `succeeded, now at 199, 110, 202` from inside a closed stone pocket. Worth a scope." (1.1.264 handoff, 2026-10-17)
-- [ ] "`ReturnBaseStuckService` counters clear only on arrival at base, so a later return inherits `backupAttempted` from an earlier stuck episode (seen in the sandbox). Worth a scope." (1.1.264 handoff, 2026-10-17)
+- [x] "a backup jump-sprint logged `succeeded, now at 199, 110, 202` from inside a closed stone pocket. Worth a scope." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.279 741355c8 + 5eb24b38 (sandbox 6bq PASS)
+- [x] "`ReturnBaseStuckService` counters clear only on arrival at base, so a later return inherits `backupAttempted` from an earlier stuck episode (seen in the sandbox). Worth a scope." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.279 741355c8 (sandbox 6bq PASS)
 - [ ] "blind walkDirect fallback after no path" (1.1.239 handoff, 2026-10-14)
 - [ ] "hand-dig stair escape for a bot with no blocks." (1.1.236 handoff; also 1.1.239 handoff, 2026-10-14; 1.1.240 `TerrainMovePolicy` places dirt stairs but has no no-blocks dig)
-- [ ] "BotActions.moveRelative same-cell teleport" ("probable IN_WALL root, shared hot file"; 1.1.233 handoff; also 1.1.229 handoff, 2026-10-13)
+- [x] "BotActions.moveRelative same-cell teleport" ("probable IN_WALL root, shared hot file"; 1.1.233 handoff; also 1.1.229 handoff, 2026-10-13) — ✅ 1.1.279 2a42404b + 5eb24b38 (sandbox 6bq: drowning/drop/door/stair PASS, kiting a field item)
 - [ ] "MovementService off-thread tool swaps" (1.1.233 handoff, 2026-10-13)
 - [ ] "isAtSurface strict under canopy" (1.1.234 handoff, 2026-10-14)
 - [ ] "RL breakBlockAhead ... still instant" (RL is gone since 1.1.244 but `BotActions.breakBlockAhead` is still called by `BotStuckService` `escapeStairs`; 1.1.234 handoff, 2026-10-14)
@@ -224,15 +224,15 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "standalone and idle woodcut runs, verifying `Planted sapling at ...` or explicit replant skip summaries after per-tree cleanup" (validation ask, likely stale; Recent Session Notes, 2026-03-31)
 
 ### Survival, hunger, crafting, farming and mutual aid
-- [ ] "bundle food in the no-food warning" (1.1.239 handoff, 2026-10-14)
+- [x] "bundle food in the no-food warning" (1.1.239 handoff, 2026-10-14) — ✅ 1.1.279 1fedf1ce (sandbox 6bq PASS)
 - [ ] "the gated hunger lines in CollectDirt/StripMine" (1.1.239 handoff, 2026-10-14)
 - [ ] "SkillResumeService vs recovery thread" ("not waiting on an active recovery thread"; 1.1.239 handoff, 2026-10-14)
-- [ ] "`SmeltingService.resolveFurnaceTarget` `Thread.sleep(150)` (SS:~810/~831) on `/bot cook` and the auto-cook tick." (1.1.222 handoff, 2026-09-25)
-- [ ] "A server-thread craft with a full inventory: `distributeOutput` / `craftWithPlanks` / `ensurePlanksFromLogs` → `offloadCheapItemsToNearbyChest` → deposit walk or `placeChestNearBot`. Same fix shape; needs its own scope." (1.1.222 handoff, 2026-09-25)
-- [ ] "`FoodConsumptionConfirmationService.tryHandleConfirmation` has no caller" (was to ride 1.1.225's yes/no router, which did not ship; 1.1.223 handoff, 2026-09-25)
-- [ ] "Defensive-aid tick freeze (`BotMutualAidService:558`)" ("a 1.6–2.4 s tick freeze when a hostile is near an ally. Needs a one-impulse or worker design."; 1.1.223 handoff, = 1.1.222 deferral 3, 2026-09-25)
+- [x] "`SmeltingService.resolveFurnaceTarget` `Thread.sleep(150)` (SS:~810/~831) on `/bot cook` and the auto-cook tick." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 0d8cd03e (sandbox 6bq PASS)
+- [x] "A server-thread craft with a full inventory: `distributeOutput` / `craftWithPlanks` / `ensurePlanksFromLogs` → `offloadCheapItemsToNearbyChest` → deposit walk or `placeChestNearBot`. Same fix shape; needs its own scope." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 + 5eb24b38 (sandbox 6bq PASS)
+- [x] "`FoodConsumptionConfirmationService.tryHandleConfirmation` has no caller" (was to ride 1.1.225's yes/no router, which did not ship; 1.1.223 handoff, 2026-09-25) — ✅ 1.1.278 410bd6d8 (sandbox 6bp PASS)
+- [x] "Defensive-aid tick freeze (`BotMutualAidService:558`)" ("a 1.6–2.4 s tick freeze when a hostile is near an ally. Needs a one-impulse or worker design."; 1.1.223 handoff, = 1.1.222 deferral 3, 2026-09-25) — ✅ 1.1.278 fdc7690a (sandbox 6bp PASS)
 - [ ] "The MutualAid recipient's inventory is mutated from the donor's tick while its own skill worker may run (pre-existing)." (1.1.222 handoff, 2026-09-25)
-- [ ] "`dropCheapStackForSpace` drops the LARGEST stack when nothing is cheap, and the dropped stack can be re-picked after 2 s." ("Needs a cheap-only mode or a longer pickup delay"; 1.1.222 handoff, 2026-09-25)
+- [x] "`dropCheapStackForSpace` drops the LARGEST stack when nothing is cheap, and the dropped stack can be re-picked after 2 s." ("Needs a cheap-only mode or a longer pickup delay"; 1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 (restated: aid make-room never drops valuables; sandbox 6bq PASS)
 - [ ] "A flower keeps targeting a full preferred recipient (cosmetic)." (1.1.222 handoff, 2026-09-25)
 - [ ] "the per-hobby backoff state is written for hunt and collect_dirt but read only by woodcut — ready if a later item gates `pickHobby` on tool availability." (1.1.216 handoff, 2026-09-07)
 - [ ] "Farm manual placement still has multiple `Heightmap.Type.WORLD_SURFACE` / `findSurfaceY` call sites outside `assessFarmSite`." ("If they misbehave in forests, apply the same walkable-ground-Y treatment"; Farm Pipeline next-session notes, 2026-04-08)
@@ -272,8 +272,8 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "Pre-existing latch race: after `/bot stop`, a later `beginSkill` for the same bot clears the abort latch, so a search still inside a hop can resume." ("needs the captured ticket's cancel flag (a TaskService accessor)"; 1.1.221 handoff, 2026-09-25)
 - [ ] "Ownership is not re-checked on arrival." (Bot Storage collect; 1.1.220 handoff, 2026-09-25)
 - [ ] "`verifyChests` revives a record for any chest placed back at its position." (1.1.220 handoff, 2026-09-25)
-- [ ] "A dimension-fallback collect is dropped." (1.1.220 handoff, 2026-09-25)
-- [ ] "Two Collects on different chests while the bot is on cooldown fail safe but silently." ("The owner sees two \"arrived\" lines and gets no items."; 1.1.220 handoff, 2026-09-25)
+- [x] "A dimension-fallback collect is dropped." (1.1.220 handoff, 2026-09-25) — ✅ 1.1.278 569c625d (dimension-fallback collect now tells the owner)
+- [x] "Two Collects on different chests while the bot is on cooldown fail safe but silently." ("The owner sees two \"arrived\" lines and gets no items."; 1.1.220 handoff, 2026-09-25) — ✅ 1.1.278 569c625d (restated: refused/replaced/cancelled collects tell the owner; sandbox 6bp PASS)
 - [ ] "A server-thread chest placement miss logs only at DEBUG." (1.1.222 handoff, 2026-09-25)
 
 ### Souls, dialogue and audio
@@ -282,7 +282,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] (uncertain) "#10 audio regeneration (needs Bradley's triage)" = "The missing `snow_golem_ammo` and other voice clips." (1.1.239 `ef4ea499` added empty-sound stubs only; 1.1.239 handoff, 2026-10-14; 1.1.223 handoff, 2026-09-25)
 - [ ] "Later: scene smoothing step 2 (scene boundaries in history)" (1.1.223 handoff, 2026-09-25)
 - [ ] "self-directed goals (proposer-only)." (1.1.223 handoff, 2026-09-25)
-- [ ] "The Pocket installer's pre-wait EOF read, which can hang." (1.1.223 handoff, 2026-09-25)
+- [x] "The Pocket installer's pre-wait EOF read, which can hang." (1.1.223 handoff, 2026-09-25) — ✅ 1.1.279 911b1243 (unit-tested; not run in the sandbox)
 - [ ] "HEARD records (the owner's own replies) are never marked private." (1.1.224 changelog deferral, 2026-09-25)
 - [ ] "remote model pulls and voice installs on the server host" (1.1.225 handoff, 2026-09-26)
 - [ ] "a voice-preset picker" (1.1.225 handoff, 2026-09-26)
@@ -405,7 +405,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [x] **Locked-gate enclosure respect (drop-sweep + pursuit)** — ✅ shipped 1.1.98. New ray-cast helper [DangerousPursuitGate.crossesLockedGate](src/main/java/net/wcfcarolina13/GameAI/services/DangerousPursuitGate.java) samples ~1 cell per block along the bot→target line and returns true if any sample is a tracked locked door / fence gate / trapdoor. Wired into both `isLocationSafeForPursuit` (drop-sweep) and `engageHostiles` combat-target filter. Caveat: over-rejects when a wall has BOTH a locked gate AND an unlocked gap (line crosses the locked cell while a legitimate path goes around). Under-rejection was the actual user complaint, so the trade-off is acceptable. Reuses existing LockableBlockService — no new wall semantics.
 - [x] **Bed selection bugs (two related)** — ✅ shipped 1.1.100, user-verified in-game 2026-05-17 (bot now places and uses its own bed from inventory when no nearby bed is available). (a) [SleepService.findNearbyBedFeet](src/main/java/net/wcfcarolina13/GameAI/services/SleepService.java) now filters beds with `BedBlock.OCCUPIED == true` and sorts the bot's previously-claimed bed (via `BotHomeService.getLastSleep`) first. Defensive late-occupancy guard added to `tryUseBed`. (b) When all nearby beds are filtered (only-occupied case), the existing placement branch fires with an explicit "Nearby bed is taken. Setting up my own." handoff message. Out of scope: bed reservation across mid-night user step-outs; multi-bot claim contention.
 - [~] **Pathfinding cache learning isn't measurably improving** — diagnostic surfacing shipped 1.1.101. [NavHazardCache](src/main/java/net/wcfcarolina13/GameAI/services/navigation/NavHazardCache.java) is the actual learning system (per-cell rejection scoring; pathfinders consult via `penaltyFor`). Wiring is correct — recording fires per `applyMovementInput-reject` (903 today's session), pathfinders read the penalty in both [PathFinder.java:152,187](src/main/java/net/wcfcarolina13/PathFinding/PathFinder.java#L152) and [BaritoneStylePathFinder.java:380](src/main/java/net/wcfcarolina13/PathFinding/BaritoneStylePathFinder.java#L380). Penalty hits now log at INFO (throttled 1/s, ≥1.0 penalty); periodic summary every 5 min lists top scoring cells. Architectural caveat: cache helps when alternative routes exist; tight bottleneck doorways (the user's actual stuck cases) have no alternates, so cache doesn't help there even when working perfectly. Out of scope: chat command for on-demand cache dump (`/bot debug nav-hazard`); promotion-event INFO log; tuning `STREAK_PROMOTION_THRESHOLD` after we have real data.
-- [ ] **Doorway / pressure plate stuck (still recurring)**: 🔧 1.1.223: two follow bugs at a plate-driven fence gate fixed (door handling off beyond 6 blocks; summit climb hijack) and bots no longer close powered/plate-adjacent doors — verify in Phase 6u before closing this. User reports persistent stalls at doorways and pressure plates despite the 1.1.5 → 1.1.16 fix series. Re-read the 2026-04-16 door passage session notes (now in `docs/handoffs/ARCHIVE_2026.md`; the known-good list and test procedure are also in `docs/GUARDRAILS.md`) before touching this — their "Architectural concern" section (drop the door-plan state machine entirely; emit door tiles as regular pathfinder waypoints with an `InteractWithDoorGoal`-style observer) is the recommended next move. Discuss with user before attempting; this is a multi-day rework.
+- [ ] **Doorway / pressure plate stuck (still recurring)**: 🔧 1.1.223: two follow bugs at a plate-driven fence gate fixed (door handling off beyond 6 blocks; summit climb hijack) and bots no longer close powered/plate-adjacent doors — verify in Phase 6u before closing this. User reports persistent stalls at doorways and pressure plates despite the 1.1.5 → 1.1.16 fix series. Re-read the 2026-04-16 door passage session notes (now in `docs/handoffs/ARCHIVE_2026.md`; the known-good list and test procedure are also in `docs/GUARDRAILS.md`) before touching this — their "Architectural concern" section (drop the door-plan state machine entirely; emit door tiles as regular pathfinder waypoints with an `InteractWithDoorGoal`-style observer) is the recommended next move. Discuss with user before attempting; this is a multi-day rework. — 2026-10-20: the open-door wedge (bots off the doorway centre line, jump under the lintel, door shut on a bot) fixed in 1.1.278 25b87bf8 (sandbox 6bp PASS); pressure-plate checks still unrun.
 
 ### Pre-existing P1 items
 
