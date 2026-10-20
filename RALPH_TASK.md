@@ -4,7 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.279) — next session starts here
+## Session Handoff 2026-10-20 (1.1.280) — next session starts here
+
+**State:** main = origin/main @ 1.1.280. Suite 3370 green. Deployed to Nirn. Sandbox check pending (Phase 6br, `tools/sandbox/fix280.py`); the 1.1.279 check (6bq) was in progress at release. Built autonomously overnight (a usage limit paused the session ~03:00-04:00).
+**1.1.280** (changelog entry has rulings and costs): follow under oak canopies rescoped and fixed (in-column waypoint reach, 0.3 waypoint stop, last live waypoint handed to direct pursuit, corners kept, no sprint into turns, leaf check both sides, leaf gate by anchor, /tp latch dropped with no task); flooded-pocket ledge climb (hold jump); woodcut cleanup never digs any tree's soil (10 min ledger, ruling) or another bot's pillar, per-bot scaffold memory; bow defenders; ally bots block a shot; admin remote open. Fable review (two reviewers), fix wave `a306fcab`, re-review found 2 more (`54238e1b`, controller read the diff).
+**Next:** run `tools/sandbox/fix277.py canopy` and `flood` against 1.1.280 first (both failed/partial on 1.1.277); then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout).
+**Public release:** 1.1.280 is the candidate once its sandbox checks pass. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Needs Bradley:** the three 1.1.272 questions still stand (Spells key migration, chest axe before crafting, shared-server chest scan).
+**Deferred (reasons in the changelogs):** see the 1.1.277-1.1.280 entries.
+**Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-20 (1.1.279) — superseded
 
 **State:** main = origin/main @ 1.1.279. Suite 3274 green. Deployed to Nirn. Sandbox check pending (Phase 6bq, `tools/sandbox/fix279.py`). Built autonomously overnight.
 **1.1.279** (changelog entry has rulings and costs): same-cell `moveRelative` steps collision-checked (`SubCellSnapPolicy`, backlog 143); make-room never drops food/tools/reserved/valuables for aid (cheap-only, ruling) and server-thread crafts never walk to or place a chest (181); fresh stuck counters per return (140) and jump-sprint judged after landing on a sideways move (139); no cooking sleep on the server thread (180); Pocket installer timeouts (235); bundled food counted (177). Fable review (two reviewers), fix wave `5eb24b38`, clean re-review.
