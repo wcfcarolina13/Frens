@@ -4,16 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.285) — next session starts here
+## Session Handoff 2026-10-20 (1.1.286) — next session starts here
 
-**State:** main = origin/main @ 1.1.285. Suite 3385 green. Deployed to Nirn. 1.1.285 = backlog 178, 220, 223, 224 (Codex, `9b23cffb`). 1.1.284 = backlog 196, 253 (Codex, `c982f8b6`; 216, 210 skipped). 1.1.283 = backlog 409, 186, 231 (Codex-implemented, `003fd626`); 135 skipped (not small). Not sandbox-checked.
+**State:** main = origin/main @ 1.1.286. Suite 3399 green. Deployed to Nirn. 1.1.286 = findings 56, 60, backlog 216, 135, 167 (Codex `77df45d2`, fix wave `4f20d03f`); 146 restated (escapeStairs unreachable: `BotStuckService.updateStuckTracker` has no callers, delete or wire it). 1.1.285 = backlog 178, 220, 223, 224 (Codex, `9b23cffb`). 1.1.284 = backlog 196, 253 (Codex, `c982f8b6`; 216, 210 skipped). 1.1.283 = backlog 409, 186, 231 (Codex-implemented, `003fd626`); 135 skipped (not small). Not sandbox-checked.
 **Pending sandbox check (Bradley 2026-10-20: queue it, run when usage allows, not yet):** one combined run for the unchecked builds:
 - 1.1.282: woodcut cleanup with every hotbar slot a tool/weapon skips the leaf clear (no swing); full-pack strict stone craft logs no "I need 3 cobbled deepslate" line (`fix281.py craft full`); store chest placement miss logs at INFO.
 - 1.1.283: a fortify run that finds a cavity speaks the callout aloud; a flower gift skips a recipient with a full inventory.
 - 1.1.284: sunset with the owner more than 48 blocks away in the same dimension: the bot comes to the owner; voice mute toggles still apply.
 - 1.1.285: a starving strip-mine bot far from its owner: the owner sees the pause line; an "Allow once" supply grant is used with the owner away; revoking Collect permission mid-trip gives the "no longer have permission" line; a chest placed by hand on a destroyed record stays unlisted.
-**Next:** finding 56 (one-block step up into oak leaves at feet and head: `leaf-cleared` logs but no leaf is mined), 59, 60; then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout).
-**Public release:** 1.1.285 is the candidate. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+- 1.1.286: fix277/280 `canopy` east route (finding 56): the bot mines the step-up leaf and gets past; fix278 `aid bowarmor` with Bob in line: bow-only Jake sidesteps and shoots, sword+bow Jake melees up close; mounted bot under leaves mines them at normal speed and skips persistent leaves; double-chest supply ask counts both halves once.
+**Next:** findings 59 (two scaffold dirt blocks left after two bots cleaned the same log), 61 done in 1.1.282; then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout).
+**Public release:** 1.1.286 is the candidate. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
 **Needs Bradley:** the three 1.1.272 questions still stand.
 **Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
 
@@ -204,7 +205,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "go_to plans in `server.getOverworld()` whatever the bot's dimension." (still `server.getOverworld()` in `modCommandRegistry`; 1.1.265 handoff, 2026-10-17) — ✅ 1.1.278 8d6a7880 (sandbox 6bp PASS)
 - [ ] "unified sunset probes returned `pathLen=0` or `7` with `next=none` inside 200 ms, so the return fell back to a direct follow plan to the far anchor. Worth a scope before Slice D." (1.1.265 handoff, 2026-10-17)
 - [ ] "Slice D (remove the legacy boolean and bidir) once the default has held." (1.1.261 handoff; also 1.1.263 and 1.1.242 handoffs, 2026-10-15/17)
-- [ ] "after the first shared-settings save the file stores `"pathfinder": "unified"` explicitly rather than null, so a later default change would not move that install." (1.1.261 handoff, 2026-10-17)
+- [x] "after the first shared-settings save the file stores `"pathfinder": "unified"` explicitly rather than null, so a later default change would not move that install." (1.1.261 handoff, 2026-10-17) — ✅ 1.1.286 77df45d2
 - [ ] "diagonal wall nudge (eye-box geometry)" (1.1.264 handoff, 2026-10-17)
 - [ ] "scaffold Phase 3 pillaring up while on a pillar" (1.1.264 handoff, 2026-10-17)
 - [ ] "the two off-thread `rescueFromBurial` callers (ReturnBaseStuck async mine escape, MovementService nudge loop)." (1.1.264 handoff, 2026-10-17)
@@ -215,7 +216,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "BotActions.moveRelative same-cell teleport" ("probable IN_WALL root, shared hot file"; 1.1.233 handoff; also 1.1.229 handoff, 2026-10-13) — ✅ 1.1.279 2a42404b + 5eb24b38 (sandbox 6bq: drowning/drop/door/stair PASS, kiting a field item)
 - [ ] "MovementService off-thread tool swaps" (1.1.233 handoff, 2026-10-13)
 - [ ] "isAtSurface strict under canopy" (1.1.234 handoff, 2026-10-14)
-- [ ] "RL breakBlockAhead ... still instant" (RL is gone since 1.1.244 but `BotActions.breakBlockAhead` is still called by `BotStuckService` `escapeStairs`; 1.1.234 handoff, 2026-10-14)
+- [ ] "RL breakBlockAhead ... still instant" (RL is gone since 1.1.244 but `BotActions.breakBlockAhead` is still called by `BotStuckService` `escapeStairs`; 1.1.234 handoff, 2026-10-14) — 2026-10-20: unreachable (`BotStuckService.updateStuckTracker` has no callers); delete the dead path or wire it, then revisit.
 - [ ] "clutter clears ... still instant" (snow/carpet clutter; 1.1.234 handoff, 2026-10-14)
 - [ ] "long automatic return refusals (combat/cooldown/food) still in chat." (1.1.234 handoff, 2026-10-14)
 - [x] "Return-base door/escape server-thread traverses (BEH ~3603/~3630): let the tripwire name them first." (1.1.223 handoff, 2026-09-25) — stale (triage 2026-10-19): Mode.RETURNING_BASE is never set; return-to-base runs via FOLLOW (BEH:1336, :3165)
@@ -236,7 +237,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] (uncertain) "This change intentionally breaks the old shelter-escape \"trapped in corner, needs door as exit\" behavior ... re-address later." (Door passage series notes, 2026-04-16)
 
 ### Woodcut and mining
-- [ ] "mounted leaf clearing still instant" (1.1.234 handoff; deferred again in 1.1.238. 1.1.267 M3 fixed the shears, not the speed)
+- [x] "mounted leaf clearing still instant" (1.1.234 handoff; deferred again in 1.1.238. 1.1.267 M3 fixed the shears, not the speed) — ✅ 1.1.286 77df45d2 + 4f20d03f
 - [ ] "woodcut cleanup async scan off-thread" (1.1.266 B bounded the scan, it still runs off-thread; 1.1.234 handoff, 2026-10-14)
 - [x] "cleanup hand fallback slot 0" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.282 2b9de28c
 - [ ] "woodcut surface-staging cost." (1.1.229 handoff, 2026-10-13)
@@ -285,7 +286,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 ### Supplies and chests
 - [ ] "Worker skills can't craft from chest materials. There is one prompt per bot, so a plank ask blocks the tool ask. Fixing it needs WaitMode through `ensure*`/`craftGeneric` plus need-bundling, which is Phase 4 and needs a ruling." (1.1.221 handoff; also 1.1.222 handoff, 2026-09-25)
 - [ ] "Supplies Phase 4: the storage-room walkthrough, need-driven armour requests while following, and the WaitMode/need-bundling ruling above." (1.1.221 handoff; also 1.1.222 handoff, 2026-09-25)
-- [ ] "`grantableEstimate` works per chest half, so it under-counts double chests." (1.1.221 handoff, 2026-09-25)
+- [x] "`grantableEstimate` works per chest half, so it under-counts double chests." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.286 77df45d2
 - [ ] "Three \"other half of a double chest\" helpers could be one." (1.1.221 handoff, 2026-09-25)
 - [x] "CraftingHelper pull hint maps aren't cleared at stop (bounded wall-clock hints)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c
 - [ ] "A double chest whose other half is unloaded reads as unreadable (skipped for that pass)." (1.1.221 handoff, 2026-09-25)

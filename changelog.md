@@ -2,6 +2,20 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Follow mines leaves blocking a step up, bow defender sidesteps for a clear shot, double chests counted once in supply estimates, settings file keeps the pathfinder default implicit, mounted leaf clearing mines at normal speed; 1.1.286 (2026-10-20)
+
+Larger batch implemented by Codex (with Bradley's permission); Fable review, one Codex fix wave, controller read the fix diff and ran the suite.
+
+- **Follow mines the leaf blocking a one-block step up** (finding 56; `77df45d2`, `FollowLeafCellPolicy`, fix wave `4f20d03f`): at a step up whose feet and head cells were oak leaves, `leaf-cleared` logged five times and nothing was mined, because the sidestep bypass reset the mining escalation each time the bot rocked across a block edge. The step-up's feet and head cells are now scanned, the streak survives the rocking, and the leaf cooldown starts only when a mine starts.
+- **A bow defender sidesteps for a clear shot before closing to melee** (finding 60; `77df45d2`, fix wave `4f20d03f`, `CombatWeaponPolicy.shouldEngageRanged`): with an ally in the line it walked to melee range and never shot. A bow-only bot, or any bot 5+ blocks away, now takes a clear sideways or backward stance; a sword-and-bow bot inside 5 blocks melees as before (review: it had started side-stepping under hits).
+- **Supply estimates count a double chest once** (backlog 216; `77df45d2`, fix wave `4f20d03f`): callers counted one half; the merged inventory is read once, and a stale double reads as a single chest.
+- **The settings file keeps the pathfinder default implicit** (backlog 135; `77df45d2`): the first save pinned `"pathfinder": "unified"`. The file now omits it unless the user chose it; sync and disconnect restore keep the effective value. Old files that contain the field keep it as an explicit choice.
+- **Mounted leaf clearing mines at normal speed** (backlog 167; `77df45d2`, fix wave `4f20d03f`): it broke leaves instantly. It now mines them (server thread, no waits), selects the tool once, shows no stuck line while riding, and leaves persistent (player-placed) leaves alone.
+- **Not changed:** backlog 146 (stair escape breaks blocks instantly): `BotStuckService.updateStuckTracker`, the only path to `escapeStairs`, has no callers, so the rewrite was reverted. 147 (snow/carpet clutter) skipped: its callers expect the block gone at once.
+- **Tests** 3385 → 3399. Not sandbox-checked.
+
+**Field checks:** see the pending sandbox list in the RALPH_TASK handoff.
+
 ## Starvation pauses reach a distant owner, grant-covered supply asks while the owner is away, Collect re-checks permission on arrival, no chest-record revival by a stranger's chest; 1.1.285 (2026-10-20)
 
 Small-items build from the backlog triage, implemented by Codex (with Bradley's permission); controller read the diff and ran the suite.
