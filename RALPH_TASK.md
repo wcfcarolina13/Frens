@@ -4,7 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-19 (1.1.276) — next session starts here
+## Session Handoff 2026-10-19 (1.1.277) — next session starts here
+
+**State:** main = origin/main @ 1.1.277. Suite 3159 green. Deployed to Nirn. Sandbox check pending (Phase 6bo, `tools/sandbox/fix277.py`). Backlog triaged this session: 190 open RALPH items (`.superpowers/backlog-triage/split182.txt` in the base checkout: 113 code / 51 play-test / 17 Bradley); 9 Codex "done" calls rejected stay open (156, 255, 294, 459, 476, 500, 507, 509, 515).
+**1.1.277** (changelog entry has rulings and costs): finding 47 follow checks headroom on a step down and every follow/come command clears the abort latch (leaf clearing had aborted on its first tick after every follow start); finding 48 a floating bot in a flooded pocket carves a two-block ledge (ruling) and failed surface recovery backs off, logs throttled; soul stage directions stripped (word list); woodcut per-log checks through the chunk reader. Fable review (two reviewers), one fix wave (`2f736b46`), clean re-review.
+**Next build candidates (top CODE rows from the triage):** 132 go_to from Nether/End plans on the Overworld; 182 food confirmation reply unhandled; 226 two Collects in cooldown; 225 cross-dimension Collect dropped silently; 183 defensive aid 1.6-2.4 s freeze; 358 door stall.
+**Public release:** 1.1.277 is the candidate once its sandbox checks pass. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Needs Bradley:** the three 1.1.272 questions still stand (Spells key migration, chest axe before crafting, shared-server chest scan).
+**Deferred (reasons in the changelogs):** on-ground flooded pocket; findNearestTree and ring/nearby tree finders still read per block; remembered cleanup log in an unloaded chunk fails its mine; repeated asterisk directions; stair-escape and woodcut ascent pause on flood; plus the 1.1.276 list below minus the woodcut per-log item.
+**Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-19 (1.1.276) — superseded
 
 **State:** main = origin/main @ 1.1.276. Suite 3111 green. Deployed to Nirn. Sandbox-checked 2026-10-19 (Phase 6bn, `tools/sandbox/fix276.py`): 7 pass (fishing search 13-31 ms, hangout start under 1 s, craft table scan 1.47 ms, farm water search 4-6 ms, miner threats, copied chest records retired, follow), woodcut partial (detect 374-394 ms with trees; per-log reads deferred); new findings 47 (follow stalls under an oak canopy, pre-existing) and 48 (underwater bot surface-recovery loop). Field checklist: 125 open.
 **1.1.276** (changelog entry has rulings and costs): `ChunkBlockReader` (one chunk fetch per scan instead of a server round trip per block) used by the path snapshot (hangout start, fishing), fishing evaluation, woodcut detection/beehives/relocation sampling, crafting table and chest searches (section skip), farm/harvest/planting/cleanup-chest/hangout-campfire scans; finding 44 a miner fights what it would fight and works past the rest (ruling), the AutoFace busy-pause no longer cancels a skill for a mob it won't fight (closes 46); finding 45 copied chest records retired. Fable review (three reviewers), one fix wave (`11e8ed2c`), clean re-review.
