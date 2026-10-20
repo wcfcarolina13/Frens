@@ -1267,6 +1267,12 @@ public class CollectDirtSkill implements Skill {
         return null;
     }
 
+    /**
+     * Parameter set only by {@code SurfaceRecoveryService}: the surface ascent is the system's own
+     * escape from a flooded pocket, so water there does not pause it (finding 48).
+     */
+    public static final String FLOOD_ESCAPE_PARAM = "surfaceRecoveryFloodEscape";
+
     private boolean getBooleanParameter(SkillContext context, String key, boolean defaultValue) {
         Map<String, Object> params = context.parameters();
         Object value = params.get(key);
@@ -1516,10 +1522,13 @@ public class CollectDirtSkill implements Skill {
             return SkillExecutionResult.success("Already at or above target Y=" + targetY + ".");
         }
         
-        // A surface ascent that starts in water is escaping the flood, so the flood is no reason to
-        // pause it (finding 48: every recovery from a flooded pocket aborted on its first loop with
-        // "water flooded the area"). An ascent that starts dry still pauses when water breaks in.
-        final boolean floodIsTheReason = stopAtSurface && isTouchingWater(player);
+        // System surface recovery that starts in water is escaping the flood, so the flood is no
+        // reason to pause it (finding 48: every recovery from a flooded pocket aborted on its first
+        // loop with "water flooded the area"). Only SurfaceRecoveryService sets the flag: a
+        // player-issued "/bot skill collect_dirt ... surface" still pauses when water breaks in, and
+        // so does any ascent that starts dry.
+        final boolean floodIsTheReason = getBooleanParameter(context, FLOOD_ESCAPE_PARAM, false)
+                && stopAtSurface && isTouchingWater(player);
 
         // Mark bot as in ascent mode to disable aggressive in-wall damage handling
         TaskService.setAscentMode(player.getUuid(), true);

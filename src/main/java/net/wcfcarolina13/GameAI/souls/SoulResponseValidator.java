@@ -46,7 +46,7 @@ public final class SoulResponseValidator {
     private static final Set<String> STAGE_DIRECTION_WORDS = Set.of(
             "chuckles", "chuckling", "chuckle", "laughs", "laughing", "laugh",
             "sighs", "sighing", "sigh", "grins", "grinning", "smiles", "smiling", "smirks",
-            "shrugs", "nods", "winks", "grumbles", "mutters", "whispers", "yawns", "snorts",
+            "shrugs", "nods", "winks", "rolls", "grumbles", "mutters", "whispers", "yawns", "snorts",
             "scoffs", "groans", "hums", "pauses", "beat", "sarcastically", "dryly", "softly",
             "quietly", "cheerfully", "nervously", "teasingly", "playfully", "flatly", "wryly",
             "gruffly", "warmly");
@@ -55,7 +55,11 @@ public final class SoulResponseValidator {
     private static final Pattern LEADING_SPAN = Pattern.compile("^\\s*" + SPAN);
     // A closing span may be followed only by sentence punctuation: "Sure. (dryly)", "Fine (sighs)."
     private static final Pattern TRAILING_SPAN = Pattern.compile(SPAN + "([.!?,]*)\\s*$");
-    private static final Pattern ASTERISK_SPAN = Pattern.compile("\\*+([^*\\n]+?)\\*+");
+    // An emphasis-shaped span: group 1 = *...*, group 2 = _..._
+    private static final Pattern EMPHASIS_SPAN =
+            Pattern.compile("\\*+([^*\\n]+?)\\*+|_+([^_\\n]+?)_+");
+    // What may follow a mid-text emphasis span for it to count as a stage direction: a new sentence.
+    private static final Pattern NEW_SENTENCE_AHEAD = Pattern.compile("^\\s+\\p{Lu}");
     private static final Pattern RUN_OF_SPACES = Pattern.compile("[ \\t]{2,}");
     private static final Pattern SPACE_BEFORE_PUNCT = Pattern.compile("[ \\t]+([,.!?])");
     private static final Pattern PUNCT_OR_SPACE_ONLY = Pattern.compile("[\\p{Punct}\\s]*");
@@ -90,6 +94,8 @@ public final class SoulResponseValidator {
         text = text.strip();
         text = stripSpeakerPrefix(text, botDisplayName);
         text = stripStageDirections(text);
+        // A stage direction can sit in front of the echoed name: "(chuckles) Bob: Fair enough."
+        text = stripSpeakerPrefix(text, botDisplayName);
         text = SECTION_SIGN_CODE.matcher(text).replaceAll("");
         text = TRAILING_LONE_SECTION_SIGN.matcher(text).replaceAll("");
         text = stripControlCharacters(text);
@@ -126,29 +132,63 @@ public final class SoulResponseValidator {
 
     /**
      * Removes stage directions such as {@code (chuckles)}, {@code *sighs*} or {@code _dryly_} so
-     * they are never shown in chat, spoken by TTS, or replayed into memory. A span is removed
-     * when it opens or closes the text (or is the whole text), holds 1-3 words and no digits, and
-     * its first word is in {@link #STAGE_DIRECTION_WORDS}; an asterisk span with a listed first
-     * word may also sit mid-text (1-4 words). Repeats until nothing changes, so
-     * "(sighs) (shrugs) Fine." becomes "Fine.". Text with no stage direction is returned
-     * unchanged; text that was only stage directions and punctuation becomes "".
+     * they are never shown in chat, spoken by TTS, or replayed into memory. Works line by line; a
+     * line left empty by stripping is dropped. A span is a stage direction when it holds 1-3 words
+     * (1-4 mid-text), no digits and no {@code ! ? ,}, and its first word is in
+     * {@link #STAGE_DIRECTION_WORDS} -- so "(Beat it!)" is dialogue. Where it may sit:
+     * <ul>
+     *   <li>any span opening a line: "(sighs) Fine.";</li>
+     *   <li>a {@code (...)} span closing a line: "Sure. (dryly)", "Fine (sighs).";</li>
+     *   <li>a {@code *...*}/{@code _..._} span closing a line only after sentence punctuation:
+     *       "Sure. *sighs*" goes, "She said it *softly*." is emphasis and stays;</li>
+     *   <li>a {@code *...*}/{@code _..._} span mid-line only between sentences: "Well, fine.
+     *       *sighs heavily* Let's go." goes, "Speak *softly* and carry a big stick." stays.</li>
+     * </ul>
+     * Repeats until nothing changes, so "(sighs) (shrugs) Fine." becomes "Fine.". Text with no
+     * stage direction is returned unchanged; text that was only stage directions and punctuation
+     * becomes "".
      */
     public static String stripStageDirections(String text) {
         if (text == null || text.isEmpty()) {
             return text == null ? "" : text;
         }
-        String current = text;
+        String[] lines = text.split("\n", -1);
+        StringBuilder out = new StringBuilder(text.length());
         boolean changed = false;
+        boolean first = true;
+        for (String line : lines) {
+            String cleaned = stripLine(line);
+            if (cleaned != line) {
+                changed = true;
+                if (cleaned.isEmpty()) {
+                    continue;
+                }
+            }
+            if (!first) {
+                out.append('\n');
+            }
+            out.append(cleaned);
+            first = false;
+        }
+        if (!changed) {
+            return text;
+        }
+        String result = out.toString().strip();
+        return PUNCT_OR_SPACE_ONLY.matcher(result).matches() ? "" : result;
+    }
+
+    /** Strips one line; returns the same instance when the line holds no stage direction. */
+    private static String stripLine(String line) {
+        String current = line;
         while (true) {
             String next = stripOnePass(current);
             if (next.equals(current)) {
                 break;
             }
-            changed = true;
             current = next;
         }
-        if (!changed) {
-            return text;
+        if (current.equals(line)) {
+            return line;
         }
         current = RUN_OF_SPACES.matcher(current).replaceAll(" ");
         current = SPACE_BEFORE_PUNCT.matcher(current).replaceAll("$1");
@@ -163,15 +203,34 @@ public final class SoulResponseValidator {
         }
         Matcher trail = TRAILING_SPAN.matcher(text);
         if (trail.find() && isStageDirection(spanInner(trail), 3)) {
-            return text.substring(0, trail.start()) + trail.group(4);
+            String before = text.substring(0, trail.start());
+            boolean emphasisShaped = trail.group(1) == null;
+            if (!emphasisShaped || followsSentenceEnd(before)) {
+                return before + trail.group(4);
+            }
         }
-        Matcher mid = ASTERISK_SPAN.matcher(text);
+        Matcher mid = EMPHASIS_SPAN.matcher(text);
         while (mid.find()) {
-            if (isStageDirection(mid.group(1), 4)) {
-                return text.substring(0, mid.start()) + " " + text.substring(mid.end());
+            String inner = mid.group(1) != null ? mid.group(1) : mid.group(2);
+            String before = text.substring(0, mid.start());
+            String after = text.substring(mid.end());
+            boolean betweenSentences = followsSentenceEnd(before)
+                    && (after.isBlank() || NEW_SENTENCE_AHEAD.matcher(after).find());
+            if (betweenSentences && isStageDirection(inner, 4)) {
+                return before + " " + after;
             }
         }
         return text;
+    }
+
+    /** True when {@code before} is empty or ends (ignoring whitespace) in {@code . ! ?}. */
+    private static boolean followsSentenceEnd(String before) {
+        String trimmed = before.stripTrailing();
+        if (trimmed.isEmpty()) {
+            return true;
+        }
+        char last = trimmed.charAt(trimmed.length() - 1);
+        return last == '.' || last == '!' || last == '?';
     }
 
     private static String spanInner(Matcher m) {
@@ -189,7 +248,9 @@ public final class SoulResponseValidator {
             return false;
         }
         for (int i = 0; i < body.length(); i++) {
-            if (Character.isDigit(body.charAt(i))) {
+            char c = body.charAt(i);
+            // Digits read as content; "!", "?" and "," read as speech: "(Beat it!)", "(Beat it, creeper!)".
+            if (Character.isDigit(c) || c == '!' || c == '?' || c == ',') {
                 return false;
             }
         }

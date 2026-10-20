@@ -6,6 +6,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
+import net.wcfcarolina13.GameAI.skills.impl.CollectDirtSkill;
 import net.wcfcarolina13.GameAI.skills.impl.SurfaceRecoverySkill;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,6 +78,8 @@ public final class SurfaceRecoveryService {
             Map<String, Object> params = new HashMap<>();
             params.put("_origin", "system");
             params.put("ascentToSurface", true);
+            // System recovery escaping a flooded pocket: water is no reason to pause this ascent.
+            params.put(CollectDirtSkill.FLOOD_ESCAPE_PARAM, true);
             params.put("skipTorches", true);
             params.put("allowChestStore", false);
             params.put("maxNoProgressSteps", MAX_NO_PROGRESS_STEPS);

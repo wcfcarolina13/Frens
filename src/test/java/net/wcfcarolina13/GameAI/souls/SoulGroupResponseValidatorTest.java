@@ -576,4 +576,25 @@ class SoulGroupResponseValidatorTest {
         assertEquals(1, parse.lines().getFirst().participantIndex());
         assertEquals(SoulGroupResponseValidator.DropReason.NOISE, parse.dropped().getFirst().reason());
     }
+
+    @Test
+    void emphasisAndSpeechShapedSpansSurviveInSceneLines() {
+        var parse = validator.parse(
+                "Jake: Speak *softly* and carry a big stick.\nSara: (Beat it!)\nJake: She said it *softly*.",
+                List.of("Jake", "Sara"));
+        assertTrue(parse.accepted());
+        assertEquals(3, parse.lines().size());
+        assertEquals("Speak *softly* and carry a big stick.", parse.lines().get(0).text());
+        assertEquals("(Beat it!)", parse.lines().get(1).text());
+        assertEquals("She said it *softly*.", parse.lines().get(2).text());
+    }
+
+    @Test
+    void sentenceBoundaryStageDirectionsStillStrippedInSceneLines() {
+        var parse = validator.parse("Jake: Well, fine. *sighs heavily* Let's go.\nSara: Sure. *sighs*",
+                List.of("Jake", "Sara"));
+        assertTrue(parse.accepted());
+        assertEquals("Well, fine. Let's go.", parse.lines().get(0).text());
+        assertEquals("Sure.", parse.lines().get(1).text());
+    }
 }

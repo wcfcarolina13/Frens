@@ -4,6 +4,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.FallingBlock;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -12,6 +13,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.PlayerUtils.BreakTimePolicy;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,8 +23,11 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Shared shoreline escape helpers for tasks that require dry footing.
@@ -31,8 +36,13 @@ public final class BotWaterEscapeService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("bot-water-escape");
 
-    /** Upper bound on one ledge-cell swing; MiningTool's own deadline normally ends it first. */
-    private static final long CARVE_MINE_TIMEOUT_MS = 45_000L;
+    /** Wait for one ledge-cell swing when the block's break time cannot be read. */
+    static final long CARVE_MINE_FALLBACK_TIMEOUT_MS = 45_000L;
+    /** Added to MiningTool's own deadline so its timeout, not ours, normally ends a slow swing. */
+    static final long CARVE_MINE_MARGIN_MS = 3_000L;
+    /** Let the break land before re-reading the cell (same settle as BotFleeService's dig-down). */
+    private static final long CARVE_SETTLE_MS = 200L;
+    private static final long SERVER_READ_TIMEOUT_MS = 2_000L;
     /** How far up the bot's column to look for the water's top cell. */
     private static final int WATER_SURFACE_SCAN = 4;
     /** "No side to carve" repeats every recovery cycle: INFO once a minute per bot, else DEBUG. */
@@ -210,22 +220,92 @@ public final class BotWaterEscapeService {
                 || state.isIn(BlockTags.DIAMOND_ORES);
     }
 
+    /**
+     * Mines one ledge cell and waits as long as MiningTool itself would: its deadline is
+     * {@link BreakTimePolicy#timeoutMs} of the ticks needed with the tool it just picked, which in
+     * water or off the ground can run to minutes (stone by hand). A swing still running after that
+     * is cancelled, so the next recovery cycle never starts a second swing on the same cell. The
+     * cell is then re-read on the server thread after a short settle.
+     */
     private static boolean mineLedgeCell(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+        MinecraftServer server = world.getServer();
+        CompletableFuture<String> mining = MiningTool.mineBlock(bot, pos, false);
+        long waitMs = CARVE_MINE_FALLBACK_TIMEOUT_MS;
+        if (!mining.isDone()) {
+            // MiningTool picked and equipped its tool before returning, so this is the delta it armed its deadline with.
+            Float delta = callOnServer(server,
+                    () -> world.getBlockState(pos).calcBlockBreakingDelta(bot, world, pos),
+                    SERVER_READ_TIMEOUT_MS, null);
+            waitMs = carveWaitMs(delta == null ? Float.NaN : delta);
+        }
         String outcome;
         try {
-            outcome = MiningTool.mineBlock(bot, pos, false).get(CARVE_MINE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            outcome = mining.get(waitMs, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
+            mining.cancel(true);
             Thread.currentThread().interrupt();
             return false;
+        } catch (TimeoutException e) {
+            mining.cancel(true);
+            outcome = "no result after " + waitMs + "ms, swing cancelled";
         } catch (Exception e) {
             outcome = "error: " + e.getClass().getSimpleName();
         }
-        boolean open = world.getBlockState(pos).getCollisionShape(world, pos).isEmpty();
+        if (!mining.isDone()) {
+            mining.cancel(true);
+        }
+        try {
+            Thread.sleep(CARVE_SETTLE_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        boolean open = Boolean.TRUE.equals(callOnServer(server,
+                () -> world.getBlockState(pos).getCollisionShape(world, pos).isEmpty(),
+                SERVER_READ_TIMEOUT_MS, Boolean.FALSE));
         if (!open) {
             LOGGER.info("Bot {} could not open ledge cell {}: {}",
                     bot.getName().getString(), pos.toShortString(), outcome);
         }
         return open;
+    }
+
+    /**
+     * How long to wait for one ledge-cell swing: MiningTool's own deadline for a block with this
+     * break delta plus {@link #CARVE_MINE_MARGIN_MS}, or the fallback when the delta is unknown or
+     * the block cannot be broken.
+     */
+    static long carveWaitMs(float delta) {
+        if (Float.isNaN(delta) || delta <= 0.0f) {
+            return CARVE_MINE_FALLBACK_TIMEOUT_MS;
+        }
+        return BreakTimePolicy.timeoutMs(BreakTimePolicy.requiredTicks(delta)) + CARVE_MINE_MARGIN_MS;
+    }
+
+    /** Bounded server-thread read from a worker; runs inline when already on the server thread. */
+    private static <T> T callOnServer(MinecraftServer server, Supplier<T> action, long timeoutMs, T fallback) {
+        if (server == null) {
+            return fallback;
+        }
+        if (server.isOnThread()) {
+            return action.get();
+        }
+        CompletableFuture<T> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(action.get());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            return future.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     private static String describeSides(List<ShoreStepPolicy.Side> sides, Direction[] dirs) {

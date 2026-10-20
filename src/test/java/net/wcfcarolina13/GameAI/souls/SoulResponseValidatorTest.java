@@ -201,4 +201,85 @@ class SoulResponseValidatorTest {
         // Untouched text keeps its exact spacing; cleanup runs only after a strip.
         assertEquals("Hello ,  world", SoulResponseValidator.stripStageDirections("Hello ,  world"));
     }
+
+    // === Stage directions: emphasis, speech-shaped spans, multi-line (fix wave) ===
+
+    @Test
+    void midSentenceEmphasisSurvives() {
+        assertEquals("Speak *softly* and carry a big stick.",
+                SoulResponseValidator.stripStageDirections("Speak *softly* and carry a big stick."));
+        assertEquals("Don't *sigh* at me.",
+                SoulResponseValidator.stripStageDirections("Don't *sigh* at me."));
+        assertEquals("Don't _sigh_ at me.",
+                SoulResponseValidator.stripStageDirections("Don't _sigh_ at me."));
+        assertEquals("Speak *softly* and carry a big stick.",
+                validator.validate("Bob: Speak *softly* and carry a big stick.", "Bob").text());
+    }
+
+    @Test
+    void trailingEmphasisWithoutSentenceEndSurvives() {
+        assertEquals("She said it *softly*.",
+                SoulResponseValidator.stripStageDirections("She said it *softly*."));
+        assertEquals("She said it _softly_.",
+                SoulResponseValidator.stripStageDirections("She said it _softly_."));
+        assertEquals("She said it *softly*.", validator.validate("She said it *softly*.", "Bob").text());
+    }
+
+    @Test
+    void stageDirectionAfterSentenceEndIsStillStripped() {
+        assertEquals("Sure.", SoulResponseValidator.stripStageDirections("Sure. *sighs*"));
+        assertEquals("Sure.", SoulResponseValidator.stripStageDirections("Sure. _sighs_"));
+        assertEquals("Sure.", SoulResponseValidator.stripStageDirections("Sure. (dryly)"));
+        assertEquals("Well, fine. Let's go.",
+                SoulResponseValidator.stripStageDirections("Well, fine. *sighs heavily* Let's go."));
+        assertEquals("Well, fine. Let's go.",
+                SoulResponseValidator.stripStageDirections("Well, fine. _sighs heavily_ Let's go."));
+        assertEquals("Fine! Go.", SoulResponseValidator.stripStageDirections("Fine! *grumbles* Go."));
+    }
+
+    @Test
+    void midTextSpanNotFollowedByNewSentenceSurvives() {
+        assertEquals("Well, fine. *sighs* and then we go.",
+                SoulResponseValidator.stripStageDirections("Well, fine. *sighs* and then we go."));
+    }
+
+    @Test
+    void speechShapedSpansAreNeverStageDirections() {
+        assertEquals("(Beat it!)", SoulResponseValidator.stripStageDirections("(Beat it!)"));
+        SoulResponseValidator.ValidationResult beat = validator.validate("(Beat it!)", "Bob");
+        assertTrue(beat.accepted());
+        assertEquals("(Beat it!)", beat.text());
+        assertEquals("(Beat it, creeper!) Go away.",
+                validator.validate("(Beat it, creeper!) Go away.", "Bob").text());
+        assertEquals("Fine. (Sighs?)", SoulResponseValidator.stripStageDirections("Fine. (Sighs?)"));
+        // The plain stage direction still goes.
+        assertEquals("Go away.", SoulResponseValidator.stripStageDirections("(beat) Go away."));
+    }
+
+    @Test
+    void stageDirectionsAreStrippedOnEveryLine() {
+        SoulResponseValidator.ValidationResult result =
+                validator.validate("Sure.\n(sighs) Anyway, let's go.", "Bob");
+        assertTrue(result.accepted());
+        assertEquals("Sure.\nAnyway, let's go.", result.text());
+        assertEquals("Sure.\nLet's go.",
+                SoulResponseValidator.stripStageDirections("Sure.\n*shrugs*\nLet's go."));
+        assertEquals("Fine.\nOkay.",
+                SoulResponseValidator.stripStageDirections("Fine. (dryly)\nOkay."));
+        // Untouched multi-line text keeps its exact shape, blank lines included.
+        assertEquals("Hi.\n\nThere.", SoulResponseValidator.stripStageDirections("Hi.\n\nThere."));
+        assertEquals("", SoulResponseValidator.stripStageDirections("(sighs)\n*shrugs*"));
+    }
+
+    @Test
+    void speakerPrefixBehindStageDirectionIsStripped() {
+        assertEquals("Fair enough.", validator.validate("(chuckles) Bob: Fair enough.", "Bob").text());
+        assertEquals("Bob: hi there.", validator.validate("(chuckles) Bob: hi there.", "Sara").text());
+    }
+
+    @Test
+    void rollsEyesIsAStageDirection() {
+        assertEquals("Fine.", validator.validate("(rolls eyes) Fine.", "Bob").text());
+        assertEquals("Fine.", SoulResponseValidator.stripStageDirections("Fine. *rolls eyes*"));
+    }
 }

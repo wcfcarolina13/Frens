@@ -33,7 +33,7 @@ class FollowCommandAbortLatchSourceTest {
             "src/main/java/net/wcfcarolina13/GameAI/services/FollowPlannerService.java",
     };
     private static final Pattern CALL = Pattern.compile(
-            "BotEventHandler\\.(setFollowMode|setComeModeWalk)\\(([^;]*?)\\);", Pattern.DOTALL);
+            "BotEventHandler\\.(setFollowModeDistance|setFollowMode|setComeModeWalk)\\(([^;]*?)\\);", Pattern.DOTALL);
 
     private static String read(String path) throws IOException {
         return Files.readString(Paths.get(path), StandardCharsets.UTF_8);
@@ -79,7 +79,7 @@ class FollowCommandAbortLatchSourceTest {
     @Test
     void supersedingOverloadsClearTheLatchOnlyWhenAsked() throws IOException {
         String src = read(HANDLER);
-        for (String method : new String[] {"setFollowMode", "setComeModeWalk"}) {
+        for (String method : new String[] {"setFollowMode", "setFollowModeDistance", "setComeModeWalk"}) {
             String body = supersedingBody(src, method);
             Matcher gate = Pattern.compile("if \\(supersedesStop[^)]*\\)\\s*\\{\\s*TaskService\\.clearAbortLatch\\(")
                     .matcher(body);
@@ -106,9 +106,21 @@ class FollowCommandAbortLatchSourceTest {
             for (String call : found) {
                 String method = call.substring(0, call.indexOf('|'));
                 int n = argCount(call.substring(call.indexOf('|') + 1));
-                // The supersedesStop overloads take 4 (follow) and 6 (come) arguments.
-                int superseding = "setFollowMode".equals(method) ? 4 : 6;
+                // The supersedesStop overloads take 4 (follow, follow-distance) and 6 (come) arguments.
+                int superseding = "setComeModeWalk".equals(method) ? 6 : 4;
                 assertTrue(n < superseding, path + " must use a non-superseding overload: " + call);
+            }
+        }
+    }
+
+    @Test
+    void followDistanceCommandSupersedesTheStop() throws IOException {
+        List<String> found = calls(read(COMMANDS));
+        assertTrue(found.stream().anyMatch(c -> c.startsWith("setFollowModeDistance|")),
+                "/bot follow <bot> <n> must call setFollowModeDistance");
+        for (String call : found) {
+            if (call.startsWith("setFollowModeDistance|")) {
+                assertEquals(4, argCount(call.substring(call.indexOf('|') + 1)), call);
             }
         }
     }

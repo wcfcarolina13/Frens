@@ -3353,7 +3353,7 @@ public class modCommandRegistry {
         }
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow distance.");
         TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot follow distance.");
-        BotEventHandler.setFollowModeDistance(bot, target, distance);
+        BotEventHandler.setFollowModeDistance(bot, target, distance, true);
         return isFollowingTarget(bot, target) ? 1 : 0;
     }
 

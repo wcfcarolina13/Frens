@@ -1572,12 +1572,25 @@ public class BotEventHandler {
      * If line-of-sight breaks (around corners/doors), normal pursuit + planning should resume.
      */
     public static String setFollowModeDistance(ServerPlayerEntity bot, ServerPlayerEntity target, double standoffRange) {
+        return setFollowModeDistance(bot, target, standoffRange, false);
+    }
+
+    /**
+     * @param supersedesStop true only for the player-issued {@code /bot follow <bot> <n>} command; clears
+     *                       the abort latch its own forceAbort set, as {@link #setFollowMode} does
+     *                       (finding 47). Internal callers pass false.
+     */
+    public static String setFollowModeDistance(ServerPlayerEntity bot, ServerPlayerEntity target, double standoffRange,
+                                               boolean supersedesStop) {
         if (bot != null && TaskService.hasActiveTask(bot.getUuid())) {
             sendBotMessage(bot, "Busy with another task right now.");
             return "Bot is busy executing another task. Try again after it finishes.";
         }
         if (target == null) {
             return "Unable to follow, target not found.";
+        }
+        if (supersedesStop && bot != null) {
+            TaskService.clearAbortLatch(bot.getUuid());
         }
         registerBot(bot);
         setFollowTarget(bot, target.getUuid());
