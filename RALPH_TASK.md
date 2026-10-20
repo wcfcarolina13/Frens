@@ -7,6 +7,10 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 ## Session Handoff 2026-10-20 (1.1.283) — next session starts here
 
 **State:** main = origin/main @ 1.1.283. Suite 3382 green. Deployed to Nirn. 1.1.283 = backlog 409, 186, 231 (Codex-implemented, `003fd626`); 135 skipped (not small). Not sandbox-checked.
+**Pending sandbox check (Bradley 2026-10-20: queue it, run when usage allows, not yet):** one combined run for the unchecked builds:
+- 1.1.282: woodcut cleanup with every hotbar slot a tool/weapon skips the leaf clear (no swing); full-pack strict stone craft logs no "I need 3 cobbled deepslate" line (`fix281.py craft full`); store chest placement miss logs at INFO.
+- 1.1.283: a fortify run that finds a cavity speaks the callout aloud; a flower gift skips a recipient with a full inventory.
+- 1.1.284: items listed in its changelog entry once it ships.
 **Next:** finding 56 (one-block step up into oak leaves at feet and head: `leaf-cleared` logs but no leaf is mined), 59, 60; then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout).
 **Public release:** 1.1.283 is the candidate. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
 **Needs Bradley:** the three 1.1.272 questions still stand.
