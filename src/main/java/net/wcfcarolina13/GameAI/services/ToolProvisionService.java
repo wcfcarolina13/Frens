@@ -1431,6 +1431,9 @@ public final class ToolProvisionService {
                     continue;
                 }
                 BlockPos otherHalf = ChestStoreService.otherChestHalf(world, pos);
+                if (otherHalf == null) {
+                    state = state.with(ChestBlock.CHEST_TYPE, net.minecraft.block.enums.ChestType.SINGLE);
+                }
                 inv = ChestBlock.getInventory(chestBlock, state, world, pos, true);
                 if (inv == null) continue;
                 // Vanilla falls back to a single inventory for stale/mismatched double states.
@@ -1656,9 +1659,11 @@ public final class ToolProvisionService {
             return false;
         }
         boolean relook = !waitsForAnswer && paused != null && paused.awaitingAnswer();
-        // Read once, before the first hop: /bot stop removes the task at once and leaves only the
-        // abort latch, so a per-chest read would find no task and go on (SupplyPullPolicy#stopsToolSearch).
-        boolean inTaskAtStart = TaskService.hasActiveTask(botUuid);
+        TaskService.TaskTicket taskAtStart = TaskService.getActiveTaskTicket(botUuid).orElse(null);
+        java.util.function.BooleanSupplier abortSearch = () -> SupplyPullPolicy.stopsToolSearch(
+                taskAtStart, TaskService.getActiveTaskTicket(botUuid).orElse(null),
+                TaskService.isAbortRequested(botUuid) || taskAtStart != null && taskAtStart.isCancelRequested());
+        if (abortSearch.getAsBoolean()) return false;
 
         // Woodcut's start (UNTIL_ANSWERED) also asks the chests near the bot that it never
         // registered, such as a player's base chest (finding 8, Bradley 2026-10-19): the facade
@@ -1667,6 +1672,7 @@ public final class ToolProvisionService {
         if (!relook) {
             // Refresh snapshots, and scan nearby chests, on the server thread (block entities must be read there).
             List<ToolChestCandidatePolicy.Candidate<ItemSnapshot>> hopped = SupplyServerHop.call(server, () -> {
+                if (abortSearch.getAsBoolean()) return null;
                 BotChestRegistryService.refreshAllSnapshots(bot, world);
                 return waitsForAnswer
                         ? scanNearbyToolChests(world, bot.getBlockPos(), snapshotFilter, stackPredicate,
@@ -1680,6 +1686,7 @@ public final class ToolProvisionService {
             }
             scanned = hopped;
         }
+        if (abortSearch.getAsBoolean()) return false;
 
         // Registered chests for this bot/owner
         List<BotChestRegistryService.ChestRecord> allChests =
@@ -1754,19 +1761,12 @@ public final class ToolProvisionService {
         Set<BlockPos> skippedHalves = new HashSet<>();
         SupplyWithdrawals.Result last = null;
         for (BlockPos candidatePos : candidates) {
-            // A stop request ends the search here, before the next chest is asked or walked to
-            // (an ABORTED answer already stops it as busy). Only the stop of the task the search
-            // began under (inTaskAtStart, read before the loop): DurabilityFallbackService also
-            // searches outside any task, where a stale abort latch (a /bot come or follow) must not
-            // cancel a search nobody stopped.
-            if (SupplyPullPolicy.stopsToolSearch(inTaskAtStart, TaskService.isAbortRequested(botUuid))) {
-                break;
-            }
+            if (abortSearch.getAsBoolean()) return false;
             if (skippedHalves.contains(candidatePos)) {
                 continue;
             }
-            SupplyWithdrawals.Result result = ChestStoreService.withdrawMatchingWalkOnly(
-                    source, bot, candidatePos, 1, stackPredicate, "chest-tool", mode);
+            SupplyWithdrawals.Result result = ChestStoreService.withdrawMatchingWalkOnlyCancellable(
+                    source, bot, candidatePos, 1, stackPredicate, "chest-tool", mode, abortSearch);
             last = result;
             search = SupplyPullPolicy.fold(search, result.kind(), result.moved(), result.scope(), result.reason());
             if (search.movedAny()) {
@@ -1790,6 +1790,7 @@ public final class ToolProvisionService {
                     result.scope());
         }
 
+        if (abortSearch.getAsBoolean()) return false;
         long pauseMs = recordToolSearch(botUuid, paused, search);
         if (pauseMs > 0L && !(relook && search.held())) {
             LOGGER.info("Chest tool retrieval: nothing taken for {} from {} candidate(s) (last: {} {} {}); next search in {} s",

@@ -214,18 +214,16 @@ public final class SupplyPullPolicy {
 
     /**
      * Whether a chest tool search ends before it asks, or walks to, its next chest: the task it
-     * ran under was told to stop. {@code inTaskAtStart} is read once, before the search's first
-     * hop, because {@code /bot stop} removes the task at once ({@code TaskService.forceAbort})
-     * while its abort latch stays set: read per chest, the check would find no task and go on to
-     * prompt for, or take from, the next chest for a bot its owner just stopped. A search begun
-     * outside any task ({@code DurabilityFallbackService}) never stops on the latch, which a
-     * {@code /bot come} or {@code follow} may have left set long before.
+     * ran under stopped or was replaced. Capture the ticket before the first hop and compare
+     * identity, since a replacement task clears the abort latch. A search begun outside any
+     * task ({@code DurabilityFallbackService}) ignores a stale latch.
      *
-     * @param inTaskAtStart  the bot had an active task when the search began
+     * @param taskAtStart    the ticket captured at search start, or null
+     * @param activeTask     the ticket active now, or null
      * @param abortRequested the bot's abort latch is set now
      */
-    public static boolean stopsToolSearch(boolean inTaskAtStart, boolean abortRequested) {
-        return inTaskAtStart && abortRequested;
+    public static boolean stopsToolSearch(Object taskAtStart, Object activeTask, boolean abortRequested) {
+        return taskAtStart != null && (taskAtStart != activeTask || abortRequested);
     }
 
     // ── What a pull adds up to ───────────────────────────────────────────────────────────────

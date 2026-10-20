@@ -105,8 +105,8 @@ public final class SupplyWithdrawalPolicy {
         /** The bot has no recorded owner, so nobody may approve anything for it. */
         NO_OWNER(Scope.BOT),
         /**
-         * The chest's key could not be read (unloaded, not a chest, or a half whose partner cannot
-         * be resolved without loading a chunk). Nothing is matched or dropped.
+         * The chest's key could not be read (the requested half is unloaded or not a chest).
+         * An unloaded partner is refused with DENY_UNLOADED at take time. Nothing is matched or dropped.
          */
         CHEST_UNREADABLE(Scope.CHEST),
         /**

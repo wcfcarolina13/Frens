@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Owner-only zone edits, village mapping and wall claims; double chest with an unloaded half refused; a stopped tool search stays stopped; woodcut cleanup tracks its own pillars; 1.1.287 (2026-10-20)
+
+Codex build from the 2026-10-19 backlog triage (rows 199, 200, 201, 219, 222) and sandbox finding 59, with a fix wave and a follow-up from two Fable reviews.
+
+- **Zone owners can rename and delete their own zones** (backlog 199): checked on the server from the sender; ops and the host can edit any zone. Base auto-zones (`base:X`) stay admin-only, and a zone hidden from the player answers "not found" rather than confirming its name. `/bot zone remove` no longer crashes on a zone with no owner.
+- **Only a bot's owner, an op or the host can map a village** (backlog 200).
+- **An ownerless wall can be claimed only by an op or the host** (backlog 201). Ruling (made on Bradley's behalf): saved walls record no builder, so no one else can prove they built it; cost if wrong: on a dedicated server with no ops, an accidentally unclaimed wall can't be reclaimed.
+- **A double chest whose other half is in an unloaded chunk** (backlog 219): its partner position comes from the chest's facing, with no chunk read, so its key, owner and territory checks no longer change when the other half unloads (a granted "Yes" is no longer lost). Ruling: the unloaded half's lock can't be read, so the take is refused (`DENY_UNLOADED`) and the bot tries the next chest; cost if wrong: a double chest at the edge of loaded terrain is skipped until both halves load. After a take, the registry re-reads the chest's contents.
+- **A stopped tool search stays stopped** (backlog 222): the task ticket is carried through queued scans, asks, answer retries, withdrawals and the walk to the chest (`MovementAbortPolicy`), so a new task clearing the abort latch can't revive the old search or let it steer the bot.
+- **Woodcut cleanup tracks its own pillars** (finding 59): teardown records the alternate placements and support blocks it actually placed, keeps per-bot memory of temporary reach pillars after a failed removal, forgets a position once mined, and mines a remembered position only if it is still scaffold material (a dirt pillar that has turned to grass, podzol or mycelium counts). Natural tree soil stays protected. The cause of the two leftover blocks is not proven; it needs a two-bot sandbox rerun.
+- **Review fixes** (Fable, two reviewers): partner facts independent of chunk load; ticket-gated walk; teardown material gate and memory removal; auto-zone and hidden-zone edits; null-owner zone remove; snapshot re-read instead of subtraction; grass-converted pillar blocks still removed.
+- **Tests** 3399 → 3419.
+- **Deferred:** an aborted walk's guard also skips its un-sneak and door-open steps (the next walk resets them); a LAN world with cheats on makes every guest an op, so every gate passes (vanilla behaviour).
+
+**Field checks:** SANDBOX
+
 ## Follow mines leaves blocking a step up, bow defender sidesteps for a clear shot, double chests counted once in supply estimates, settings file keeps the pathfinder default implicit, mounted leaf clearing mines at normal speed; 1.1.286 (2026-10-20)
 
 Larger batch implemented by Codex (with Bradley's permission); Fable review, one Codex fix wave, controller read the fix diff and ran the suite.

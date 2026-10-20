@@ -47,6 +47,38 @@ class SupplyChestRulesTest {
     private static final String F = OTHER.toString();
     private static final Config CFG = Config.defaults();
 
+    @Test
+    void partnerPositionMatchesEveryHorizontalFacingAndHalf() {
+        Pos a = new Pos(15, 64, 15);
+        int[][] facingsAndLeftOffsets = {
+                {0, -1, 1, 0}, {1, 0, 0, 1}, {0, 1, -1, 0}, {-1, 0, 0, -1}
+        };
+        for (int[] direction : facingsAndLeftOffsets) {
+            Pos leftPartner = new Pos(a.x() + direction[2], a.y(), a.z() + direction[3]);
+            Pos rightPartner = new Pos(a.x() - direction[2], a.y(), a.z() - direction[3]);
+            assertEquals(leftPartner, SupplyChestRules.partnerPosition(a, direction[0], direction[1], "LEFT"));
+            assertEquals(rightPartner, SupplyChestRules.partnerPosition(a, direction[0], direction[1], "RIGHT"));
+            assertEquals(a, SupplyChestRules.partnerPosition(leftPartner, direction[0], direction[1], "RIGHT"));
+            assertNull(SupplyChestRules.partnerPosition(a, direction[0], direction[1], "SINGLE"));
+        }
+    }
+
+    @Test
+    void declaredPartnerKeepsCanonicalKeyFromEitherHalfAcrossChunkBoundary() {
+        Pos a = new Pos(15, 64, 0);
+        Pos b = SupplyChestRules.partnerPosition(a, 0, -1, "LEFT");
+        assertEquals(new Pos(16, 64, 0), b);
+        assertEquals(ChestKey.canonical("world", a, b),
+                ChestKey.canonical("world", b, SupplyChestRules.partnerPosition(b, 0, -1, "RIGHT")));
+        assertEquals(new ChestKey("world", 15, 64, 0), ChestKey.canonical("world", b, a));
+    }
+
+    @Test
+    void unavailablePartnerLockRefusesEvenWithOtherwisePermittedFacts() {
+        assertEquals(Access.DENY_UNLOADED, SupplyChestRules.access(new AccessFacts(false, true, true,
+                false, false, true, true, false, Ownership.OWNER_STORAGE)));
+    }
+
     private static List<String> recs(String... owners) {
         return Arrays.asList(owners); // null elements allowed, unlike List.of
     }

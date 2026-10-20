@@ -451,6 +451,11 @@ public final class TaskService {
         return ACTIVE.containsKey(key(botUuid));
     }
 
+    /** Captures task identity so delayed work cannot inherit a replacement task's cleared latch. */
+    public static Optional<TaskTicket> getActiveTaskTicket(UUID botUuid) {
+        return Optional.ofNullable(ACTIVE.get(key(botUuid)));
+    }
+
     /**
      * Records which thread is executing the active skill for this ticket.
      * This enables /bot stop and server shutdown to interrupt long-running/hung skills.

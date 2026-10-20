@@ -227,11 +227,11 @@ public final class MovementService {
         return true;
     }
 
-    private static boolean abortRequested(ServerPlayerEntity player) {
+    static boolean abortRequested(ServerPlayerEntity player) {
         if (player == null) {
             return false;
         }
-        return TaskService.isAbortRequested(player.getUuid());
+        return MovementAbortPolicy.abortRequested(TaskService.isAbortRequested(player.getUuid()));
     }
 
     public enum Mode {
@@ -5112,21 +5112,22 @@ public final class MovementService {
     }
 
     static boolean runOnServerThread(ServerPlayerEntity player, Runnable action) {
+        Runnable guardedAction = MovementAbortPolicy.guard(action);
         MinecraftServer server = player != null && player.getCommandSource() != null
                 ? player.getCommandSource().getServer()
                 : null;
         if (server == null) {
-            action.run();
+            guardedAction.run();
             return true;
         }
         if (server.isOnThread()) {
-            action.run();
+            guardedAction.run();
             return true;
         }
         CompletableFuture<Void> future = new CompletableFuture<>();
         server.execute(() -> {
             try {
-                action.run();
+                guardedAction.run();
                 future.complete(null);
             } catch (Throwable t) {
                 future.completeExceptionally(t);

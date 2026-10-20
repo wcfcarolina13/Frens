@@ -173,10 +173,21 @@ class SupplyPullPolicyTest {
      */
     @Test
     void rereviewBN2ATaskStopEndsTheToolSearchThoughTheTaskIsAlreadyGone() {
-        assertTrue(SupplyPullPolicy.stopsToolSearch(true, true), "/bot stop mid-search: the task began it");
-        assertFalse(SupplyPullPolicy.stopsToolSearch(true, false));
-        assertFalse(SupplyPullPolicy.stopsToolSearch(false, true), "no task at the start: a stale latch is ignored");
-        assertFalse(SupplyPullPolicy.stopsToolSearch(false, false));
+        Object ticket = new Object();
+        assertTrue(SupplyPullPolicy.stopsToolSearch(ticket, null, true), "/bot stop removes the ticket");
+        assertTrue(SupplyPullPolicy.stopsToolSearch(ticket, ticket, true));
+        assertFalse(SupplyPullPolicy.stopsToolSearch(ticket, ticket, false));
+        assertFalse(SupplyPullPolicy.stopsToolSearch(null, null, true), "no task: ignore a stale latch");
+        assertFalse(SupplyPullPolicy.stopsToolSearch(null, null, false));
+    }
+
+    @Test
+    void aReplacementTaskCannotReviveTheCapturedSearchByClearingTheLatch() {
+        Object original = new Object();
+        Object replacement = new Object();
+        assertTrue(SupplyPullPolicy.stopsToolSearch(original, replacement, false));
+        assertTrue(SupplyPullPolicy.stopsToolSearch(original, null, false));
+        assertFalse(SupplyPullPolicy.stopsToolSearch(null, replacement, false));
     }
 
     // ── a pass ───────────────────────────────────────────────────────────────────────────────

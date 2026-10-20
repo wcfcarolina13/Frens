@@ -132,14 +132,16 @@ public final class ZoneNetworkManager {
         ServerPlayNetworking.registerGlobalReceiver(ZoneEditPayload.ID, (payload, context) ->
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
-                    if (player == null || !BotAccessGate.isServerAdmin(player)) return;
+                    if (player == null) return;
 
                     String oldLabel = payload.label();
                     String newName = payload.newName();
                     if (oldLabel == null || newName == null || newName.isBlank()) return;
 
                     ServerWorld world = player.getCommandSource().getWorld();
-                    boolean ok = ProtectedZoneService.renameZone(world, oldLabel, newName, player, true);
+                    if (!checkZoneEditPermission(player, world, oldLabel)) return;
+                    boolean ok = ProtectedZoneService.renameZone(world, oldLabel, newName, player,
+                            BotAccessGate.isServerAdmin(player));
                     if (ok) {
                         ZoneVisualizerService.renameZone(oldLabel, newName);
                         ChatUtils.sendSystemMessage(player.getCommandSource(),
@@ -155,13 +157,15 @@ public final class ZoneNetworkManager {
         ServerPlayNetworking.registerGlobalReceiver(ZoneDeletePayload.ID, (payload, context) ->
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
-                    if (player == null || !BotAccessGate.isServerAdmin(player)) return;
+                    if (player == null) return;
 
                     String label = payload.label();
                     if (label == null || label.isBlank()) return;
 
                     ServerWorld world = player.getCommandSource().getWorld();
-                    boolean ok = ProtectedZoneService.removeZone(world, label, player, true);
+                    if (!checkZoneEditPermission(player, world, label)) return;
+                    boolean ok = ProtectedZoneService.removeZone(world, label, player,
+                            BotAccessGate.isServerAdmin(player));
                     if (ok) {
                         ZoneVisualizerService.removeZone(label);
                         ChatUtils.sendSystemMessage(player.getCommandSource(),
@@ -194,6 +198,28 @@ public final class ZoneNetworkManager {
                     if (player == null) return;
                     sendZoneList(player);
                 }));
+    }
+
+    private static boolean checkZoneEditPermission(ServerPlayerEntity player, ServerWorld world, String label) {
+        for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
+            if (!label.equals(zone.getLabel())) continue;
+            boolean visible = isZoneVisibleToViewer(world, zone, player);
+            UUID owner = zone.getOwnerUuid();
+            BaseAccessPolicy.ZoneEditDecision decision = BaseAccessPolicy.zoneEditDecision(label, visible,
+                    player.getUuidAsString(), owner == null ? null : owner.toString(),
+                    Frens.isOperator(player), BotAccessGate.isHost(player));
+            if (decision == BaseAccessPolicy.ZoneEditDecision.NOT_FOUND) break;
+            if (decision == BaseAccessPolicy.ZoneEditDecision.ALLOW) {
+                return true;
+            }
+            ChatUtils.sendSystemMessage(player.getCommandSource(),
+                    decision == BaseAccessPolicy.ZoneEditDecision.BASE_AUTO_ZONE
+                            ? "Only an operator or the host can rename or delete a base's automatic zone."
+                            : "Only the zone's owner, an operator or the host can rename or delete this zone.");
+            return false;
+        }
+        ChatUtils.sendSystemMessage(player.getCommandSource(), "No zone named '" + label + "' found.");
+        return false;
     }
 
     public static void sendZoneList(ServerPlayerEntity player) {

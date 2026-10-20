@@ -70,6 +70,13 @@ public final class BaseNetworkManager {
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
                     if (player == null) return;
+                    boolean ownsBot = Frens.CONFIG.getBotOwnership().values().stream()
+                            .anyMatch(owner -> owner != null && player.getUuid().equals(tryParseUuid(owner.ownerUuid())));
+                    if (!BaseAccessPolicy.canMapVillage(ownsBot, Frens.isOperator(player), BotAccessGate.isHost(player))) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                "Only a bot owner, an operator or the host can map a village.");
+                        return;
+                    }
                     ServerWorld world = player.getCommandSource().getWorld();
                     if (world.getRegistryKey() != World.OVERWORLD) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Villages are only managed in the Overworld.");
@@ -270,6 +277,13 @@ public final class BaseNetworkManager {
                     var fort = opt.get();
                     UUID currentOwner = tryParseUuid(fort.getOwnerUuid());
                     boolean isAdmin = BotAccessGate.isServerAdmin(player);
+                    // Saved fortifications have no builder identity to authorize an ownerless claim.
+                    if (currentOwner == null && !BaseAccessPolicy.canClaimUnownedWall(
+                            false, Frens.isOperator(player), BotAccessGate.isHost(player))) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                "This wall has no recorded owner or builder. Only an operator or the host can claim it.");
+                        return;
+                    }
                     if (currentOwner != null && !currentOwner.equals(player.getUuid()) && !isAdmin) {
                         String ownerName = fort.getOwnerName() == null || fort.getOwnerName().isBlank()
                                 ? "another player"

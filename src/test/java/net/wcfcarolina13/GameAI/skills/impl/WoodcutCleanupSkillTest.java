@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.skills.impl;
 
+import net.wcfcarolina13.GameAI.skills.support.WoodcutScaffoldMemoryStore;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -8,6 +9,46 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WoodcutCleanupSkillTest {
+    @Test
+    void spreadSoilNeedsRememberedOrPlacedPillarEvidence() {
+        assertTrue(WoodcutCleanupDiagnostics.mayMineScaffoldMaterial(false, true, true, false));
+        assertTrue(WoodcutCleanupDiagnostics.mayMineScaffoldMaterial(false, true, false, true));
+        assertFalse(WoodcutCleanupDiagnostics.mayMineScaffoldMaterial(false, true, false, false));
+        assertFalse(WoodcutCleanupDiagnostics.mayMineScaffoldMaterial(false, false, true, true),
+                "a remembered position does not permit an unrelated replacement block");
+        assertTrue(WoodcutCleanupDiagnostics.mayMineScaffoldMaterial(true, false, false, false));
+    }
+
+    @Test
+    void failedOrRedirectedPillarsKeepEveryActualPlacementForTeardown() throws java.io.IOException {
+        String cleanup = source("WoodcutCleanupSkill.java");
+        assertTrue(cleanup.contains("recordScaffoldPlacement(scaffoldMemory, placedPillar, placePos)"));
+        assertTrue(cleanup.contains("recordScaffoldPlacement(scaffoldMemory, placedPillar, alt)"));
+        assertTrue(cleanup.contains("recordScaffoldPlacement(scaffoldMemory, placedPillar, below)"));
+        assertFalse(cleanup.contains("placedPillar.add(candidate.toImmutable())"),
+                "a fallback placement is not at the requested candidate");
+        assertFalse(cleanup.contains("Set<Long> tempMemory = new HashSet<>()"),
+                "temporary reach pillars must survive a failed teardown in the bot's memory");
+    }
+
+    @Test
+    void anotherBotsCompletedCleanupLeavesOwnScaffoldEligibleEvenOnTreeSoil() {
+        var shared = new java.util.HashMap<String, Object>();
+        var first = java.util.UUID.randomUUID();
+        var second = java.util.UUID.randomUUID();
+        String dimension = "minecraft:overworld";
+        WoodcutScaffoldMemoryStore.record(shared, first, dimension, 120L, 0L);
+        WoodcutScaffoldMemoryStore.record(shared, first, dimension, 121L, 0L);
+        WoodcutScaffoldMemoryStore.record(shared, second, dimension, 121L, 0L);
+        WoodcutScaffoldMemoryStore.forget(shared, second, dimension, 121L);
+        // The upper block is gone when the first bot reaches teardown; its bottom block remains.
+        WoodcutScaffoldMemoryStore.forget(shared, first, dimension, 121L);
+        boolean remembered = WoodcutScaffoldMemoryStore.contains(
+                shared, first, dimension, 120L);
+        assertTrue(remembered);
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, remembered, false, true, true));
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false, true, true));
+    }
 
     @Test
     void fallbackSweepMinesStoneOnlyWhenTheBotPlacedIt() {
@@ -226,8 +267,10 @@ class WoodcutCleanupSkillTest {
         assertFalse(list.contains("Items.RED_SAND"), list);
         assertFalse(list.contains("Items.GRAVEL"), list);
         assertFalse(list.contains("_PLANKS"), "no planks in the heuristic pass");
-        assertTrue(cleanup.contains("!isRememberedScaffoldBlock(state.getBlock().asItem())"),
+        assertTrue(cleanup.contains("!mayMineScaffoldMaterial(state, true, false)"),
                 "the remembered pass must accept everything woodcut places");
+        assertTrue(cleanup.contains("isRememberedScaffoldBlock(state.getBlock().asItem()), spreadSoil, remembered, placed"));
+        assertTrue(cleanup.contains("state.isOf(Blocks.GRASS_BLOCK) || state.isOf(Blocks.PODZOL)\n                || state.isOf(Blocks.MYCELIUM)"));
         assertTrue(cleanup.contains("WoodcutSkill.PILLAR_BLOCKS.contains(item)"));
         String woodcut = source("WoodcutSkill.java");
         String placed = woodcut.substring(woodcut.indexOf("static final List<Item> PILLAR_BLOCKS"));

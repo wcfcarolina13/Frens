@@ -46,6 +46,19 @@ public final class SupplyChestRules {
     private SupplyChestRules() {
     }
 
+    /** Derives the declared other half without inspecting its chunk. LEFT rotates clockwise. */
+    public static Pos partnerPosition(Pos half, int facingX, int facingZ, String chestType) {
+        if (half == null || "SINGLE".equals(chestType)) {
+            return null;
+        }
+        if (Math.abs(facingX) + Math.abs(facingZ) != 1
+                || !("LEFT".equals(chestType) || "RIGHT".equals(chestType))) {
+            throw new IllegalArgumentException("Expected a horizontal facing and chest type");
+        }
+        int sign = "LEFT".equals(chestType) ? 1 : -1;
+        return new Pos(half.x() - sign * facingZ, half.y(), half.z() + sign * facingX);
+    }
+
     // ── Ownership ────────────────────────────────────────────────────────────────────────────
 
     /**

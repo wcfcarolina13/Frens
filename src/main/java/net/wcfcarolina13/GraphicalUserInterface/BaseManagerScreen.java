@@ -398,7 +398,7 @@ public class BaseManagerScreen extends Screen {
 
         addBtn("Claim Wall", "Claim ownership of the selected wall (ties it to your player)", y, 0,
                 this::sendClaimWall);
-        addBtn("Unclaim", "Release ownership of the selected wall so anyone can claim it", y, 1,
+        addBtn("Unclaim", "Release this wall's claim (an operator or host can reclaim it)", y, 1,
                 this::sendUnclaimWall);
         y += BUTTON_H + BUTTON_ROW_GAP;
 

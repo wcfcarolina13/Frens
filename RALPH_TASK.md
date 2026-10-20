@@ -4,7 +4,14 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.286) — next session starts here
+## Session Handoff 2026-10-20 (1.1.287) — next session starts here
+
+**State:** main = origin/main @ 1.1.287. Suite 3419 green. Deployed to Nirn. 1.1.287 = backlog 199, 200, 201, 219, 222 and finding 59 (Codex, fix wave and follow-up from two Fable reviews). Rulings: an unowned wall is claimable by op/host only (saved walls record no builder); a double chest whose other half is unloaded is refused at take time (`DENY_UNLOADED`, lock unknown); base auto-zones stay admin-only to edit. Finding 59's cause is not proven (bookkeeping defects fixed); it needs a two-bot sandbox rerun. Deferred: an owner who unclaims a wall on a dedicated server with no ops can't reclaim it; walk-abort guard also skips the un-sneak/door-open steps of an aborted walk (next walk resets them).
+
+**Pending sandbox check:** see the 1.1.286 handoff list below, plus:
+- 1.1.287: two bots clean the same felled tree (finding 59): no scaffold dirt left, natural soil untouched; a non-owner on a shared server can't rename/delete a zone, map a village or claim an ownerless wall; `/bot stop` then a new task: the old tool search doesn't walk the bot to its chest; double chest with one half unloaded is refused, not half-read.
+
+## Session Handoff 2026-10-20 (1.1.286) — superseded
 
 **State:** main = origin/main @ 1.1.286. Suite 3399 green. Deployed to Nirn. 1.1.286 = findings 56, 60, backlog 216, 135, 167 (Codex `77df45d2`, fix wave `4f20d03f`); 146 restated (escapeStairs unreachable: `BotStuckService.updateStuckTracker` has no callers, delete or wire it). 1.1.285 = backlog 178, 220, 223, 224 (Codex, `9b23cffb`). 1.1.284 = backlog 196, 253 (Codex, `c982f8b6`; 216, 210 skipped). 1.1.283 = backlog 409, 186, 231 (Codex-implemented, `003fd626`); 135 skipped (not small). Not sandbox-checked.
 **Pending sandbox check (Bradley 2026-10-20: queue it, run when usage allows, not yet):** one combined run for the unchecked builds:
@@ -269,9 +276,9 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "join-check commander radius" (48; 1.1.236 handoff, 2026-10-14) — ✅ 1.1.284 c982f8b6
 - [ ] "multiplayer roster payload" (1.1.236 handoff, 2026-10-14)
 - [ ] "level-name-keyed stores (chest/furnace/beehive registries, hunt + crafting history, fortifications, mapped villages" (1.1.256 fixed spawns only; 1.1.234 handoff, 2026-10-14)
-- [ ] "D7 non-op zone edit/delete" (1.1.233 handoff, 2026-10-13)
-- [ ] "anyone can map a village" (1.1.233 handoff, 2026-10-13)
-- [ ] "claim an ownerless wall" (1.1.233 handoff, 2026-10-13)
+- [x] "D7 non-op zone edit/delete" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.287
+- [x] "anyone can map a village" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.287
+- [x] "claim an ownerless wall" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.287
 - [ ] "typed /bot ... for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
 - [ ] "SPAWN for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
 - [x] "resurrection owner clause." (1.1.233 handoff, 2026-10-13) ✅ 1.1.272 (Questing-off ritual: owner, op or host)
@@ -289,10 +296,10 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "`grantableEstimate` works per chest half, so it under-counts double chests." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.286 77df45d2
 - [ ] "Three \"other half of a double chest\" helpers could be one." (1.1.221 handoff, 2026-09-25)
 - [x] "CraftingHelper pull hint maps aren't cleared at stop (bounded wall-clock hints)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c
-- [ ] "A double chest whose other half is unloaded reads as unreadable (skipped for that pass)." (1.1.221 handoff, 2026-09-25)
+- [x] "A double chest whose other half is unloaded reads as unreadable (skipped for that pass)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.287
 - [x] "A grant-covered ask while the owner is away is still refused (only Always skips the owner-range check)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
 - [ ] "The `/bot stop` fix for the chest tool search (read `hasActiveTask` once before the loop) is verified by reading only; its test pins the pure helper, not the wiring." (1.1.221 handoff, 2026-09-25)
-- [ ] "Pre-existing latch race: after `/bot stop`, a later `beginSkill` for the same bot clears the abort latch, so a search still inside a hop can resume." ("needs the captured ticket's cancel flag (a TaskService accessor)"; 1.1.221 handoff, 2026-09-25)
+- [x] "Pre-existing latch race: after `/bot stop`, a later `beginSkill` for the same bot clears the abort latch, so a search still inside a hop can resume." ("needs the captured ticket's cancel flag (a TaskService accessor)"; 1.1.221 handoff, 2026-09-25) — ✅ 1.1.287
 - [x] "Ownership is not re-checked on arrival." (Bot Storage collect; 1.1.220 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
 - [x] "`verifyChests` revives a record for any chest placed back at its position." (1.1.220 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
 - [x] "A dimension-fallback collect is dropped." (1.1.220 handoff, 2026-09-25) — ✅ 1.1.278 569c625d (dimension-fallback collect now tells the owner)

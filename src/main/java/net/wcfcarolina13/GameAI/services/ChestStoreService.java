@@ -721,12 +721,28 @@ public final class ChestStoreService {
                                                                    Predicate<ItemStack> matcher,
                                                                    String purpose,
                                                                    SupplyWithdrawals.WaitMode mode) {
+        return withdrawMatchingWalkOnlyCancellable(source, bot, chestPos, amount, matcher, purpose, mode,
+                () -> bot != null && TaskService.isAbortRequested(bot.getUuid()));
+    }
+
+    /** A task-bound search carries the same cancellation check through queued asks and takes. */
+    public static SupplyWithdrawals.Result withdrawMatchingWalkOnlyCancellable(ServerCommandSource source,
+                                                                   ServerPlayerEntity bot,
+                                                                   BlockPos chestPos,
+                                                                   int amount,
+                                                                   Predicate<ItemStack> matcher,
+                                                                   String purpose,
+                                                                   SupplyWithdrawals.WaitMode mode,
+                                                                   java.util.function.BooleanSupplier abort) {
         if (bot == null || chestPos == null || source == null || matcher == null) {
             return SupplyWithdrawals.Result.refused(Refusal.INVALID);
         }
         MinecraftServer server = source.getServer();
         if (server == null) {
             return SupplyWithdrawals.Result.refused(Refusal.NOT_RUNNING);
+        }
+        if (abort != null && abort.getAsBoolean()) {
+            return SupplyWithdrawals.Result.refused(Refusal.ABORTED);
         }
 
         int want = Math.max(1, amount);
@@ -741,22 +757,29 @@ public final class ChestStoreService {
         // Server thread only, abandon-safe: SupplyServerHop never runs the ask off it (a stopped
         // server) or after this worker stopped waiting for it.
         SupplyAsk ask = SupplyServerHop.call(server,
-                () -> askBeforeWalking(bot, chestPos, want, matcher, purpose, mode), ASK_HOP_TIMEOUT_MS, null);
+                () -> askBeforeWalking(bot, chestPos, want, matcher, purpose, mode, abort), ASK_HOP_TIMEOUT_MS, null);
         if (ask == null) {
             return SupplyWithdrawals.Result.refused(Refusal.SERVER_BUSY);
         }
         if (ask.walkFor() == null) {
             return ask.result();
         }
+        if (abort != null && abort.getAsBoolean()) {
+            return SupplyWithdrawals.Result.refused(Refusal.ABORTED);
+        }
 
-        TransferAttemptResult reach = approachChestForTransfer(source, bot, chestPos, WALK_ONLY);
+        TransferAttemptResult reach = MovementAbortPolicy.withAbort(abort,
+                () -> approachChestForTransfer(source, bot, chestPos, WALK_ONLY));
+        if (abort != null && abort.getAsBoolean()) {
+            return SupplyWithdrawals.Result.refused(Refusal.ABORTED);
+        }
         if (!reach.interacted()) {
             // Any ticket the ask left stays with the facade; a later call can still redeem it.
             return SupplyWithdrawals.Result.refused(SupplyPullPolicy.UNREACHABLE, Scope.CHEST);
         }
         return SupplyWithdrawals.withdraw(bot, chestPos, ask.walkFor(), want, want, purpose,
                 mode == null ? SupplyWithdrawals.WaitMode.NONE : mode,
-                () -> TaskService.isAbortRequested(bot.getUuid()));
+                abort);
     }
 
     /**
@@ -772,9 +795,19 @@ public final class ChestStoreService {
                                               int want,
                                               Predicate<ItemStack> matcher,
                                               String purpose,
-                                              SupplyWithdrawals.WaitMode mode) {
+                                              SupplyWithdrawals.WaitMode mode,
+                                              java.util.function.BooleanSupplier abort) {
+        if (abort != null && abort.getAsBoolean()) {
+            return new SupplyAsk(SupplyWithdrawals.Result.refused(Refusal.ABORTED), null);
+        }
         ServerWorld world = bot.getEntityWorld();
+        if (!world.isChunkLoaded(chestPos)) {
+            return new SupplyAsk(SupplyWithdrawals.Result.refused(Refusal.CHEST_UNREADABLE), null);
+        }
         BlockState state = world.getBlockState(chestPos);
+        if (state.getBlock() instanceof ChestBlock && otherChestHalf(world, chestPos) == null) {
+            state = state.with(ChestBlock.CHEST_TYPE, ChestType.SINGLE);
+        }
         Inventory storage = state.getBlock() instanceof net.minecraft.block.ChestBlock chestBlock
                 ? net.minecraft.block.ChestBlock.getInventory(chestBlock, state, world, chestPos, true)
                 : null;
@@ -801,7 +834,7 @@ public final class ChestStoreService {
         SupplyWithdrawals.Result last = SupplyWithdrawals.Result.refused(SupplyPullPolicy.NO_MATCH, Scope.CHEST);
         for (ItemStack sample : samples) {
             SupplyWithdrawals.Result result = SupplyWithdrawals.withdraw(bot, chestPos, sample, want, want, purpose,
-                    SupplyWithdrawals.WaitMode.NONE, null);
+                    SupplyWithdrawals.WaitMode.NONE, abort);
             if (SupplyPullPolicy.walkAfterAsk(result.kind(), mode)) {
                 return new SupplyAsk(result, sample);
             }
@@ -1051,7 +1084,7 @@ public final class ChestStoreService {
         String lastFailure = "stand-blocked";
         int consecutiveNoMove = 0;
         for (ChestStandCandidate candidate : candidates) {
-            if (TaskService.isAbortRequested(bot.getUuid())) {
+            if (MovementService.abortRequested(bot)) {
                 return new ChestApproachResult(false, false, null, "aborted");
             }
             if (candidate == null || candidate.pos() == null || failedStands.contains(candidate.pos().asLong())) {
@@ -1152,7 +1185,7 @@ public final class ChestStoreService {
         }
 
         // Retry once after clearing leaf obstructions mid-path
-        if (towardStand.getAxis().isHorizontal() && !TaskService.isAbortRequested(bot.getUuid())) {
+        if (towardStand.getAxis().isHorizontal() && !MovementService.abortRequested(bot)) {
             MovementService.LeafClearResult leafClear = MovementService.clearLeafObstructionDetailed(bot, towardStand);
             if (leafClear.countsAsCleared()) {
                 MovementService.clearRecentWalkAttempt(bot.getUuid());

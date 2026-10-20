@@ -7,6 +7,11 @@ final class WoodcutCleanupDiagnostics {
     private WoodcutCleanupDiagnostics() {
     }
 
+    static boolean mayMineScaffoldMaterial(boolean scaffoldMaterial, boolean spreadSoil,
+                                           boolean remembered, boolean placed) {
+        return scaffoldMaterial || (spreadSoil && (remembered || placed));
+    }
+
     static record CleanupScanStats(int actionableTargets,
                                    int blockedProtected,
                                    int blockedHuman,

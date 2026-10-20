@@ -95,6 +95,14 @@ public final class WoodcutScaffoldMemoryStore {
         }
     }
 
+    /** Failed mining keeps the placement available for a later cleanup attempt. */
+    public static boolean forgetAfterMine(Set<Long> memory, long packedPos, boolean mined) {
+        if (mined && memory != null) {
+            memory.remove(packedPos);
+        }
+        return mined;
+    }
+
     /** Whether this bot remembers placing scaffold at the position. */
     public static boolean contains(Map<String, Object> sharedState, UUID bot, String dimension, long packedPos) {
         Set<Long> set = get(sharedState, bot, dimension, false);

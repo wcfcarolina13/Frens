@@ -260,7 +260,9 @@ class SupplyBypassClosedTest {
         assertCalls(TPS, "pullFromReachableChests", WITHDRAW_CALL);
         assertCalls(TPS, "grantableChestCount", GRANTABLE_CALL);
         assertCalls(CSS, "askBeforeWalking", WITHDRAW_CALL);
-        assertCalls(CSS, "withdrawMatchingWalkOnly", WITHDRAW_CALL);
+        assertCalls(CSS, "withdrawMatchingWalkOnlyCancellable", WITHDRAW_CALL);
+        assertCalls(CSS, "withdrawMatchingWalkOnly",
+                Pattern.compile("(?<![\\w.])withdrawMatchingWalkOnlyCancellable\\s*\\("));
         assertCalls(MUTUAL_AID, "askForFood", WITHDRAW_CALL);
         assertCalls(MUTUAL_AID, "takeFoodFromChest", GRANTABLE_CALL);
         assertCalls(MUTUAL_AID, "takeFoodFromChest", ASK_FOR_FOOD_CALL);
@@ -277,7 +279,7 @@ class SupplyBypassClosedTest {
     void chokePointsAndTheirChestListingsHoldNoRawMove() {
         Map<String, List<String>> methods = new LinkedHashMap<>();
         methods.put(TPS, List.of("pullFromReachableChests", "grantableChestCount", "scanContainers", "scanContainerSlots"));
-        methods.put(CSS, List.of("askBeforeWalking", "withdrawMatchingWalkOnly"));
+        methods.put(CSS, List.of("askBeforeWalking", "withdrawMatchingWalkOnly", "withdrawMatchingWalkOnlyCancellable"));
         methods.put(MUTUAL_AID, List.of("tryTakeFoodFromSharedChest", "takeFoodFromChest", "askForFood", "listChestFood",
                 "hasGrantableChestFood", "scanForGrantableChestFood", "mergedChestAt"));
         methods.put(CRAFTING, List.of("withdrawFromNearbyChests", "countItemsInInventoryAndNearbyChests",
@@ -323,8 +325,8 @@ class SupplyBypassClosedTest {
         assertCalls(TPS, "pullFromReachableChests", SHARED_HOP_CALL);
         // ChestStoreService keeps its private copy for the owner's own transfers, deposits and the
         // walk; the ask before walking uses the shared hop.
-        assertCalls(CSS, "withdrawMatchingWalkOnly", SHARED_HOP_CALL);
-        assertFalse(PRIVATE_HOP_CALL.matcher(methodBody(CSS, "withdrawMatchingWalkOnly")).find(),
+        assertCalls(CSS, "withdrawMatchingWalkOnlyCancellable", SHARED_HOP_CALL);
+        assertFalse(PRIVATE_HOP_CALL.matcher(methodBody(CSS, "withdrawMatchingWalkOnlyCancellable")).find(),
                 "ChestStoreService#withdrawMatchingWalkOnly hops through SupplyServerHop.call only");
     }
 

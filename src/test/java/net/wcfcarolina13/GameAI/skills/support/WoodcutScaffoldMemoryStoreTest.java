@@ -57,6 +57,29 @@ class WoodcutScaffoldMemoryStoreTest {
     }
 
     @Test
+    void successfulCleanupForgetsOnlyTheMinedPlacement() {
+        Map<String, Object> shared = new HashMap<>();
+        WoodcutScaffoldMemoryStore.record(shared, alex, OVERWORLD, 7L, 0L);
+        WoodcutScaffoldMemoryStore.record(shared, alex, OVERWORLD, 8L, 0L);
+        WoodcutScaffoldMemoryStore.record(shared, bob, OVERWORLD, 7L, 0L);
+        Set<Long> memory = WoodcutScaffoldMemoryStore.get(shared, alex, OVERWORLD, false);
+
+        assertTrue(WoodcutScaffoldMemoryStore.forgetAfterMine(memory, 7L, true));
+        assertEquals(Set.of(8L), memory);
+        assertFalse(WoodcutScaffoldMemoryStore.contains(shared, alex, OVERWORLD, 7L));
+        assertTrue(WoodcutScaffoldMemoryStore.contains(shared, bob, OVERWORLD, 7L));
+    }
+
+    @Test
+    void failedCleanupKeepsPlacementForRetryAndMissingMemoryIsSafe() {
+        Set<Long> memory = new HashSet<>(Set.of(7L));
+        assertFalse(WoodcutScaffoldMemoryStore.forgetAfterMine(memory, 7L, false));
+        assertEquals(Set.of(7L), memory);
+        assertTrue(WoodcutScaffoldMemoryStore.forgetAfterMine(null, 7L, true));
+        assertFalse(WoodcutScaffoldMemoryStore.forgetAfterMine(null, 7L, false));
+    }
+
+    @Test
     void aDimensionChangeDropsThatBotsOldSet() {
         Map<String, Object> shared = new HashMap<>();
         WoodcutScaffoldMemoryStore.record(shared, alex, OVERWORLD, 5L, 0L);

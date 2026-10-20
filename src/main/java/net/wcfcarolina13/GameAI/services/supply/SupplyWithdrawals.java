@@ -175,7 +175,7 @@ public final class SupplyWithdrawals {
      * @param need     how many it actually needs (the grant never exceeds it)
      * @param purpose  a short label for the logs, e.g. {@code "woodcut-axe"}
      * @param mode     whether a worker may wait for the owner's answer inside this call
-     * @param abort    polled while waiting; {@code true} stops the wait ({@code null}: never)
+     * @param abort    checked before each server step and while waiting; true stops ({@code null}: never)
      */
     public static Result withdraw(ServerPlayerEntity bot, BlockPos chestPos, ItemStack sample, int qty, int need,
                                   String purpose, WaitMode mode, BooleanSupplier abort) {
@@ -187,7 +187,9 @@ public final class SupplyWithdrawals {
                     + " not waiting there, this call and any like it run without waiting", purposeText(purpose));
         }
         WaitMode effective = SupplyWithdrawalPolicy.effectiveMode(mode, onServerThread);
-        Supplier<Step> oneStep = () -> step(bot, chestPos, sample, qty, need);
+        Supplier<Step> oneStep = () -> abort != null && abort.getAsBoolean()
+                ? Step.loud(Result.refused(Refusal.ABORTED))
+                : step(bot, chestPos, sample, qty, need);
         Step outcome;
         if (srv == null) {
             outcome = Step.loud(Result.refused(Refusal.NOT_RUNNING));

@@ -272,7 +272,7 @@ public class ProtectedZoneService {
         ProtectedZone zone = worldZones.get(label);
         if (zone == null) return false;
 
-        if (!isAdmin && !zone.getOwnerUuid().equals(player.getUuid())) return false;
+        if (!isAdmin && !player.getUuid().equals(zone.getOwnerUuid())) return false;
 
         worldZones.remove(label);
         save(world.getServer(), worldId);

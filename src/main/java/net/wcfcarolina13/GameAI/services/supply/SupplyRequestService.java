@@ -726,7 +726,7 @@ public final class SupplyRequestService {
 
     /**
      * Reads every access fact for the chest at {@code posA} and, for a double chest, its partner,
-     * without loading a chunk: an unloaded half stops the read before its block is touched.
+     * without loading a chunk. An unavailable partner has an unknown lock and refuses access.
      */
     private static ChestRead readChest(MinecraftServer srv, ServerWorld world, BlockPos posA,
                                        ServerPlayerEntity bot, UUID owner) {
@@ -737,35 +737,37 @@ public final class SupplyRequestService {
         if (!(stateA.getBlock() instanceof ChestBlock chestBlock)) {
             return ChestRead.denied(Access.DENY_NOT_CHEST);
         }
-        BlockPos posB = null;
-        if (stateA.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE) {
-            posB = posA.offset(ChestBlock.getFacing(stateA));
-            if (!world.isChunkLoaded(posB)) {
-                return ChestRead.denied(Access.DENY_UNLOADED);
-            }
-        }
+        BlockPos posB = declaredPartnerOf(stateA, posA);
         boolean isDouble = posB != null;
+        boolean partnerLoaded = !isDouble || world.isChunkLoaded(posB);
+        // Vanilla's merge lookup must not inspect an unloaded partner. This local state does
+        // not change the block; it asks vanilla to check the lid and read just this half.
+        BlockState readState = isDouble && partnerLoaded ? stateA : stateA.with(ChestBlock.CHEST_TYPE, ChestType.SINGLE);
         BlockEntity entityA = world.getBlockEntity(posA);
-        BlockEntity entityB = isDouble ? world.getBlockEntity(posB) : null;
+        BlockEntity entityB = isDouble && partnerLoaded ? world.getBlockEntity(posB) : null;
         boolean chestEntities = entityA instanceof ChestBlockEntity
-                && (!isDouble || (entityB instanceof ChestBlockEntity && isPartner(stateA, world.getBlockState(posB))));
+                && (!isDouble || !partnerLoaded
+                || (entityB instanceof ChestBlockEntity && isPartner(stateA, world.getBlockState(posB))));
         if (!chestEntities) {
             return ChestRead.denied(Access.DENY_NOT_CHEST);
         }
         ChestBlockEntity chestA = (ChestBlockEntity) entityA;
-        ChestBlockEntity chestB = isDouble ? (ChestBlockEntity) entityB : null;
+        ChestBlockEntity chestB = entityB instanceof ChestBlockEntity chest ? chest : null;
 
         String dimension = world.getRegistryKey().getValue().toString();
         boolean zonesLoaded = ProtectedZoneService.isLoaded(dimension);
         boolean territoryA = territoryAllows(bot, world, posA);
         boolean territoryB = !isDouble || territoryAllows(bot, world, posB);
-        boolean blocked = ChestBlock.getInventory(chestBlock, stateA, world, posA, false) == null;
+        boolean blocked = partnerLoaded
+                && ChestBlock.getInventory(chestBlock, readState, world, posA, false) == null;
         // Footgun: a single chest passes null for half B. recordedOwnersAt(world, null) fails closed
         // with [null], which would read as DENY_UNKNOWN for every single chest.
         SupplyChestRules.Ownership ownership = SupplyChestRules.ownership(owner,
                 BotChestRegistryService.recordedOwnersAt(world, posA),
                 isDouble ? BotChestRegistryService.recordedOwnersAt(world, posB) : null);
-        AccessFacts facts = new AccessFacts(true, true, zonesLoaded,
+        // Ownership and territory are registry facts even when B is unloaded. Its lock is
+        // unknowable in that case, so fail closed before attempting any inventory read.
+        AccessFacts facts = new AccessFacts(partnerLoaded, true, zonesLoaded,
                 chestA.isLocked(), chestB != null && chestB.isLocked(),
                 territoryA, territoryB, blocked, ownership);
         Access access = SupplyChestRules.access(facts);
@@ -773,7 +775,7 @@ public final class SupplyRequestService {
         if (access != Access.OK) {
             return new ChestRead(access, key, null);
         }
-        Inventory inventory = ChestBlock.getInventory(chestBlock, stateA, world, posA, true);
+        Inventory inventory = ChestBlock.getInventory(chestBlock, readState, world, posA, true);
         if (inventory == null) {
             return new ChestRead(Access.DENY_BLOCKED, key, null);
         }
@@ -808,6 +810,13 @@ public final class SupplyRequestService {
 
     private static boolean hasChestProperties(BlockState state) {
         return state.contains(ChestBlock.CHEST_TYPE) && state.contains(ChestBlock.FACING);
+    }
+
+    private static BlockPos declaredPartnerOf(BlockState state, BlockPos pos) {
+        var facing = state.get(ChestBlock.FACING);
+        Pos partner = SupplyChestRules.partnerPosition(toPos(pos), facing.getOffsetX(), facing.getOffsetZ(),
+                state.get(ChestBlock.CHEST_TYPE).name());
+        return partner == null ? null : new BlockPos(partner.x(), partner.y(), partner.z());
     }
 
     /** The other half of a loaded double chest at {@code pos}, or {@code null}. Never loads a chunk. */
@@ -1003,8 +1012,8 @@ public final class SupplyRequestService {
     /**
      * The canonical key of the chest at {@code pos} — the same key a request records, whichever
      * half {@code pos} names — or {@code null} when the service is not running, the chunk is not
-     * loaded, the block is not a chest, or it is a double chest whose other half cannot be
-     * resolved without loading a chunk. Server thread; never loads a chunk.
+     * loaded, or the block is not a chest. A declared double chest keeps the same key when its
+     * partner is unloaded, matching {@link #readChest}. Server thread; never loads a chunk.
      */
     static ChestKey chestKeyAt(ServerWorld world, BlockPos pos) {
         MinecraftServer srv = server;
@@ -1015,13 +1024,7 @@ public final class SupplyRequestService {
         if (!(state.getBlock() instanceof ChestBlock) || !hasChestProperties(state)) {
             return null;
         }
-        BlockPos partner = null;
-        if (state.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE) {
-            partner = partnerOf(world, pos);
-            if (partner == null) {
-                return null;
-            }
-        }
+        BlockPos partner = declaredPartnerOf(state, pos);
         return chestKey(srv, world, pos, partner);
     }
 
