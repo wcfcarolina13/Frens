@@ -1461,7 +1461,10 @@ public class modCommandRegistry {
                                         if (net.wcfcarolina13.network.BotAccessGate.isServerAdmin(viewer)) {
                                             source.sendError(Text.literal("Failed to open bot inventory."));
                                         } else {
-                                            source.sendError(Text.literal("Out of range or wrong dimension."));
+                                            source.sendError(Text.literal(net.wcfcarolina13.GameAI.services.BotAccessPolicy.openOutOfRangeMessage(
+                                                    net.wcfcarolina13.EntityUtil.safeDisplayName(bot.getName().getString()),
+                                                    viewer.getEntityWorld() == bot.getEntityWorld(),
+                                                    Math.sqrt(viewer.squaredDistanceTo(bot)))));
                                         }
                                         return 0;
                                     }
@@ -1496,7 +1499,10 @@ public class modCommandRegistry {
 	                                                if (net.wcfcarolina13.network.BotAccessGate.isServerAdmin(viewer)) {
 	                                                    source.sendError(Text.literal("Failed to open bot inventory."));
 	                                                } else {
-	                                                    source.sendError(Text.literal("Out of range or wrong dimension."));
+	                                                    source.sendError(Text.literal(net.wcfcarolina13.GameAI.services.BotAccessPolicy.openOutOfRangeMessage(
+                                                    net.wcfcarolina13.EntityUtil.safeDisplayName(bot.getName().getString()),
+                                                    viewer.getEntityWorld() == bot.getEntityWorld(),
+                                                    Math.sqrt(viewer.squaredDistanceTo(bot)))));
 	                                                }
 	                                                return 0;
 	                                            }

@@ -67,6 +67,26 @@ public final class BotAccessPolicy {
         };
     }
 
+    /**
+     * Whether an inventory screen opened through the normal open path is remote-authorized. A
+     * server admin may open a bot's inventory from any distance (changelog ruling), but an admin
+     * who also owns the bot is decided as {@link Decision#ALLOW_OWNER}, which needs reach unless
+     * the screen is remote-authorized; without this the screen closed on its first tick, silently
+     * (finding 55).
+     */
+    public static boolean openRemoteAuthorized(boolean isServerAdmin) {
+        return isServerAdmin;
+    }
+
+    /** The player line when a non-admin's open fails on range: which of the two it was. */
+    public static String openOutOfRangeMessage(String botName, boolean sameWorld, double distance) {
+        String name = botName == null || botName.isBlank() ? "The bot" : botName;
+        if (!sameWorld) {
+            return name + " is in another dimension.";
+        }
+        return name + " is too far away to open (" + Math.round(distance) + " blocks).";
+    }
+
     /** Longest client string {@link #logSafe} keeps before cutting. */
     public static final int LOG_SAFE_MAX_CHARS = 32;
 

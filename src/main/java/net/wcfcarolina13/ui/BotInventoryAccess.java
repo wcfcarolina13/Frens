@@ -21,9 +21,13 @@ public final class BotInventoryAccess {
             if (viewer.squaredDistanceTo(bot) > 64.0) return false;
         }
 
+        // An admin opens from any range, so its screen must not need reach to stay open either
+        // (an admin who owns the bot is decided as the owner, which does).
+        boolean remoteAuthorized = net.wcfcarolina13.GameAI.services.BotAccessPolicy.openRemoteAuthorized(
+                BotAccessGate.isServerAdmin(viewer));
         viewer.openHandledScreen(new net.minecraft.screen.SimpleNamedScreenHandlerFactory(
                 (syncId, playerInv, player) ->
-                        new net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler(syncId, playerInv, bot.getInventory(), bot),
+                        new net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler(syncId, playerInv, bot.getInventory(), bot, remoteAuthorized),
                 net.minecraft.text.Text.literal(EntityUtil.safeDisplayName(bot.getName().getString()) + "'s Inventory")
         ));
         return true;

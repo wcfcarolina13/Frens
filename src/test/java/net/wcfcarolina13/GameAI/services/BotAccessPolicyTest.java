@@ -130,4 +130,27 @@ class BotAccessPolicyTest {
         }
         assertFalse(BotAccessPolicy.canKeepInventoryOpen(null, true, true));
     }
+
+    // ── open path (finding 55) ─────────────────────────────────────────────
+
+    @Test
+    void anAdminsOpenIsRemoteAuthorizedSoItStaysOpenOutOfReach() {
+        assertTrue(BotAccessPolicy.openRemoteAuthorized(true));
+        assertFalse(BotAccessPolicy.openRemoteAuthorized(false));
+        // An admin who owns the bot is decided as the owner: the flag is what keeps it open.
+        assertTrue(BotAccessPolicy.canKeepInventoryOpen(Decision.ALLOW_OWNER,
+                BotAccessPolicy.openRemoteAuthorized(true), false));
+        assertFalse(BotAccessPolicy.canKeepInventoryOpen(Decision.ALLOW_OWNER,
+                BotAccessPolicy.openRemoteAuthorized(false), false));
+    }
+
+    @Test
+    void outOfRangeMessageSaysWhichReason() {
+        assertEquals("Coll is too far away to open (16 blocks).",
+                BotAccessPolicy.openOutOfRangeMessage("Coll", true, 16.3));
+        assertEquals("Coll is in another dimension.",
+                BotAccessPolicy.openOutOfRangeMessage("Coll", false, 16.3));
+        assertEquals("The bot is in another dimension.",
+                BotAccessPolicy.openOutOfRangeMessage(null, false, 0));
+    }
 }
