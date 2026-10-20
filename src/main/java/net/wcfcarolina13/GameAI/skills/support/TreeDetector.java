@@ -9,6 +9,9 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.world.Heightmap;
+import net.minecraft.world.chunk.WorldChunk;
+import net.wcfcarolina13.GameAI.services.ChunkBlockReader;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotBeehiveRegistryService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
@@ -25,12 +28,15 @@ import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Light-weight tree identification helpers shared by woodcutting logic.
  */
 public final class TreeDetector {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("tree-detector");
     private static final int MAX_TREE_HEIGHT = 18;
     private static final int HUMAN_SCAN_RADIUS = 2;
     private static final int LEAF_SCAN_RADIUS = 3;
@@ -1054,7 +1060,13 @@ public final class TreeDetector {
         if (world == null || origin == null) {
             return null;
         }
-        long deadline = System.nanoTime() + Math.max(1L, timeBudgetMs) * 1_000_000L;
+        long startedAt = System.nanoTime();
+        long deadline = startedAt + Math.max(1L, timeBudgetMs) * 1_000_000L;
+        // One reader per sampling pass: each sample reads 9 columns, and off the server thread
+        // every world.getBlockState is a server round trip.
+        ChunkBlockReader reader = new ChunkBlockReader(world);
+        int sampledColumns = 0;
+        int lastRadius = 0;
         int startRadius = Math.max(Math.max(1, innerRadius + 1), Math.max(1, radiusStep));
         int innerSq = Math.max(0, innerRadius * innerRadius);
         double bestDistSq = Double.MAX_VALUE;
@@ -1062,15 +1074,18 @@ public final class TreeDetector {
         Set<Long> seenBases = new HashSet<>();
 
         for (int radius = startRadius; radius <= outerRadius; radius += Math.max(1, radiusStep)) {
-            int samples = Math.max(minSamplesPerRing, Math.min(48, radius * 2));
+            int samples = TreeSamplingPolicy.samplesForRing(radius, minSamplesPerRing);
+            lastRadius = radius;
             for (int sample = 0; sample < samples; sample++) {
                 if (System.nanoTime() > deadline) {
+                    logSamplingPass(origin, outerRadius, lastRadius, sampledColumns, best, startedAt, true);
                     return best;
                 }
                 double angle = (Math.PI * 2.0D * sample) / samples;
                 int x = origin.getX() + (int) Math.round(Math.cos(angle) * radius);
                 int z = origin.getZ() + (int) Math.round(Math.sin(angle) * radius);
-                BlockPos tree = findTreeNearColumnForWoodcut(world, origin, x, z, verticalRange, seenBases, excludedBases);
+                sampledColumns++;
+                BlockPos tree = findTreeNearColumnForWoodcut(world, reader, origin, x, z, verticalRange, seenBases, excludedBases);
                 if (tree == null) {
                     continue;
                 }
@@ -1082,7 +1097,16 @@ public final class TreeDetector {
                 best = tree.toImmutable();
             }
         }
+        logSamplingPass(origin, outerRadius, lastRadius, sampledColumns, best, startedAt, false);
         return best;
+    }
+
+    private static void logSamplingPass(BlockPos origin, int outerRadius, int lastRadius, int sampledColumns,
+                                        BlockPos best, long startedAt, boolean budgetExhausted) {
+        LOGGER.info("Tree sampling from {}: sampledColumns={} reachedRadius={}/{} found={} budgetExhausted={} after {}ms",
+                origin.toShortString(), sampledColumns, lastRadius, outerRadius,
+                best == null ? "none" : best.toShortString(), budgetExhausted,
+                (System.nanoTime() - startedAt) / 1_000_000L);
     }
 
     public static String summarizeProtectionReasons(Map<String, Integer> reasonCounts) {
@@ -1121,28 +1145,32 @@ public final class TreeDetector {
     }
 
     private static BlockPos findTreeNearColumnForWoodcut(ServerWorld world,
+                                                         ChunkBlockReader reader,
                                                          BlockPos origin,
                                                          int x,
                                                          int z,
                                                          int verticalRange,
                                                          Set<Long> seenBases,
                                                          Set<BlockPos> excludedBases) {
-        BlockPos column = new BlockPos(x, origin.getY(), z);
-        if (!world.isChunkLoaded(column)) {
+        WorldChunk columnChunk = reader.chunk(x >> 4, z >> 4);
+        if (columnChunk == null) {
             return null;
         }
         int minY = Math.max(world.getBottomY(), origin.getY() - Math.max(1, verticalRange));
-        int maxY = Math.min(world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z) + 2,
-                origin.getY() + Math.max(1, verticalRange));
+        // The chunk's own heightmap: world.getTopY(type, x, z) reads the same sample, plus a server round trip.
+        int maxY = TreeSamplingPolicy.scanMaxY(
+                columnChunk.sampleHeightmap(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15),
+                origin.getY(), verticalRange);
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 int cx = x + dx;
                 int cz = z + dz;
                 for (int y = maxY; y >= minY; y--) {
-                    BlockPos candidate = new BlockPos(cx, y, cz);
-                    if (!world.getBlockState(candidate).isIn(BlockTags.LOGS)) {
+                    BlockState state = reader.state(cx, y, cz);
+                    if (state == null || !state.isIn(BlockTags.LOGS)) {
                         continue;
                     }
+                    BlockPos candidate = new BlockPos(cx, y, cz);
                     Optional<TreeTarget> treeOpt = detectTreeAtForWoodcut(world, candidate);
                     if (treeOpt.isEmpty()) {
                         continue;
