@@ -31,6 +31,45 @@ class CraftingStationPolicyTest {
     private static final String STATION_SIGNATURE =
             "private static boolean ensureCraftingStation(ServerPlayerEntity bot, ServerCommandSource source, boolean quiet)";
 
+    // ── section-skipping scan order ──────────────────────────────────────────────────────────
+
+    @Test
+    void scanOrderMatchesTheWholeBoxLoopXFastestThenYThenZ() {
+        // BlockPos.iterate(min, max): index % sizeX -> x, (index / sizeX) % sizeY -> y, the rest -> z.
+        List<int[]> boxOrder = new java.util.ArrayList<>();
+        for (int z = -17; z <= 18; z += 5) {
+            for (int y = -2; y <= 3; y++) {
+                for (int x = 30; x >= -33; x -= 7) {
+                    boxOrder.add(new int[]{x, y, z});
+                }
+            }
+        }
+        boxOrder.sort((a, b) -> CraftingStationPolicy.compareScanOrder(a[0], a[1], a[2], b[0], b[1], b[2]));
+        for (int i = 1; i < boxOrder.size(); i++) {
+            int[] a = boxOrder.get(i - 1), b = boxOrder.get(i);
+            assertTrue(a[2] < b[2] || (a[2] == b[2] && (a[1] < b[1] || (a[1] == b[1] && a[0] < b[0]))),
+                    "cell " + i + " out of iterate order");
+        }
+        // Section by section, then sorted: a hit in a later chunk column but a lower z comes first.
+        List<int[]> hits = new java.util.ArrayList<>(List.of(
+                new int[]{20, 64, 3}, new int[]{-5, 64, 3}, new int[]{-5, 70, 1}, new int[]{40, 60, 1}));
+        hits.sort((a, b) -> CraftingStationPolicy.compareScanOrder(a[0], a[1], a[2], b[0], b[1], b[2]));
+        assertEquals(List.of("40,60,1", "-5,70,1", "-5,64,3", "20,64,3"),
+                hits.stream().map(c -> c[0] + "," + c[1] + "," + c[2]).toList());
+        assertEquals(0, CraftingStationPolicy.compareScanOrder(1, 2, 3, 1, 2, 3));
+    }
+
+    @Test
+    void tableAndChestScansReadThroughTheSectionSkippingHelper() throws IOException {
+        String source = craftingHelperSource();
+        String helper = bodyOf(source, "private static List<BlockPos> findBlocksInBox(");
+        assertTrue(helper.contains("new ChunkBlockReader(world)") && helper.contains("section.hasAny(match)"),
+                "the box scan reads through one reader and skips sections without a match");
+        assertTrue(helper.contains("CraftingStationPolicy.compareScanOrder("), "hits keep the whole-box order");
+        assertEquals(3, count(source, "CraftingHelper::isCraftingTable,"), "the table scan, its re-scan and the pre-check");
+        assertEquals(2, count(source, "CraftingHelper::isChest,"), "both findNearbyChests overloads");
+    }
+
     // ── walking, nudging and carving ─────────────────────────────────────────────────────────
 
     @Test

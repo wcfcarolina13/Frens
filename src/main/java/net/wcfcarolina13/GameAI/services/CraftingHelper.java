@@ -1693,23 +1693,19 @@ public final class CraftingHelper {
 
         if (nearest == null) {
             double best = Double.MAX_VALUE;
-            for (BlockPos pos : BlockPos.iterate(botPos.add(-radius, -ySpan, -radius), botPos.add(radius, ySpan, radius))) {
-                if (!world.isChunkLoaded(pos)) {
+            for (BlockPos pos : findBlocksInBox(world, botPos.add(-radius, -ySpan, -radius),
+                    botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Crafting table")) {
+                if (skipsFailedTable(bot, botPos, pos, onServerThread)) {
                     continue;
                 }
-                if (world.getBlockState(pos).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
-                    if (skipsFailedTable(bot, botPos, pos, onServerThread)) {
-                        continue;
-                    }
-                    if (!CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
-                        skippedTableOutOfReach = true;
-                        continue;
-                    }
-                    double distSq = botPos.getSquaredDistance(pos);
-                    if (distSq < best) {
-                        best = distSq;
-                        nearest = pos.toImmutable();
-                    }
+                if (!CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))) {
+                    skippedTableOutOfReach = true;
+                    continue;
+                }
+                double distSq = botPos.getSquaredDistance(pos);
+                if (distSq < best) {
+                    best = distSq;
+                    nearest = pos;
                 }
             }
         }
@@ -1790,18 +1786,16 @@ public final class CraftingHelper {
                 // Re-scan for a different, accessible table
                 nearest = null;
                 double best2 = Double.MAX_VALUE;
-                for (BlockPos pos2 : BlockPos.iterate(botPos.add(-radius, -ySpan, -radius), botPos.add(radius, ySpan, radius))) {
-                    if (!world.isChunkLoaded(pos2)) continue;
+                for (BlockPos pos2 : findBlocksInBox(world, botPos.add(-radius, -ySpan, -radius),
+                        botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Alternative crafting table")) {
                     if (pos2.equals(unreachable) || skipsFailedTable(bot, botPos, pos2, onServerThread)) continue;
-                    if (world.getBlockState(pos2).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
-                        List<BlockPos> altStandables = findStandableOptions(world, pos2.toImmutable(), 3);
-                        if (altStandables.isEmpty()) continue;
-                        double distSq2 = botPos.getSquaredDistance(pos2);
-                        if (distSq2 < best2) {
-                            best2 = distSq2;
-                            nearest = pos2.toImmutable();
-                            standables = altStandables;
-                        }
+                    List<BlockPos> altStandables = findStandableOptions(world, pos2, 3);
+                    if (altStandables.isEmpty()) continue;
+                    double distSq2 = botPos.getSquaredDistance(pos2);
+                    if (distSq2 < best2) {
+                        best2 = distSq2;
+                        nearest = pos2;
+                        standables = altStandables;
                     }
                 }
                 if (nearest == null) {
@@ -2031,8 +2025,10 @@ public final class CraftingHelper {
         }
         int radius = CraftingStationPolicy.scanHorizontal(onServerThread);
         int ySpan = CraftingStationPolicy.scanVertical(onServerThread);
-        for (BlockPos pos : BlockPos.iterate(botPos.add(-radius, -ySpan, -radius), botPos.add(radius, ySpan, radius))) {
-            if (usableTableForCraft(bot, world, botPos, pos, onServerThread)) {
+        for (BlockPos pos : findBlocksInBox(world, botPos.add(-radius, -ySpan, -radius),
+                botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Crafting table pre-check")) {
+            if (CraftingStationPolicy.acceptKnownTable(onServerThread, withinStationReach(bot, pos))
+                    && !skipsFailedTable(bot, botPos, pos, onServerThread)) {
                 return true;
             }
         }
@@ -2104,6 +2100,72 @@ public final class CraftingHelper {
     }
 
     /** A per-call step line: its usual INFO off the server thread, DEBUG on it. */
+    private static boolean isCraftingTable(BlockState state) {
+        return state.isOf(net.minecraft.block.Blocks.CRAFTING_TABLE);
+    }
+
+    private static boolean isChest(BlockState state) {
+        return state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST);
+    }
+
+    /**
+     * Every cell of the box {@code from}..{@code to} whose block matches, in the order
+     * {@code BlockPos.iterate(from, to)} visits them (see {@link CraftingStationPolicy#compareScanOrder}).
+     * Same cells as that loop with its {@code isChunkLoaded} skip, but read through one
+     * {@link ChunkBlockReader} and walking only the chunk sections whose palette holds a match: an
+     * 81x13x81 table box is ~85k reads, each a server round trip from a worker, and most sections
+     * hold no table at all. Unloaded chunks are skipped and never loaded, as before.
+     */
+    private static List<BlockPos> findBlocksInBox(ServerWorld world, BlockPos from, BlockPos to,
+                                                  Predicate<BlockState> match, String label) {
+        long startNs = System.nanoTime();
+        List<BlockPos> hits = new ArrayList<>();
+        int minX = Math.min(from.getX(), to.getX()), maxX = Math.max(from.getX(), to.getX());
+        int minY = Math.min(from.getY(), to.getY()), maxY = Math.max(from.getY(), to.getY());
+        int minZ = Math.min(from.getZ(), to.getZ()), maxZ = Math.max(from.getZ(), to.getZ());
+        ChunkBlockReader reader = new ChunkBlockReader(world);
+        int sectionsWalked = 0;
+        for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
+            for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
+                net.minecraft.world.chunk.WorldChunk chunk = reader.chunk(cx, cz);
+                if (chunk == null) {
+                    continue;
+                }
+                int x0 = Math.max(minX, cx << 4), x1 = Math.min(maxX, (cx << 4) + 15);
+                int z0 = Math.max(minZ, cz << 4), z1 = Math.min(maxZ, (cz << 4) + 15);
+                for (int sy = minY >> 4; sy <= maxY >> 4; sy++) {
+                    int index = chunk.getSectionIndex(sy << 4);
+                    if (index < 0 || index >= chunk.countVerticalSections()) {
+                        continue;
+                    }
+                    net.minecraft.world.chunk.ChunkSection section = chunk.getSection(index);
+                    if (section == null || section.isEmpty() || !section.hasAny(match)) {
+                        continue;
+                    }
+                    sectionsWalked++;
+                    int y0 = Math.max(minY, sy << 4), y1 = Math.min(maxY, (sy << 4) + 15);
+                    for (int y = y0; y <= y1; y++) {
+                        for (int z = z0; z <= z1; z++) {
+                            for (int x = x0; x <= x1; x++) {
+                                if (match.test(section.getBlockState(x & 15, y & 15, z & 15))) {
+                                    hits.add(new BlockPos(x, y, z));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        hits.sort((a, b) -> CraftingStationPolicy.compareScanOrder(
+                a.getX(), a.getY(), a.getZ(), b.getX(), b.getY(), b.getZ()));
+        MinecraftServer server = world.getServer();
+        logStationStep(server != null && server.isOnThread(),
+                "{} scan: {} hit(s) in a {}x{}x{} box, {} section(s) walked, {} ms",
+                label, hits.size(), maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1, sectionsWalked,
+                String.format(Locale.ROOT, "%.2f", (System.nanoTime() - startNs) / 1_000_000.0D));
+        return hits;
+    }
+
     private static void logStationStep(boolean onServerThread, String format, Object... args) {
         if (CraftingStationPolicy.logAtInfo(onServerThread)) {
             LOGGER.info(format, args);
@@ -3653,15 +3715,8 @@ public final class CraftingHelper {
         if (world == null || origin == null) {
             return chests;
         }
-        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
-            if (!world.isChunkLoaded(pos)) {
-                continue;
-            }
-            var state = world.getBlockState(pos);
-            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
-                chests.add(pos.toImmutable());
-            }
-        }
+        chests.addAll(findBlocksInBox(world, origin.add(-radius, -2, -radius), origin.add(radius, 2, radius),
+                CraftingHelper::isChest, "Nearby chest"));
         chests.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
         return chests;
     }
@@ -3671,15 +3726,8 @@ public final class CraftingHelper {
         if (world == null || origin == null) {
             return chests;
         }
-        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -ySpan, -radius), origin.add(radius, ySpan, radius))) {
-            if (!world.isChunkLoaded(pos)) {
-                continue;
-            }
-            var state = world.getBlockState(pos);
-            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
-                chests.add(pos.toImmutable());
-            }
-        }
+        chests.addAll(findBlocksInBox(world, origin.add(-radius, -ySpan, -radius), origin.add(radius, ySpan, radius),
+                CraftingHelper::isChest, "Nearby chest"));
         chests.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
         return chests;
     }

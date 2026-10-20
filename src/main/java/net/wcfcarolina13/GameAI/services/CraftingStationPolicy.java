@@ -197,6 +197,22 @@ public final class CraftingStationPolicy {
     }
 
     /**
+     * Orders two cells the way {@code BlockPos.iterate(min, max)} visits a box: z slowest, then y,
+     * then x fastest. The table and chest scans collect hits chunk section by section and sort them
+     * with this, so the table scan's "first of the nearest wins" tie-break and the chest list's
+     * stable distance sort see the hits in the order the old whole-box loop did.
+     */
+    public static int compareScanOrder(int ax, int ay, int az, int bx, int by, int bz) {
+        if (az != bz) {
+            return Integer.compare(az, bz);
+        }
+        if (ay != by) {
+            return Integer.compare(ay, by);
+        }
+        return Integer.compare(ax, bx);
+    }
+
+    /**
      * Throttle key for a player's "I don't know how to craft X" line: one slot per bot and item
      * name, case-insensitive (finding 7, 1.1.274). {@code unknownCraftKey(bot, "")} is the prefix
      * every key of that bot starts with.
