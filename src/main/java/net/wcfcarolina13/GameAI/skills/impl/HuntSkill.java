@@ -34,6 +34,7 @@ import net.wcfcarolina13.GameAI.services.BotMutualAidService;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
 import net.wcfcarolina13.GameAI.services.HealingService;
+import net.wcfcarolina13.PlayerUtils.InventoryIterator;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.HuntCatalog;
 import net.wcfcarolina13.GameAI.services.HuntConfigService;
@@ -1450,20 +1451,18 @@ public final class HuntSkill implements Skill {
     }
 
     /**
-     * Counts all food items (raw and cooked) in the bot's inventory.
+     * Counts all food items (raw and cooked) in the bot's inventory, bundle contents included
+     * (the bot eats from bundles, so packed food is food it has).
      */
     public static int countFoodItems(ServerPlayerEntity bot) {
         if (bot == null) return 0;
-        int count = 0;
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) continue;
-            FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
-            if (food != null && food.nutrition() > 0) {
-                count += stack.getCount();
-            }
-        }
-        return count;
+        return InventoryIterator.count(bot, HuntSkill::isNourishing);
+    }
+
+    private static boolean isNourishing(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
+        return food != null && food.nutrition() > 0;
     }
 
     /**
@@ -1473,17 +1472,8 @@ public final class HuntSkill implements Skill {
      */
     public static int countSafeFoodItems(ServerPlayerEntity bot) {
         if (bot == null) return 0;
-        int count = 0;
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) continue;
-            if (HealingService.isPrecious(stack) || HealingService.isForbidden(stack)) continue;
-            FoodComponent food = stack.getComponents().get(DataComponentTypes.FOOD);
-            if (food != null && food.nutrition() > 0) {
-                count += stack.getCount();
-            }
-        }
-        return count;
+        // Bundle-aware, same predicate the eat path uses (HealingService.tryReachBundledFood).
+        return InventoryIterator.count(bot, HealingService::isSafeEdible);
     }
 
     private static boolean isSunset(ServerWorld world) {

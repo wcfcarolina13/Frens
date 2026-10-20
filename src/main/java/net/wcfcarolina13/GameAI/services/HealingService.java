@@ -134,7 +134,7 @@ public final class HealingService {
     }
 
     /** Foods {@link #findCheapestSafeFood} would consider eligible (ignoring the raw/cooked split). */
-    private static boolean isSafeEdible(ItemStack stack) {
+    public static boolean isSafeEdible(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         FoodComponent food = getFoodComponent(stack);
         if (food == null || food.nutrition() <= 0) return false;
