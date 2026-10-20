@@ -83,6 +83,8 @@ JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (
 
 ## Findings (backlog for a fix build)
 
+**Fixed in 1.1.276** (2026-10-19, sandbox-checked, replays `frens_1_1_276_6bn_fix_checks.zip`, `frens_1_1_276_6bn_fix_checks_fishing.zip`, `frens_1_1_276_6bn_fix_checks_abr1.zip` and `frens_1_1_276_6bn_fix_checks_follow_275.zip`, `tools/sandbox/fix276.py`; Phase 6bn): 43 (fishing search 13-31 ms on fresh ponds with the snapshot built in 5-8 ms, was 1781 / 8392 ms; hangout scan 2 ms and its first move within a second), 44 (one "sees 1 hostile(s) nearby" line, 0 WARN lines, was 444; a caged zombie: mined on to 10 stone; a free zombie: fought, then mined; a creeper: fled and stayed clear), 45 (Sweep Souls3 retires its 4 copied records, `destroyed=true`; AB R1 untouched, deposit works), 39 and 14 with 43. 46 closed by 44's ruling (its pause line still unseen). Partial: woodcut detect with trees standing 374-394 ms (was 1091-1541), the per-log checks still read the world (deferred); empty detects 0-1 ms, relocation sampling reaches 117/120 in 1-10 ms. Craft table scan 1.47 ms and farm water scans 4-6 ms (new lines, no before). New: 47, 48. Still open: 3, 47, 48.
+
 **Fixed in 1.1.275** (2026-10-19, sandbox-checked, replays `frens_1_1_275_6bm_fix_checks.zip`, `frens_1_1_275_6bm_fix_checks_chest_owner.zip`, `frens_1_1_275_6bm_fix_checks_chest_foreign.zip` and `frens_1_1_275_6bm_fix_checks_threat_skeleton.zip`, `tools/sandbox/fix275.py`; Phase 6bm): 37 (0 threat lines in 61 s near a frozen zombie, was 16; the once-per-pause announcement was not reached because no run paused a task, finding 46), 38 (the dirt under the felled trunk stays, the bot's 7 scaffold blocks removed), 40 (Sweep Souls3 starts empty with `chestLike=0`, AB R1 adopts with `chestLike=1`, also over Sweep Souls3's 1.1.274 claim, deposit works), 41 (one-tree run ends `success=true`, no "Repeated failures"; the plain command prints "Cleared the local woodcut area after 1 target(s)."), 42 ("Desperate food" 1-2 lines in 45 s, no starvation pause while eating). Partial: 39 (snapshot skipped, 1781 ms, but 8392 ms when one stand needs A*; finding 43). New: 43-46. Still open: 3, 14 (as 39/43), 43-46.
 
 **Fixed in 1.1.274** (2026-10-19, sandbox-checked, replays `frens_1_1_274_6bl_fix_checks.zip`, `frens_1_1_274_6bl_fix_checks_minds_relaunch.zip` and `frens_1_1_274_6bl_fix_checks_chest_registry.zip`, `tools/sandbox/fix274.py`; Phase 6bl): 7, 13, 20, 21, 26 (for the save that owns the chests; see finding 40), plus the 1.1.273 axe re-equip (the AutoFaceEntity cliff loadout) and the idle leather-armor fallback. Not fixed: 14 (the search still takes 11.6 s, finding 39). Partial: the farm no-hoe line on a half-planted farm (the start gate answers when there is no hoe at all; the half-planted path is a field item). Not checked: 3 (merged scene speakers), the idle cobblestone-tools fallback, the re-poll timeout extension. Finding 37 repro: still 16 lines a minute. Still open: 3, 14, 37, 38, 39-42.
@@ -278,6 +280,19 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     without the line. The line now lives only in `AutoFaceEntity` (phantom pause, busy branch, danger-zone branch), and whether its
     busy branch runs while a skill is active (`BotEventHandler.updateBehavior` returns first?) is not known. Next step: a skeleton
     that really shoots a working bot, or the debug log for `AutoFaceEntity`.
+
+47. **Follow stalls under an oak canopy on a one-block step (medium, pre-existing).** 1.1.276 sandbox 2026-10-19 21:15, Sweep
+    Souls3: Fol followed the player 36 blocks south over hills from 60, 72, 228, then stopped 8 blocks behind at 61, 77, 266 (an
+    oak with leaf litter around its base, leaves at Y 78) with the player at 60, 76, 274: `Follow status: ... dist=7.87
+    canSee=false directBlocked=true usingWaypoints=true wp=4 navGoal=60, 76, 268`, `transition rejects=1`, no movement for over 40 s
+    and none after a fresh `/bot follow`. 1.1.275 stalled at the same tree (55.7, 77, 268, replay
+    `frens_1_1_276_6bn_fix_checks_follow_275.zip`), so it is not the 1.1.276 snapshot change. The navGoal is one block down and
+    diagonal from the bot; whether leaf litter or the canopy blocks the step is not known.
+48. **A bot stuck under water retries surface recovery every ~10 s for hours (minor, log).** Bob has been at 234, 62, 299 (under
+    water, no sky, food 0, health 9.3) since the 1.1.275 mining stage at 19:06; on 1.1.276 he still logged `Surface recovery exit:
+    success=false ... 'Mining paused: water flooded the area.'` and `Bot Bob ascent failed` 167 times in 28 minutes (20:49-21:17),
+    with `pillarUp ... not on ground` and `ensureAtSurface: Bob pillar recovery placed no blocks reason=not-on-ground` as the top
+    `sb_flood` lines. The interval never backs off and nothing frees him.
 
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
