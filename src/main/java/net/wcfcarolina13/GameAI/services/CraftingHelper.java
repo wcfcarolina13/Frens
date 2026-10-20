@@ -306,10 +306,32 @@ public final class CraftingHelper {
         return bot == null ? null : EXPLICIT_CRAFTS.get(bot.getUuid());
     }
 
+    private static boolean isExplicitSource(ServerCommandSource source) {
+        for (ExplicitCraftCall call : EXPLICIT_CRAFTS.values()) {
+            if (call.source == source) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Every craft line to the player goes through here, so an explicit craft knows it answered. */
     private static void say(ServerCommandSource source, String msg) {
+        sayTo(source, msg, false);
+    }
+
+    /**
+     * A line that reaches the owner even during a quiet craft: the full-pack refusal, already
+     * throttled to once per 30 s per bot, so a bot whose pack is full does not silently never
+     * upgrade its tools.
+     */
+    private static void sayEvenIfQuiet(ServerCommandSource source, String msg) {
+        sayTo(source, msg, true);
+    }
+
+    private static void sayTo(ServerCommandSource source, String msg, boolean ignoreQuiet) {
         if (source == null) return;
-        if (CraftingStationPolicy.chatSuppressed(QUIET.get(), false)) {
+        if (!ignoreQuiet && CraftingStationPolicy.chatSuppressed(QUIET.get(), isExplicitSource(source))) {
             LOGGER.info("craft (quiet): {}", msg);
             return;
         }
@@ -3261,7 +3283,8 @@ public final class CraftingHelper {
         CRAFT_FULL_PACK_LINE.put(bot.getUuid(), now);
         LOGGER.info("craft: {} has a full pack and nothing cheap to drop, not crafting {} on the server thread",
                 bot.getName().getString(), output.getName().getString());
-        say(source, fullPackCraftLine(output));
+        // Not held back by QUIET: the owner hears why the idle upgrade is stuck (throttled above).
+        sayEvenIfQuiet(source, fullPackCraftLine(output));
     }
 
     public static boolean offloadCheapItemsToNearbyChest(ServerPlayerEntity bot,

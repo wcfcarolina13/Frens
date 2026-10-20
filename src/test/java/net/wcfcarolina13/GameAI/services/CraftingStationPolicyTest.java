@@ -101,7 +101,7 @@ class CraftingStationPolicyTest {
         assertTrue(room.contains("sendFullPackCraftLine(bot, source, output, quiet);"), "the refusal honours quiet");
         String line = bodyOf(source, "private static void sendFullPackCraftLine(");
         int quietReturn = line.indexOf("if (quiet) {");
-        assertTrue(quietReturn >= 0 && quietReturn < line.indexOf("say(source,")
+        assertTrue(quietReturn >= 0 && quietReturn < line.indexOf("sayEvenIfQuiet(source,")
                 && quietReturn < line.indexOf("CRAFT_FULL_PACK_LINE.put("), "a quiet refusal neither chats nor eats the throttle");
         // ensureSticks clears the flag before anything else.
         String sticks = bodyOf(source, "private static boolean ensureSticks(ServerPlayerEntity bot, ServerCommandSource source, int needed, boolean quiet)");
@@ -704,7 +704,22 @@ class CraftingStationPolicyTest {
         String helper = craftingHelperSource();
         String quiet = bodyOf(helper, "public static int craftQuietlyKeeping(");
         assertTrue(quiet.contains("QUIET.set(Boolean.TRUE)") && quiet.contains("finally"), "quiet not set with try/finally");
-        assertTrue(bodyOf(helper, "private static void say(").contains("QUIET.get()"), "say() ignores quiet");
+        String sayTo = bodyOf(helper, "private static void sayTo(");
+        assertTrue(sayTo.contains("!ignoreQuiet && CraftingStationPolicy.chatSuppressed(QUIET.get(), isExplicitSource(source))"),
+                "say() ignores quiet, or treats a player's own craft as quiet");
+        assertTrue(bodyOf(helper, "private static void say(").contains("sayTo(source, msg, false);"),
+                "say() is not the quiet-honouring path");
+        // The full-pack refusal still reaches the owner during a quiet craft (throttled once per 30 s per bot);
+        // it is the only line that bypasses QUIET.
+        String fullPack = bodyOf(helper, "private static void sendFullPackCraftLine(");
+        assertTrue(fullPack.contains("sayEvenIfQuiet(source, fullPackCraftLine(output));"),
+                "the full-pack line is silenced by a quiet craft");
+        assertTrue(fullPack.indexOf("CRAFT_FULL_PACK_LINE.put(") < fullPack.indexOf("sayEvenIfQuiet("),
+                "the full-pack line bypasses quiet without its throttle");
+        assertEquals(2, count(helper, "sayEvenIfQuiet("), "another line bypasses quiet");
+        assertTrue(bodyOf(mainSource("src/main/java/net/wcfcarolina13/GameAI/services/ToolProvisionService.java"),
+                        "private static boolean hasRoomForItem(").contains("PlayerInventory.MAIN_SIZE"),
+                "the bundle craft-space check counts armor/offhand slots as room");
         assertEquals(1, count(helper, "CRAFT_TABLE_MSG_COOLDOWN.remove("),
                 "the table-line throttle is cleared outside clearTableLineCooldown");
         assertTrue(bodyOf(helper, "private static boolean keepsStackForCraft(").contains("keepsStackForBatch("),

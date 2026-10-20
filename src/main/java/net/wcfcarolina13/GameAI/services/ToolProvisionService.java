@@ -458,7 +458,9 @@ public final class ToolProvisionService {
             return false;
         }
         ItemStack probe = new ItemStack(item, 1);
-        for (int i = 0; i < bot.getInventory().size(); i++) {
+        // Main slots only: size() also counts armor, offhand, body and saddle (43 in 1.21.11),
+        // where insertStack never puts an item (same fix as CraftingHelper.hasRoomForItem).
+        for (int i = 0; i < net.minecraft.entity.player.PlayerInventory.MAIN_SIZE; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty()) {
                 return true;
