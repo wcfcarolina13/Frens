@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Small fixes: cleanup never swings a weapon at leaves, chest placement misses logged, no wrong-material line after a full pack, chest-pull hints reset per world; 1.1.282 (2026-10-20)
+
+Small-items build from the backlog triage and the 1.1.281 sandbox check (one implementer, controller read the diff).
+
+- **Woodcut cleanup never swings a tool or weapon at leaves** (backlog 169; `2b9de28c`): with no empty or harmless hotbar slot it fell back to slot 0 (a sword or enchanted tool); it now skips that leaf clear.
+- **No per-material "I need 3 cobbled deepslate" after a full-pack refusal** (finding 61; `2b9de28c`): a strict tool craft refused for a full pack went on to try the other stone types and logged their shortfall; it now stops, since the pack-full line already says why.
+- **Store chest placement misses log at INFO** (backlog 227; `2b9de28c`): "no placeable spot" and "placed but no chest there" were silent.
+- **CraftingHelper chest-pull pauses and pending pulls clear at server stop** (backlog 218; `2b9de28c`).
+- **Tests** 3380 → 3380 (no pure helper fell out). Not sandbox-checked.
+
+**Field checks:** none (log and edge-case changes; the 169 and 61 paths are covered by the existing woodcut and craft sandbox stages)
+
 ## The idle stone-tool upgrade crafts only stone, keeps the cobblestone it still needs, and stays quiet; 1.1.281 (2026-10-20)
 
 Fix build from the 1.1.279 sandbox check (findings 57, 58). Scoped read-only first; the cobblestone drop came from the after-craft retry, not the pre-craft room check.

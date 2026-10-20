@@ -4,7 +4,16 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.281) — next session starts here
+## Session Handoff 2026-10-20 (1.1.282) — next session starts here
+
+**State:** main = origin/main @ 1.1.282. Suite 3380 green. Deployed to Nirn. 1.1.282 is four small fixes (backlog 169, 218, 227; finding 61), not sandbox-checked; 1.1.281 sandbox (6bs) passed.
+**Next:** finding 56 (one-block step up into oak leaves at feet and head: `leaf-cleared` logs but no leaf is mined), 59, 60; then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout; 169, 218, 227 done).
+**Public release:** 1.1.282 is the candidate. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Needs Bradley:** the three 1.1.272 questions still stand (Spells key migration, chest axe before crafting, shared-server chest scan).
+**Deferred (reasons in the changelogs):** see the 1.1.277-1.1.281 entries.
+**Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
+
+## Session Handoff 2026-10-20 (1.1.281) — superseded
 
 **State:** main = origin/main @ 1.1.281. Suite 3380 green. Deployed to Nirn. Sandbox-checked 2026-10-20 (Phase 6bs, `tools/sandbox/fix281.py`): PASS idle stone upgrade (full pack: nothing dropped or crafted, one "My pack's full, so I can't craft stone pickaxe right now."; rotten flesh dropped, pickaxe in stone, cobblestone kept, one line for the sword; with 4 free slots 4x `using stone` and no chat, diamonds and iron kept; 4 cobblestone: pickaxe and shovel in stone only; 0 `using diamond|iron`, 0 cobblestone drops, 0 "Missing materials" all session), explicit `/bot craft` still answers in chat, follow no regression. New finding 61 (log only: after a full-pack refusal the quiet line names cobbled deepslate); 1 field item in Phase 6bs. Built autonomously overnight.
 **1.1.281** (changelog entry has rulings and costs): findings 57/58: idle stone upgrade strict stone only (ruling), batch reserve keeps its cobblestone, main-slot room checks, idle crafts quiet except the throttled full-pack line (ruling). Fable review clean; small follow-up `095b3028` read by the controller.
@@ -216,7 +225,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 ### Woodcut and mining
 - [ ] "mounted leaf clearing still instant" (1.1.234 handoff; deferred again in 1.1.238. 1.1.267 M3 fixed the shears, not the speed)
 - [ ] "woodcut cleanup async scan off-thread" (1.1.266 B bounded the scan, it still runs off-thread; 1.1.234 handoff, 2026-10-14)
-- [ ] "cleanup hand fallback slot 0" (1.1.233 handoff, 2026-10-13)
+- [x] "cleanup hand fallback slot 0" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.282 2b9de28c
 - [ ] "woodcut surface-staging cost." (1.1.229 handoff, 2026-10-13)
 - [x] "weapons+food-only inventory mining thrash (pre-existing)" (1.1.229 handoff, 2026-10-13) — ✅ 1.1.273 3d01ec5a (RepollPolicy) + 1.1.274 e4f77737 (cliff-branch loadout); sandbox PASS FIELD_0_6AI_SANDBOX:92
 - [ ] (uncertain) "WoodcutSkill still reports `soilFail=29` out of 31 logs in dense forest" ("May need to revisit the soil/hazard heuristic for bounded-mode farm clearing"; Farm Pipeline next-session notes, 2026-04-08)
@@ -265,7 +274,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "Supplies Phase 4: the storage-room walkthrough, need-driven armour requests while following, and the WaitMode/need-bundling ruling above." (1.1.221 handoff; also 1.1.222 handoff, 2026-09-25)
 - [ ] "`grantableEstimate` works per chest half, so it under-counts double chests." (1.1.221 handoff, 2026-09-25)
 - [ ] "Three \"other half of a double chest\" helpers could be one." (1.1.221 handoff, 2026-09-25)
-- [ ] "CraftingHelper pull hint maps aren't cleared at stop (bounded wall-clock hints)." (1.1.221 handoff, 2026-09-25)
+- [x] "CraftingHelper pull hint maps aren't cleared at stop (bounded wall-clock hints)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c
 - [ ] "A double chest whose other half is unloaded reads as unreadable (skipped for that pass)." (1.1.221 handoff, 2026-09-25)
 - [ ] "A grant-covered ask while the owner is away is still refused (only Always skips the owner-range check)." (1.1.221 handoff, 2026-09-25)
 - [ ] "The `/bot stop` fix for the chest tool search (read `hasActiveTask` once before the loop) is verified by reading only; its test pins the pure helper, not the wiring." (1.1.221 handoff, 2026-09-25)
@@ -274,7 +283,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "`verifyChests` revives a record for any chest placed back at its position." (1.1.220 handoff, 2026-09-25)
 - [x] "A dimension-fallback collect is dropped." (1.1.220 handoff, 2026-09-25) — ✅ 1.1.278 569c625d (dimension-fallback collect now tells the owner)
 - [x] "Two Collects on different chests while the bot is on cooldown fail safe but silently." ("The owner sees two \"arrived\" lines and gets no items."; 1.1.220 handoff, 2026-09-25) — ✅ 1.1.278 569c625d (restated: refused/replaced/cancelled collects tell the owner; sandbox 6bp PASS)
-- [ ] "A server-thread chest placement miss logs only at DEBUG." (1.1.222 handoff, 2026-09-25)
+- [x] "A server-thread chest placement miss logs only at DEBUG." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c
 
 ### Souls, dialogue and audio
 - [ ] "Audio for \"Hey, incoming!\"." (also listed in untracked `AUDIO_NEEDED.md`; 1.1.261 handoff, 2026-10-17)
