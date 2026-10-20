@@ -53,4 +53,25 @@ class DesperateEatPolicyTest {
         assertTrue(DesperateEatPolicy.attemptDue(m, "bot", 50_000L));
         assertTrue(DesperateEatPolicy.attemptDue(m, "bot", 1_000L));
     }
+    @Test
+    void chewingIsAlwaysAnEatInFlight() {
+        assertTrue(DesperateEatPolicy.eatInFlight(true, null, 0L, false));
+        assertTrue(DesperateEatPolicy.eatInFlight(true, 1_000L, 90_000L, false));
+    }
+
+    @Test
+    void aRecentTryWithDesperateFoodLeftIsAnEatInFlight() {
+        // Loop head lands 50 ms .. 1999 ms after autoEat tried rotten flesh: do not pause.
+        assertTrue(DesperateEatPolicy.eatInFlight(false, 10_000L, 10_000L, true));
+        assertTrue(DesperateEatPolicy.eatInFlight(false, 10_000L, 10_050L, true));
+        assertTrue(DesperateEatPolicy.eatInFlight(false, 10_000L, 11_999L, true));
+    }
+
+    @Test
+    void noFoodOrAnExpiredTryIsNotAnEatInFlight() {
+        assertFalse(DesperateEatPolicy.eatInFlight(false, 10_000L, 10_050L, false), "tried but nothing to eat");
+        assertFalse(DesperateEatPolicy.eatInFlight(false, 10_000L, 12_000L, true), "cooldown over: autoEat decides");
+        assertFalse(DesperateEatPolicy.eatInFlight(false, null, 10_000L, true), "never tried");
+        assertFalse(DesperateEatPolicy.eatInFlight(false, 50_000L, 1_000L, true), "clock went back");
+    }
 }

@@ -274,21 +274,86 @@ class WorldStoreKeyPolicyTest {
         assertEquals(USE_OWN, WorldStoreKeyPolicy.decideChestStore(true, true, 90_000, null, "x#1", 4, 0));
         assertEquals(START_EMPTY_NO_LEGACY, WorldStoreKeyPolicy.decideChestStore(false, false, 90_000, null, "x#1", 4, 0));
         assertEquals(START_EMPTY_NEW_WORLD, WorldStoreKeyPolicy.decideChestStore(false, true, 10, null, "x#1", 4, 4));
-        assertEquals(START_EMPTY_CLAIMED, WorldStoreKeyPolicy.decideChestStore(false, true, 90_000, "y#2", "x#1", 4, 4));
+        assertEquals(START_EMPTY_CLAIMED, WorldStoreKeyPolicy.decideChestStore(false, true, 90_000, "y#2", "x#1", 4, 0));
+        assertEquals(START_EMPTY_CLAIMED, WorldStoreKeyPolicy.decideChestStore(false, true, 90_000, "y#2", "x#1", 0, 0),
+                "nothing checked: the foreign claim stands");
     }
 
     @Test
-    void chestStoreMatchesDecideForEveryInputWhenAChestIsThere() {
+    void aChestFoundHereOverridesAnotherSavesClaim() {
+        // 1.1.274: same-named "New World#bb" took the claim; "New World#aa" has the chests.
+        WorldStoreKeyPolicy.Adoption a = WorldStoreKeyPolicy.decideChestStore(false, true, 90_000, "New World#bb", "New World#aa", 3, 1);
+        assertEquals(ADOPT_LEGACY, a);
+        assertTrue(WorldStoreKeyPolicy.mustCreateOwnStore(a));
+    }
+
+    @Test
+    void aChestFoundHereDoesNotOverrideABrandNewWorldOrAnOwnStore() {
+        assertEquals(START_EMPTY_NEW_WORLD, WorldStoreKeyPolicy.decideChestStore(false, true, 10, "y#2", "x#1", 4, 1));
+        assertEquals(USE_OWN, WorldStoreKeyPolicy.decideChestStore(true, true, 90_000, "y#2", "x#1", 4, 1));
+    }
+
+    @Test
+    void emptyOwnChestStoreIsReplacedOnlyWhenAChestIsHere() {
+        assertTrue(WorldStoreKeyPolicy.shouldAdoptOverEmptyOwnChestStore(0, true, 1),
+                "the 1.1.274 sandbox case: empty own store, chests present");
+        assertFalse(WorldStoreKeyPolicy.shouldAdoptOverEmptyOwnChestStore(0, true, 0), "no chest here");
+        assertFalse(WorldStoreKeyPolicy.shouldAdoptOverEmptyOwnChestStore(0, false, 1), "no legacy entry");
+    }
+
+    @Test
+    void ownChestStoreWithRecordsIsNeverOverwritten() {
+        assertFalse(WorldStoreKeyPolicy.shouldAdoptOverEmptyOwnChestStore(1, true, 1));
+        assertFalse(WorldStoreKeyPolicy.shouldAdoptOverEmptyOwnChestStore(40, true, 1));
+    }
+
+    @Test
+    void chestStoreMatchesDecideExceptAForeignClaimWhenAChestIsThere() {
         for (boolean own : new boolean[]{true, false}) {
             for (boolean legacy : new boolean[]{true, false}) {
                 for (long time : new long[]{0, 1199, 1200, 500_000}) {
                     for (String claimant : new String[]{null, "", "x#1", "y#2"}) {
-                        assertEquals(WorldStoreKeyPolicy.decide(own, legacy, time, claimant, "x#1"),
+                        WorldStoreKeyPolicy.Adoption plain = WorldStoreKeyPolicy.decide(own, legacy, time, claimant, "x#1");
+                        // A verified chest turns another save's claim into an adoption.
+                        WorldStoreKeyPolicy.Adoption expected = plain == START_EMPTY_CLAIMED ? ADOPT_LEGACY : plain;
+                        assertEquals(expected,
                                 WorldStoreKeyPolicy.decideChestStore(own, legacy, time, claimant, "x#1", 4, 1));
                     }
                 }
             }
         }
+    }
+
+    @Test
+    void chestCheckKeepsGoingPastStaleRecordsAndStopsAtTheFirstChest() {
+        // The owner's first four live records are moved chests; the fifth is still there.
+        List<Integer> probed = new java.util.ArrayList<>();
+        WorldStoreKeyPolicy.ChestCheck c = WorldStoreKeyPolicy.checkChestPositions(
+                List.of(1, 2, 3, 4, 5, 6, 7), p -> { probed.add(p); return p == 5; });
+        assertEquals(new WorldStoreKeyPolicy.ChestCheck(5, 5, 1), c);
+        assertEquals(List.of(1, 2, 3, 4, 5), probed, "nothing is read after the first chest");
+    }
+
+    @Test
+    void chestCheckTriesAtMostSixteenPositions() {
+        List<Integer> many = new java.util.ArrayList<>();
+        for (int i = 0; i < 40; i++) many.add(i);
+        int[] reads = {0};
+        WorldStoreKeyPolicy.ChestCheck c = WorldStoreKeyPolicy.checkChestPositions(many, p -> { reads[0]++; return p == 30; });
+        assertEquals(WorldStoreKeyPolicy.MAX_CHEST_POSITIONS_CHECKED, 16);
+        assertEquals(new WorldStoreKeyPolicy.ChestCheck(16, 16, 0), c);
+        assertEquals(16, reads[0]);
+        assertEquals(1, WorldStoreKeyPolicy.checkChestPositions(many, p -> p == 15).chestLike(), "the 16th still counts");
+    }
+
+    @Test
+    void chestCheckCountsUnreadablePositionsAsTriedNotChecked() {
+        // Worker thread: chunk not loaded -> null.
+        WorldStoreKeyPolicy.ChestCheck c = WorldStoreKeyPolicy.checkChestPositions(List.of(1, 2, 3), p -> null);
+        assertEquals(new WorldStoreKeyPolicy.ChestCheck(3, 0, 0), c);
+        assertEquals(new WorldStoreKeyPolicy.ChestCheck(3, 1, 1),
+                WorldStoreKeyPolicy.checkChestPositions(List.of(1, 2, 3), p -> p == 3 ? Boolean.TRUE : null));
+        assertEquals(WorldStoreKeyPolicy.ChestCheck.NONE, WorldStoreKeyPolicy.checkChestPositions(List.<Integer>of(), p -> true));
     }
 
     @Test

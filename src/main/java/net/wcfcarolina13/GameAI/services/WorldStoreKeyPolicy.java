@@ -106,7 +106,10 @@ public final class WorldStoreKeyPolicy {
         START_EMPTY_NO_LEGACY,
         /** Brand-new world: start empty and leave the legacy store unclaimed for its real owner. */
         START_EMPTY_NEW_WORLD,
-        /** Another save already adopted the legacy store: start empty. */
+        /**
+         * Another save already adopted the legacy store: start empty. The chest registry adopts
+         * instead when a checked legacy chest is really here ({@link #decideChestStore}).
+         */
         START_EMPTY_CLAIMED,
         /**
          * The legacy zone and lock store does not look like this save's own (see
@@ -193,11 +196,17 @@ public final class WorldStoreKeyPolicy {
     /**
      * {@link #decide} for the bot chest registry. Its legacy key ({@code levelName/dim}) is shared
      * by every save with that level name, so the first such save to load would adopt another
-     * save's chests (finding 40). The caller checks a few of the legacy entry's recorded chest
-     * positions in this save: when it checked at least one ({@code checked > 0}) and none holds a
+     * save's chests (finding 40). The caller checks up to {@link #MAX_CHEST_POSITIONS_CHECKED} of the legacy entry's recorded chest
+     * positions in this save, stopping at the first chest: when it checked at least one ({@code checked > 0}) and none holds a
      * chest-like block ({@code chestLike == 0}), an adoption becomes
      * {@link Adoption#START_EMPTY_NOT_THIS_SAVE} (no claim, legacy left for its real owner).
      * Nothing checked (no live records, or none readable) adopts as {@link #decide} does.
+     *
+     * <p>A verified chest ({@code chestLike > 0}) overrides another save's claim: 1.1.274 let a
+     * same-named save claim the legacy entry by level name alone, which left the save that really
+     * has the chests with an empty store for good. {@link Adoption#START_EMPTY_CLAIMED} becomes
+     * {@link Adoption#ADOPT_LEGACY}, and the caller records the claim for this save (the claim
+     * moves). A brand-new world still starts empty.
      */
     public static Adoption decideChestStore(boolean hasOwnStore, boolean hasLegacyStore, long overworldGameTimeAtLoad,
                                             String legacyClaimant, String fingerprint,
@@ -206,7 +215,67 @@ public final class WorldStoreKeyPolicy {
         if (adoption == Adoption.ADOPT_LEGACY && checked > 0 && chestLike <= 0) {
             return Adoption.START_EMPTY_NOT_THIS_SAVE;
         }
+        if (adoption == Adoption.START_EMPTY_CLAIMED && chestLike > 0) {
+            return Adoption.ADOPT_LEGACY;
+        }
         return adoption;
+    }
+
+    /**
+     * Whether a save that already has its own chest store should replace it with the legacy
+     * entry: only when its own store holds no records at all and a checked legacy position holds
+     * a chest-like block here. This repairs the save that 1.1.274 left with an empty store after
+     * a same-named save took the claim. An own store with any record is never overwritten.
+     *
+     * @param ownRecordCount every record in this save's own store (destroyed ones included)
+     */
+    public static boolean shouldAdoptOverEmptyOwnChestStore(int ownRecordCount, boolean hasLegacyStore, int chestLike) {
+        return ownRecordCount == 0 && hasLegacyStore && chestLike > 0;
+    }
+
+    /** Most recorded chest positions tried per legacy chest entry (finding 40). */
+    public static final int MAX_CHEST_POSITIONS_CHECKED = 16;
+
+    /**
+     * Result of probing a legacy chest entry's recorded positions in this save.
+     *
+     * @param candidates positions tried (read or not)
+     * @param checked    positions actually read
+     * @param chestLike  1 when a read position holds a chest-like block, else 0
+     */
+    public record ChestCheck(int candidates, int checked, int chestLike) {
+        public static final ChestCheck NONE = new ChestCheck(0, 0, 0);
+    }
+
+    /**
+     * Probes recorded chest positions in order: up to {@link #MAX_CHEST_POSITIONS_CHECKED} of
+     * them, stopping at the first chest-like one. Misses do not end the check: a save's first
+     * records can all be stale (moved chests stay live until verifyChests marks them destroyed),
+     * and stopping after four of them marked the real owner "not this save" for good.
+     *
+     * @param probe {@code TRUE} chest-like, {@code FALSE} read and not chest-like, {@code null}
+     *              not readable (chunk not loaded on this thread, or the read failed)
+     */
+    public static <P> ChestCheck checkChestPositions(Iterable<P> positions, java.util.function.Function<P, Boolean> probe) {
+        if (positions == null || probe == null) {
+            return ChestCheck.NONE;
+        }
+        int candidates = 0;
+        int checked = 0;
+        for (P pos : positions) {
+            if (pos == null) continue;
+            if (candidates >= MAX_CHEST_POSITIONS_CHECKED) {
+                break;
+            }
+            candidates++;
+            Boolean chest = probe.apply(pos);
+            if (chest == null) continue;
+            checked++;
+            if (chest) {
+                return new ChestCheck(candidates, checked, 1);
+            }
+        }
+        return new ChestCheck(candidates, checked, 0);
     }
 
     /**

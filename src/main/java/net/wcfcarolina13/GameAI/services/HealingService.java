@@ -195,8 +195,26 @@ public final class HealingService {
      */
     public static boolean shouldPauseForStarvation(ServerPlayerEntity bot) {
         if (!isStarving(bot)) return false;
+        if (isDesperateEatInFlight(bot)) return false;
         if (autoEat(bot)) return false;
         return true;
+    }
+
+    /**
+     * True while a last-resort eat is under way: the bot is using an item (chewing), or a
+     * desperate eat was tried within {@link DesperateEatPolicy#ATTEMPT_COOLDOWN_MS} and desperate
+     * food is still in the inventory. autoEat returns false in both cases (it skips a bot that is
+     * using an item, and waits out the cooldown), so without this a loop head that lands there
+     * paused the skill as "starving and out of food" while the bot was eating rotten flesh.
+     */
+    public static boolean isDesperateEatInFlight(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        boolean usingItem = bot.isUsingItem();
+        Long lastAttempt = LAST_DESPERATE_ATTEMPT.get(bot.getUuid());
+        long now = System.currentTimeMillis();
+        boolean food = !usingItem && DesperateEatPolicy.withinAttemptCooldown(lastAttempt, now)
+                && hasDesperateFood(bot.getInventory());
+        return DesperateEatPolicy.eatInFlight(usingItem, lastAttempt, now, food);
     }
 
     /**
@@ -477,30 +495,40 @@ public final class HealingService {
      */
     private static OptionalInt findDesperateFood(UUID botId, PlayerInventory inventory) {
         // First pass: rotten flesh (cheap, acceptable in desperation)
-        for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (stack.isEmpty()) continue;
-            FoodComponent food = getFoodComponent(stack);
-            if (food == null) continue;
-            String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (itemId.contains("rotten_flesh")) {
-                if (DesperateEatPolicy.logDue(LAST_DESPERATE_LOG, botId, System.currentTimeMillis())) {
-                    LOGGER.info("Desperate food: eating rotten flesh (slot {})", i);
-                }
-                return OptionalInt.of(i);
+        OptionalInt slot = desperateFoodSlot(inventory, false);
+        if (slot.isPresent()) {
+            if (DesperateEatPolicy.logDue(LAST_DESPERATE_LOG, botId, System.currentTimeMillis())) {
+                LOGGER.info("Desperate food: eating rotten flesh (slot {})", slot.getAsInt());
             }
+            return slot;
         }
         // Second pass: precious foods (golden apple, golden carrot — last resort)
+        slot = desperateFoodSlot(inventory, true);
+        if (slot.isPresent()) {
+            if (DesperateEatPolicy.logDue(LAST_DESPERATE_LOG, botId, System.currentTimeMillis())) {
+                String itemId = inventory.getStack(slot.getAsInt()).getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+                LOGGER.info("Desperate food: eating precious food {} (slot {})", itemId, slot.getAsInt());
+            }
+        }
+        return slot;
+    }
+
+    /** Whether {@link #findDesperateFood} would find something (no logging). */
+    private static boolean hasDesperateFood(PlayerInventory inventory) {
+        return inventory != null
+                && (desperateFoodSlot(inventory, false).isPresent() || desperateFoodSlot(inventory, true).isPresent());
+    }
+
+    /** First slot holding rotten flesh, or with {@code precious} a precious food. */
+    private static OptionalInt desperateFoodSlot(PlayerInventory inventory, boolean precious) {
         for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
             ItemStack stack = inventory.getStack(i);
             if (stack.isEmpty()) continue;
             FoodComponent food = getFoodComponent(stack);
             if (food == null) continue;
             String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (PRECIOUS_FOODS.stream().anyMatch(itemId::contains)) {
-                if (DesperateEatPolicy.logDue(LAST_DESPERATE_LOG, botId, System.currentTimeMillis())) {
-                    LOGGER.info("Desperate food: eating precious food {} (slot {})", itemId, i);
-                }
+            boolean match = precious ? PRECIOUS_FOODS.stream().anyMatch(itemId::contains) : itemId.contains("rotten_flesh");
+            if (match) {
                 return OptionalInt.of(i);
             }
         }

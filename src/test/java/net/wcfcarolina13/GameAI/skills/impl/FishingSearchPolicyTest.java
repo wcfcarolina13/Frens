@@ -57,11 +57,13 @@ class FishingSearchPolicyTest {
         int half = FishingSearchPolicy.chestScanHalfWidth(28);
         int ySpan = FishingSearchPolicy.CHEST_SCAN_Y_SPAN;
         assertTrue(FishingSearchPolicy.chestScanCovers(36, 0, -36, half, ySpan));
-        assertTrue(FishingSearchPolicy.chestScanCovers(-10, -6, 20, half, ySpan));
+        assertEquals(16, ySpan, "same vertical reach as the old HOME_CHEST_Y_SPAN");
+        assertTrue(FishingSearchPolicy.chestScanCovers(-10, -16, 20, half, ySpan));
+        assertTrue(FishingSearchPolicy.chestScanCovers(0, 16, 0, half, ySpan));
         assertFalse(FishingSearchPolicy.chestScanCovers(37, 0, 0, half, ySpan));
         assertFalse(FishingSearchPolicy.chestScanCovers(0, 0, -37, half, ySpan));
-        assertFalse(FishingSearchPolicy.chestScanCovers(0, 7, 0, half, ySpan));
-        assertFalse(FishingSearchPolicy.chestScanCovers(0, -7, 0, half, ySpan));
+        assertFalse(FishingSearchPolicy.chestScanCovers(0, 17, 0, half, ySpan));
+        assertFalse(FishingSearchPolicy.chestScanCovers(0, -17, 0, half, ySpan));
     }
 
     @Test

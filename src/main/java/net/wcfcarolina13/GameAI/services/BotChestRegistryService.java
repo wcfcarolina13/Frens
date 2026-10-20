@@ -188,9 +188,6 @@ public final class BotChestRegistryService {
     /** identityHashCode of the server whose legacy adoption has run; -1 = none yet. */
     private static volatile int adoptedServerIdentity = -1;
 
-    /** Most legacy chest positions checked per dimension before adopting (finding 40). */
-    private static final int MAX_LEGACY_POSITIONS_CHECKED = 4;
-
     /**
      * Keys whose adoption a worker pass could not decide (no checked position loaded). Until the
      * server thread decides them, {@link #worldData} hands out a detached entry instead of
@@ -198,18 +195,17 @@ public final class BotChestRegistryService {
      */
     private static final Set<String> UNDECIDED_KEYS = new HashSet<>();
 
-    /** Result of checking a legacy entry's recorded chest positions in this save. */
-    private record LegacyChestCheck(int candidates, int checked, int chestLike) {}
-
     /**
      * Once per server start, before anything reads chests: for each dimension with no
      * fingerprinted entry, copy the legacy ({@code levelName/dim}) entry when
      * {@link WorldStoreKeyPolicy#decideChestStore} allows it, and record the claim in
      * {@code legacyWorldClaims}. The legacy key is shared by every save with that level name, so
-     * up to {@value #MAX_LEGACY_POSITIONS_CHECKED} of its live chest records are checked first:
+     * up to {@value WorldStoreKeyPolicy#MAX_CHEST_POSITIONS_CHECKED} of its live chest records are checked first:
      * if none of the checked positions holds a chest here, the entry is another save's and this
-     * one starts empty without a claim (finding 40). Legacy entries are never removed or
-     * modified. A world that starts empty gets an empty entry so the decision sticks. Call from
+     * one starts empty without a claim (finding 40). A chest found here overrides another save's
+     * claim (the claim moves to this save), and on the server thread it also replaces an own
+     * store that holds no records (the save 1.1.274 left empty). Legacy entries are never removed
+     * or modified. A world that starts empty gets an empty entry so the decision sticks. Call from
      * SERVER_STARTED on the server thread, where reading a position may load its chunk;
      * {@link #worldData} and {@link #recordedOwnersAt} also run it lazily as a fallback, and on a
      * worker thread that pass only reads already-loaded chunks and leaves a key undecided when
@@ -234,15 +230,16 @@ public final class BotChestRegistryService {
                 boolean hasOwn = DATA.worlds.containsKey(key);
                 if (hasOwn) {
                     UNDECIDED_KEYS.remove(key);
-                    if (legacy != null && mayLoadChunks && fingerprint.equals(claimant)) {
-                        changed |= releaseWrongClaim(world, legacy, legacyKey, key, claimant, fingerprint);
+                    if (legacy != null && mayLoadChunks) {
+                        changed |= recheckOwnStore(world, legacy, legacyKey, key, claimant, fingerprint);
                     }
                     continue;
                 }
                 WorldStoreKeyPolicy.Adoption base = WorldStoreKeyPolicy.decide(
                         false, legacy != null, gameTime, claimant, fingerprint);
-                LegacyChestCheck check = new LegacyChestCheck(0, 0, 0);
-                if (base == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
+                WorldStoreKeyPolicy.ChestCheck check = WorldStoreKeyPolicy.ChestCheck.NONE;
+                if (base == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY
+                        || base == WorldStoreKeyPolicy.Adoption.START_EMPTY_CLAIMED) {
                     check = checkLegacyChests(world, legacy, mayLoadChunks);
                     if (check.candidates() > 0 && check.checked() == 0 && !mayLoadChunks) {
                         // A worker saw none of the positions loaded: no decision, no own store.
@@ -261,8 +258,13 @@ public final class BotChestRegistryService {
                 if (adoption == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
                     DATA.worlds.put(key, GSON.fromJson(GSON.toJson(legacy), WorldData.class));
                     DATA.legacyWorldClaims.put(legacyKey, fingerprint);
-                    LOGGER.info("Adopted legacy chest registry '{}' as '{}' (checked={}, chestLike={})",
-                            legacyKey, key, check.checked(), check.chestLike());
+                    if (base == WorldStoreKeyPolicy.Adoption.START_EMPTY_CLAIMED) {
+                        LOGGER.info("Adopted legacy chest registry '{}' as '{}' over the claim of '{}': a recorded chest is in this save (checked={}, chestLike={})",
+                                legacyKey, key, claimant, check.checked(), check.chestLike());
+                    } else {
+                        LOGGER.info("Adopted legacy chest registry '{}' as '{}' (checked={}, chestLike={})",
+                                legacyKey, key, check.checked(), check.chestLike());
+                    }
                     changed = true;
                 } else if (WorldStoreKeyPolicy.mustCreateOwnStore(adoption)) {
                     DATA.worlds.put(key, new WorldData());
@@ -288,14 +290,32 @@ public final class BotChestRegistryService {
     }
 
     /**
-     * 1.1.274 adopted a legacy entry by level name alone, so a same-named save may hold the claim
-     * while the chests are in another save. When none of the checked legacy positions holds a
-     * chest here, drop the claim (this save keeps its own store) so the real owner can still
-     * adopt if it has not decided yet. Server thread only; caller holds {@link #LOCK}.
+     * Re-checks a save that already has its own store against the legacy entry. 1.1.274 adopted
+     * by level name alone, so the claim may sit with the wrong same-named save:
+     * <ul>
+     *   <li>this save holds the claim and none of the checked legacy positions holds a chest here:
+     *       drop the claim (this save keeps its own store) so the real owner can adopt;</li>
+     *   <li>this save's own store has no records at all and a checked legacy position holds a
+     *       chest here: copy the legacy entry over it and take the claim. An own store with any
+     *       record is never overwritten.</li>
+     * </ul>
+     * Server thread only (reading a position may load its chunk); caller holds {@link #LOCK}.
      */
-    private static boolean releaseWrongClaim(ServerWorld world, WorldData legacy, String legacyKey,
-                                             String key, String claimant, String fingerprint) {
-        LegacyChestCheck check = checkLegacyChests(world, legacy, true);
+    private static boolean recheckOwnStore(ServerWorld world, WorldData legacy, String legacyKey,
+                                           String key, String claimant, String fingerprint) {
+        boolean holdsClaim = fingerprint.equals(claimant);
+        int ownRecords = recordCount(DATA.worlds.get(key));
+        if (!holdsClaim && ownRecords > 0) {
+            return false;
+        }
+        WorldStoreKeyPolicy.ChestCheck check = checkLegacyChests(world, legacy, true);
+        if (WorldStoreKeyPolicy.shouldAdoptOverEmptyOwnChestStore(ownRecords, true, check.chestLike())) {
+            DATA.worlds.put(key, GSON.fromJson(GSON.toJson(legacy), WorldData.class));
+            DATA.legacyWorldClaims.put(legacyKey, fingerprint);
+            LOGGER.info("Adopted legacy chest registry '{}' over the empty own store '{}' (previous claim '{}'): a recorded chest is in this save (checked={}, chestLike={})",
+                    legacyKey, key, claimant, check.checked(), check.chestLike());
+            return true;
+        }
         if (!WorldStoreKeyPolicy.shouldReleaseChestClaim(claimant, fingerprint, check.checked(), check.chestLike())) {
             return false;
         }
@@ -305,49 +325,60 @@ public final class BotChestRegistryService {
         return true;
     }
 
+    /** Every record in a store, destroyed ones included. Caller holds {@link #LOCK}. */
+    private static int recordCount(WorldData data) {
+        if (data == null || data.chestsByBot == null) {
+            return 0;
+        }
+        int count = 0;
+        for (List<ChestRecord> records : data.chestsByBot.values()) {
+            if (records == null) continue;
+            for (ChestRecord r : records) {
+                if (r != null) count++;
+            }
+        }
+        return count;
+    }
+
     /**
-     * Checks up to {@value #MAX_LEGACY_POSITIONS_CHECKED} non-destroyed records of a legacy
-     * entry for a chest-like block. With {@code mayLoadChunks} false only already-loaded chunks
+     * Probes the live (non-destroyed) records of a legacy entry through
+     * {@link WorldStoreKeyPolicy#checkChestPositions}: up to
+     * {@value WorldStoreKeyPolicy#MAX_CHEST_POSITIONS_CHECKED} positions, stopping at the first
+     * chest-like block; misses do not end it (records of moved or broken chests stay live until
+     * verifyChests marks them). With {@code mayLoadChunks} false only already-loaded chunks
      * are read, through {@code getWorldChunk}, which never loads or waits for the server thread
      * (in 1.21.11 it returns null on any other thread, so a worker pass checks nothing and
      * defers). Never {@code world.getBlockState} off-thread here: that joins the server thread
      * while this caller holds {@link #LOCK}.
      */
-    private static LegacyChestCheck checkLegacyChests(ServerWorld world, WorldData legacy, boolean mayLoadChunks) {
+    private static WorldStoreKeyPolicy.ChestCheck checkLegacyChests(ServerWorld world, WorldData legacy, boolean mayLoadChunks) {
         if (world == null || legacy == null || legacy.chestsByBot == null) {
-            return new LegacyChestCheck(0, 0, 0);
+            return WorldStoreKeyPolicy.ChestCheck.NONE;
         }
-        int candidates = 0;
-        int checked = 0;
-        int chestLike = 0;
+        List<BlockPos> positions = new ArrayList<>();
         for (List<ChestRecord> records : legacy.chestsByBot.values()) {
             if (records == null) continue;
             for (ChestRecord r : records) {
-                if (r == null || r.destroyed) continue;
-                if (candidates >= MAX_LEGACY_POSITIONS_CHECKED) {
-                    return new LegacyChestCheck(candidates, checked, chestLike);
-                }
-                candidates++;
-                BlockPos pos = new BlockPos(r.x, r.y, r.z);
-                BlockState state;
-                try {
-                    if (mayLoadChunks) {
-                        state = world.getBlockState(pos);
-                    } else {
-                        WorldChunk chunk = world.getChunkManager().getWorldChunk(pos.getX() >> 4, pos.getZ() >> 4);
-                        if (chunk == null) continue;
-                        state = chunk.getBlockState(pos);
-                    }
-                } catch (Throwable t) {
-                    continue;
-                }
-                checked++;
-                if (isChestLike(state)) {
-                    chestLike++;
+                if (r != null && !r.destroyed) {
+                    positions.add(new BlockPos(r.x, r.y, r.z));
                 }
             }
         }
-        return new LegacyChestCheck(candidates, checked, chestLike);
+        return WorldStoreKeyPolicy.checkChestPositions(positions, pos -> {
+            BlockState state;
+            try {
+                if (mayLoadChunks) {
+                    state = world.getBlockState(pos);
+                } else {
+                    WorldChunk chunk = world.getChunkManager().getWorldChunk(pos.getX() >> 4, pos.getZ() >> 4);
+                    if (chunk == null) return null;
+                    state = chunk.getBlockState(pos);
+                }
+            } catch (Throwable t) {
+                return null;
+            }
+            return isChestLike(state);
+        });
     }
 
     /** Chest, trapped chest, barrel or any copper chest (1.21.11). */

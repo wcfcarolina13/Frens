@@ -22,6 +22,27 @@ public final class DesperateEatPolicy {
         return LogThrottle.due(lastAttempt, key, nowMs, ATTEMPT_COOLDOWN_MS);
     }
 
+    /**
+     * True when a desperate eat was tried for this bot less than {@link #ATTEMPT_COOLDOWN_MS} ago.
+     * A clock that went back (negative elapsed) is outside the cooldown, as in {@link #attemptDue}.
+     */
+    public static boolean withinAttemptCooldown(Long lastAttemptMs, long nowMs) {
+        if (lastAttemptMs == null) {
+            return false;
+        }
+        long elapsed = nowMs - lastAttemptMs;
+        return elapsed >= 0 && elapsed < ATTEMPT_COOLDOWN_MS;
+    }
+
+    /**
+     * Whether a last-resort eat is under way, so a starving bot must not be paused as "out of
+     * food": it is using an item (chewing), or it tried a desperate eat within the cooldown and
+     * still has desperate food.
+     */
+    public static boolean eatInFlight(boolean usingItem, Long lastAttemptMs, long nowMs, boolean hasDesperateFood) {
+        return usingItem || (withinAttemptCooldown(lastAttemptMs, nowMs) && hasDesperateFood);
+    }
+
     /** True when the "Desperate food" line may be logged now for {@code key}, and records it. */
     public static <K> boolean logDue(Map<K, Long> lastLog, K key, long nowMs) {
         return LogThrottle.due(lastLog, key, nowMs, LOG_INTERVAL_MS);

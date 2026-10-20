@@ -24,8 +24,12 @@ public final class FishingSearchPolicy {
     public static final int STAND_REACH = 3;
     /** Blocks added to the scanned area when looking for chest anchors (finding 39). */
     public static final int CHEST_SCAN_MARGIN = 8;
-    /** Half height of the chest-anchor scan, centred on the bot (or the remembered water). */
-    public static final int CHEST_SCAN_Y_SPAN = 6;
+    /**
+     * Half height of the chest-anchor scan, centred on the bot (or the remembered water). 16, as
+     * the old HOME_CHEST_Y_SPAN: the chest bonus counts within 16 blocks in 3D, so chests well
+     * above or below the bot used to count and still should. Reads stay chunk-local.
+     */
+    public static final int CHEST_SCAN_Y_SPAN = 16;
 
     private FishingSearchPolicy() {
     }
@@ -36,8 +40,10 @@ public final class FishingSearchPolicy {
      * ~620k block reads per search; anchors only give stands a small score bonus, so the
      * scan now covers the searched area plus {@link #CHEST_SCAN_MARGIN}.
      *
-     * @param areaRadius radius of the searched area (the water search radius, or
-     *                   {@link #STAND_REACH} around one remembered water block)
+     * @param areaRadius radius of the searched area (the water search radius). The
+     *                   remembered-spot path does not use this: it scans
+     *                   {@link #STAND_REACH} + FishingSkill.CHEST_PROXIMITY_RADIUS (19) around the
+     *                   remembered water directly.
      */
     public static int chestScanHalfWidth(int areaRadius) {
         return Math.max(0, areaRadius) + CHEST_SCAN_MARGIN;
