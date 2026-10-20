@@ -99,4 +99,14 @@ public final class StuckCellPolicy {
         return landingFeetPathable && landingHeadPathable && transitAbovePathable
                 && floorCollisionNonEmpty && !floorHazard && !landingHazard && !landingFluid;
     }
+
+    /**
+     * A jump-sprint escape worked only when the bot ended in a different X or Z cell
+     * and is standing on the ground. A Y-only change (the bot read mid-jump, or landed
+     * back on the same column) is not an escape, and neither is a sideways change read
+     * while still airborne.
+     */
+    public static boolean jumpSprintEscaped(int startX, int startZ, int endX, int endZ, boolean onGround) {
+        return onGround && (startX != endX || startZ != endZ);
+    }
 }

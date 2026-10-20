@@ -186,4 +186,24 @@ class StuckCellPolicyTest {
         assertFalse(StuckCellPolicy.dropOneAllowed(true, false, true, true, false, false, false));
         assertFalse(StuckCellPolicy.dropOneAllowed(true, true, false, true, false, false, false));
     }
+
+    // --- jumpSprintEscaped ------------------------------------------------------
+
+    @Test
+    void jumpSprintSameCellHigherYIsNotAnEscape() {
+        // Same X/Z, Y+1 (mid-jump or back on the same column): the caller never passes Y.
+        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -4, true));
+        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -4, false));
+    }
+
+    @Test
+    void jumpSprintSidewaysOnGroundIsAnEscape() {
+        assertTrue(StuckCellPolicy.jumpSprintEscaped(10, -4, 11, -4, true));
+        assertTrue(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -5, true));
+    }
+
+    @Test
+    void jumpSprintSidewaysWhileAirborneIsNotAnEscape() {
+        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 11, -4, false));
+    }
 }

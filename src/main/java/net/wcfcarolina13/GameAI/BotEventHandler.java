@@ -1732,17 +1732,14 @@ public class BotEventHandler {
 
         // Guard: if already returning to the same (or very close) base, don't reset state
         // This prevents repeated calls from resetting stuck detection counters
-        if (isReturningToBase(bot)) {
-            BotCommandStateService.State existingState = stateFor(bot);
-            if (existingState != null && existingState.baseTarget != null) {
-                double dx = base.x - existingState.baseTarget.x;
-                double dz = base.z - existingState.baseTarget.z;
-                double distSq2 = dx * dx + dz * dz;
-                if (distSq2 < 9.0D) { // Within 3 blocks of same target
-                    LOGGER.debug("setReturnToBase: already returning to nearby base, skipping reset");
-                    return "Bot is already returning to base.";
-                }
-            }
+        BotCommandStateService.State existingState = stateFor(bot);
+        boolean wasReturning = isReturningToBase(bot) && existingState != null && existingState.baseTarget != null;
+        double oldBaseX = wasReturning ? existingState.baseTarget.x : 0.0D;
+        double oldBaseZ = wasReturning ? existingState.baseTarget.z : 0.0D;
+        if (!net.wcfcarolina13.GameAI.services.ReturnEpisodePolicy.isNewReturn(
+                wasReturning, oldBaseX, oldBaseZ, base.x, base.z)) {
+            LOGGER.debug("setReturnToBase: already returning to nearby base, skipping reset");
+            return "Bot is already returning to base.";
         }
 
         // Try bot-to-bot artifact teleport when far from base — a same-owner bot
@@ -1786,7 +1783,11 @@ public class BotEventHandler {
         UUID id = bot.getUuid();
         FollowStateService.clearPlanning(id);
         FollowDebugService.clear(id);
-        // Note: ReturnBaseStuckService counter is NOT cleared here - it should keep counting
+        // A new return episode (not a re-plan of the same one; that returned early at the
+        // same-base guard above) starts with fresh stuck counters. Flags and stagnation left
+        // over from an earlier, interrupted return would otherwise skip escape steps and
+        // jump straight to the late ones.
+        net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(id);
         if (requestInitialPlan) {
             requestFollowPathPlanToGoal(bot, goal, true, "return-base-start");
         }

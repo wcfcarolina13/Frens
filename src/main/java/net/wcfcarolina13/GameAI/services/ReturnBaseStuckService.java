@@ -1531,6 +1531,9 @@ public final class ReturnBaseStuckService {
      * Tries all 4 cardinal directions, with jumping, to escape.
      * If all directions are blocked, delegates to mining (pillar escape).
      */
+    /** Settle time after a jump-sprint stop so the bot lands before the escape is judged. */
+    private static final long JUMP_SPRINT_SETTLE_MS = 200L;
+
     private static void tryBackupAndSidestep(ServerPlayerEntity bot, Vec3d target) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             LOGGER.warn("Stuck escape: world not ServerWorld, aborting");
@@ -1604,11 +1607,30 @@ public final class ReturnBaseStuckService {
                     BotActions.moveForward(bot);
                 });
                 sleepQuiet(300);
-                server.execute(() -> BotActions.stop(bot));
-                
-                // Check if we moved
-                if (!bot.getBlockPos().equals(startPos)) {
-                    LOGGER.info("Stuck escape: jump-sprint {} succeeded, now at {}", escapeDir, bot.getBlockPos().toShortString());
+                // Wait for the stop to run, then let the jump land before judging it:
+                // a mid-jump read changes only Y and is not an escape.
+                CountDownLatch stopLatch = new CountDownLatch(1);
+                server.execute(() -> {
+                    try {
+                        BotActions.stop(bot);
+                    } finally {
+                        stopLatch.countDown();
+                    }
+                });
+                try {
+                    stopLatch.await(1, TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                sleepQuiet(JUMP_SPRINT_SETTLE_MS);
+
+                // Only a sideways cell change, landed on the ground, counts.
+                BlockPos endPos = bot.getBlockPos();
+                boolean onGround = bot.isOnGround();
+                if (StuckCellPolicy.jumpSprintEscaped(startPos.getX(), startPos.getZ(),
+                        endPos.getX(), endPos.getZ(), onGround)) {
+                    LOGGER.info("Stuck escape: jump-sprint {} succeeded, now at {}", escapeDir, endPos.toShortString());
                     return;
                 }
             }
