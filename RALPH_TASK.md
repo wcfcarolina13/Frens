@@ -4,15 +4,16 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.284) — next session starts here
+## Session Handoff 2026-10-20 (1.1.285) — next session starts here
 
-**State:** main = origin/main @ 1.1.284. Suite 3382 green. Deployed to Nirn. 1.1.284 = backlog 196, 253 (Codex, `c982f8b6`; 216, 210 skipped). 1.1.283 = backlog 409, 186, 231 (Codex-implemented, `003fd626`); 135 skipped (not small). Not sandbox-checked.
+**State:** main = origin/main @ 1.1.285. Suite 3385 green. Deployed to Nirn. 1.1.285 = backlog 178, 220, 223, 224 (Codex, `9b23cffb`). 1.1.284 = backlog 196, 253 (Codex, `c982f8b6`; 216, 210 skipped). 1.1.283 = backlog 409, 186, 231 (Codex-implemented, `003fd626`); 135 skipped (not small). Not sandbox-checked.
 **Pending sandbox check (Bradley 2026-10-20: queue it, run when usage allows, not yet):** one combined run for the unchecked builds:
 - 1.1.282: woodcut cleanup with every hotbar slot a tool/weapon skips the leaf clear (no swing); full-pack strict stone craft logs no "I need 3 cobbled deepslate" line (`fix281.py craft full`); store chest placement miss logs at INFO.
 - 1.1.283: a fortify run that finds a cavity speaks the callout aloud; a flower gift skips a recipient with a full inventory.
 - 1.1.284: sunset with the owner more than 48 blocks away in the same dimension: the bot comes to the owner; voice mute toggles still apply.
+- 1.1.285: a starving strip-mine bot far from its owner: the owner sees the pause line; an "Allow once" supply grant is used with the owner away; revoking Collect permission mid-trip gives the "no longer have permission" line; a chest placed by hand on a destroyed record stays unlisted.
 **Next:** finding 56 (one-block step up into oak leaves at feet and head: `leaf-cleared` logs but no leaf is mined), 59, 60; then the remaining triage CODE rows (`.superpowers/backlog-triage/split182.txt` in the base checkout).
-**Public release:** 1.1.284 is the candidate. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
+**Public release:** 1.1.285 is the candidate. Nothing goes to Modrinth or Discord without Bradley's OK on the exact text.
 **Needs Bradley:** the three 1.1.272 questions still stand.
 **Field checklist drain:** step 3 is one guided session (`GUIDED_SESSION_BRADLEY.md`).
 
@@ -246,7 +247,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 
 ### Survival, hunger, crafting, farming and mutual aid
 - [x] "bundle food in the no-food warning" (1.1.239 handoff, 2026-10-14) — ✅ 1.1.279 1fedf1ce (sandbox 6bq PASS)
-- [ ] "the gated hunger lines in CollectDirt/StripMine" (1.1.239 handoff, 2026-10-14)
+- [x] "the gated hunger lines in CollectDirt/StripMine" (1.1.239 handoff, 2026-10-14) — ✅ 1.1.285 9b23cffb
 - [ ] "SkillResumeService vs recovery thread" ("not waiting on an active recovery thread"; 1.1.239 handoff, 2026-10-14)
 - [x] "`SmeltingService.resolveFurnaceTarget` `Thread.sleep(150)` (SS:~810/~831) on `/bot cook` and the auto-cook tick." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 0d8cd03e (sandbox 6bq PASS)
 - [x] "A server-thread craft with a full inventory: `distributeOutput` / `craftWithPlanks` / `ensurePlanksFromLogs` → `offloadCheapItemsToNearbyChest` → deposit walk or `placeChestNearBot`. Same fix shape; needs its own scope." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 + 5eb24b38 (sandbox 6bq PASS)
@@ -288,11 +289,11 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "Three \"other half of a double chest\" helpers could be one." (1.1.221 handoff, 2026-09-25)
 - [x] "CraftingHelper pull hint maps aren't cleared at stop (bounded wall-clock hints)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c
 - [ ] "A double chest whose other half is unloaded reads as unreadable (skipped for that pass)." (1.1.221 handoff, 2026-09-25)
-- [ ] "A grant-covered ask while the owner is away is still refused (only Always skips the owner-range check)." (1.1.221 handoff, 2026-09-25)
+- [x] "A grant-covered ask while the owner is away is still refused (only Always skips the owner-range check)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
 - [ ] "The `/bot stop` fix for the chest tool search (read `hasActiveTask` once before the loop) is verified by reading only; its test pins the pure helper, not the wiring." (1.1.221 handoff, 2026-09-25)
 - [ ] "Pre-existing latch race: after `/bot stop`, a later `beginSkill` for the same bot clears the abort latch, so a search still inside a hop can resume." ("needs the captured ticket's cancel flag (a TaskService accessor)"; 1.1.221 handoff, 2026-09-25)
-- [ ] "Ownership is not re-checked on arrival." (Bot Storage collect; 1.1.220 handoff, 2026-09-25)
-- [ ] "`verifyChests` revives a record for any chest placed back at its position." (1.1.220 handoff, 2026-09-25)
+- [x] "Ownership is not re-checked on arrival." (Bot Storage collect; 1.1.220 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
+- [x] "`verifyChests` revives a record for any chest placed back at its position." (1.1.220 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
 - [x] "A dimension-fallback collect is dropped." (1.1.220 handoff, 2026-09-25) — ✅ 1.1.278 569c625d (dimension-fallback collect now tells the owner)
 - [x] "Two Collects on different chests while the bot is on cooldown fail safe but silently." ("The owner sees two \"arrived\" lines and gets no items."; 1.1.220 handoff, 2026-09-25) — ✅ 1.1.278 569c625d (restated: refused/replaced/cancelled collects tell the owner; sandbox 6bp PASS)
 - [x] "A server-thread chest placement miss logs only at DEBUG." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c

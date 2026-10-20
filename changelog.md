@@ -2,6 +2,18 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Starvation pauses reach a distant owner, grant-covered supply asks while the owner is away, Collect re-checks permission on arrival, no chest-record revival by a stranger's chest; 1.1.285 (2026-10-20)
+
+Small-items build from the backlog triage, implemented by Codex (with Bradley's permission); controller read the diff and ran the suite.
+
+- **Starvation pause lines reach a distant owner** (backlog 178; `9b23cffb`): strip mine and collect dirt sent "pausing, I'm starving" through a range-gated sender.
+- **A grant that covers a supply ask no longer needs the owner nearby** (backlog 220; `9b23cffb`): only "Always" skipped the range check, so an unspent "Allow once" was refused while the owner was away (listed as a known gap in 1.1.221). Quantity and expiry checks still apply.
+- **Collect re-checks the requester's permission on arrival** (backlog 223; `9b23cffb`): if it was revoked during the trip, the owner hears "arrived, but you no longer have permission to collect from its chest. Nothing was collected."
+- **verifyChests no longer revives a destroyed chest record** (backlog 224; `9b23cffb`): any chest put back at a recorded spot revived it, even one someone else placed. Ruling (made on Bradley's behalf): only a bot placing and registering the chest revives it; cost if wrong: a bot's own chest broken and put back by hand stays unlisted until a bot registers it again (the 1.1.276 retired-copy records also revive only by registration now).
+- **Tests** 3382 → 3385. Not sandbox-checked.
+
+**Field checks:** see the pending sandbox list in the RALPH_TASK handoff.
+
 ## Sunset return finds a distant owner, voice mute mask capped at its category count; 1.1.284 (2026-10-20)
 
 Small-items build from the backlog triage, implemented by Codex (with Bradley's permission for this task); controller read the diff, dropped one part and ran the suite.
