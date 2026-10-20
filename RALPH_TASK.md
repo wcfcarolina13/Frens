@@ -146,7 +146,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "RL breakBlockAhead ... still instant" (RL is gone since 1.1.244 but `BotActions.breakBlockAhead` is still called by `BotStuckService` `escapeStairs`; 1.1.234 handoff, 2026-10-14)
 - [ ] "clutter clears ... still instant" (snow/carpet clutter; 1.1.234 handoff, 2026-10-14)
 - [ ] "long automatic return refusals (combat/cooldown/food) still in chat." (1.1.234 handoff, 2026-10-14)
-- [ ] "Return-base door/escape server-thread traverses (BEH ~3603/~3630): let the tripwire name them first." (1.1.223 handoff, 2026-09-25)
+- [x] "Return-base door/escape server-thread traverses (BEH ~3603/~3630): let the tripwire name them first." (1.1.223 handoff, 2026-09-25) — stale (triage 2026-10-19): Mode.RETURNING_BASE is never set; return-to-base runs via FOLLOW (BEH:1336, :3165)
 - [ ] "redstone step 2 (use plates and buttons, iron doors with triggers)" (1.1.223 handoff, 2026-09-25)
 - [ ] "`LeafClearAction`/`LeafClearResult` still on MovementService." (2026-09-05 late night handoff; also 2026-09-05 night and later handoffs)
 - [ ] (uncertain) "Duplicate \"Returning to base\" messages on each sunset return." (Farm Pipeline next-session notes, 2026-04-08)
@@ -168,7 +168,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "woodcut cleanup async scan off-thread" (1.1.266 B bounded the scan, it still runs off-thread; 1.1.234 handoff, 2026-10-14)
 - [ ] "cleanup hand fallback slot 0" (1.1.233 handoff, 2026-10-13)
 - [ ] "woodcut surface-staging cost." (1.1.229 handoff, 2026-10-13)
-- [ ] "weapons+food-only inventory mining thrash (pre-existing)" (1.1.229 handoff, 2026-10-13)
+- [x] "weapons+food-only inventory mining thrash (pre-existing)" (1.1.229 handoff, 2026-10-13) — ✅ 1.1.273 3d01ec5a (RepollPolicy) + 1.1.274 e4f77737 (cliff-branch loadout); sandbox PASS FIELD_0_6AI_SANDBOX:92
 - [ ] (uncertain) "WoodcutSkill still reports `soilFail=29` out of 31 logs in dense forest" ("May need to revisit the soil/hazard heuristic for bounded-mode farm clearing"; Farm Pipeline next-session notes, 2026-04-08)
 - [ ] "woodcut trunk-entry cases that previously carved `grass_block` / `dirt` support under the stand" (validation ask, likely stale; Recent Session Notes, 2026-03-31)
 - [ ] "standalone and idle woodcut runs, verifying `Planted sapling at ...` or explicit replant skip summaries after per-tree cleanup" (validation ask, likely stale; Recent Session Notes, 2026-03-31)
@@ -255,7 +255,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] (uncertain) "ontology Phase 3 / second scripted-text personality (spec first)" (ontology half done; may mean the soul personality Silas shipped in 1.1.204; 2026-09-05 handoffs)
 
 ### MCP fork and tooling
-- [ ] "keyboard in-world" (minecraft-mod-mcp fork; open in `docs/testing/MCP_MOD_IMPROVEMENTS.md`; 1.1.236 handoff, 2026-10-14)
+- [x] "keyboard in-world" (minecraft-mod-mcp fork; open in `docs/testing/MCP_MOD_IMPROVEMENTS.md`; 1.1.236 handoff, 2026-10-14) — ✅ MCP fork 71efa71 (docs/testing/MCP_MOD_IMPROVEMENTS.md:47)
 - [ ] "per-action control mode upstream PR." ("Upstream PR plan ... nothing sent" in `MCP_MOD_IMPROVEMENTS.md`; 1.1.236 handoff, 2026-10-14)
 
 ### Docs and process
@@ -317,7 +317,7 @@ track is validation-bound before anything new starts. Suite 621 green.
       (`SoulLocalDirector` ~L262), `SoulPlayerActivity.clear()` on runtime shutdown +
       `forget(playerId)` on disconnect (`SoulRuntime` L434 / L697). Verified in code 2026-09-03.
 - [ ] **Bob's own TTS reference sample** — still shares Jake's Dreamsleeve clone (open since 1.1.184).
-- [ ] **P1 gameplay** (detail in the P1 section below): creeper back-away, BotTorchHoldService not
+- [x] **P1 gameplay** (detail in the P1 section below): creeper back-away, BotTorchHoldService not — dropped (triage 2026-10-19): roll-up of 352/354/358, which stay open
       firing (diagnostic-first), doorway/pressure-plate stalls (multi-day rework — discuss the
       door-plan architecture with Bradley first). Slot after the field session; they need in-game time.
 
@@ -359,7 +359,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 ### Pre-existing P1 items
 
-- [ ] **Elder Scrolls-style dialogue menu**: Conversation topics, commands, quests
+- [x] **Elder Scrolls-style dialogue menu**: Conversation topics, commands, quests — ✅ BotPlayerInventoryScreen:707-727 topics, :2301 tabs (triage 2026-10-19)
 - [ ] **Elder Scrolls-style Journal**: Conversation topics, quests, important information with simple filter search
 - [x] **Drop-sweep cobblestone loop**: ✅ shipped. Two-layer fix: (1) [DropSweeper.ensureSpaceForDropSweep:284-286](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java#L284-L286) only drops items when `chestStoreSucceeded` is true — no offload target → no drop. (2) per-bot TTL self-drop suppression in 1.1.70 (commit `247005e`) — [DropSweeper.java:216-217](src/main/java/net/wcfcarolina13/GameAI/DropSweeper.java#L216-L217) calls `CraftingHelper.isRecentlySelfDropped` to reject pickup of items the bot itself dropped within the last 5 min, killing the inter-sweep reacquisition loop even if guard #1 partially fails.
 - [x] **Idle during fast-travel cooldown** ✅ 1.1.204 — `TravelWaitService` (hobbies + auto-travel; offload-existing deferred). Was: When a bot wants to fast-travel but has an active cooldown, it should do useful things while waiting (idle hobbies if enabled, chest offloading to nearby existing chests if disabled), then fast-travel when cooldown expires. Currently the bot just sits idle. For sunset→home specifically, don't build new chests — only use existing ones.
@@ -373,7 +373,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 - [x] **Furnace offload fallback** ✅ 1.1.205 (`FurnaceOffloadService` + `FuelOffloadPolicy`; verify in field). Was: When no chest is available but furnaces are nearby, dump fuel-eligible items (leaves, sticks, planks) into the fuel slot and smeltable items into the input slot. Especially useful during patrol when bot accumulates items with no chest infrastructure.
 - [x] **Craft chest from wood** — ✅ already done. [ToolProvisionService.ensureChest](src/main/java/net/wcfcarolina13/GameAI/services/ToolProvisionService.java) crafts an 8-plank chest when planks/logs are available. Wired into [ChestStoreService.java:588](src/main/java/net/wcfcarolina13/GameAI/services/ChestStoreService.java#L588) (offload path), HuntSkill (camp), FishingSkill.
-- [ ] Shift-click, double-click, drag support in inventory UI
+- [x] Shift-click, double-click, drag support in inventory UI — ✅ HandledScreen delegation :4809/:4838 + ScreenHandler.quickMove :160 (field check still FIELD_SESSION:1517)
 - [ ] Quick-action buttons (Sort, Equip Best, Take All, Give All)
 - [ ] Bundle packing verification: drop_sweep crafts/uses bundles when inventory is truly full
 - [ ] Chest management overhaul: locking/access policy, categorization rules, organization modes
@@ -390,13 +390,13 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 ### Shelter (Redo Needed)
 
-- [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes
+- [x] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes — ✅ b5479ada (BurrowBuilder + HovelPerimeterBuilder)
 - [x] **ScaffoldService extraction** ✅ 1.1.208 (ladders moved. Not migrated, on purpose: `FarmSkill.pillarEscape` (its fixed 120 ms timing, placement and lack of a 12-step cap differ, so migrating is a behaviour change to judge in the field first), `WoodcutSkill.pillarUp` and `HovelPerimeterBuilder.pillarUp` (each needs 2–3 new options), `WoodcutSkill.clearBlockingLeaves` (mutates reach-session counters); changelog 1.1.208. Tracked as an open line under "Recovered deferrals", Construction, scaffold and shelter.)
 - [x] **LeafClearService extraction** ✅ 1.1.208 (navigation clearing moved + shared clearLineOfSight; WoodcutSkill's LOS variant deferred)
 - [ ] **Shelter resource acquisition flow**: Auto-collect/craft materials by default; allow `ask|wait|manual` to pause
-- [ ] **Shelter options parameter**: Investigate what `options` currently controls for hovel/burrow
+- [x] **Shelter options parameter**: Investigate what `options` currently controls for hovel/burrow — ✅ answer: getOption (ShelterSkill:543-567) reads options only to pick the type; first of burrow/hovel/hovel2 wins, else first token, default hovel; only burrow branches (:86); radius/wall height/door side come from other parameters
 - [ ] **Shelter chest workflow**: Withdraw/deposit resources and place chests inside planned interior
-- [ ] **Burrow "descend-stripmine-descend"**: Restore intended method
+- [x] **Burrow "descend-stripmine-descend"**: Restore intended method — ✅ BurrowBuilder:68-148 (descend 5, strip throat, descend 3, hollow; resumable phase state)
 
 ### Construction (Blocked — formerly active task)
 
@@ -410,7 +410,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 
 - [ ] **Construction parity baseline**: Establish measurable parity for generic schematic builds, shelter/hovel/burrow, fortify wall/patch/moat, and other block-placement paths
-- [ ] **Shared construction reach/scaffold**: Standardize feet-based reach, LOS-aware recovery, scaffold stance rules in the generic service layer
+- [x] **Shared construction reach/scaffold**: Standardize feet-based reach, LOS-aware recovery, scaffold stance rules in the generic service layer — ✅ ConstructionPlacementRules + ConstructionRecoveryService:441 (changelog parity slice 1); shelter builders not migrated
 - [ ] **Generic schematic bottlenecks**: Remove remaining bottlenecks in `BuildSchematicSkill` and `ConstructionRecoveryService`
 - [ ] **Shelter onto shared semantics**: Move shelter/hovel/burrow onto shared reach/scaffold without regressing geometry-specific behavior
 - [x] **FortifyVillageSkill Phase 2 refactoring** ✅ 1.1.209 (cleanup/tower) + 1.1.210 (carve, Phase 3 — extraction complete): `FortifySharedContext`/`FortifyTowerContext`/`FortifyCarveContext`, `FortifyCleanupProcessor`, `FortifyTowerHelper`, `FortifyCarveHelper`; skill 9,560 → 6,185. Phase 1 complete (extracted EntombmentHelper, SkillTypes, CleanupHelper, LayoutHelper, EscapeHelper — reduced by ~740 lines)
@@ -419,7 +419,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 - [x] **Command pruning review** ✅ 1.1.207 — both KEPT (only yaw-setter; only WorkDirection reset); README name fixed
 - [ ] In-game check: verify guide/search usability and that actions launched from adjusted counts run with the expected arguments
-- [ ] **Base Manager UX polish (carry-forward from 2026-04-20)**: the menu mixes registered bases (yellow `[Base]`) with lodestone compasses (white rows) in one flat list, and `[Home]` means two different things depending on row color. Even the dev got confused. A minimal inline legend landed in 1.1.39 and a "Home & Bases Explained" guide topic was added, but the full fix is: (a) sort rows so registered bases come first, lodestones second; (b) insert section headers (`Registered Bases`, `Lodestone Compasses`); (c) on row hover, show a one-line tooltip describing what clicking `Set Home` will do for that row type; (d) when the user clicks `Set Home` on a row, echo the stored label back in chat (`Jake will treat 'home' as home.`) — so they can immediately verify it took.
+- [x] **Base Manager UX polish (carry-forward from 2026-04-20)**: the menu mixes registered bases (yellow `[Base]`) with lodestone compasses (white rows) in one flat list, and `[Home]` means two different things depending on row color. Even the dev got confused. A minimal inline legend landed in 1.1.39 and a "Home & Bases Explained" guide topic was added, but the full fix is: (a) sort rows so registered bases come first, lodestones second; (b) insert section headers (`Registered Bases`, `Lodestone Compasses`); (c) on row hover, show a one-line tooltip describing what clicking `Set Home` will do for that row type; (d) when the user clicks `Set Home` on a row, echo the stored label back in chat (`Jake will treat 'home' as home.`) — so they can immediately verify it took. — ✅ BaseManagerScreen:282/:132/:145/:1332
 - [ ] **Named-hostile-mob pacifism: in-game verification (reopened 2026-10-17)** — no field phase covers it and the "6-item test plan" it cites was not found in the old session notes or `docs/superpowers/specs/` (the notes are now in `docs/handoffs/ARCHIVE_2026.md`). Verify: a name-tagged hostile is not engaged, flee still fires when it deals damage, `/bot attack_named_mobs on|off|toggle` and the Admin row flip it. Original line: implemented in `aeef62a` (1.1.55). `BotCombatPolicyService.shouldBotAttack` gates engagement; named hostiles still appear in scans so flee fires on damage; per-bot `attackNamedMobs` opt-in toggle reachable via `/bot attack_named_mobs <on|off|toggle> [target]` and the Admin tab "Attack Named Mobs" row. **Manual in-game verification still pending.**
 - [x] **`CompanionSpellsScreen` cleanup — partial**: Audited 2026-05-06. The legacy screen is **not** fully decommissioned — it's still reached via the dedicated `KEY_OPEN_SPELLS` keybind path in [FrensClient.java:660 → 1578](src/main/java/net/wcfcarolina13/FrensClient.java#L660), the recruit-contact key fall-through after recruitment, and the temporary `-` go-to-spells override (when holding a spell trigger item). `isEyeSpellOnCooldown` / `armEyeSpellCooldown` are also still consumed inside `FrensClient` itself, not just the legacy screen. So the original "delete the file" plan would break the keybind UX. What WAS removable: the dead `openSpellsMenu` method in `BotPlayerInventoryScreen` — defined but never called. Removed in 1.1.68. Open follow-up: decide whether to migrate the `KEY_OPEN_SPELLS` keybind path to also use the unified Spells tab (would let us actually delete the legacy screen) or accept the dual UX as intentional.
 - [x] ✅ 1.1.207 (changelog "Command pruning review": the Actions-tab Regroup entry is gone, Spells keeps it; the `Return Home` vs `Home` label question below was not part of that fix) **Actions-tab Regroup duplicate**: `Regroup` lives in both the Actions tab (`Orders & Travel`) and the Spells tab (Movement). Users may hit the Actions-tab version first; it runs `/bot companion come` which the server then rejects if artifacts are missing. Decide: keep both with a visible "gated" indicator on the Actions copy, or remove Regroup from Actions and leave it in Spells only. Same question for `Return Home` (Actions) vs `Home` (Spells) — distinct actions (`RETURN_HOME` vs `COMPANION_HOME`) so this may just need clearer labels.
@@ -431,7 +431,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [ ] Boat support (enter, exit, navigate) — partial: [TravelMountHandler](src/main/java/net/wcfcarolina13/GameAI/services/TravelMountHandler.java) handles boat mount/dismount/leashed-rejoin sync (incl. ChestBoatEntity); free-form bot-driven boat *navigation* (steer, paddle to a point) is not implemented.
 - [ ] Test fishing from a boat
 - [ ] Portal following (Nether, End)
-- [ ] Cross-realm teleport command
+- [x] Cross-realm teleport command — ✅ modCommandRegistry:4887-4932 (Tome/enchanting-table gated)
 - [ ] Water-aware pickup (wade/bridge)
 - [ ] Edge/hole pickup (hop down safely)
 - [x] Add shelves and containers to no-break list — ✅ already done. [ProtectedStructureBlockHelper.isProtectedContainer](src/main/java/net/wcfcarolina13/GameAI/services/ProtectedStructureBlockHelper.java) covers bookshelves (incl. chiseled), all chest variants, barrels, hoppers, dispensers, droppers, decorated pots, crafters, brewing stands, furnaces, blast furnaces, smokers, and all 17 shulker box variants. Wired through `isNeverBreakBlock` and consulted from BotStuckService + MovementService.
@@ -448,7 +448,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 - [x] Creeper evasion (sprint away when unarmed) — implemented in [BotEventHandler.java:3794](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L3794): default flee sprints away within 6 blocks, raises shield within 4.5, with extra `isIgnited()` boost in scoreThreat (line 3603).
 - [x] Protected build zones (no-grief areas) — implemented as [ProtectedZoneService](src/main/java/net/wcfcarolina13/GameAI/services/ProtectedZoneService.java) with AABB zones, persisted per-world; consulted by FeedAnimalsSkill, MiningHazardDetector, and others.
-- [ ] Fight with teammates
+- [x] Fight with teammates — ✅ BotThreatService.augmentHostiles (BEH:1175, BotThreatService:60-80), since e7a047e7
 - [ ] In-game check: stand near passive endermen and confirm bot does not face/aggro them; then provoke one and confirm bot can still target it once hostile
 - [ ] In-game check: drop bot from lethal height with/without a water bucket (Overworld), verify clutch attempts near impact and no attempts in ultrawarm dimensions — **code shipped** in [BotFallSafetyService](src/main/java/net/wcfcarolina13/GameAI/services/BotFallSafetyService.java) ("Attempts a last-second water-bucket clutch when a lethal fall is detected"); just unverified in-game.
 - [ ] Ride sync verification: mount/dismount mirroring across entities — **code shipped** in [RideSyncService](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java); just unverified in-game.
@@ -458,18 +458,18 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 - [ ] Craft common items (armor, torches, etc.)
 - [x] Crafting helper: report missing items ✅ 1.1.207 (`CraftingRequirementsPolicy`; torches/bed/door/fence + unknown names)
-- [ ] Crafting table craft: craft when inputs exist; announce success or missing items in chat
-- [ ] Placement: place crafted table/furnace/chest near commander safely
+- [x] Crafting table craft: craft when inputs exist; announce success or missing items in chat — ✅ sandbox PASS FIELD_6AD_6AL_SANDBOX_2026-10-17:42, FIELD_0_6AI_SANDBOX:376
+- [x] Placement: place crafted table/furnace/chest near commander safely — ✅ modCommandRegistry:2651/:5612-5682
 - [ ] Build walls (specified materials, dimensions)
 - [ ] Simple 2-person house
-- [ ] Block placement primitives
+- [x] Block placement primitives — ✅ BotActions:961-989 PlaceResult
 - [ ] Recipe awareness: refuse and explain if commander lacks recipe
 
 ### Farming & Survival
 
 - [x] **Hunger-aware task interruption** — ✅ shipped 1.1.102. New helper `HealingService.shouldPauseForStarvation(bot)` returns true iff starving + autoEat fails. Wired into [StripMineSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/StripMineSkill.java), [CollectDirtSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/CollectDirtSkill.java) (covers MiningSkill), [WoodcutSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoodcutSkill.java) main loop. Skill bails with `flagManualResume`; user feeds bot then `/bot resume`. HuntSkill / FishingSkill / GrassSeedSkill keep their existing in-skill checks. FarmSkill / Bridge / Shelter / Fortify not yet — main-loop boundaries non-obvious; add when symptom hits.
 - [x] Till soil, plant seeds, harvest, replant — implemented across [PlantSeedsSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/PlantSeedsSkill.java), [HarvestCropSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HarvestCropSkill.java), and [FarmSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java) (full pipeline: assess site → till → irrigate → plant → harvest → replant; auto-replanting validated 2026-04-08).
-- [ ] Create infinite water source — [FarmSkill.java:332+](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java#L332) detects + uses an existing 2×2 still-water basin, but does NOT yet *create* one when none exists. The "create from scratch" path is still open.
+- [x] Create infinite water source — [FarmSkill.java:332+](src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java#L332) detects + uses an existing 2×2 still-water basin, but does NOT yet *create* one when none exists. The "create from scratch" path is still open. — ✅ FarmSkill:470-482 2x2 dig-and-fill since 5a0eb283 (2025-12-11); the 2026-05-06 'not yet' note was wrong
 - [ ] Animal husbandry (shear, collect meat, pen animals) — partial: shears used for [WoolSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoolSkill.java) (sheep) and [HoneyCollectSkill](src/main/java/net/wcfcarolina13/GameAI/skills/impl/HoneyCollectSkill.java); auto-hunt collects meat. Breed/pen behavior not done.
 - [ ] **Farm underground recovery**: Escape when underground with overhead dirt
 - [ ] **Farm chest workflow**: Proactive chest placement/use during farming
@@ -503,7 +503,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 
 ### Multi-Bot Features
 
-- [ ] Per-bot chat behaviors/personas (beyond routing)
+- [x] Per-bot chat behaviors/personas (beyond routing) — ✅ SoulProfileRegistry:30-32 (jake/bob/silas), voices 1.1.190-192
 - [ ] Broadcast command UX polish (feedback per bot)
 - [ ] Shared job coordination (queue fan-out, conflict handling)
 - [ ] Resume prompts respect group commands
@@ -518,7 +518,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 ### Quality of Life
 
 - [ ] Command queuing (multi-step instructions)
-- [ ] Voiced banter variants for follow-adventure lines
+- [x] Voiced banter variants for follow-adventure lines — ✅ BotAmbientChatter:219-224/:1442 (creeper_kidding has 1 take)
 
 ### Dialogue / Voiced Lines (backlog 2026-05-04)
 
@@ -676,4 +676,4 @@ Bradley had already re-enabled the governor himself. Frens side: `SoulRuntime.ac
 
 ## LLM Integration (Future)
 
-- [ ] Phase 1+: Core architecture, toggles, identity & memory, routing, performance, social awareness, integration & testing
+- [x] Phase 1+: Core architecture, toggles, identity & memory, routing, performance, social awareness, integration & testing — stale (triage 2026-10-19): legacy stack deleted 1.1.251 080160e4; souls runtime covers it
