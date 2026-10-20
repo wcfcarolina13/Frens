@@ -2927,8 +2927,11 @@ public final class BotActions {
             return false;
         }
 
-        // Don't waste time shuffling when already close enough to just melee.
-        if (bot.squaredDistanceTo(target) <= RANGED_REPOSITION_MIN_DISTANCE_SQ) {
+        // Don't waste time shuffling when already close enough to just melee, unless the shot is
+        // held for a friend in the line: then a sidestep is the only way to shoot.
+        boolean friendlyInLine = blockedNow && isFriendlyInRangedLine(world, bot, bot.getEyePos(), target);
+        if (!RangedFriendlyFirePolicy.mayReposition(bot.squaredDistanceTo(target),
+                RANGED_REPOSITION_MIN_DISTANCE_SQ, friendlyInLine)) {
             return false;
         }
 
@@ -3132,7 +3135,12 @@ public final class BotActions {
             );
             BlockHitResult hit = world.raycast(ctx);
             if (hit.getType() == HitResult.Type.MISS) {
-                return 1_000_000.0D;
+                // A clear line with a friend in it is not a clear shot: score it low so a
+                // reposition looks for a stance off the friend's line.
+                if (!wouldRangedShotHitFriendly(bot, fromEye, aim, target)) {
+                    return 1_000_000.0D;
+                }
+                continue;
             }
             if (hit.getType() == HitResult.Type.BLOCK) {
                 double dist = fromEye.distanceTo(hit.getPos());
@@ -3200,9 +3208,9 @@ public final class BotActions {
         if (isRangedLineBlockedByCobweb(world, fromEye, aim)) {
             return true;
         }
-        // Friendly-fire check: if a non-bot player is inside the fire cone between
-        // the bot's eye and the aim point, cancel the shot.
-        if (wouldRangedShotHitFriendly(bot, fromEye, aim)) {
+        // Friendly-fire check: if a player (human or fellow bot) is in the line of fire
+        // between the bot's eye and the aim point, cancel the shot.
+        if (wouldRangedShotHitFriendly(bot, fromEye, aim, target)) {
             return true;
         }
         return false;
@@ -3232,37 +3240,32 @@ public final class BotActions {
     }
 
     /**
-     * Friendly-fire gate: returns true if a non-bot player is within the fire cone from
-     * {@code fromEye} to {@code aim}. Uses a simple "distance from point to line segment"
-     * test with a 1.5-block lateral threshold to account for player hitbox width plus bow
-     * divergence.
+     * Friendly-fire gate: returns true if a player is in the line of fire from {@code fromEye} to
+     * {@code aim} ({@link RangedFriendlyFirePolicy#inLineOfFire}). Fellow bots count too (finding
+     * 54: a bow defender shot the ally it defended), within a tighter cone. The shooter, the target
+     * and anything the shooter rides or carries are skipped.
      */
-    private static boolean wouldRangedShotHitFriendly(ServerPlayerEntity bot, Vec3d fromEye, Vec3d aim) {
+    private static boolean wouldRangedShotHitFriendly(ServerPlayerEntity bot, Vec3d fromEye, Vec3d aim, Entity target) {
         if (bot == null || fromEye == null || aim == null) return false;
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
-        Vec3d delta = aim.subtract(fromEye);
-        double maxDist = delta.length();
-        if (maxDist < 0.5D) return false;
-        Vec3d dir = delta.multiply(1.0D / maxDist);
-        final double LATERAL_THRESHOLD = 1.5D;
-        final double LATERAL_THRESHOLD_SQ = LATERAL_THRESHOLD * LATERAL_THRESHOLD;
         for (ServerPlayerEntity other : world.getPlayers()) {
-            if (other == null || other == bot || other.isRemoved() || !other.isAlive()) continue;
-            // Skip fellow bots — they're allies but also the only valid "in-fire-cone" targets
-            // we might accidentally shoot. A bot-on-bot friendly-fire concern is a different
-            // feature (tamed animal defense); here we only gate against human players.
-            if (net.wcfcarolina13.GameAI.services.BotRegistry.isRegistered(other.getUuid())) continue;
+            if (other == null || other == bot || other == target || other.isRemoved() || !other.isAlive()) continue;
+            if (other.isConnectedThroughVehicle(bot)) continue;
+            boolean otherIsBot = net.wcfcarolina13.GameAI.services.BotRegistry.isRegistered(other.getUuid());
             // Use the player's mid-body position (feet Y + half standing eye height).
-            Vec3d otherMid = new Vec3d(other.getX(), other.getY() + other.getStandingEyeHeight() / 2.0D, other.getZ());
-            Vec3d toOther = otherMid.subtract(fromEye);
-            double along = toOther.dotProduct(dir);
-            if (along <= 0.0D || along >= maxDist + 1.0D) continue;
-            Vec3d perp = toOther.subtract(dir.multiply(along));
-            if (perp.lengthSquared() <= LATERAL_THRESHOLD_SQ) {
+            double midY = other.getY() + other.getStandingEyeHeight() / 2.0D;
+            if (RangedFriendlyFirePolicy.inLineOfFire(fromEye.x, fromEye.y, fromEye.z, aim.x, aim.y, aim.z,
+                    other.getX(), midY, other.getZ(), otherIsBot)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** Whether the shot from {@code fromEye} at {@code target}'s preferred aim point is held for a friend in the line. */
+    private static boolean isFriendlyInRangedLine(ServerWorld world, ServerPlayerEntity bot, Vec3d fromEye, LivingEntity target) {
+        Vec3d aim = pickPreferredAimPoint(world, bot, fromEye, target);
+        return aim != null && wouldRangedShotHitFriendly(bot, fromEye, aim, target);
     }
 
     /**
