@@ -1062,11 +1062,23 @@ public final class BotAutoReturnSunsetService {
         }
 
         if (server != null) {
-            ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(server, bot);
+            UUID ownerUuid = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
+            ServerPlayerEntity commander = ownerUuid == null
+                    ? CompanionCommunicationPolicy.resolveController(server, bot)
+                    : server.getPlayerManager().getPlayer(ownerUuid);
+            if (commander == null && ownerUuid == null) {
+                var bots = BotEventHandler.getRegisteredBots(server);
+                commander = server.getPlayerManager().getPlayerList().stream()
+                        .filter(player -> player != bot && !player.isRemoved()
+                                && player.getEntityWorld() == world && !bots.contains(player)
+                                && bot.squaredDistanceTo(Vec3d.ofCenter(player.getBlockPos()))
+                                        <= COMMANDER_FALLBACK_RANGE_SQ)
+                        .min(Comparator.comparingDouble(bot::squaredDistanceTo))
+                        .orElse(null);
+            }
             if (commander != null
                     && !commander.isRemoved()
-                    && commander.getEntityWorld() == world
-                    && bot.squaredDistanceTo(Vec3d.ofCenter(commander.getBlockPos())) <= COMMANDER_FALLBACK_RANGE_SQ) {
+                    && commander.getEntityWorld() == world) {
                 BlockPos safe = SafePositionService.findForwardSafeSpot(world, commander);
                 if (safe == null) {
                     safe = SafePositionService.findSafeNear(world, commander.getBlockPos(), 4);
@@ -1077,7 +1089,6 @@ public final class BotAutoReturnSunsetService {
                 return new SunsetAnchor(safe.toImmutable(), AnchorKind.COMMANDER, "commander");
             }
 
-            UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
             if (ownerUuid != null) {
                 ServerPlayerEntity ally = BotEventHandler.getRegisteredBots(server).stream()
                         .filter(other -> other != null

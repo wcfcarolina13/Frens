@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * Client -> Server: the sender's personal voiced-dialogue mute mask (category ids).
  *
- * <p>The list is capped well above the category count; ids are validated server-side against
+ * <p>The list is capped at the category count; ids are validated server-side against
  * {@code VoiceLineCategory} before being stored.
  */
 public record VoiceMuteMaskPayload(List<String> mutedCategoryIds) implements CustomPayload {
@@ -20,8 +20,8 @@ public record VoiceMuteMaskPayload(List<String> mutedCategoryIds) implements Cus
     public static final Identifier ID_IDENTIFIER = Identifier.of("frens", "voice_mute_mask");
     public static final CustomPayload.Id<VoiceMuteMaskPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
 
-    /** Hard cap on the wire; the enum has 9 ids today, 64 leaves room without unbounded input. */
-    public static final int MAX_ENTRIES = 64;
+    /** One entry per VoiceLineCategory, independent of the number of bots or voices. */
+    public static final int MAX_ENTRIES = 9;
 
     public static final PacketCodec<RegistryByteBuf, VoiceMuteMaskPayload> CODEC =
             PacketCodec.tuple(
