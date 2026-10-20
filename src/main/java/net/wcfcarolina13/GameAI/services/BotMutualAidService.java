@@ -110,6 +110,12 @@ public final class BotMutualAidService {
      * items, so a failed gear drop says nothing about a food pickup. Server thread.
      */
     private static final Map<UUID, Map<MutualAidMakeRoomPolicy.Kind, Long>> NEXT_MAKE_ROOM_TICK = new ConcurrentHashMap<>();
+    /**
+     * Per bot: when it last told its owner its pack holds nothing it will throw away (a make-room
+     * drop found no cheap stack). At most once per {@link #PACK_FULL_LINE_INTERVAL_MS} across kinds.
+     */
+    private static final Map<UUID, Long> PACK_FULL_LINE_MS = new ConcurrentHashMap<>();
+    private static final long PACK_FULL_LINE_INTERVAL_MS = 30_000L;
     private static final Map<UUID, PendingHandoff> PENDING_HANDOFFS = new ConcurrentHashMap<>();
     private static final Map<UUID, UUID> DONOR_PENDING = new ConcurrentHashMap<>();
     private static final Map<UUID, UUID> LAST_INTERACTION_BOT = new ConcurrentHashMap<>();
@@ -1355,9 +1361,9 @@ public final class BotMutualAidService {
     }
 
     /**
-     * Frees one slot for chest food by dropping one stack, a cheap one first (never food the bot
-     * carries, never a protected or damageable item; the drop is registered so the bot does not
-     * sweep it back up).
+     * Frees one slot for chest food by dropping one cheap stack, never a valuable one (never food the
+     * bot carries, never a protected or damageable item; the drop is registered so the bot does not
+     * sweep it back up). With no cheap stack it takes nothing and tells its owner (throttled).
      * Server thread, inside the take: it must never walk, place a chest or deposit into one, so no
      * offload to a nearby chest here.
      */
@@ -1366,7 +1372,10 @@ public final class BotMutualAidService {
             return;
         }
         Map<Item, Integer> reserveFood = collectReservedFood(bot);
-        CraftingHelper.dropCheapStackForSpace(bot, bot.getCommandSource().withSilent(), reserveFood.keySet());
+        // cheapOnly: a bot never throws a valuable stack away to take food.
+        if (!CraftingHelper.dropCheapStackForSpace(bot, bot.getCommandSource().withSilent(), reserveFood.keySet(), true)) {
+            tellOwnerPackFull(bot);
+        }
     }
 
     private static int pickBestInventoryFoodSlot(ServerPlayerEntity bot, boolean allowRotten) {
@@ -1476,7 +1485,7 @@ public final class BotMutualAidService {
 
     /**
      * A starving bot with a full inventory next to dropped food frees a slot by dropping one stack
-     * (a cheap one first; never food it carries, never a protected or damageable item) and lets the
+     * (a cheap one only; never food it carries, never a protected or damageable item) and lets the
      * food be picked up at once. Server tick: it only drops, never walks to, places or fills a chest.
      * A drop that finds nothing it may drop holds this bot's food-pickup make-room off for
      * {@link MutualAidMakeRoomPolicy#RETRY_TICKS}; until then this returns false without dropping.
@@ -1514,7 +1523,7 @@ public final class BotMutualAidService {
 
         if (room == MutualAidMakeRoomPolicy.Decision.DROP) {
             Map<Item, Integer> reserveFood = collectReservedFood(bot);
-            if (!CraftingHelper.dropCheapStackForSpace(bot, bot.getCommandSource().withSilent(), reserveFood.keySet())) {
+            if (!CraftingHelper.dropCheapStackForSpace(bot, bot.getCommandSource().withSilent(), reserveFood.keySet(), true)) {
                 holdOffMakeRoom(bot, MutualAidMakeRoomPolicy.Kind.FOOD_PICKUP, nowTick);
                 return false;
             }
@@ -1562,7 +1571,7 @@ public final class BotMutualAidService {
     /**
      * Whether {@code recipient} has room for a {@code kind} handoff, made if it must be. Food needs
      * none; an empty slot is room. Otherwise gear makes room by dropping one stack (a cheap one
-     * first; never food, weapons, armor, shields or flowers it carries, never a protected or
+     * only; never food, weapons, armor, shields or flowers it carries, never a protected or
      * damageable item), and a flower is declined without dropping anything. Server tick: it only
      * drops, never walks to, places or fills a chest. A drop that finds nothing it may drop holds
      * this recipient's make-room for that kind off for {@link MutualAidMakeRoomPolicy#RETRY_TICKS};
@@ -1586,7 +1595,7 @@ public final class BotMutualAidService {
             return false;
         }
         Map<Item, Integer> reserveItems = collectAidReserveItems(recipient);
-        if (CraftingHelper.dropCheapStackForSpace(recipient, recipient.getCommandSource().withSilent(), reserveItems.keySet())) {
+        if (CraftingHelper.dropCheapStackForSpace(recipient, recipient.getCommandSource().withSilent(), reserveItems.keySet(), true)) {
             return true;
         }
         holdOffMakeRoom(recipient, roomKind, nowTick);
@@ -1605,6 +1614,30 @@ public final class BotMutualAidService {
                 .put(kind, MutualAidMakeRoomPolicy.nextAllowedAfterFailure(nowTick));
         LOGGER.info("mutual-aid make-room: {} has nothing it may drop, retry in 10 s (kind={})",
                 bot.getName().getString(), kind);
+        tellOwnerPackFull(bot);
+    }
+
+    /**
+     * One owner line when a make-room drop found only things the bot will not throw away (it drops
+     * cheap stacks only), at most once per bot per {@link #PACK_FULL_LINE_INTERVAL_MS}. Server thread.
+     */
+    private static void tellOwnerPackFull(ServerPlayerEntity bot) {
+        MinecraftServer server = bot.getCommandSource() == null ? null : bot.getCommandSource().getServer();
+        if (server == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        Long last = PACK_FULL_LINE_MS.get(bot.getUuid());
+        if (last != null && now - last < PACK_FULL_LINE_INTERVAL_MS) {
+            return;
+        }
+        ServerPlayerEntity owner = CompanionCommunicationPolicy.resolveController(server, bot);
+        if (owner == null || owner.isRemoved()) {
+            return;
+        }
+        PACK_FULL_LINE_MS.put(bot.getUuid(), now);
+        owner.sendMessage(net.minecraft.text.Text.literal(
+                "<" + bot.getName().getString() + "> My pack's full of things I won't throw away."), false);
     }
 
     private static Map<Item, Integer> collectAidReserveItems(ServerPlayerEntity bot) {

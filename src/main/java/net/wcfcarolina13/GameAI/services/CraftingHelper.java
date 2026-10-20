@@ -119,6 +119,9 @@ public final class CraftingHelper {
     // A player's /bot craft gets the same line at most once per 30 s per bot and item name
     // (finding 7, 1.1.274), keyed CraftingStationPolicy.unknownCraftKey; evicted with the map above.
     private static final Map<String, Long> UNKNOWN_CRAFT_EXPLICIT_MSG = new ConcurrentHashMap<>();
+    // A server-thread craft refused for a full pack with nothing cheap to drop (makeRoomForOutput):
+    // its chat line at most once per bot per CraftingStationPolicy.DECLINE_LOG_INTERVAL_MS.
+    private static final Map<UUID, Long> CRAFT_FULL_PACK_LINE = new ConcurrentHashMap<>();
 
     // Cooldown after crafting a new table — prevents spam-crafting when placement/reach keeps failing.
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
@@ -588,7 +591,9 @@ public final class CraftingHelper {
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.STICK, crafts * 7);
-        ensureInventorySpaceForOutput(bot, source, Items.LADDER, crafts * 3, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.LADDER, crafts * 3, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.STICK, crafts * 7);
         distributeOutput(bot, Items.LADDER, crafts * 3);
         recordCraftHistory(commander, Identifier.of("minecraft", "ladder"));
@@ -716,7 +721,9 @@ public final class CraftingHelper {
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(chosen.wool(), crafts * 3);
-        ensureInventorySpaceForOutput(bot, source, chosen.bed(), crafts, crafts * 3, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, chosen.bed(), crafts, crafts * 3, 0, reserveItems)) {
+            return 0;
+        }
         if (!consumePlanks(bot, crafts * 3)) {
             say(source, "I couldn't reserve planks for beds.");
             return 0;
@@ -753,7 +760,9 @@ public final class CraftingHelper {
 
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.STRING, crafts * 4);
-        ensureInventorySpaceForOutput(bot, source, Items.WHITE_WOOL, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.WHITE_WOOL, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.STRING, crafts * 4);
         distributeOutput(bot, Items.WHITE_WOOL, crafts);
         recordCraftHistory(commander, WHITE_WOOL_RECIPE_ID);
@@ -843,7 +852,9 @@ public final class CraftingHelper {
             if (!quiet) sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft. Missing " + (planksPerItem - plankCount) + ".");
             return 0;
         }
-        ensureInventorySpaceForOutput(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of());
+        if (!ensureInventorySpaceForOutput(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of())) {
+            return 0;
+        }
         if (!consumePlanks(bot, crafts * planksPerItem)) {
             if (!quiet) say(source, "I couldn't reserve planks for crafting.");
             return 0;
@@ -886,7 +897,9 @@ public final class CraftingHelper {
             }
             return 0;
         }
-        ensureInventorySpaceForOutput(bot, source, Items.STICK, crafts * 4, crafts * 2, 0, Map.of());
+        if (!ensureInventorySpaceForOutput(bot, source, Items.STICK, crafts * 4, crafts * 2, 0, Map.of())) {
+            return 0;
+        }
         if (!consumePlanks(bot, crafts * 2)) {
             if (!quiet) {
                 say(source, "I couldn't reserve planks for sticks.");
@@ -945,7 +958,9 @@ public final class CraftingHelper {
         if (charcoal > 0 && coal < crafts) {
             reserveItems.put(Items.CHARCOAL, Math.min(crafts - coal, charcoal));
         }
-        ensureInventorySpaceForOutput(bot, source, Items.TORCH, crafts * 4, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.TORCH, crafts * 4, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.STICK, crafts);
         int useCoal = Math.min(crafts, coal);
         if (useCoal > 0) {
@@ -1033,7 +1048,9 @@ public final class CraftingHelper {
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(best.plank(), crafts * 6);
-        ensureInventorySpaceForOutput(bot, source, best.door(), crafts * 3, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, best.door(), crafts * 3, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, best.plank(), crafts * 6);
         distributeOutput(bot, best.door(), crafts * 3);
         recordCraftHistory(commander, best.recipeId());
@@ -1122,7 +1139,9 @@ public final class CraftingHelper {
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(best.plank(), crafts * 4);
         reserveItems.put(Items.STICK, crafts * 2);
-        ensureInventorySpaceForOutput(bot, source, best.fence(), crafts * 3, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, best.fence(), crafts * 3, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, best.plank(), crafts * 4);
         consumeItem(bot, Items.STICK, crafts * 2);
         distributeOutput(bot, best.fence(), crafts * 3);
@@ -1156,7 +1175,9 @@ public final class CraftingHelper {
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.STRING, crafts * 4);
         reserveItems.put(Items.SLIME_BALL, crafts);
-        ensureInventorySpaceForOutput(bot, source, Items.LEAD, crafts * 2, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.LEAD, crafts * 2, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.STRING, crafts * 4);
         consumeItem(bot, Items.SLIME_BALL, crafts);
         distributeOutput(bot, Items.LEAD, crafts * 2);
@@ -1190,7 +1211,9 @@ public final class CraftingHelper {
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.LEATHER, crafts);
         reserveItems.put(Items.STRING, crafts);
-        ensureInventorySpaceForOutput(bot, source, Items.BUNDLE, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.BUNDLE, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.LEATHER, crafts);
         consumeItem(bot, Items.STRING, crafts);
         distributeOutput(bot, Items.BUNDLE, crafts);
@@ -1217,7 +1240,9 @@ public final class CraftingHelper {
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.RABBIT_HIDE, crafts * 4);
-        ensureInventorySpaceForOutput(bot, source, Items.LEATHER, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.LEATHER, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.RABBIT_HIDE, crafts * 4);
         distributeOutput(bot, Items.LEATHER, crafts);
         recordCraftHistory(commander, recipeId);
@@ -1250,7 +1275,9 @@ public final class CraftingHelper {
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.LEATHER, crafts * 3);
         reserveItems.put(Items.IRON_INGOT, crafts);
-        ensureInventorySpaceForOutput(bot, source, Items.SADDLE, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.SADDLE, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.LEATHER, crafts * 3);
         consumeItem(bot, Items.IRON_INGOT, crafts);
         distributeOutput(bot, Items.SADDLE, crafts);
@@ -1286,7 +1313,9 @@ public final class CraftingHelper {
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.CARROT, crafts);
         reserveItems.put(Items.FISHING_ROD, crafts);
-        ensureInventorySpaceForOutput(bot, source, Items.CARROT_ON_A_STICK, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.CARROT_ON_A_STICK, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.CARROT, crafts);
         consumeItem(bot, Items.FISHING_ROD, crafts);
         distributeOutput(bot, Items.CARROT_ON_A_STICK, crafts);
@@ -1322,7 +1351,9 @@ public final class CraftingHelper {
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.WARPED_FUNGUS, crafts);
         reserveItems.put(Items.FISHING_ROD, crafts);
-        ensureInventorySpaceForOutput(bot, source, Items.WARPED_FUNGUS_ON_A_STICK, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.WARPED_FUNGUS_ON_A_STICK, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.WARPED_FUNGUS, crafts);
         consumeItem(bot, Items.FISHING_ROD, crafts);
         distributeOutput(bot, Items.WARPED_FUNGUS_ON_A_STICK, crafts);
@@ -1550,10 +1581,14 @@ public final class CraftingHelper {
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.STICK, crafts * stickCount);
         if (mat.headItem().equals(Items.OAK_PLANKS)) {
-            ensureInventorySpaceForOutput(bot, source, output, crafts, crafts * headCount, 0, reserveItems);
+            if (!ensureInventorySpaceForOutput(bot, source, output, crafts, crafts * headCount, 0, reserveItems)) {
+                return 0;
+            }
         } else {
             reserveItems.put(mat.headItem(), crafts * headCount);
-            ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems);
+            if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
+                return 0;
+            }
         }
 
         consumeItem(bot, Items.STICK, crafts * stickCount);
@@ -1620,7 +1655,9 @@ public final class CraftingHelper {
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.IRON_INGOT, crafts);
-        ensureInventorySpaceForOutput(bot, source, Items.SHIELD, crafts, crafts * 6, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.SHIELD, crafts, crafts * 6, 0, reserveItems)) {
+            return 0;
+        }
         consumePlanks(bot, crafts * 6);
         consumeItem(bot, Items.IRON_INGOT, crafts);
         distributeOutput(bot, Items.SHIELD, crafts);
@@ -2867,7 +2904,9 @@ public final class CraftingHelper {
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(input, crafts * per);
-        ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, input, crafts * per);
         distributeOutput(bot, output, crafts);
         recordCraftHistory(commander, output);
@@ -2891,7 +2930,9 @@ public final class CraftingHelper {
         }
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.LEATHER, crafts * leatherPer);
-        ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.LEATHER, crafts * leatherPer);
         distributeOutput(bot, output, crafts);
         recordCraftHistory(commander, output);
@@ -2921,7 +2962,9 @@ public final class CraftingHelper {
         reserveItems.put(Items.COBBLESTONE, crafts * per);
         reserveItems.put(Items.COBBLED_DEEPSLATE, crafts * per);
         reserveItems.put(Items.BLACKSTONE, crafts * per);
-        ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeCobble(bot, crafts * per);
         distributeOutput(bot, output, crafts);
         recordCraftHistory(commander, output);
@@ -2948,7 +2991,9 @@ public final class CraftingHelper {
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.STICK, crafts * 3);
         reserveItems.put(Items.STRING, crafts * 2);
-        ensureInventorySpaceForOutput(bot, source, Items.FISHING_ROD, crafts, 0, 0, reserveItems);
+        if (!ensureInventorySpaceForOutput(bot, source, Items.FISHING_ROD, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
         consumeItem(bot, Items.STICK, crafts * 3);
         consumeItem(bot, Items.STRING, crafts * 2);
         distributeOutput(bot, Items.FISHING_ROD, crafts);
@@ -3011,13 +3056,15 @@ public final class CraftingHelper {
     private static void distributeOutput(ServerPlayerEntity bot, net.minecraft.item.Item output, int count) {
         debugChest("Distribute output item=" + output.getName().getString() + " count=" + count
                 + " emptySlot=" + bot.getInventory().getEmptySlot());
-        ensureInventorySpaceForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of());
+        // After the craft: on the server thread this only drops a cheap stack, and an output that
+        // still does not fit is dropped below rather than walking to a chest.
+        makeRoomForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of(), false, true);
         ItemStack stack = new ItemStack(output, count);
         boolean added = bot.getInventory().insertStack(stack);
         debugChest("InsertStack result added=" + added + " remaining=" + stack.getCount());
         if (!added && !stack.isEmpty()) {
             debugChest("InsertStack failed; retrying after offload.");
-            ensureInventorySpaceForOutput(bot, bot.getCommandSource(), output, stack.getCount(), 0, 0, Map.of(), true);
+            makeRoomForOutput(bot, bot.getCommandSource(), output, stack.getCount(), 0, 0, Map.of(), true, true);
             boolean retryAdded = bot.getInventory().insertStack(stack);
             debugChest("InsertStack retry added=" + retryAdded + " remaining=" + stack.getCount());
             if (!retryAdded && !stack.isEmpty()) {
@@ -3026,39 +3073,52 @@ public final class CraftingHelper {
         }
     }
 
-    private static void ensureInventorySpaceForOutput(ServerPlayerEntity bot,
-                                                      ServerCommandSource source,
-                                                      Item output,
-                                                      int outputCount,
-                                                      int reservePlanks,
-                                                      int reserveLogs,
-                                                      Map<Item, Integer> reserveItems) {
-        ensureInventorySpaceForOutput(bot, source, output, outputCount, reservePlanks, reserveLogs, reserveItems, false);
+    /**
+     * Before a craft uses any ingredient: false means refuse the craft (return 0), which only
+     * happens on the server thread with a full pack and no cheap stack to drop.
+     */
+    private static boolean ensureInventorySpaceForOutput(ServerPlayerEntity bot,
+                                                         ServerCommandSource source,
+                                                         Item output,
+                                                         int outputCount,
+                                                         int reservePlanks,
+                                                         int reserveLogs,
+                                                         Map<Item, Integer> reserveItems) {
+        return makeRoomForOutput(bot, source, output, outputCount, reservePlanks, reserveLogs, reserveItems, false, false);
     }
 
-    private static void ensureInventorySpaceForOutput(ServerPlayerEntity bot,
-                                                      ServerCommandSource source,
-                                                      Item output,
-                                                      int outputCount,
-                                                      int reservePlanks,
-                                                      int reserveLogs,
-                                                      Map<Item, Integer> reserveItems,
-                                                      boolean forceOffload) {
+    /**
+     * Frees a slot for a craft's output. Off the server thread it offloads to a nearby chest (or
+     * places one) as before and always lets the craft go on. On the server thread
+     * ({@link CraftingStationPolicy#mayOffloadToChest}) it never walks, places or fills a chest: it
+     * drops one cheap stack that is not one of the craft's reserves, and with none it returns false.
+     * {@code afterCraft}: called from {@link #distributeOutput} once the ingredients are spent, so no
+     * refusal line (the caller drops the output that does not fit).
+     */
+    private static boolean makeRoomForOutput(ServerPlayerEntity bot,
+                                             ServerCommandSource source,
+                                             Item output,
+                                             int outputCount,
+                                             int reservePlanks,
+                                             int reserveLogs,
+                                             Map<Item, Integer> reserveItems,
+                                             boolean forceOffload,
+                                             boolean afterCraft) {
         if (bot == null || source == null || output == null) {
-            return;
+            return true;
         }
         if (outputCount <= 0) {
-            return;
+            return true;
         }
         if (!forceOffload) {
             if (hasRoomForItem(bot, output)) {
                 debugChest("Skip offload: room for output=" + output.getName().getString()
                         + " count=" + outputCount
                         + " emptySlot=" + bot.getInventory().getEmptySlot());
-                return;
+                return true;
             }
             if (bot.getInventory().getEmptySlot() != -1) {
-                return;
+                return true;
             }
         }
         debugChest("Need space for output=" + output.getName().getString()
@@ -3068,8 +3128,34 @@ public final class CraftingHelper {
                 + ", items=" + reserveItems.size() + ")"
                 + " force=" + forceOffload
                 + " botPos=" + bot.getBlockPos().toShortString());
+        if (!CraftingStationPolicy.mayOffloadToChest(isServerThreadCall(source, bot))) {
+            Set<Item> reservedItems = reserveItems.keySet();
+            boolean reservePlanksNeeded = reservePlanks > 0;
+            boolean reserveLogsNeeded = reserveLogs > 0;
+            if (dropStackForSpace(bot,
+                    stack -> isReservedForCraft(stack, reservedItems, reservePlanksNeeded, reserveLogsNeeded), true)) {
+                return true;
+            }
+            if (!afterCraft) {
+                sendFullPackCraftLine(bot, source, output);
+            }
+            return false;
+        }
         offloadCheapItemsToNearbyChest(bot, source, reservePlanks, reserveLogs, reserveItems);
         debugChest("Post-offload emptySlot=" + bot.getInventory().getEmptySlot());
+        return true;
+    }
+
+    /** The server-thread craft refusal for a full pack: one INFO line and one chat line per bot per 30 s. */
+    private static void sendFullPackCraftLine(ServerPlayerEntity bot, ServerCommandSource source, Item output) {
+        long now = System.currentTimeMillis();
+        if (!CraftingStationPolicy.shouldLogDecline(now, CRAFT_FULL_PACK_LINE.get(bot.getUuid()))) {
+            return;
+        }
+        CRAFT_FULL_PACK_LINE.put(bot.getUuid(), now);
+        LOGGER.info("craft: {} has a full pack and nothing cheap to drop, not crafting {} on the server thread",
+                bot.getName().getString(), output.getName().getString());
+        say(source, "My pack's full, so I can't craft " + itemLabel(output).replace('_', ' ') + " right now.");
     }
 
     public static boolean offloadCheapItemsToNearbyChest(ServerPlayerEntity bot,
@@ -3093,6 +3179,9 @@ public final class CraftingHelper {
      *  can be re-picked legitimately (the bot has presumably moved on by then). */
     private static final long SELF_DROP_TTL_TICKS = 6000L;
 
+    /** 30 s: how long a valuable stack dropped for room is kept from the sweep, well inside the despawn. */
+    private static final long VALUABLE_SELF_DROP_TTL_TICKS = 600L;
+
     /** Returns true if {@code item} was dropped by {@code bot} via
      *  {@link #dropCheapStackForSpace} within the last {@link #SELF_DROP_TTL_TICKS}
      *  ticks. Reads are self-evicting: an expired entry is removed on lookup. */
@@ -3115,11 +3204,11 @@ public final class CraftingHelper {
         return true;
     }
 
-    private static void registerSelfDrop(ServerPlayerEntity bot, ItemEntity item) {
+    private static void registerSelfDrop(ServerPlayerEntity bot, ItemEntity item, long ttlTicks) {
         if (bot == null || item == null) return;
         MinecraftServer server = bot.getCommandSource().getServer();
         if (server == null) return;
-        long expiry = server.getTicks() + SELF_DROP_TTL_TICKS;
+        long expiry = server.getTicks() + ttlTicks;
         RECENT_SELF_DROPS
                 .computeIfAbsent(bot.getUuid(), k -> new ConcurrentHashMap<>())
                 .put(item.getUuid(), expiry);
@@ -3128,49 +3217,60 @@ public final class CraftingHelper {
     public static boolean dropCheapStackForSpace(ServerPlayerEntity bot,
                                                  ServerCommandSource source,
                                                  Set<Item> reservedItems) {
+        return dropCheapStackForSpace(bot, source, reservedItems, false);
+    }
+
+    /**
+     * Frees one slot by dropping one stack ({@link MakeRoomDropPolicy}): never food, a tool or other
+     * damageable, a protected item or one of {@code reservedItems}, the smallest cheap stack first.
+     * {@code cheapOnly}: drop nothing but a cheap stack (mutual aid, a server-thread craft).
+     */
+    public static boolean dropCheapStackForSpace(ServerPlayerEntity bot,
+                                                 ServerCommandSource source,
+                                                 Set<Item> reservedItems,
+                                                 boolean cheapOnly) {
+        return dropStackForSpace(bot,
+                stack -> reservedItems != null && reservedItems.contains(stack.getItem()), cheapOnly);
+    }
+
+    private static boolean dropStackForSpace(ServerPlayerEntity bot, Predicate<ItemStack> reserved, boolean cheapOnly) {
         if (bot == null) {
             return false;
         }
         if (bot.getInventory().getEmptySlot() != -1) {
             return true;
         }
-        int bestSlot = -1;
-        int bestCount = -1;
-        boolean bestCheap = false;
+        List<MakeRoomDropPolicy.SlotView> slots = new ArrayList<>(36);
         for (int i = 0; i < 36; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty()) {
                 continue;
             }
-            if (reservedItems != null && reservedItems.contains(stack.getItem())) {
-                continue;
-            }
-            if (isProtectedItem(stack) || stack.isDamageable()) {
-                continue;
-            }
-            boolean cheap = isCheapDumpItem(stack);
-            if (bestSlot == -1
-                    || (cheap && !bestCheap)
-                    || (cheap == bestCheap && stack.getCount() > bestCount)) {
-                bestSlot = i;
-                bestCount = stack.getCount();
-                bestCheap = cheap;
-            }
+            slots.add(new MakeRoomDropPolicy.SlotView(i, stack.getCount(),
+                    isCheapDumpItem(stack),
+                    isProtectedItem(stack),
+                    stack.isDamageable(),
+                    reserved.test(stack),
+                    stack.getComponents().contains(net.minecraft.component.DataComponentTypes.FOOD),
+                    stack.getComponents().contains(net.minecraft.component.DataComponentTypes.TOOL)));
         }
+        int bestSlot = MakeRoomDropPolicy.pick(slots, cheapOnly);
         if (bestSlot == -1) {
-            LOGGER.info("No disposable stack available to free inventory space.");
+            LOGGER.info("No disposable stack available to free inventory space (cheapOnly={}).", cheapOnly);
             return false;
         }
         ItemStack removed = bot.getInventory().removeStack(bestSlot);
         if (removed.isEmpty()) {
             return false;
         }
-        // Capture the spawned entity so we can register it as self-dropped — prevents
-        // DropSweeper from immediately re-acquiring it on the next sweep cycle.
+        boolean cheap = isCheapDumpItem(removed);
         ItemEntity dropped = bot.dropItem(removed, false, false);
-        registerSelfDrop(bot, dropped);
+        // A cheap drop is left behind: registered so DropSweeper does not re-acquire it (the
+        // cobblestone loop). A valuable one (only without cheapOnly) is held back from the sweep
+        // just long enough to break that loop, then the sweeper may recover it before it despawns.
+        registerSelfDrop(bot, dropped, cheap ? SELF_DROP_TTL_TICKS : VALUABLE_SELF_DROP_TTL_TICKS);
         String name = removed.getItem().getName().getString();
-        LOGGER.info("Dropped {}x {} to free inventory space.", removed.getCount(), name);
+        LOGGER.info("Dropped {}x {} to free inventory space (cheap={}).", removed.getCount(), name, cheap);
         return bot.getInventory().getEmptySlot() != -1;
     }
 

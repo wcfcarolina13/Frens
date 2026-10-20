@@ -80,6 +80,46 @@ class CraftingStationPolicyTest {
         assertFalse(CraftingStationPolicy.mayCarve(SERVER));
     }
 
+    // ── room for a craft's output ────────────────────────────────────────────────────────────
+
+    @Test
+    void onlyWorkersMayOffloadToAChestForRoom() {
+        assertTrue(CraftingStationPolicy.mayOffloadToChest(WORKER));
+        assertFalse(CraftingStationPolicy.mayOffloadToChest(SERVER));
+    }
+
+    @Test
+    void makingRoomForAnOutputAsksThePolicyBeforeAnyChestOffload() throws IOException {
+        String source = craftingHelperSource();
+        String body = bodyOf(source, "private static boolean makeRoomForOutput(");
+        assertGuarded(body, "offloadCheapItemsToNearbyChest(", "CraftingStationPolicy.mayOffloadToChest(");
+        int gate = body.indexOf("CraftingStationPolicy.mayOffloadToChest(");
+        int offload = body.indexOf("offloadCheapItemsToNearbyChest(");
+        String serverSide = body.substring(gate, offload);
+        assertTrue(serverSide.contains("dropStackForSpace(") && serverSide.contains(", true)"),
+                "the server thread drops a cheap stack only");
+        assertTrue(serverSide.contains("return false;"), "the server thread refuses when nothing cheap drops");
+        assertTrue(serverSide.contains("if (!afterCraft)"), "no refusal line once the ingredients are spent");
+        // The class's only chest offload for an output is the gated one.
+        assertEquals(1, count(source, "offloadCheapItemsToNearbyChest(bot, source,"));
+        assertTrue(bodyOf(source, "private static boolean ensureInventorySpaceForOutput(")
+                .contains("makeRoomForOutput("), "the pre-craft entry goes through the gated method");
+        String distribute = bodyOf(source, "private static void distributeOutput(");
+        assertEquals(2, count(distribute, "makeRoomForOutput("), "both output make-room calls are gated");
+        assertEquals(2, count(distribute, "true, true);") + count(distribute, "false, true);"),
+                "both are marked afterCraft");
+        assertTrue(distribute.contains("bot.dropItem(stack, false, false)"), "an output that does not fit is dropped");
+    }
+
+    @Test
+    void everyCraftRefusesBeforeUsingIngredientsWhenThereIsNoRoom() throws IOException {
+        String source = craftingHelperSource();
+        assertFalse(java.util.regex.Pattern.compile("(?m)^\\s+ensureInventorySpaceForOutput\\(").matcher(source).find(),
+                "a pre-craft make-room call ignores its answer");
+        assertTrue(count(source, "if (!ensureInventorySpaceForOutput(bot, source, ") >= 20,
+                "the craft methods check the make-room answer");
+    }
+
     // ── which tables count ───────────────────────────────────────────────────────────────────
 
     @Test

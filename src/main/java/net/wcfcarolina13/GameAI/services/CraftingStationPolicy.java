@@ -55,6 +55,15 @@ public final class CraftingStationPolicy {
         return !onServerThread;
     }
 
+    /**
+     * Whether a craft that needs a free slot for its output may offload to a chest: walk to one
+     * nearby, or place (and maybe craft) one. On the server thread the bot may only drop a cheap
+     * stack, and otherwise refuses the craft before using any ingredient.
+     */
+    public static boolean mayOffloadToChest(boolean onServerThread) {
+        return !onServerThread;
+    }
+
     /** Horizontal half-width of the crafting table scan around the bot. */
     public static int scanHorizontal(boolean onServerThread) {
         return onServerThread ? TICK_SCAN_HORIZONTAL : WORKER_SCAN_HORIZONTAL;
