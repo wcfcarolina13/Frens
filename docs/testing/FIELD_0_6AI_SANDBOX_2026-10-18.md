@@ -83,6 +83,8 @@ JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (
 
 ## Findings (backlog for a fix build)
 
+**Fixed in 1.1.279** (2026-10-20, sandbox-checked on the 1.1.279 jar (md5 93768df7...), replays `frens_1_1_279_6bq_walls.zip` (04:05-04:16), `frens_1_1_279_6bq_makeroom_craft.zip` (04:16-04:27), `frens_1_1_279_6bq_return_cook_bundle.zip` (04:27-04:33) and `frens_1_1_279_6bq_regress.zip` (04:34-04:38), `tools/sandbox/fix279.py`; Phase 6bq): same-cell steps stop flush with a wall (a submerged bot's drowning rescue facing a stone wall: `moveRelative-same-cell ... to=(330.500, 899.050) result=clamped(330.500, 899.300) penetrationTarget=0.2700`, 28 clamped lines all session, the box never inside a wall, 0 `taking IN_WALL damage` WARN lines; a drop sweep at a wall's foot and bots wedged in a door cell or on a stair step all fine, out of the cell within 0.3 s), make-room keeps valuables (a starving full bot beside bread: `mutual-aid make-room: Fullz has nothing it may drop, retry in 10 s` every 10 s, "My pack's full of things I won't throw away." twice 40 s apart, nothing dropped; an idle stone upgrade with a full pack dropped rotten flesh or leftover cobblestone, never placed or walked to a chest), fresh stuck counters (the lane pocket's backup fired 3 s after both the first and a second return, `backupAttempted=false` each time; jump-sprint reported failure, no false success), `/bot cook` from the bag (furnace placed, 4 beef cooked in 40 s), bundled food (no "I have no food", bread taken out of the bundle and eaten at food 5), and no regression in follow over hills, woodcut or the doorway; 0 "Can't keep up!" all session. Not exercised: combat kiting at a wall (the staged sword bot never backpedalled in five runs; Phase 6bq field item). Not run: the Pocket installer timeout (unit-tested). New: 57-58. Still open: 3, 47, 48, 49-58 (49, 52 and 55 have fixes committed after 1.1.279, not yet sandbox-checked).
+
 **Fixed in 1.1.278** (2026-10-20, sandbox-checked on the 1.1.278 jar (md5 b2ea36c5...), replays `frens_1_1_278_6bp_aid_apple.zip` (00:31-00:42), `frens_1_1_278_6bp_goto_door.zip` (00:42-00:49), `frens_1_1_278_6bp_collect.zip` (00:49-00:56) and `frens_1_1_278_6bp_regress.zip` (00:56-01:00), `tools/sandbox/fix278.py`; Phase 6bp): defensive mutual aid (Jake with a sword ran 8 blocks to Bob's zombie in about 1.3 s, `Mutual aid: Jake moved to defend Bob against Zombie` twice, the zombie dead in 9.2 s, Jake still afterwards; with a bow and 6 armor `Mutual aid: Jake hands its defend_hostile approach to its own combat` and he shot it dead; 0 `nudgeTowardUntilClose on the server thread` WARN lines and 0 "Can't keep up!" in all runs), the golden-apple prompt ("yes" → "Understood. Using it." and the apple eaten within 3 s, food 5 → 9; "no" → "Alright. I'll save it." and the apple kept; an unanswered prompt is asked again after its 20 s; hand-fed with [Yes]: `accepted food`, no "(yes/no)"), `/bot go_to` ("Nethy can't go there across dimensions." from the Overworld; in the Nether a FULL 18-node path on the netherrack floor through a wall's gap, never inside the wall), the doorway (one bot through a closed 1x2 oak door in 3.2 s, two bots in 2.9 and 5.5 s, hinge flipped about 5 s; 0 `door-plan abort`, 0 `head-not-passable`, the door closed behind them, `door-close wait: bot too close` / `another player at the door` while one was in it), Collect messages through the Bot Storage screen ("Coll is resting 17s before traveling to 760, 120, 799. I'll keep busy meanwhile." with no ETA line, then "Replaced the collect at 760, 120, 799 with 625, 120, 799.", the queued retry went to the new chest), and no regression in follow over hills (the 1.1.277 route, ended 1.1 blocks from the player) or woodcut (detect 7-25 ms, all four trees felled). Partial: the hand-fed prompt showed twice for one right-click tap (Phase 6bp field item). New: 53-56. Still open: 3, 47, 48, 49-56.
 
 **Fixed in 1.1.277** (2026-10-19/20, sandbox-checked on the 1.1.277 jar (md5 45aa2300...), replays `frens_1_1_277_6bo_canopy_flood.zip` (23:30-00:07) and `frens_1_1_277_6bo_souls_woodcut_follow_mine.zip` (00:07-00:19), `tools/sandbox/fix277.py`; Phase 6bo): 48's backoff (a floating bot backs off from its 2nd failure, `Stuck-escape backoff: Flood1 failed surface recovery 2 times at Y=102 while floating in water, pausing retries for 30 s`, then 60 s and 120 s; `ascent failed` every 75-90 s instead of every 10 s; Bob reached the 600 s step at his 9th failure (00:06:47), was 167 WARN lines in 28 minutes; "I'm stuck in a flooded hole and can't climb out." once), soul stage directions (none in 34 soul chat lines from 6 DMs and 7 scenes, but the model wrote none either: 0 in 14 raw replies through the Ollama tap, only "(get it?)", dialogue the punctuation rule keeps), woodcut detect (24 and 12 ms with four trees standing, `logs=20 ... nearest=246, 120, 417 bases=4`, was 374-394 ms; all four felled, both bots `success=true`), and no regression in follow over hills or mining beside a zombie. Partial: 48's ledge (carved in 11 s with a stone pickaxe, 80 s bare-handed, but the bot never climbs onto it: `climbed out=false`, finding 49). Not fixed: 47 on the staged canopy. With a detour the bot stalls on a diagonal step down past the end leaf (finding 50); with a wall-to-wall leaf row the old `head-not-passable` loop is unchanged, 75-77 lines a minute with no leaf clear. At the original spot near 61, 77, 266 Fol followed 46 blocks south and ended 1.1 blocks from the player. New: 49-52. Still open: 3, 47, 48 (backoff half fixed; its escape half continues as 49), 49-52.
@@ -345,6 +347,21 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     directBlocked=true usingWaypoints=false`, `leaf-cleared: toward=east stagnant=10` 4 times, `Follow path planning: transition
     rejects=32 ... no path found`, 1 `head-not-passable`. Same family as 47 and 50 (follow in canopy terrain); the south route
     passed in the same session.
+
+57. **A full pack's stone upgrade drops the cobblestone the rest of the pass needs, then floods chat (medium).** 1.1.279 sandbox
+    2026-10-20 04:24:43, Smith2 idle with a full pack (wooden pickaxe and shovel, 16 cobblestone, 8 sticks, bread, 31 valuables),
+    a table 2 blocks away: `Crafted 1 pickaxe(s) using stone`, then `Dropped 13x Cobblestone to free inventory space
+    (cheap=true).` in the same tick, so the sword, axe and shovel that follow in the same pass have nothing to use: 18 chat
+    lines "Missing materials for stone sword." / "... diamond axe." / "... iron shovel." / "... wood sword." (6 stone, 2 each of
+    the other tiers per tool) to the owner in one second. Smith3 (with rotten flesh) 04:26:46: rotten flesh dropped, pickaxe and
+    sword crafted, then `Dropped 11x Cobblestone` and 12 "Missing materials" lines. The server-thread drop (1.1.279) reserves only
+    the current craft's ingredients, not the pass's; the "Missing materials" lines are sent for every tier tried.
+58. **The idle "stone" upgrade makes diamond and iron tools from a full pack's valuables (medium).** 1.1.279 sandbox 2026-10-20
+    04:22:34, the same set-up with 3 diamonds and 5 iron ingots among the valuables: after the pickaxe and the cobblestone drop
+    (57), `Crafting sword: 2 of 6 materials held, those first` → `Crafted 1 sword(s) using diamond`, `Crafted 1 axe(s) using
+    iron (... 3x Iron Ingot)`, `Crafted 1 shovel(s) using diamond`: all 3 diamonds and 3 ingots gone, unasked. `craftGeneric`'s
+    "held materials first" order (`69ba7f37`, pre-existing) treats "stone" as one candidate, not a cap; 1.1.279's drop of the
+    cobblestone is what sent it to the other materials here.
 
 Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat (1.1.277 strips a word list; raw scene replies from the 1.1.275/276 tap sessions also used words not on it: skeptical, cautious, curious, smirking, muttering, absent-mindedly, trails off, calling, turns); two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
@@ -770,3 +787,18 @@ Pass 4 notes:
   chest from 120 blocks away, so remove the first chest briefly to get a second record.
 - Right-click a bot with the fork's `keybind id=key.use` after `/tp <player> x y z <yaw> <pitch>` (the `facing entity` form left
   the camera on the sky). Fast travel needs a lodestone compass (pass 4 notes) or a map and compass.
+
+1.1.279 notes:
+
+- DEBUG for one logger: add `<Logger name="bot-actions" level="debug"/>` to `~/Library/Caches/frens-ft/frens-debug-log4j2.xml` (the
+  file the sandbox JvmArgs already point at) while the game is closed; it has one throttled DEBUG line (`moveRelative-same-cell`).
+  Restore the file afterwards.
+- A swimming bot's box is 0.6 tall: check overlap against walls with that height, or a roof over the pool reads as a clip.
+  `Bot X is stuck! ... headState=Stone, feetState=Water` repeats (187 lines in 20 s) while it swims under a roof; test set-up, not a bug.
+- A starving bot eats raw meat from its pack as fast as `/effect hunger 60` drains it, so a full-pack make-room test needs a pack with
+  no food at all. A food handoff from an ally never needs room (`MutualAidMakeRoomPolicy.decide(FOOD_SHARE)`); the bot's own
+  starving pickup of dropped food (FOOD_PICKUP) is the drop path to stage.
+- Kiting is hard to stage: a free zombie gets knocked down the corridor and chased, a NoAI one is never fought, and an immune or
+  slowed one drew no backpedal either. Test it in real fights.
+- A `/bot base set` made for one stage protects blocks well beyond it: the lane bot 37 blocks away was refused a stripmine as
+  "protected zone: base:craft279rotten". Remove stage bases (`/bot base remove <label>`) when done.
