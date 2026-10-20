@@ -33,7 +33,9 @@ import net.wcfcarolina13.GameAI.services.BotEmergencyRescueService;
 import net.wcfcarolina13.GameAI.services.BotMutualAidService;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
+import net.wcfcarolina13.GameAI.services.BundleService;
 import net.wcfcarolina13.GameAI.services.HealingService;
+import net.wcfcarolina13.PlayerUtils.BundleReachPolicy;
 import net.wcfcarolina13.PlayerUtils.InventoryIterator;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.HuntCatalog;
@@ -1249,6 +1251,9 @@ public final class HuntSkill implements Skill {
     private static boolean maybeEatEmergencyFood(ServerPlayerEntity bot) {
         boolean emergency = bot.getHealth() <= EMERGENCY_HEALTH || bot.getHungerManager().getFoodLevel() <= EMERGENCY_HUNGER;
         boolean starving = bot.getHungerManager().getFoodLevel() <= STARVING_HUNGER;
+        if (starving || emergency) {
+            reachBundledFood(bot);
+        }
 
         FoodCandidate cooked = findFoodCandidate(bot, true);
         if (cooked != null && (starving || emergency)) {
@@ -1262,6 +1267,20 @@ public final class HuntSkill implements Skill {
             }
         }
         return false;
+    }
+
+    /**
+     * {@link #collectFoodCandidates} sees direct slots only, so with no safe food there but some in a
+     * bundle, one piece is pulled out first ({@code BundleService.reachFirst} hops to the server
+     * thread from this worker). Gated like {@code HealingService}'s bundle reach, so a bot with
+     * direct food or none at all never makes the hop.
+     */
+    private static void reachBundledFood(ServerPlayerEntity bot) {
+        int direct = InventoryIterator.countDirect(bot, HealingService::isSafeEdible);
+        int total = InventoryIterator.count(bot, HealingService::isSafeEdible);
+        if (BundleReachPolicy.extractionsNeeded(1, direct, total - direct) > 0) {
+            BundleService.reachFirst(bot, HealingService::isSafeEdible);
+        }
     }
 
     private static FoodCandidate findFoodCandidate(ServerPlayerEntity bot, boolean cookedOnly) {

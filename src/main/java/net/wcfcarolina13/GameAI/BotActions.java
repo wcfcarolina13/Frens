@@ -1948,8 +1948,9 @@ public final class BotActions {
      * A step that stays in the bot's current feet cell. This used to be accepted unchecked
      * (so a wedged bot, e.g. in a closed door cell, could still move), which let a 0.45 step
      * put the hitbox 0.25 into a solid neighbour and suffocate the bot. Now
-     * {@link SubCellSnapPolicy} allows it only when it ends clear or with less overlap than
-     * it started with, and otherwise shortens it to stop flush with the wall. Blocks in the
+     * {@link SubCellSnapPolicy} allows it only when it ends clear or overlaps no solid more
+     * than it started with (so a bot already in a side wall can slide along it), and
+     * otherwise shortens it to stop flush with the wall. Blocks in the
      * bot's own feet and head cells are left out: the bot already stands in them (a door it
      * is wedged in, the upper half of a stair) and vanilla accepted that.
      */
@@ -2064,8 +2065,8 @@ public final class BotActions {
         return boxes;
     }
 
-    // Diagnostic: re-evaluate canOccupyPosition and log the specific rejection reason.
-    // Called only from applyMovementInput's rejection branch. Throttled per-bot so a long
+    // Diagnostic: re-evaluate canAcceptMovementImpulse's checks and log the specific rejection
+    // reason. Called only from applyMovementInput's rejection branch. Throttled per-bot so a long
     // stall produces a steady heartbeat (~once/0.5s) instead of a tick-rate spam flood.
     // Named "applyMovementInput-reject" so the user can grep Prism logs.
     private static final ConcurrentHashMap<UUID, Long> LAST_OCCUPANCY_REJECT_DIAG_TICK = new ConcurrentHashMap<>();
@@ -2180,7 +2181,7 @@ public final class BotActions {
     }
 
     // Self-heal: when the bot's current feet cell is a closed door, open it so vanilla
-    // physics can carry the bot through. Runs as a side-effect before canOccupyPosition
+    // physics can carry the bot through. Runs as a side-effect before canAcceptMovementImpulse
     // in applyMovementInput. Throttled per-bot so we don't spam interact packets.
     private static final ConcurrentHashMap<UUID, Long> LAST_AUTO_OPEN_CURRENT_DOOR_TICK = new ConcurrentHashMap<>();
     private static final long AUTO_OPEN_CURRENT_DOOR_THROTTLE_TICKS = 20L;

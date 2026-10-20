@@ -97,6 +97,46 @@ class MakeRoomDropPolicyTest {
         assertFalse(helper.contains("registerSelfDrop(bot, dropped);"), "a valuable drop is not held for the full despawn");
     }
 
+    @Test
+    void junkFoodIsACheapDropWhileRealFoodIsNeverDropped() throws IOException {
+        // Rotten flesh / spider eye: in the cheap mob drops and not safe to eat, so food=false.
+        SlotView rottenFlesh = new SlotView(0, 12, true, false, false, false, false, false);
+        SlotView steak = food(1, 3, false);
+        assertEquals(0, MakeRoomDropPolicy.pick(List.of(steak, rottenFlesh), true));
+        assertEquals(0, MakeRoomDropPolicy.pick(List.of(steak, rottenFlesh), false));
+        assertEquals(-1, MakeRoomDropPolicy.pick(List.of(steak), false));
+        String helper = mainSource("src/main/java/net/wcfcarolina13/GameAI/services/CraftingHelper.java");
+        assertTrue(helper.contains("HealingService.isSafeEdible(stack) || HealingService.isPrecious(stack),"),
+                "the food flag is safe or precious food, not any FOOD component");
+        String drop = helper.substring(helper.indexOf("private static boolean dropStackForSpace("));
+        drop = drop.substring(0, drop.indexOf("MakeRoomDropPolicy.pick("));
+        assertFalse(drop.contains("DataComponentTypes.FOOD"), "raw FOOD presence no longer marks a stack as food");
+    }
+
+    @Test
+    void aReservedTypeKeepsOnlyWhatTheCraftNeeds() {
+        // 74 planks in two stacks, the craft needs 20: the 10-stack may go, the 64-stack may not.
+        assertFalse(MakeRoomDropPolicy.reservedKeepsStack(74, 10, 20));
+        assertTrue(MakeRoomDropPolicy.reservedKeepsStack(74, 64, 20));
+        // Exactly enough left after the drop is fine; one short is not.
+        assertFalse(MakeRoomDropPolicy.reservedKeepsStack(40, 20, 20));
+        assertTrue(MakeRoomDropPolicy.reservedKeepsStack(39, 20, 20));
+        // Nothing reserved keeps nothing.
+        assertFalse(MakeRoomDropPolicy.reservedKeepsStack(5, 5, 0));
+    }
+
+    @Test
+    void theServerThreadMakeRoomDropKeepsOnlyTheReservedAmount() throws IOException {
+        String helper = mainSource("src/main/java/net/wcfcarolina13/GameAI/services/CraftingHelper.java");
+        String body = helper.substring(helper.indexOf("private static boolean makeRoomForOutput("));
+        body = body.substring(0, body.indexOf("offloadCheapItemsToNearbyChest("));
+        assertTrue(body.contains("keepsStackForCraft(bot, stack, reserveItems, reservePlanks, reserveLogs), true)"));
+        String keeps = helper.substring(helper.indexOf("private static boolean keepsStackForCraft("));
+        keeps = keeps.substring(0, keeps.indexOf("private static boolean isReservedForCraft("));
+        assertEquals(3, count(keeps, "MakeRoomDropPolicy.reservedKeepsStack("), "items, planks and logs");
+        assertEquals(3, count(keeps, "InventoryIterator.countDirect("), "direct slots only");
+    }
+
     private static int count(String text, String needle) {
         int n = 0;
         for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length())) {

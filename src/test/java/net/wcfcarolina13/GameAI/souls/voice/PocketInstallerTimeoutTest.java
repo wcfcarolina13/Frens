@@ -55,4 +55,14 @@ class PocketInstallerTimeoutTest {
                 List.of("/bin/sh", "-c", "echo building; echo boom; exit 2"), (s, d, t) -> { }, 5_000));
         assertTrue(ex.getMessage().contains("exit 2") && ex.getMessage().contains("boom"), ex.getMessage());
     }
+
+    @Test
+    void outputReaderGetsAFixedFloorAfterTheProbeExits() throws IOException {
+        assertTrue(PocketInstaller.DRAIN_JOIN_FLOOR_MS >= 500, "a probe exiting near the deadline keeps its output");
+        String source = Files.readString(Path.of("src/main/java/net/wcfcarolina13/GameAI/souls/voice/PocketInstaller.java"));
+        assertTrue(source.contains("drain.join(Math.max(DRAIN_JOIN_FLOOR_MS, deadline - System.currentTimeMillis()));"));
+        assumeShell();
+        // Exits inside its 300 ms budget; the reader's wait is the 500 ms floor, so the output arrives.
+        assertEquals("late", PocketInstaller.runForOutput(List.of("/bin/sh", "-c", "sleep 0.1; echo late"), 300).trim());
+    }
 }

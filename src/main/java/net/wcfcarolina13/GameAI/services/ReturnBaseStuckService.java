@@ -571,6 +571,18 @@ public final class ReturnBaseStuckService {
      */
     public static void clear(UUID botId) {
         if (botId != null) {
+            clearCounters(botId);
+            ESCAPE_IN_PROGRESS.remove(botId);
+        }
+    }
+
+    /**
+     * {@link #clear} without dropping {@code ESCAPE_IN_PROGRESS}: a new return episode resets its
+     * stuck counters, but an escape task still running from the old one keeps its flag, so a second
+     * escape does not start alongside it and the old task's finally does not clear a newer flag.
+     */
+    public static void clearCounters(UUID botId) {
+        if (botId != null) {
             LAST_BLOCK_POS.remove(botId);
             LAST_POS.remove(botId);
             STAGNANT_TICKS.remove(botId);
@@ -582,7 +594,6 @@ public final class ReturnBaseStuckService {
             LAST_STAGNANT_TICK_MS.remove(botId);
             BACKUP_ATTEMPTED.remove(botId);
             PILLAR_ATTEMPTED.remove(botId);
-            ESCAPE_IN_PROGRESS.remove(botId);
             FAILED_NUDGE_DIRS.remove(botId);
             STUCK_ANCHOR_POS.remove(botId);
             PANIC_FLEE_ATTEMPTED.remove(botId);
@@ -1527,13 +1538,18 @@ public final class ReturnBaseStuckService {
     }
     
     /**
+     * Longest wait for a jump-sprint to land after the stop before it is judged. The stop zeroes
+     * velocity near the jump apex, so the fall back down takes several hundred milliseconds.
+     */
+    private static final long JUMP_SPRINT_LAND_WAIT_MS = 800L;
+    /** Poll interval while waiting for the jump-sprint landing. */
+    private static final long JUMP_SPRINT_LAND_POLL_MS = 50L;
+
+    /**
      * Try backing up and sidestepping to find a clear path.
      * Tries all 4 cardinal directions, with jumping, to escape.
      * If all directions are blocked, delegates to mining (pillar escape).
      */
-    /** Settle time after a jump-sprint stop so the bot lands before the escape is judged. */
-    private static final long JUMP_SPRINT_SETTLE_MS = 200L;
-
     private static void tryBackupAndSidestep(ServerPlayerEntity bot, Vec3d target) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             LOGGER.warn("Stuck escape: world not ServerWorld, aborting");
@@ -1623,13 +1639,19 @@ public final class ReturnBaseStuckService {
                     Thread.currentThread().interrupt();
                     return;
                 }
-                sleepQuiet(JUMP_SPRINT_SETTLE_MS);
-
-                // Only a sideways cell change, landed on the ground, counts.
-                BlockPos endPos = bot.getBlockPos();
+                // Worker thread (runEscapeAsync): poll for the landing, bounded.
+                long landBy = System.currentTimeMillis() + JUMP_SPRINT_LAND_WAIT_MS;
                 boolean onGround = bot.isOnGround();
+                while (!onGround && System.currentTimeMillis() < landBy && !Thread.currentThread().isInterrupted()) {
+                    sleepQuiet(JUMP_SPRINT_LAND_POLL_MS);
+                    onGround = bot.isOnGround();
+                }
+                boolean landWaitTimedOut = !onGround;
+
+                // Only a sideways cell change counts: landed, or still airborne after the full wait.
+                BlockPos endPos = bot.getBlockPos();
                 if (StuckCellPolicy.jumpSprintEscaped(startPos.getX(), startPos.getZ(),
-                        endPos.getX(), endPos.getZ(), onGround)) {
+                        endPos.getX(), endPos.getZ(), onGround, landWaitTimedOut)) {
                     LOGGER.info("Stuck escape: jump-sprint {} succeeded, now at {}", escapeDir, endPos.toShortString());
                     return;
                 }

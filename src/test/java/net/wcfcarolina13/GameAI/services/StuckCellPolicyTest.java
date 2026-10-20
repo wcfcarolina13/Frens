@@ -2,6 +2,12 @@ package net.wcfcarolina13.GameAI.services;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -192,18 +198,87 @@ class StuckCellPolicyTest {
     @Test
     void jumpSprintSameCellHigherYIsNotAnEscape() {
         // Same X/Z, Y+1 (mid-jump or back on the same column): the caller never passes Y.
-        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -4, true));
-        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -4, false));
+        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -4, true, false));
+        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -4, false, false));
+        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -4, false, true));
     }
 
     @Test
     void jumpSprintSidewaysOnGroundIsAnEscape() {
-        assertTrue(StuckCellPolicy.jumpSprintEscaped(10, -4, 11, -4, true));
-        assertTrue(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -5, true));
+        assertTrue(StuckCellPolicy.jumpSprintEscaped(10, -4, 11, -4, true, false));
+        assertTrue(StuckCellPolicy.jumpSprintEscaped(10, -4, 10, -5, true, false));
     }
 
     @Test
-    void jumpSprintSidewaysWhileAirborneIsNotAnEscape() {
-        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 11, -4, false));
+    void jumpSprintSidewaysReadEarlyWhileAirborneIsNotAnEscape() {
+        assertFalse(StuckCellPolicy.jumpSprintEscaped(10, -4, 11, -4, false, false));
+    }
+
+    @Test
+    void jumpSprintSidewaysStillAirborneAfterTheWholeLandingWaitIsAnEscape() {
+        // The stop zeroed velocity near the apex; a bot still falling at the cap but in a new
+        // column (e.g. dropping down a slope) did get out.
+        assertTrue(StuckCellPolicy.jumpSprintEscaped(10, -4, 11, -4, false, true));
+    }
+
+    @Test
+    void jumpSprintJudgeWaitsForTheLandingBoundedAfterTheStop() throws IOException {
+        String source = mainSource("src/main/java/net/wcfcarolina13/GameAI/services/ReturnBaseStuckService.java");
+        String body = bodyOf(source, "private static void tryBackupAndSidestep(");
+        int stop = body.indexOf("BotActions.stop(bot);");
+        int poll = body.indexOf("while (!onGround && System.currentTimeMillis() < landBy");
+        int judge = body.indexOf("StuckCellPolicy.jumpSprintEscaped(");
+        assertTrue(stop >= 0 && poll > stop && judge > poll, "stop, then the bounded landing poll, then the judge");
+        assertTrue(body.contains("System.currentTimeMillis() + JUMP_SPRINT_LAND_WAIT_MS"), "the poll is bounded");
+        assertTrue(body.contains("onGround, landWaitTimedOut)"), "the judge gets the timed-out flag");
+        assertTrue(source.contains("JUMP_SPRINT_LAND_WAIT_MS = 800L"));
+        assertFalse(source.contains("JUMP_SPRINT_SETTLE_MS"), "the fixed 200 ms settle is gone");
+        // The constant no longer splits the method's javadoc from the method.
+        int doc = source.indexOf("     * If all directions are blocked, delegates to mining (pillar escape).\n     */\n");
+        assertTrue(doc >= 0 && source.startsWith("    private static void tryBackupAndSidestep(",
+                doc + "     * If all directions are blocked, delegates to mining (pillar escape).\n     */\n".length()),
+                "the javadoc sits on tryBackupAndSidestep");
+    }
+
+    @Test
+    void aNewReturnKeepsTheEscapeInProgressFlag() throws IOException {
+        String stuck = mainSource("src/main/java/net/wcfcarolina13/GameAI/services/ReturnBaseStuckService.java");
+        String counters = bodyOf(stuck, "public static void clearCounters(UUID botId)");
+        assertFalse(counters.contains("ESCAPE_IN_PROGRESS"), "clearCounters leaves a running escape's flag");
+        assertTrue(counters.contains("STAGNANT_TICKS.remove(botId)"));
+        String clear = bodyOf(stuck, "public static void clear(UUID botId)");
+        assertTrue(clear.contains("clearCounters(botId)") && clear.contains("ESCAPE_IN_PROGRESS.remove(botId)"),
+                "clear is clearCounters plus the flag");
+        String handler = mainSource("src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java");
+        String ret = bodyOf(handler, "private static String setReturnToBaseInternal(");
+        assertTrue(ret.contains("ReturnBaseStuckService.clearCounters(id);"), "the new-return path keeps the flag");
+        assertFalse(ret.contains("ReturnBaseStuckService.clear(id);"));
+    }
+
+    private static String bodyOf(String source, String signature) {
+        int at = source.indexOf(signature);
+        assertTrue(at >= 0, signature + " not found");
+        int open = source.indexOf('{', at);
+        int depth = 0;
+        for (int i = open; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == '{') {
+                depth++;
+            } else if (c == '}' && --depth == 0) {
+                return source.substring(open, i + 1);
+            }
+        }
+        throw new AssertionError(signature + ": unbalanced body");
+    }
+
+    private static String mainSource(String relative) throws IOException {
+        Path dir = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
+        for (Path at = dir; at != null; at = at.getParent()) {
+            Path candidate = at.resolve(relative);
+            if (Files.isRegularFile(candidate)) {
+                return Files.readString(candidate, StandardCharsets.UTF_8);
+            }
+        }
+        throw new IOException(relative + " not found above " + dir);
     }
 }

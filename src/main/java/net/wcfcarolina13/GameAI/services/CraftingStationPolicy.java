@@ -64,6 +64,15 @@ public final class CraftingStationPolicy {
         return !onServerThread;
     }
 
+    /**
+     * Whether a craft whose stick sub-step came up short should report missing sticks. Not when the
+     * sub-step was refused for a full pack: that refusal already has its own line, and the planks
+     * were there all along.
+     */
+    public static boolean reportStickShortfall(boolean subCraftRefusedForFullPack) {
+        return !subCraftRefusedForFullPack;
+    }
+
     /** Horizontal half-width of the crafting table scan around the bot. */
     public static int scanHorizontal(boolean onServerThread) {
         return onServerThread ? TICK_SCAN_HORIZONTAL : WORKER_SCAN_HORIZONTAL;

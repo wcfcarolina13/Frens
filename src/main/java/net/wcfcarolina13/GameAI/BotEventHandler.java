@@ -1786,8 +1786,9 @@ public class BotEventHandler {
         // A new return episode (not a re-plan of the same one; that returned early at the
         // same-base guard above) starts with fresh stuck counters. Flags and stagnation left
         // over from an earlier, interrupted return would otherwise skip escape steps and
-        // jump straight to the late ones.
-        net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(id);
+        // jump straight to the late ones. An escape task still running from the old episode
+        // keeps its in-progress flag (clearCounters), so a second escape cannot start beside it.
+        net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clearCounters(id);
         if (requestInitialPlan) {
             requestFollowPathPlanToGoal(bot, goal, true, "return-base-start");
         }

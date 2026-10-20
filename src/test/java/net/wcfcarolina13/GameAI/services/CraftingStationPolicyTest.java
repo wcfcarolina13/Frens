@@ -89,6 +89,43 @@ class CraftingStationPolicyTest {
     }
 
     @Test
+    void aStickSubCraftRefusedForAFullPackIsNotReportedAsMissingSticks() throws IOException {
+        assertTrue(CraftingStationPolicy.reportStickShortfall(false));
+        assertFalse(CraftingStationPolicy.reportStickShortfall(true));
+        String source = craftingHelperSource();
+        // The refusal before a craft is recorded; the after-craft path does not record one.
+        String room = bodyOf(source, "private static boolean makeRoomForOutput(");
+        int afterCraft = room.indexOf("if (!afterCraft) {");
+        int flag = room.indexOf("LAST_CRAFT_REFUSED_FULL_PACK.set(Boolean.TRUE);");
+        assertTrue(afterCraft >= 0 && flag > afterCraft, "only a pre-craft refusal sets the flag");
+        assertTrue(room.contains("sendFullPackCraftLine(bot, source, output, quiet);"), "the refusal honours quiet");
+        String line = bodyOf(source, "private static void sendFullPackCraftLine(");
+        int quietReturn = line.indexOf("if (quiet) {");
+        assertTrue(quietReturn >= 0 && quietReturn < line.indexOf("say(source,")
+                && quietReturn < line.indexOf("CRAFT_FULL_PACK_LINE.put("), "a quiet refusal neither chats nor eats the throttle");
+        // ensureSticks clears the flag before anything else.
+        String sticks = bodyOf(source, "private static boolean ensureSticks(ServerPlayerEntity bot, ServerCommandSource source, int needed, boolean quiet)");
+        assertTrue(sticks.indexOf("LAST_CRAFT_REFUSED_FULL_PACK.set(Boolean.FALSE);") < sticks.indexOf("craftSticks("));
+        // Every stick shortfall line asks first: ladder, torch, fence, tool, fishing rod.
+        assertEquals(5, count(source, "CraftingStationPolicy.reportStickShortfall("));
+        String tool = bodyOf(source, "private static int craftToolWithMaterial(");
+        assertTrue(tool.indexOf("CraftingStationPolicy.reportStickShortfall(packFull)") < tool.indexOf("\"Missing sticks. Need \""));
+        assertTrue(tool.contains("shortfall.message = fullPackCraftLine(Items.STICK);"), "a strict craft names the full pack");
+        String fence = source.substring(source.indexOf("boolean stickCraftRefused = takeFullPackRefusal();"));
+        assertTrue(fence.indexOf("reportStickShortfall(stickCraftRefused)") < fence.indexOf("reportMissing(source, \"fence\""));
+        // The stick and table sub-crafts pass quiet through.
+        assertTrue(bodyOf(source, "private static int craftWithPlanks(").contains("Map.of(), quiet)"));
+    }
+
+    @Test
+    void batchCookOffloadsToAChestOnlyOffTheServerThread() throws IOException {
+        String smelting = mainSource("src/main/java/net/wcfcarolina13/GameAI/services/SmeltingService.java");
+        String body = bodyOf(smelting, "private static boolean startBatchCookInternal(");
+        assertGuarded(body, "CraftingHelper.offloadCheapItemsToNearbyChest(", "CraftingStationPolicy.mayOffloadToChest(");
+        assertTrue(body.contains("source.getServer().isOnThread()"));
+    }
+
+    @Test
     void makingRoomForAnOutputAsksThePolicyBeforeAnyChestOffload() throws IOException {
         String source = craftingHelperSource();
         String body = bodyOf(source, "private static boolean makeRoomForOutput(");
@@ -103,6 +140,8 @@ class CraftingStationPolicyTest {
         // The class's only chest offload for an output is the gated one.
         assertEquals(1, count(source, "offloadCheapItemsToNearbyChest(bot, source,"));
         assertTrue(bodyOf(source, "private static boolean ensureInventorySpaceForOutput(")
+                .contains("ensureInventorySpaceForSubCraft("), "the pre-craft entry shares the sub-craft entry");
+        assertTrue(bodyOf(source, "private static boolean ensureInventorySpaceForSubCraft(")
                 .contains("makeRoomForOutput("), "the pre-craft entry goes through the gated method");
         String distribute = bodyOf(source, "private static void distributeOutput(");
         assertEquals(2, count(distribute, "makeRoomForOutput("), "both output make-room calls are gated");
@@ -116,7 +155,10 @@ class CraftingStationPolicyTest {
         String source = craftingHelperSource();
         assertFalse(java.util.regex.Pattern.compile("(?m)^\\s+ensureInventorySpaceForOutput\\(").matcher(source).find(),
                 "a pre-craft make-room call ignores its answer");
-        assertTrue(count(source, "if (!ensureInventorySpaceForOutput(bot, source, ") >= 20,
+        assertFalse(java.util.regex.Pattern.compile("(?m)^\\s+ensureInventorySpaceForSubCraft\\(").matcher(source).find(),
+                "a sub-craft make-room call ignores its answer");
+        assertTrue(count(source, "if (!ensureInventorySpaceForOutput(bot, source, ")
+                        + count(source, "if (!ensureInventorySpaceForSubCraft(bot, source, ") >= 20,
                 "the craft methods check the make-room answer");
     }
 

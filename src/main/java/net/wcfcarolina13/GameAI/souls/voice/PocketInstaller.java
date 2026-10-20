@@ -381,6 +381,9 @@ public final class PocketInstaller {
      * thread so a child that keeps its stdout open (or a grandchild that inherited it) can't
      * block us past the timeout; on timeout the process tree is killed and {@code ""} returned.
      */
+    /** Shortest wait for the output reader to reach EOF after the probe exited. */
+    static final long DRAIN_JOIN_FLOOR_MS = 500L;
+
     static String runForOutput(List<String> cmd, long timeoutMs) {
         Process p = null;
         try {
@@ -400,8 +403,9 @@ public final class PocketInstaller {
                 destroyTree(p);
                 return "";
             }
-            // The process exited; give the reader what's left of the budget to hit EOF.
-            drain.join(Math.max(1L, deadline - System.currentTimeMillis()));
+            // The process exited; give the reader what's left of the budget to hit EOF, but never
+            // less than a fixed floor, so a probe that exits just before the deadline is not cut short.
+            drain.join(Math.max(DRAIN_JOIN_FLOOR_MS, deadline - System.currentTimeMillis()));
             if (p.exitValue() != 0) {
                 return "";
             }

@@ -6,7 +6,9 @@ import java.util.List;
  * Which stack a bot drops on the ground to free one inventory slot
  * ({@code CraftingHelper.dropCheapStackForSpace}).
  *
- * <p>Never food, a tool or other damageable item, a protected item, or a stack the caller reserved.
+ * <p>Never food worth eating ({@code food}: safe or precious edibles; rotten flesh and spider eyes
+ * are cheap mob drops, not food), a tool or other damageable item, a protected item, or a stack the
+ * caller reserved ({@link #reservedKeepsStack}: a reserved type's excess is not reserved).
  * A cheap stack (logs, planks, cobble and other bulk blocks, common mob drops) goes first, the
  * smallest cheap stack first so the least is lost. With {@code cheapOnly} nothing else is dropped:
  * mutual aid and a craft on the server thread never throw a valuable stack away. Without it (the
@@ -48,6 +50,14 @@ public final class MakeRoomDropPolicy {
             return bestCheap.id();
         }
         return bestOther != null ? bestOther.id() : -1;
+    }
+
+    /**
+     * Whether a stack of a type a craft reserves must stay: dropping it would leave fewer than
+     * {@code needed} of the type in direct slots. {@code needed <= 0} reserves nothing.
+     */
+    public static boolean reservedKeepsStack(int totalOfType, int stackCount, int needed) {
+        return needed > 0 && totalOfType - stackCount < needed;
     }
 
     private static boolean neverDropped(SlotView slot) {

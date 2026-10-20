@@ -135,4 +135,57 @@ class SubCellSnapPolicyTest {
         double[] r = SubCellSnapPolicy.resolve(bot(5.5, 5.5), -0.45, 0.0, wallWest);
         assertArrayEquals(new double[]{-0.2, 0.0}, r, D);
     }
+
+    /** Stone east of the bot along z = 4..6, feet and head rows: one straight wall of six blocks. */
+    private static final List<double[]> LONG_WALL_EAST = List.of(
+            block(6, 64, 4), block(6, 65, 4), block(6, 64, 5), block(6, 65, 5), block(6, 64, 6), block(6, 65, 6));
+
+    @Test
+    void botAlreadyInASideWallMaySlideAlongIt() {
+        // 0.1 inside the wall, moving north along it: the overlap with the wall stays the same.
+        double before = SubCellSnapPolicy.penetration(bot(5.8, 5.5), LONG_WALL_EAST);
+        assertTrue(before > 0);
+        assertEquals(before, SubCellSnapPolicy.penetration(bot(5.8, 5.2), LONG_WALL_EAST), D);
+        assertTrue(SubCellSnapPolicy.allowSameCellMove(bot(5.8, 5.5), bot(5.8, 5.2), LONG_WALL_EAST));
+        assertArrayEquals(new double[]{0.0, -0.3}, SubCellSnapPolicy.resolve(bot(5.8, 5.5), 0.0, -0.3, LONG_WALL_EAST), D);
+        // Southward too, where the box crosses from block z=5 into block z=6 of the same wall.
+        assertArrayEquals(new double[]{0.0, 0.3}, SubCellSnapPolicy.resolve(bot(5.8, 5.5), 0.0, 0.3, LONG_WALL_EAST), D);
+    }
+
+    @Test
+    void botInASideWallSlidesButDoesNotGoDeeperOnADiagonal() {
+        // Into the wall and along it: the deeper part is dropped, the slide is kept.
+        assertArrayEquals(new double[]{0.0, -0.2}, SubCellSnapPolicy.resolve(bot(5.8, 5.5), 0.1, -0.2, LONG_WALL_EAST), D);
+        assertNull(SubCellSnapPolicy.resolve(bot(5.8, 5.5), 0.1, 0.0, LONG_WALL_EAST));
+    }
+
+    @Test
+    void steppingOutOfOneWallIntoAnotherIsRefusedEvenWhenTheTotalGoesDown() {
+        // East wall at z = 5 and a north wall block at (5, z = 4). The bot is 0.1 into the east
+        // wall; the diagonal step leaves it but clips 0.03 into the north wall.
+        List<double[]> walls = List.of(block(6, 64, 5), block(6, 65, 5), block(5, 64, 4), block(5, 65, 4));
+        double[] from = bot(5.8, 5.32);
+        double[] to = bot(5.65, 5.27);
+        assertTrue(SubCellSnapPolicy.penetration(to, walls) < SubCellSnapPolicy.penetration(from, walls));
+        assertTrue(SubCellSnapPolicy.penetration(to, walls) > 0);
+        assertFalse(SubCellSnapPolicy.allowSameCellMove(from, to, walls));
+        double[] r = SubCellSnapPolicy.resolve(from, -0.15, -0.05, walls);
+        // Whatever comes back adds nothing to the north wall.
+        if (r != null) {
+            double[] end = SubCellSnapPolicy.offset(from, r[0], r[1]);
+            List<double[]> north = List.of(block(5, 64, 4), block(5, 65, 4));
+            assertEquals(0.0, SubCellSnapPolicy.penetration(end, north), D);
+            assertArrayEquals(new double[]{-0.15, -0.02}, r, D);
+        }
+    }
+
+    @Test
+    void mergeJoinsTheBlocksOfOneStraightWallButNotACorner() {
+        assertEquals(1, SubCellSnapPolicy.mergeCoplanar(LONG_WALL_EAST).size());
+        assertArrayEquals(SubCellSnapPolicy.box(6, 64, 4, 7, 66, 7), SubCellSnapPolicy.mergeCoplanar(LONG_WALL_EAST).get(0), D);
+        List<double[]> corner = List.of(block(6, 64, 5), block(5, 64, 4));
+        assertEquals(2, SubCellSnapPolicy.mergeCoplanar(corner).size());
+        List<double[]> gap = List.of(block(6, 64, 4), block(6, 64, 6));
+        assertEquals(2, SubCellSnapPolicy.mergeCoplanar(gap).size());
+    }
 }

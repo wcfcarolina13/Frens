@@ -101,12 +101,15 @@ public final class StuckCellPolicy {
     }
 
     /**
-     * A jump-sprint escape worked only when the bot ended in a different X or Z cell
-     * and is standing on the ground. A Y-only change (the bot read mid-jump, or landed
-     * back on the same column) is not an escape, and neither is a sideways change read
-     * while still airborne.
+     * A jump-sprint escape worked only when the bot ended in a different X or Z cell. A Y-only
+     * change (the bot read mid-jump, or landed back on the same column) is not an escape. The
+     * caller waits (bounded) for the landing after its stop, which zeroes velocity near the apex:
+     * a sideways change counts once the bot is on the ground, or when it is still airborne after
+     * the whole wait ({@code landWaitTimedOut}, e.g. falling down a slope), but not on an early
+     * airborne read.
      */
-    public static boolean jumpSprintEscaped(int startX, int startZ, int endX, int endZ, boolean onGround) {
-        return onGround && (startX != endX || startZ != endZ);
+    public static boolean jumpSprintEscaped(int startX, int startZ, int endX, int endZ,
+                                            boolean onGround, boolean landWaitTimedOut) {
+        return (onGround || landWaitTimedOut) && (startX != endX || startZ != endZ);
     }
 }

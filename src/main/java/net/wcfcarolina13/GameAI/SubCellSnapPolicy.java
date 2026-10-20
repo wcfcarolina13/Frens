@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -7,8 +8,11 @@ import java.util.List;
  * ({@code BotActions.moveRelative}). Such a step used to be accepted unchecked, so a 0.45
  * step from x=5.5 toward stone at x=6 put the hitbox 0.25 into the stone and the bot
  * suffocated. A same-cell step is now allowed only when it ends clear of solid neighbours
- * or with less overlap than it started with (a wedged bot can still work its way out), and
- * a step that would clip is shortened so the bot stops flush with the wall.
+ * or when it overlaps no solid more than it started with (a wedged bot can still work its
+ * way out, and a bot already in a side wall can slide along it), and a step that would clip
+ * is shortened so the bot stops flush with the wall. Coplanar block boxes are merged into
+ * one wall first, so sliding along a wall of several blocks is not read as entering the next
+ * block, while stepping out of one wall into another one (a diagonal trade) is refused.
  * <p>
  * Boxes are {@code double[6]} = {minX, minY, minZ, maxX, maxY, maxZ}. Only X and Z move.
  */
@@ -48,10 +52,81 @@ public final class SubCellSnapPolicy {
         return total;
     }
 
-    /** Clear target, or one that overlaps solids less than the start did. */
+    /** Volume by which {@code bot} sits inside one solid box (0 when they only touch). */
+    static double overlapVolume(double[] bot, double[] solid) {
+        double ox = overlap(bot, solid, 0);
+        double oy = overlap(bot, solid, 1);
+        double oz = overlap(bot, solid, 2);
+        return ox > EPS && oy > EPS && oz > EPS ? ox * oy * oz : 0.0;
+    }
+
+    /**
+     * Clear target, or one where no (merged) solid is overlapped more than at the start. Equal
+     * overlap is allowed, so a bot already in a side wall may slide along it; overlap moved
+     * into another solid is refused even when the total goes down.
+     */
     public static boolean allowSameCellMove(double[] from, double[] to, List<double[]> solids) {
-        double after = penetration(to, solids);
-        return after <= EPS || after < penetration(from, solids);
+        if (penetration(to, solids) <= EPS) {
+            return true;
+        }
+        for (double[] s : mergeCoplanar(solids)) {
+            if (overlapVolume(to, s) > overlapVolume(from, s) + EPS) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Merges boxes that share their extent on two axes and touch or overlap on the third (the
+     * blocks of one straight wall, feet and head rows), so the wall is judged as one solid.
+     */
+    static List<double[]> mergeCoplanar(List<double[]> solids) {
+        List<double[]> out = new ArrayList<>(solids.size());
+        for (double[] s : solids) {
+            out.add(s.clone());
+        }
+        boolean merged = true;
+        while (merged) {
+            merged = false;
+            outer:
+            for (int i = 0; i < out.size(); i++) {
+                for (int j = i + 1; j < out.size(); j++) {
+                    double[] u = union(out.get(i), out.get(j));
+                    if (u != null) {
+                        out.set(i, u);
+                        out.remove(j);
+                        merged = true;
+                        break outer;
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The union of two boxes when it is itself a box (two axes equal, the third touching), else null. */
+    private static double[] union(double[] a, double[] b) {
+        int differing = -1;
+        for (int axis = 0; axis < 3; axis++) {
+            boolean same = Math.abs(a[axis] - b[axis]) <= EPS && Math.abs(a[axis + 3] - b[axis + 3]) <= EPS;
+            if (!same) {
+                if (differing != -1) {
+                    return null;
+                }
+                differing = axis;
+            }
+        }
+        if (differing == -1) {
+            return a.clone();
+        }
+        if (a[differing] > b[differing + 3] + EPS || b[differing] > a[differing + 3] + EPS) {
+            return null; // a gap between them
+        }
+        double[] u = a.clone();
+        u[differing] = Math.min(a[differing], b[differing]);
+        u[differing + 3] = Math.max(a[differing + 3], b[differing + 3]);
+        return u;
     }
 
     /**
@@ -85,12 +160,31 @@ public final class SubCellSnapPolicy {
      * shortened against the solids the box faces on the other two axes (like vanilla
      * collision, so a diagonal step into a corner slides along the open side). Returns the
      * allowed {dx, dz}, or null when the bot cannot move at all. A step that already ends
-     * clear, or overlaps less than the start, is returned unchanged.
+     * clear, or overlaps no solid more than the start, is returned unchanged. Solids the bot is
+     * already inside are left to {@link #allowSameCellMove} rather than clamped against (their
+     * flush point is behind the bot), and when the clamped step is refused the step's X-only and
+     * Z-only parts are tried, so a bot in a side wall still slides along it.
      */
     public static double[] resolve(double[] from, double dx, double dz, List<double[]> solids) {
         if (allowSameCellMove(from, offset(from, dx, dz), solids)) {
             return new double[]{dx, dz};
         }
+        double[] clamped = clampStep(from, dx, dz, solids);
+        if (clamped != null) {
+            return clamped;
+        }
+        if (Math.abs(dx) > EPS && Math.abs(dz) > EPS) {
+            if (allowSameCellMove(from, offset(from, dx, 0.0), solids)) {
+                return new double[]{dx, 0.0};
+            }
+            if (allowSameCellMove(from, offset(from, 0.0, dz), solids)) {
+                return new double[]{0.0, dz};
+            }
+        }
+        return null;
+    }
+
+    private static double[] clampStep(double[] from, double dx, double dz, List<double[]> solids) {
         double rx = clampDelta(from, 0, dx, solids);
         if (Double.isNaN(rx)) {
             rx = 0.0;
@@ -119,6 +213,9 @@ public final class SubCellSnapPolicy {
         for (double[] s : solids) {
             if (overlap(b, s, 1) <= EPS || overlap(b, s, other) <= EPS) {
                 continue; // not in the box's path on this axis
+            }
+            if (overlap(b, s, axis) > EPS) {
+                continue; // already inside it: allowSameCellMove judges whether the overlap grows
             }
             double c = clampAxis(from, to, half, s[axis], s[axis + 3]);
             if (Double.isNaN(c)) {

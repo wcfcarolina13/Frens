@@ -122,6 +122,10 @@ public final class CraftingHelper {
     // A server-thread craft refused for a full pack with nothing cheap to drop (makeRoomForOutput):
     // its chat line at most once per bot per CraftingStationPolicy.DECLINE_LOG_INTERVAL_MS.
     private static final Map<UUID, Long> CRAFT_FULL_PACK_LINE = new ConcurrentHashMap<>();
+    // Set when makeRoomForOutput refuses a craft for a full pack; cleared by a caller right before a
+    // sub-craft it then judges, so a refused stick craft is not read as missing sticks. Refusals only
+    // happen on the server thread, and the caller reads the flag on that same thread.
+    private static final ThreadLocal<Boolean> LAST_CRAFT_REFUSED_FULL_PACK = ThreadLocal.withInitial(() -> Boolean.FALSE);
 
     // Cooldown after crafting a new table — prevents spam-crafting when placement/reach keeps failing.
     private static final Map<UUID, Long> CRAFT_TABLE_CRAFT_COOLDOWN = new java.util.concurrent.ConcurrentHashMap<>();
@@ -577,6 +581,9 @@ public final class CraftingHelper {
         int craftsNeeded = (int) Math.ceil(amountRequested / 3.0);
         int neededSticks = craftsNeeded * 7;
         if (!ensureSticks(bot, source, neededSticks)) {
+            if (!CraftingStationPolicy.reportStickShortfall(takeFullPackRefusal())) {
+                return 0; // the full-pack line already said why
+            }
             int haveSticks = countItem(bot, Items.STICK);
             int planks = countPlanks(bot);
             say(source, "Missing sticks for ladders. Need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + ").");
@@ -852,7 +859,7 @@ public final class CraftingHelper {
             if (!quiet) sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft. Missing " + (planksPerItem - plankCount) + ".");
             return 0;
         }
-        if (!ensureInventorySpaceForOutput(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of())) {
+        if (!ensureInventorySpaceForSubCraft(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of(), quiet)) {
             return 0;
         }
         if (!consumePlanks(bot, crafts * planksPerItem)) {
@@ -897,7 +904,7 @@ public final class CraftingHelper {
             }
             return 0;
         }
-        if (!ensureInventorySpaceForOutput(bot, source, Items.STICK, crafts * 4, crafts * 2, 0, Map.of())) {
+        if (!ensureInventorySpaceForSubCraft(bot, source, Items.STICK, crafts * 4, crafts * 2, 0, Map.of(), quiet)) {
             return 0;
         }
         if (!consumePlanks(bot, crafts * 2)) {
@@ -923,6 +930,9 @@ public final class CraftingHelper {
         int targetTorches = Math.max(1, amountRequested);
         int craftsNeeded = (int) Math.ceil(targetTorches / 4.0);
         if (!ensureSticks(bot, source, craftsNeeded)) {
+            if (!CraftingStationPolicy.reportStickShortfall(takeFullPackRefusal())) {
+                return 0; // the full-pack line already said why
+            }
             reportMissing(source, "torch",
                     Map.of("stick", craftsNeeded),
                     Map.of("stick", countItem(bot, Items.STICK)),
@@ -1118,14 +1128,19 @@ public final class CraftingHelper {
         int craftsNeeded = (int) Math.ceil(amountRequested / 3.0);
         ensureItemAvailable(bot, source, Items.STICK, craftsNeeded * 2);
         int sticks = countItem(bot, Items.STICK);
+        LAST_CRAFT_REFUSED_FULL_PACK.set(Boolean.FALSE);
         if (sticks < craftsNeeded * 2 && ensurePlanksAvailable(bot, source, 2)) {
             int missing = craftsNeeded * 2 - sticks;
             craftSticks(bot, source, commander, missing);
             sticks = countItem(bot, Items.STICK);
         }
+        boolean stickCraftRefused = takeFullPackRefusal();
         int plankCount = countItem(bot, best.plank());
         int crafts = Math.min(craftsNeeded, Math.min(plankCount / 4, sticks / 2));
         if (crafts <= 0) {
+            if (!CraftingStationPolicy.reportStickShortfall(stickCraftRefused)) {
+                return 0; // the full-pack line already said why
+            }
             Map<String, Integer> fenceNeeded = new LinkedHashMap<>();
             fenceNeeded.put(itemLabel(best.plank()), craftsNeeded * 4);
             fenceNeeded.put("stick", craftsNeeded * 2);
@@ -1531,14 +1546,21 @@ public final class CraftingHelper {
         int neededSticks = stickCount * amount;
         // A strict craft answers with its own shortfall line, so the stick sub-step stays quiet.
         if (!ensureSticks(bot, source, neededSticks, shortfall != null)) {
+            boolean packFull = takeFullPackRefusal();
             if (shortfall != null) {
-                if (shortfall.message == null) {
+                if (shortfall.message == null && packFull) {
+                    // The quiet stick sub-step was refused for a full pack: say that, not "missing sticks".
+                    shortfall.message = fullPackCraftLine(Items.STICK);
+                } else if (shortfall.message == null) {
                     String line = toolShortfallLine(bot, kind, mat, amount, headCount, stickCount);
                     shortfall.message = line.isEmpty()
                             ? "I couldn't get " + neededSticks + " sticks to craft " + toolLabel(kind, mat) + "."
                             : line;
                 }
                 return 0;
+            }
+            if (!CraftingStationPolicy.reportStickShortfall(packFull)) {
+                return 0; // the full-pack line already said why
             }
             int haveSticks = countItem(bot, Items.STICK);
             int planks = countPlanks(bot);
@@ -2980,11 +3002,15 @@ public final class CraftingHelper {
             return 0;
         }
         ensureSticks(bot, source, amount * 3);
+        boolean stickCraftRefused = takeFullPackRefusal();
         ensureItemAvailable(bot, source, Items.STRING, amount * 2);
         int sticks = countItem(bot, Items.STICK);
         int strings = countItem(bot, Items.STRING);
         int crafts = Math.min(amount, Math.min(sticks / 3, strings / 2));
         if (crafts <= 0) {
+            if (!CraftingStationPolicy.reportStickShortfall(stickCraftRefused)) {
+                return 0; // the full-pack line already said why
+            }
             say(source, "Fishing rods need 3 sticks and 2 strings each.");
             return 0;
         }
@@ -3058,13 +3084,13 @@ public final class CraftingHelper {
                 + " emptySlot=" + bot.getInventory().getEmptySlot());
         // After the craft: on the server thread this only drops a cheap stack, and an output that
         // still does not fit is dropped below rather than walking to a chest.
-        makeRoomForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of(), false, true);
+        makeRoomForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of(), false, true, true);
         ItemStack stack = new ItemStack(output, count);
         boolean added = bot.getInventory().insertStack(stack);
         debugChest("InsertStack result added=" + added + " remaining=" + stack.getCount());
         if (!added && !stack.isEmpty()) {
             debugChest("InsertStack failed; retrying after offload.");
-            makeRoomForOutput(bot, bot.getCommandSource(), output, stack.getCount(), 0, 0, Map.of(), true, true);
+            makeRoomForOutput(bot, bot.getCommandSource(), output, stack.getCount(), 0, 0, Map.of(), true, true, true);
             boolean retryAdded = bot.getInventory().insertStack(stack);
             debugChest("InsertStack retry added=" + retryAdded + " remaining=" + stack.getCount());
             if (!retryAdded && !stack.isEmpty()) {
@@ -3084,7 +3110,23 @@ public final class CraftingHelper {
                                                          int reservePlanks,
                                                          int reserveLogs,
                                                          Map<Item, Integer> reserveItems) {
-        return makeRoomForOutput(bot, source, output, outputCount, reservePlanks, reserveLogs, reserveItems, false, false);
+        return ensureInventorySpaceForSubCraft(bot, source, output, outputCount, reservePlanks, reserveLogs, reserveItems, false);
+    }
+
+    /**
+     * {@link #ensureInventorySpaceForOutput} for a sub-craft (sticks, planks crafts). {@code quiet}:
+     * its caller answers for it, so a full-pack refusal only logs.
+     */
+    private static boolean ensureInventorySpaceForSubCraft(ServerPlayerEntity bot,
+                                                         ServerCommandSource source,
+                                                         Item output,
+                                                         int outputCount,
+                                                         int reservePlanks,
+                                                         int reserveLogs,
+                                                         Map<Item, Integer> reserveItems,
+                                                         boolean quiet) {
+        return makeRoomForOutput(bot, source, output, outputCount, reservePlanks, reserveLogs, reserveItems,
+                false, false, quiet);
     }
 
     /**
@@ -3093,7 +3135,9 @@ public final class CraftingHelper {
      * ({@link CraftingStationPolicy#mayOffloadToChest}) it never walks, places or fills a chest: it
      * drops one cheap stack that is not one of the craft's reserves, and with none it returns false.
      * {@code afterCraft}: called from {@link #distributeOutput} once the ingredients are spent, so no
-     * refusal line (the caller drops the output that does not fit).
+     * refusal line (the caller drops the output that does not fit). {@code quiet}: a sub-craft whose
+     * caller answers for it, so a refusal logs but sends no chat line. Any refusal before a craft sets
+     * {@link #LAST_CRAFT_REFUSED_FULL_PACK} so the caller does not report missing ingredients.
      */
     private static boolean makeRoomForOutput(ServerPlayerEntity bot,
                                              ServerCommandSource source,
@@ -3103,7 +3147,8 @@ public final class CraftingHelper {
                                              int reserveLogs,
                                              Map<Item, Integer> reserveItems,
                                              boolean forceOffload,
-                                             boolean afterCraft) {
+                                             boolean afterCraft,
+                                             boolean quiet) {
         if (bot == null || source == null || output == null) {
             return true;
         }
@@ -3129,15 +3174,13 @@ public final class CraftingHelper {
                 + " force=" + forceOffload
                 + " botPos=" + bot.getBlockPos().toShortString());
         if (!CraftingStationPolicy.mayOffloadToChest(isServerThreadCall(source, bot))) {
-            Set<Item> reservedItems = reserveItems.keySet();
-            boolean reservePlanksNeeded = reservePlanks > 0;
-            boolean reserveLogsNeeded = reserveLogs > 0;
             if (dropStackForSpace(bot,
-                    stack -> isReservedForCraft(stack, reservedItems, reservePlanksNeeded, reserveLogsNeeded), true)) {
+                    stack -> keepsStackForCraft(bot, stack, reserveItems, reservePlanks, reserveLogs), true)) {
                 return true;
             }
             if (!afterCraft) {
-                sendFullPackCraftLine(bot, source, output);
+                LAST_CRAFT_REFUSED_FULL_PACK.set(Boolean.TRUE);
+                sendFullPackCraftLine(bot, source, output, quiet);
             }
             return false;
         }
@@ -3146,8 +3189,18 @@ public final class CraftingHelper {
         return true;
     }
 
-    /** The server-thread craft refusal for a full pack: one INFO line and one chat line per bot per 30 s. */
-    private static void sendFullPackCraftLine(ServerPlayerEntity bot, ServerCommandSource source, Item output) {
+    /**
+     * The server-thread craft refusal for a full pack: one INFO line and one chat line per bot per 30 s.
+     * {@code quiet} (a sub-craft whose caller answers): the INFO line only, and the throttle is left
+     * alone so the caller's own line is not swallowed.
+     */
+    private static void sendFullPackCraftLine(ServerPlayerEntity bot, ServerCommandSource source, Item output,
+                                              boolean quiet) {
+        if (quiet) {
+            LOGGER.info("craft: {} has a full pack and nothing cheap to drop, not crafting {} on the server thread (sub-step)",
+                    bot.getName().getString(), output.getName().getString());
+            return;
+        }
         long now = System.currentTimeMillis();
         if (!CraftingStationPolicy.shouldLogDecline(now, CRAFT_FULL_PACK_LINE.get(bot.getUuid()))) {
             return;
@@ -3155,7 +3208,7 @@ public final class CraftingHelper {
         CRAFT_FULL_PACK_LINE.put(bot.getUuid(), now);
         LOGGER.info("craft: {} has a full pack and nothing cheap to drop, not crafting {} on the server thread",
                 bot.getName().getString(), output.getName().getString());
-        say(source, "My pack's full, so I can't craft " + itemLabel(output).replace('_', ' ') + " right now.");
+        say(source, fullPackCraftLine(output));
     }
 
     public static boolean offloadCheapItemsToNearbyChest(ServerPlayerEntity bot,
@@ -3251,7 +3304,8 @@ public final class CraftingHelper {
                     isProtectedItem(stack),
                     stack.isDamageable(),
                     reserved.test(stack),
-                    stack.getComponents().contains(net.minecraft.component.DataComponentTypes.FOOD),
+                    // Food worth keeping: junk food (rotten flesh, spider eye) is a cheap mob drop.
+                    HealingService.isSafeEdible(stack) || HealingService.isPrecious(stack),
                     stack.getComponents().contains(net.minecraft.component.DataComponentTypes.TOOL)));
         }
         int bestSlot = MakeRoomDropPolicy.pick(slots, cheapOnly);
@@ -3347,6 +3401,37 @@ public final class CraftingHelper {
         return CHEAP_BLOCKS.contains(item) || CHEAP_MOB_DROPS.contains(item);
     }
 
+    /**
+     * The server-thread make-room drop keeps a stack of a reserved type only when dropping it would
+     * leave fewer direct copies than the craft needs, so the excess of a cheap reserve may go.
+     * Direct slots only: bundled copies would need a free slot to come out.
+     */
+    private static boolean keepsStackForCraft(ServerPlayerEntity bot,
+                                              ItemStack stack,
+                                              Map<Item, Integer> reserveItems,
+                                              int reservePlanks,
+                                              int reserveLogs) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        if (reserveItems != null && reserveItems.containsKey(stack.getItem())) {
+            Integer needed = reserveItems.get(stack.getItem());
+            int total = InventoryIterator.countDirect(bot, s -> s.isOf(stack.getItem()));
+            if (MakeRoomDropPolicy.reservedKeepsStack(total, stack.getCount(), needed == null ? Integer.MAX_VALUE : needed)) {
+                return true;
+            }
+        }
+        if (reservePlanks > 0 && isPlank(stack)
+                && MakeRoomDropPolicy.reservedKeepsStack(
+                        InventoryIterator.countDirect(bot, CraftingHelper::isPlank), stack.getCount(), reservePlanks)) {
+            return true;
+        }
+        return reserveLogs > 0 && stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS)
+                && MakeRoomDropPolicy.reservedKeepsStack(
+                        InventoryIterator.countDirect(bot, s -> s.isIn(net.minecraft.registry.tag.ItemTags.LOGS)),
+                        stack.getCount(), reserveLogs);
+    }
+
     private static boolean isReservedForCraft(ItemStack stack,
                                               Set<Item> reservedItems,
                                               boolean reservePlanksNeeded,
@@ -3439,8 +3524,23 @@ public final class CraftingHelper {
         return ensureSticks(bot, source, needed, false);
     }
 
+    /**
+     * Whether the sub-craft run since the flag was last cleared (ensureSticks, the fence's stick
+     * craft) was refused for a full pack. Read once: the flag is cleared here.
+     */
+    private static boolean takeFullPackRefusal() {
+        boolean refused = LAST_CRAFT_REFUSED_FULL_PACK.get();
+        LAST_CRAFT_REFUSED_FULL_PACK.set(Boolean.FALSE);
+        return refused;
+    }
+
+    private static String fullPackCraftLine(Item output) {
+        return "My pack's full, so I can't craft " + itemLabel(output).replace('_', ' ') + " right now.";
+    }
+
     /** {@code quiet}: see {@link #craftSticks(ServerPlayerEntity, ServerCommandSource, ServerPlayerEntity, int, boolean)}. */
     private static boolean ensureSticks(ServerPlayerEntity bot, ServerCommandSource source, int needed, boolean quiet) {
+        LAST_CRAFT_REFUSED_FULL_PACK.set(Boolean.FALSE);
         int have = countItem(bot, Items.STICK);
         if (have >= needed) {
             return true;

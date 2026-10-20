@@ -362,7 +362,10 @@ public final class SmeltingService {
         if (bot == null || source == null) {
             return false;
         }
-        if (bot.getInventory().getEmptySlot() == -1) {
+        // A chest offload walks to (or places) a chest, which the server thread (/bot cook, FishingSkill's
+        // callOnServer) must not do: there the cook goes on with what fits.
+        boolean onServerThread = source.getServer() != null && source.getServer().isOnThread();
+        if (bot.getInventory().getEmptySlot() == -1 && CraftingStationPolicy.mayOffloadToChest(onServerThread)) {
             CraftingHelper.offloadCheapItemsToNearbyChest(bot, source, 0, 0, Map.of());
         }
         if (!(source.getWorld() instanceof ServerWorld world)) {
