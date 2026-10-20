@@ -18,6 +18,7 @@ import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
+import net.wcfcarolina13.GameAI.services.ChunkBlockReader;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.skills.Skill;
@@ -151,18 +152,33 @@ public class PlantSeedsSkill implements Skill {
 
     // ── Farmland scanning ────────────────────────────────────────────────
 
+    /**
+     * Runs on the skill's worker thread, where every world.getBlockState is a server round
+     * trip; one chunk cache for the scan turns the box into a few chunk fetches. An unloaded
+     * cell reads as null and never matches.
+     */
     private static List<BlockPos> findEmptyFarmland(ServerWorld world, BlockPos center) {
+        long startNanos = System.nanoTime();
+        ChunkBlockReader reader = new ChunkBlockReader(world);
         List<BlockPos> plots = new ArrayList<>();
         for (int dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
             for (int dz = -SCAN_RADIUS; dz <= SCAN_RADIUS; dz++) {
                 for (int dy = -SCAN_VERTICAL; dy <= SCAN_VERTICAL; dy++) {
                     BlockPos pos = center.add(dx, dy, dz);
-                    if (world.getBlockState(pos).isOf(Blocks.FARMLAND) && world.isAir(pos.up())) {
+                    BlockState state = reader.state(pos);
+                    if (state == null || !state.isOf(Blocks.FARMLAND)) {
+                        continue;
+                    }
+                    // Above the build limit the world reads VOID_AIR, which is air; null is that case here.
+                    BlockState above = reader.state(pos.up());
+                    if (above == null || above.isAir()) {
                         plots.add(pos);
                     }
                 }
             }
         }
+        LOGGER.debug("[PlantScan] empty-farmland scan took {} ms ({} plots)",
+                (System.nanoTime() - startNanos) / 1_000_000L, plots.size());
         return plots;
     }
 

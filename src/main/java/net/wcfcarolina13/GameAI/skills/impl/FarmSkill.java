@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.skills.impl;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.wcfcarolina13.GameAI.services.ChunkBlockReader;
 import net.minecraft.entity.decoration.LeashKnotEntity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -915,22 +916,26 @@ public class FarmSkill implements Skill {
             return null;
         }
 
+        // One chunk cache for the whole box: from a worker each world.getBlockState is a
+        // server round trip, and this box is (2r+1)^2 x 9 cells.
+        long startNanos = System.nanoTime();
+        ChunkBlockReader reader = new ChunkBlockReader(world);
         BlockPos best = null;
         double bestDistSq = Double.MAX_VALUE;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -4; dy <= 4; dy++) {
                     BlockPos nw = origin.add(dx, dy, dz);
-                    if (!isStillWater(world, nw)) {
+                    if (!isStillWater(reader, nw)) {
                         continue;
                     }
                     BlockPos ne = nw.add(1, 0, 0);
                     BlockPos sw = nw.add(0, 0, 1);
                     BlockPos se = nw.add(1, 0, 1);
-                    if (!isStillWater(world, ne) || !isStillWater(world, sw) || !isStillWater(world, se)) {
+                    if (!isStillWater(reader, ne) || !isStillWater(reader, sw) || !isStillWater(reader, se)) {
                         continue;
                     }
-                    if (!isEnclosed2x2Water(world, nw)) {
+                    if (!isEnclosed2x2Water(reader, nw)) {
                         continue;
                     }
 
@@ -942,10 +947,17 @@ public class FarmSkill implements Skill {
                 }
             }
         }
+        LOGGER.debug("[FarmScan] enclosed 2x2 irrigation scan r={} took {} ms (found={})",
+                radius, (System.nanoTime() - startNanos) / 1_000_000L, best != null);
         return best;
     }
 
     private static boolean isEnclosed2x2Water(ServerWorld world, BlockPos nw) {
+        return isEnclosed2x2Water(new ChunkBlockReader(world), nw);
+    }
+
+    private static boolean isEnclosed2x2Water(ChunkBlockReader reader, BlockPos nw) {
+        ServerWorld world = reader.world();
         int minX = nw.getX();
         int minZ = nw.getZ();
         int y = nw.getY();
@@ -959,7 +971,7 @@ public class FarmSkill implements Skill {
                     continue;
                 }
                 BlockPos ring = new BlockPos(x, y, z);
-                BlockState s = world.getBlockState(ring);
+                BlockState s = stateOrAir(reader, ring);
                 if (s.isAir() || s.isReplaceable() || s.isOf(Blocks.WATER)) {
                     return false;
                 }
@@ -2724,6 +2736,21 @@ public class FarmSkill implements Skill {
         return state.isOf(Blocks.WATER) && state.getFluidState().isStill();
     }
 
+    /** {@link #isStillWater(ServerWorld, BlockPos)} through a scan's chunk cache; unloaded reads as not water. */
+    private static boolean isStillWater(ChunkBlockReader reader, BlockPos pos) {
+        BlockState state = reader.state(pos);
+        return state != null && state.isOf(Blocks.WATER) && state.getFluidState().isStill();
+    }
+
+    /**
+     * The reader's state, with an unloaded or out-of-height cell read as air: what the world
+     * gives above or below the build limit, and "nothing there" for terrain the scan cannot see.
+     */
+    private static BlockState stateOrAir(ChunkBlockReader reader, BlockPos pos) {
+        BlockState state = reader.state(pos);
+        return state != null ? state : Blocks.AIR.getDefaultState();
+    }
+
     /**
      * Returns {waterCount, stillCount, flowCount, dryCount} for the 2x2 irrigation hole.
      */
@@ -2810,22 +2837,39 @@ public class FarmSkill implements Skill {
         return score;
     }
 
+    private static int shoreScore(ChunkBlockReader reader, BlockPos pos) {
+        int score = 0;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (!stateOrAir(reader, pos.offset(dir)).isOf(Blocks.WATER)) {
+                score++;
+            }
+        }
+        return score;
+    }
+
     private static boolean isViableBucketRefillSource(ServerWorld world, BlockPos waterPos) {
         if (world == null || waterPos == null) {
             return false;
         }
-        if (!world.getBlockState(waterPos).isOf(Blocks.WATER)) {
+        return isViableBucketRefillSource(new ChunkBlockReader(world), waterPos);
+    }
+
+    private static boolean isViableBucketRefillSource(ChunkBlockReader reader, BlockPos waterPos) {
+        if (waterPos == null) {
+            return false;
+        }
+        if (!stateOrAir(reader, waterPos).isOf(Blocks.WATER)) {
             return false;
         }
         // Prefer shoreline-accessible water (reduces "run into the ocean" behavior).
-        if (shoreScore(world, waterPos) <= 0) {
+        if (shoreScore(reader, waterPos) <= 0) {
             return false;
         }
-        if (enumerateStandingNearWater(world, waterPos).isEmpty()) {
+        if (enumerateStandingNearWater(reader, waterPos).isEmpty()) {
             return false;
         }
         // Avoid deep water where we can't easily get back to land.
-        return findSolidGroundNearby(world, waterPos, 12) != null;
+        return findSolidGroundNearby(reader, waterPos, 12) != null;
     }
 
     /** Distance within which a remembered water source is worth using for refills. */
@@ -2899,13 +2943,17 @@ public class FarmSkill implements Skill {
             double distSq;
             Candidate(BlockPos p, int s, double d) { pos = p; shore = s; distSq = d; }
         }
+        // One chunk cache for the box and every per-hit shore check (finding: ~9.6k reads
+        // plus a 25x7x25 solid-ground scan per viable hit, each a server hop off-thread).
+        long startNanos = System.nanoTime();
+        ChunkBlockReader reader = new ChunkBlockReader(world);
         List<Candidate> list = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -2; dy <= 1; dy++) {
                     BlockPos check = origin.add(dx, dy, dz);
-                    if (isStillWater(world, check) && isViableBucketRefillSource(world, check)) {
-                        int shore = shoreScore(world, check);
+                    if (isStillWater(reader, check) && isViableBucketRefillSource(reader, check)) {
+                        int shore = shoreScore(reader, check);
                         double distSq = origin.getSquaredDistance(check);
                         list.add(new Candidate(check.toImmutable(), shore, distSq));
                     }
@@ -2920,10 +2968,14 @@ public class FarmSkill implements Skill {
         for (Candidate c : list) {
             results.add(c.pos);
         }
+        LOGGER.debug("[FarmScan] still-water source scan r={} took {} ms ({} sources)",
+                radius, (System.nanoTime() - startNanos) / 1_000_000L, results.size());
         return results;
     }
 
     private static BlockPos findAnyWaterSource(ServerWorld world, BlockPos origin, int radius) {
+        long startNanos = System.nanoTime();
+        ChunkBlockReader reader = new ChunkBlockReader(world);
         BlockPos best = null;
         double bestDistSq = Double.MAX_VALUE;
         int bestShore = Integer.MIN_VALUE;
@@ -2931,8 +2983,8 @@ public class FarmSkill implements Skill {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -2; dy <= 1; dy++) {
                     BlockPos check = origin.add(dx, dy, dz);
-                    if (world.getBlockState(check).isOf(Blocks.WATER) && isViableBucketRefillSource(world, check)) {
-                        int shore = shoreScore(world, check);
+                    if (stateOrAir(reader, check).isOf(Blocks.WATER) && isViableBucketRefillSource(reader, check)) {
+                        int shore = shoreScore(reader, check);
                         double distSq = origin.getSquaredDistance(check);
                         if (shore > bestShore || (shore == bestShore && distSq < bestDistSq)) {
                             bestDistSq = distSq;
@@ -2943,29 +2995,35 @@ public class FarmSkill implements Skill {
                 }
             }
         }
+        LOGGER.debug("[FarmScan] any-water source scan r={} took {} ms (found={})",
+                radius, (System.nanoTime() - startNanos) / 1_000_000L, best != null);
         return best;
     }
 
     private static List<BlockPos> findAnyWaterSources(ServerWorld world, BlockPos origin, int radius) {
+        long startNanos = System.nanoTime();
+        ChunkBlockReader reader = new ChunkBlockReader(world);
         List<BlockPos> list = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -2; dy <= 1; dy++) {
                     BlockPos check = origin.add(dx, dy, dz);
-                    if (world.getBlockState(check).isOf(Blocks.WATER) && isViableBucketRefillSource(world, check)) {
+                    if (stateOrAir(reader, check).isOf(Blocks.WATER) && isViableBucketRefillSource(reader, check)) {
                         list.add(check.toImmutable());
                     }
                 }
             }
         }
         list.sort((a, b) -> {
-            int sa = shoreScore(world, a);
-            int sb = shoreScore(world, b);
+            int sa = shoreScore(reader, a);
+            int sb = shoreScore(reader, b);
             if (sa != sb) {
                 return Integer.compare(sb, sa);
             }
             return Double.compare(origin.getSquaredDistance(a), origin.getSquaredDistance(b));
         });
+        LOGGER.debug("[FarmScan] any-water sources scan r={} took {} ms ({} sources)",
+                radius, (System.nanoTime() - startNanos) / 1_000_000L, list.size());
         return list;
     }
 
@@ -3041,6 +3099,11 @@ public class FarmSkill implements Skill {
         return candidate;
     }
     private static List<BlockPos> enumerateStandingNearWater(ServerWorld world, BlockPos water) {
+        return enumerateStandingNearWater(new ChunkBlockReader(world), water);
+    }
+
+    private static List<BlockPos> enumerateStandingNearWater(ChunkBlockReader reader, BlockPos water) {
+        ServerWorld world = reader.world();
         BlockPos fallback = null;
         List<BlockPos> result = new ArrayList<>();
         // Search small ring around the water at water Y +/-1 and one block above.
@@ -3049,8 +3112,8 @@ public class FarmSkill implements Skill {
                 for (int dy = -1; dy <= 1; dy++) {
                     BlockPos basePos = water.offset(dir, radius).up(dy);
                     BlockPos standPos = basePos.up();
-                    BlockState base = world.getBlockState(basePos);
-                    boolean headroom = isPassableStandingSpace(world, standPos) && isPassableStandingSpace(world, standPos.up());
+                    BlockState base = stateOrAir(reader, basePos);
+                    boolean headroom = isPassableStandingSpace(reader, standPos) && isPassableStandingSpace(reader, standPos.up());
                     if (!base.isSolidBlock(world, basePos) || !headroom) {
                         continue;
                     }
@@ -3108,6 +3171,18 @@ public class FarmSkill implements Skill {
             return true;
         }
         return state.getCollisionShape(world, pos).isEmpty();
+    }
+
+    /** {@link #isPassableStandingSpace(ServerWorld, BlockPos)} through a scan's chunk cache; unloaded reads as air. */
+    private static boolean isPassableStandingSpace(ChunkBlockReader reader, BlockPos pos) {
+        BlockState state = stateOrAir(reader, pos);
+        if (!state.getFluidState().isEmpty()) {
+            return false;
+        }
+        if (state.isAir() || state.isReplaceable()) {
+            return true;
+        }
+        return state.getCollisionShape(reader.world(), pos).isEmpty();
     }
 
     private static void ensureStandingOffFarmland(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos target) {
@@ -4650,6 +4725,11 @@ public class FarmSkill implements Skill {
      * Finds nearby solid ground that's not water.
      */
     private static BlockPos findSolidGroundNearby(ServerWorld world, BlockPos center, int radius) {
+        return findSolidGroundNearby(new ChunkBlockReader(world), center, radius);
+    }
+
+    private static BlockPos findSolidGroundNearby(ChunkBlockReader reader, BlockPos center, int radius) {
+        ServerWorld world = reader.world();
         BlockPos best = null;
         int bestDistSq = Integer.MAX_VALUE;
         int bestY = Integer.MIN_VALUE;
@@ -4658,9 +4738,9 @@ public class FarmSkill implements Skill {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dy = -2; dy <= 4; dy++) {
                     BlockPos check = center.add(dx, dy, dz);
-                    BlockState below = world.getBlockState(check.down());
-                    BlockState at = world.getBlockState(check);
-                    BlockState above = world.getBlockState(check.up());
+                    BlockState below = stateOrAir(reader, check.down());
+                    BlockState at = stateOrAir(reader, check);
+                    BlockState above = stateOrAir(reader, check.up());
                     
                     // Need: solid below, air/passable at feet and head, not water
                     if (below.isSolidBlock(world, check.down()) 

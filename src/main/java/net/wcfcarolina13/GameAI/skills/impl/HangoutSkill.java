@@ -13,6 +13,7 @@ import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
+import net.wcfcarolina13.GameAI.services.ChunkBlockReader;
 import net.wcfcarolina13.GameAI.services.FollowPathService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.skills.Skill;
@@ -293,18 +294,31 @@ public final class HangoutSkill implements Skill {
         BlockPos origin = bot.getBlockPos();
         int r = Math.max(2, radius);
 
+        // One pass over the box through a chunk cache (this runs on the skill's worker thread,
+        // where each world.getBlockState / isChunkLoaded is a server round trip). An unloaded
+        // chunk reads as null, which the old isChunkLoaded check skipped too. Both passes below
+        // walk the campfires in the box's iteration order, so ties resolve as before.
+        long startNanos = System.nanoTime();
+        ChunkBlockReader reader = new ChunkBlockReader(world);
+        List<BlockPos> campfires = new ArrayList<>();
+        List<BlockState> campfireStates = new ArrayList<>();
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            BlockState state = reader.state(pos);
+            if (state != null && (state.isOf(net.minecraft.block.Blocks.CAMPFIRE) || state.isOf(net.minecraft.block.Blocks.SOUL_CAMPFIRE))) {
+                campfires.add(pos.toImmutable());
+                campfireStates.add(state);
+            }
+        }
+        LOGGER.debug("[Hangout] campfire scan r={} took {} ms ({} campfires)",
+                r, (System.nanoTime() - startNanos) / 1_000_000L, campfires.size());
+
         BlockPos best = null;
         double bestScore = Double.POSITIVE_INFINITY;
         boolean bestLit = false;
 
-        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
-            if (!world.isChunkLoaded(pos)) {
-                continue;
-            }
-            BlockState state = world.getBlockState(pos);
-            if (!(state.isOf(net.minecraft.block.Blocks.CAMPFIRE) || state.isOf(net.minecraft.block.Blocks.SOUL_CAMPFIRE))) {
-                continue;
-            }
+        for (int i = 0; i < campfires.size(); i++) {
+            BlockPos pos = campfires.get(i);
+            BlockState state = campfireStates.get(i);
             boolean lit = state.contains(Properties.LIT) && Boolean.TRUE.equals(state.get(Properties.LIT));
 
             // Prefer campfires where we can find at least one "see-the-fire" stand candidate.
@@ -326,17 +340,11 @@ public final class HangoutSkill implements Skill {
 
         // Fallback: nearest campfire even if we couldn't find a visible stand.
         if (best == null) {
-            for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
-                if (!world.isChunkLoaded(pos)) {
-                    continue;
-                }
-                BlockState state = world.getBlockState(pos);
-                if (state.isOf(net.minecraft.block.Blocks.CAMPFIRE) || state.isOf(net.minecraft.block.Blocks.SOUL_CAMPFIRE)) {
-                    double distSq = pos.getSquaredDistance(origin);
-                    if (best == null || distSq < bestScore) {
-                        best = pos.toImmutable();
-                        bestScore = distSq;
-                    }
+            for (BlockPos pos : campfires) {
+                double distSq = pos.getSquaredDistance(origin);
+                if (best == null || distSq < bestScore) {
+                    best = pos;
+                    bestScore = distSq;
                 }
             }
         }

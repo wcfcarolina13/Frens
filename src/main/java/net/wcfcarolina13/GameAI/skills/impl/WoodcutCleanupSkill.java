@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.skills.impl;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.LeavesBlock;
+import net.wcfcarolina13.GameAI.services.ChunkBlockReader;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.minecraft.item.BlockItem;
@@ -2463,14 +2464,20 @@ public final class WoodcutCleanupSkill implements Skill {
         LOGGER.info("woodcut_cleanup: inventory full, attempting chest offload");
         CompanionOverheadHologramService.show(bot, "Storing items...", 5_000);
         // Find nearby chests.
+        // This runs on the skill's worker thread, where every world.getBlockState is a server
+        // round trip; one chunk cache for the 37x13x37 box. Unloaded cells read as null: no chest.
         BlockPos botPos = bot.getBlockPos();
+        long startNanos = System.nanoTime();
+        ChunkBlockReader reader = new ChunkBlockReader(world);
         List<BlockPos> chests = new ArrayList<>();
         for (BlockPos probe : BlockPos.iterate(botPos.add(-18, -6, -18), botPos.add(18, 6, 18))) {
-            BlockState state = world.getBlockState(probe);
-            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+            BlockState state = reader.state(probe);
+            if (state != null && (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST))) {
                 chests.add(probe.toImmutable());
             }
         }
+        LOGGER.debug("woodcut_cleanup: chest scan took {} ms ({} chests)",
+                (System.nanoTime() - startNanos) / 1_000_000L, chests.size());
         chests.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(botPos)));
         for (BlockPos chest : chests) {
             int moved = ChestStoreService.depositMatchingWalkOnly(source, bot, chest, this::isCleanupOffloadItem);
