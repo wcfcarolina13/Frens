@@ -19,8 +19,12 @@ import java.util.Set;
  */
 public final class FoodConfirmReplyPolicy {
 
-    /** How long an unanswered prompt stays answerable (and blocks a re-prompt for the same item). */
-    public static final long PENDING_TTL_MS = 60_000L;
+    /**
+     * How long an unanswered prompt stays answerable (and blocks a re-prompt for the same item).
+     * Short on purpose: a bare "yes"/"no" is only taken as an answer soon after the prompt, so a
+     * "no" typed minutes later in unrelated chat is not swallowed by an old question.
+     */
+    public static final long PENDING_TTL_MS = 20_000L;
 
     /** A parsed answer. {@code alias} is the normalized pending alias named, or null for a bare answer. */
     public record Reply(String alias, boolean approve) {

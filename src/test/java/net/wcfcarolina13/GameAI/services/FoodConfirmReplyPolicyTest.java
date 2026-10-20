@@ -69,14 +69,22 @@ class FoodConfirmReplyPolicyTest {
     }
 
     @Test
-    void pendingPromptLastsSixtySeconds() {
-        assertEquals(60_000L, PENDING_TTL_MS);
+    void pendingPromptLastsTwentySeconds() {
+        assertEquals(20_000L, PENDING_TTL_MS);
         long asked = 1_000_000L;
         assertFalse(FoodConfirmReplyPolicy.isExpired(asked, asked));
         assertFalse(FoodConfirmReplyPolicy.isExpired(asked, asked + PENDING_TTL_MS));
         assertTrue(FoodConfirmReplyPolicy.isExpired(asked, asked + PENDING_TTL_MS + 1L));
         // Before the fix a prompt never expired, so the same item could never be asked about again.
         assertTrue(FoodConfirmReplyPolicy.isExpired(asked, asked + 10L * 60_000L));
+    }
+
+    @Test
+    void aBareAnswerHalfAMinuteLaterIsNoLongerCaptured() {
+        // The old 60 s window let an unrelated "no" in chat 30-60 s later answer a stale prompt.
+        long asked = 5_000_000L;
+        assertTrue(FoodConfirmReplyPolicy.isExpired(asked, asked + 30_000L));
+        assertFalse(FoodConfirmReplyPolicy.isExpired(asked, asked + 19_999L));
     }
 
     @Test

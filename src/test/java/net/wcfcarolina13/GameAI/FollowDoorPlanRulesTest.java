@@ -141,4 +141,69 @@ class FollowDoorPlanRulesTest {
         assertTrue(FollowDoorRules.mayCloseStuckNearDoor(5.0));
         assertTrue(FollowDoorRules.mayCloseStuckNearDoor(Double.POSITIVE_INFINITY), "nobody else around");
     }
+
+    // ── stuck count: lining up and waiting for the door (fix wave after 1.1.277) ──
+
+    @Test
+    void movingToAnotherColumnResetsTheStuckCount() {
+        assertEquals(0, FollowDoorRules.nextStuckTicks(17, false, false));
+        assertEquals(0, FollowDoorRules.nextStuckTicks(17, false, true));
+    }
+
+    @Test
+    void aStallInTheSameColumnCounts() {
+        assertEquals(6, FollowDoorRules.nextStuckTicks(5, true, false));
+    }
+
+    @Test
+    void slidingOntoTheLaneInsideOneBlockDoesNotSpendTheAbortBudget() {
+        int stuck = 3;
+        // 30 ticks of damped sideways correction inside one block, each closer than the last.
+        double offset = 0.45D;
+        double prev = Double.NaN;
+        for (int tick = 0; tick < 30; tick++) {
+            boolean progressed = FollowDoorRules.liningUpProgressed(prev, offset);
+            stuck = FollowDoorRules.nextStuckTicks(stuck, true, progressed);
+            prev = offset;
+            offset *= 0.9D;
+        }
+        // Only the first tick (no previous reading) counted.
+        assertEquals(4, stuck);
+        assertTrue(stuck < 24, "the 24-tick abort must not fire while lining up makes progress");
+    }
+
+    @Test
+    void liningUpThatStopsClosingCounts() {
+        assertFalse(FollowDoorRules.liningUpProgressed(0.30D, 0.30D), "no change is no progress");
+        assertFalse(FollowDoorRules.liningUpProgressed(0.30D, 0.32D), "drifting away is no progress");
+        assertFalse(FollowDoorRules.liningUpProgressed(0.30D, 0.2995D), "within epsilon is no progress");
+        assertFalse(FollowDoorRules.liningUpProgressed(Double.NaN, 0.1D), "no previous reading");
+        assertTrue(FollowDoorRules.liningUpProgressed(0.30D, 0.25D));
+    }
+
+    // ── close-behind on every path ──
+
+    @Test
+    void closeBehindClosesWithNobodyAtTheDoor() {
+        assertEquals(FollowDoorRules.CloseBehind.CLOSE,
+                FollowDoorRules.closeBehind(Double.POSITIVE_INFINITY, 0, FollowDoorRules.CLOSE_BEHIND_MAX_ATTEMPT));
+        assertEquals(FollowDoorRules.CloseBehind.CLOSE,
+                FollowDoorRules.closeBehind(4.01D, 20, FollowDoorRules.CLOSE_BEHIND_MAX_ATTEMPT));
+    }
+
+    @Test
+    void closeBehindWaitsForATrailingBotInTheDoorCell() {
+        // Trailing bot standing in the door cell: distance 0, even though the closer crossed the plane.
+        assertEquals(FollowDoorRules.CloseBehind.WAIT,
+                FollowDoorRules.closeBehind(0.0D, 1, FollowDoorRules.CLOSE_BEHIND_MAX_ATTEMPT));
+        assertEquals(FollowDoorRules.CloseBehind.WAIT,
+                FollowDoorRules.closeBehind(4.0D, 19, FollowDoorRules.CLOSE_BEHIND_MAX_ATTEMPT));
+    }
+
+    @Test
+    void closeBehindLeavesTheDoorOpenAfterTheCap() {
+        assertEquals(20, FollowDoorRules.CLOSE_BEHIND_MAX_ATTEMPT);
+        assertEquals(FollowDoorRules.CloseBehind.LEAVE_OPEN,
+                FollowDoorRules.closeBehind(1.0D, 20, FollowDoorRules.CLOSE_BEHIND_MAX_ATTEMPT));
+    }
 }

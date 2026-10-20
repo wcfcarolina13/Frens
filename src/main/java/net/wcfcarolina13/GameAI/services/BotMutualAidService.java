@@ -267,6 +267,12 @@ public final class BotMutualAidService {
         rememberInteraction(seeker, donor, nowTick);
         if (onServerThread) {
             if (seeker.squaredDistanceTo(donor) > SHARE_RADIUS_SQ) {
+                // A sheltering or breaking-free bot cannot walk: its caller clears the shelter and
+                // starts a break-free, which ends the engagement next tick. Say no, so the caller
+                // takes its own fallback (break free, then a fresh food decision). No cooldown here.
+                if (BotFleeService.isInShelter(seeker.getUuid()) || BotFleeService.isBreakingFree(seeker.getUuid())) {
+                    return false;
+                }
                 startEngagement(seeker, EngagementKind.SEEK_FOOD, donor, donor.getUuid(),
                         nowTick + MutualAidDefensePolicy.SEEK_FOOD_DEADLINE_TICKS, SHARE_RADIUS_SQ);
                 LOGGER.info("Mutual aid: {} is walking to {} for food support",
@@ -678,8 +684,9 @@ public final class BotMutualAidService {
 
     /**
      * One step for every approach under way, at most one movement input per bot per tick. A bot
-     * that left the server is dropped; every other end goes through {@link #endEngagement}, which
-     * stops the bot so it is never left walking. Server thread.
+     * that left the server is dropped; a defense approach another mover took over ends through
+     * {@link #handOffEngagement} without a stop; every other end goes through {@link #endEngagement},
+     * which stops the bot so it is never left walking. Server thread.
      */
     private static void advanceEngagements(MinecraftServer server, long nowTick) {
         if (ENGAGEMENTS.isEmpty()) {
@@ -700,6 +707,19 @@ public final class BotMutualAidService {
     private static void advanceEngagement(MinecraftServer server, ServerPlayerEntity bot, Engagement engagement,
                                           long nowTick) {
         Entity target = resolveEngagementTarget(server, bot, engagement);
+        if (engagement.kind() != EngagementKind.SEEK_FOOD) {
+            double hostileDistSq = engagement.kind() == EngagementKind.DEFEND_HOSTILE && target != null
+                    ? bot.squaredDistanceTo(target)
+                    : Double.POSITIVE_INFINITY;
+            MutualAidDefensePolicy.Handoff handoff = MutualAidDefensePolicy.defenseHandoff(
+                    BotEventHandler.hasCombatTarget(bot.getUuid()),
+                    hostileDistSq,
+                    TaskService.hasActiveTask(bot.getUuid()));
+            if (handoff != MutualAidDefensePolicy.Handoff.NONE) {
+                handOffEngagement(bot, engagement, handoff, nowTick);
+                return;
+            }
+        }
         if (target == null || !canContinueEngagement(bot, engagement)) {
             endEngagement(server, bot, engagement, target, false, nowTick);
             return;
@@ -737,7 +757,10 @@ public final class BotMutualAidService {
             return false;
         }
         if (engagement.kind() != EngagementKind.SEEK_FOOD) {
-            return isDefenseEligible(bot);
+            // A task that appeared mid-approach is handed off before this check
+            // (advanceEngagement → handOffEngagement); kept here so no defense approach ever
+            // continues beside one.
+            return !TaskService.hasActiveTask(bot.getUuid()) && isDefenseEligible(bot);
         }
         // Not TaskService.isAbortRequested: interrupting an ambient task latches it, and the hobby
         // starvation path interrupts one right before seeking food.
@@ -762,8 +785,23 @@ public final class BotMutualAidService {
     }
 
     /**
-     * Ends an approach: removes it, stops the bot (velocity and sprint cleared, as the old nudge did
-     * on every exit), then acts on arrival or backs off. {@code target} may be null when it was lost.
+     * Ends a defense approach because another mover now has the bot (its own combat, or a task such
+     * as a hobby that started mid-approach). No {@link BotActions#stop}: that would cancel the other
+     * mover's work, e.g. a bow draw the combat loop started. Counts as a success for the cooldown.
+     */
+    private static void handOffEngagement(ServerPlayerEntity bot, Engagement engagement,
+                                          MutualAidDefensePolicy.Handoff handoff, long nowTick) {
+        ENGAGEMENTS.remove(bot.getUuid());
+        endDefense(bot, true, nowTick);
+        LOGGER.info("Mutual aid: {} hands its {} approach to {}",
+                bot.getName().getString(),
+                engagement.kind().name().toLowerCase(Locale.ROOT),
+                handoff == MutualAidDefensePolicy.Handoff.TASK ? "its task" : "its own combat");
+    }
+
+    /**
+     * Ends an approach the engagement was the last mover for: removes it, stops the bot (velocity
+     * and sprint cleared, as the old nudge did on every exit), then acts on arrival or backs off. {@code target} may be null when it was lost.
      */
     private static void endEngagement(MinecraftServer server, ServerPlayerEntity bot, Engagement engagement,
                                       Entity target, boolean arrived, long nowTick) {

@@ -1558,10 +1558,20 @@ public final class NavigationArtifactService {
 
         ps.world().playSound(null, ps.dest(), SoundEvents.ENTITY_ENDER_PEARL_THROW, SoundCategory.PLAYERS, 1.0F, 0.8F);
 
-        String msg = ps.dimensionFallback()
-                ? "\u00A7eYour companion " + ps.botAlias() + " arrived at Overworld spawn (target dimension was unavailable).\u00A7r"
-                : "\u00A7aYour companion " + ps.botAlias() + " has arrived at the destination.\u00A7r";
-        notifyOwner(server, travel.ownerUuid(), msg);
+        // A Collect trip that fell back gets one line, the withdraw's specific "couldn't reach the
+        // chest's dimension" (sent with the post-arrival action below), not this generic one too.
+        PostArrivalAction riding = peekPostArrival(ps.botAlias());
+        boolean collectSaysFallback = ps.dimensionFallback() && riding != null
+                && CollectSchedulePolicy.isWithdraw(riding.type())
+                && riding.target() != null
+                && riding.target().equals(travel.destination())
+                && java.util.Objects.equals(riding.ownerUuid(), travel.ownerUuid());
+        if (!collectSaysFallback) {
+            String msg = ps.dimensionFallback()
+                    ? "\u00A7eYour companion " + ps.botAlias() + " arrived at Overworld spawn (target dimension was unavailable).\u00A7r"
+                    : "\u00A7aYour companion " + ps.botAlias() + " has arrived at the destination.\u00A7r";
+            notifyOwner(server, travel.ownerUuid(), msg);
+        }
 
         LOGGER.info("Bot '{}' arrived at {} in {}.", ps.botAlias(), ps.dest().toShortString(), ps.dim().getValue());
 

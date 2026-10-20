@@ -2875,7 +2875,7 @@ public final class MovementService {
             return;
         }
         // Retry a few times so doors close even if the bot pauses briefly after opening.
-        if (attempt > 20) {
+        if (attempt > net.wcfcarolina13.GameAI.FollowDoorRules.CLOSE_BEHIND_MAX_ATTEMPT) {
             return;
         }
         DOOR_CLOSE_SCHEDULER.schedule(() -> server.execute(() -> {
@@ -2929,22 +2929,35 @@ public final class MovementService {
                     return;
                 }
                 if (stuckNearDoor) {
-                    // Never shut the door on someone else in it (sandbox S9 1.1.271: closed on a
-                    // following bot two blocks away). Any other player counts: bots and the
-                    // followed player are both players.
-                    double nearestOtherSq = Double.POSITIVE_INFINITY;
-                    for (ServerPlayerEntity other : world.getPlayers()) {
-                        if (other == bot || other.isRemoved() || other.isSpectator()) {
-                            continue;
-                        }
-                        nearestOtherSq = Math.min(nearestOtherSq, other.getBlockPos().getSquaredDistance(doorPos));
-                    }
-                    if (!net.wcfcarolina13.GameAI.FollowDoorRules.mayCloseStuckNearDoor(nearestOtherSq)) {
-                        maybeLogDoor(bot, doorPos, "door-close wait: another player at the door (attempt=" + attempt + ")");
-                        scheduleDoorCloseInternal(server, botUuid, worldKey, doorPos, travelDir, attempt + 1);
-                        return;
-                    }
                     maybeLogDoor(bot, doorPos, "door-close: stuck near door, closing anyway after " + attempt + " attempts");
+                }
+            }
+
+            // Never shut the door on someone else in it, on any close path: crossed the plane,
+            // abandoned far away, or stuck near it (sandbox S9 1.1.271: closed on a following bot
+            // two blocks away; the crossed-the-plane close still shut it on a trailing bot in the
+            // door cell). Any other player counts: bots and the followed player are both players.
+            double nearestOtherSq = Double.POSITIVE_INFINITY;
+            for (ServerPlayerEntity other : world.getPlayers()) {
+                if (other == bot || other.isRemoved() || other.isSpectator()) {
+                    continue;
+                }
+                nearestOtherSq = Math.min(nearestOtherSq, other.getBlockPos().getSquaredDistance(doorPos));
+            }
+            switch (net.wcfcarolina13.GameAI.FollowDoorRules.closeBehind(nearestOtherSq, attempt,
+                    net.wcfcarolina13.GameAI.FollowDoorRules.CLOSE_BEHIND_MAX_ATTEMPT)) {
+                case WAIT -> {
+                    maybeLogDoor(bot, doorPos, "door-close wait: another player at the door (attempt=" + attempt + ")");
+                    scheduleDoorCloseInternal(server, botUuid, worldKey, doorPos, travelDir, attempt + 1);
+                    return;
+                }
+                case LEAVE_OPEN -> {
+                    // Last attempt of the chain, so this logs once per door left open.
+                    LOGGER.info("door-close: {} left the door at {} open, another player stayed in it for {} attempts",
+                            bot.getName().getString(), doorPos.toShortString(), attempt);
+                    return;
+                }
+                case CLOSE -> {
                 }
             }
 

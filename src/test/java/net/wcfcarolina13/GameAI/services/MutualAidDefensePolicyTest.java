@@ -116,6 +116,42 @@ class MutualAidDefensePolicyTest {
         assertEquals(0.20D, MutualAidDefensePolicy.impulse(30.0D, 0.20D));
     }
 
+    // ── defenseHandoff ───────────────────────────────────────────────────────────────────────
+
+    @Test
+    void farHostileNoTargetNoTaskKeepsApproaching() {
+        assertEquals(MutualAidDefensePolicy.Handoff.NONE,
+                MutualAidDefensePolicy.defenseHandoff(false, 12.0D * 12.0D, false));
+        assertEquals(MutualAidDefensePolicy.Handoff.NONE,
+                MutualAidDefensePolicy.defenseHandoff(false, Double.POSITIVE_INFINITY, false));
+    }
+
+    @Test
+    void aHostileWithinTheBotsOwnScanGoesToItsOwnCombat() {
+        assertEquals(MutualAidDefensePolicy.Handoff.OWN_COMBAT,
+                MutualAidDefensePolicy.defenseHandoff(false, 100.0D, false));
+        assertEquals(MutualAidDefensePolicy.Handoff.NONE,
+                MutualAidDefensePolicy.defenseHandoff(false, 100.01D, false));
+        // Reach (7 blocks) is inside the scan: an approach never strikes beside the combat loop.
+        assertTrue(49.0D <= MutualAidDefensePolicy.OWN_COMBAT_SCAN_SQ);
+    }
+
+    @Test
+    void aCombatTargetHandsOffEvenWithTheHostileFarOrGone() {
+        assertEquals(MutualAidDefensePolicy.Handoff.OWN_COMBAT,
+                MutualAidDefensePolicy.defenseHandoff(true, 20.0D * 20.0D, false));
+        assertEquals(MutualAidDefensePolicy.Handoff.OWN_COMBAT,
+                MutualAidDefensePolicy.defenseHandoff(true, Double.POSITIVE_INFINITY, false));
+    }
+
+    @Test
+    void aTaskThatStartedMidApproachWins() {
+        assertEquals(MutualAidDefensePolicy.Handoff.TASK,
+                MutualAidDefensePolicy.defenseHandoff(false, 400.0D, true));
+        assertEquals(MutualAidDefensePolicy.Handoff.TASK,
+                MutualAidDefensePolicy.defenseHandoff(true, 25.0D, true));
+    }
+
     // ── source guards ────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -149,6 +185,31 @@ class MutualAidDefensePolicyTest {
         assertTrue(stop < end.indexOf("switch"), "the bot stops before any arrival action");
         String advance = bodyOf(mutualAidSource(), "void advanceEngagement(");
         assertEquals(3, count(advance, "endEngagement("), "a lost target or ineligible bot, arrival and abort all end the same way");
+    }
+
+    @Test
+    void aHandOffNeverStopsTheBotAndRunsBeforeTheStopPaths() throws IOException {
+        String source = mutualAidSource();
+        String handOff = bodyOf(source, "void handOffEngagement(");
+        assertFalse(handOff.contains("BotActions.stop("), "stopping would cancel the other mover's bow draw");
+        assertTrue(handOff.contains("ENGAGEMENTS.remove(bot.getUuid())"));
+        assertTrue(handOff.contains("endDefense(bot, true, nowTick)"), "a hand-off is a success for the cooldown");
+        String advance = bodyOf(source, "void advanceEngagement(");
+        int handOffAt = advance.indexOf("handOffEngagement(");
+        assertTrue(handOffAt >= 0 && handOffAt < advance.indexOf("endEngagement("),
+                "the hand-off is checked before any stopping end");
+        assertTrue(bodyOf(source, "boolean canContinueEngagement(").contains("TaskService.hasActiveTask(bot.getUuid())"),
+                "no defense approach continues beside a task");
+    }
+
+    @Test
+    void aShelteredSeekerDoesNotStartAFoodWalk() throws IOException {
+        String seek = bodyOf(mutualAidSource(), "public static boolean trySeekFoodFromNearbyBot(");
+        int guard = seek.indexOf("BotFleeService.isInShelter(seeker.getUuid())");
+        int start = seek.indexOf("startEngagement(seeker, EngagementKind.SEEK_FOOD");
+        assertTrue(guard >= 0 && guard < start, "the shelter/break-free check precedes the engagement");
+        assertTrue(seek.substring(guard, start).contains("isBreakingFree(seeker.getUuid())"));
+        assertTrue(seek.substring(guard, start).contains("return false;"));
     }
 
     @Test

@@ -240,6 +240,9 @@ public final class FoodConsumptionConfirmationService {
             APPROVED_BY_BOT.put(bot.getUuid(), new ApprovedConsumption(state.itemId, System.currentTimeMillis() + APPROVAL_WINDOW_MS));
             ChatUtils.sendChatMessages(bot.getCommandSource(), "Understood. Using it.", false);
         } else {
+            // A "no" after an earlier "yes" is the newer answer: the approval must not outlive it
+            // (approvals are checked before the deny cooldown in allowConsumptionOrRequest).
+            APPROVED_BY_BOT.remove(bot.getUuid());
             DENIED_UNTIL_MS_BY_BOT.put(bot.getUuid(), System.currentTimeMillis() + DENY_COOLDOWN_MS);
             ChatUtils.sendChatMessages(bot.getCommandSource(), "Alright. I'll save it.", false);
         }

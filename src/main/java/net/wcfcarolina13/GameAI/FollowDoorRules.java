@@ -22,22 +22,26 @@ public final class FollowDoorRules {
     }
 
     /**
-     * Jump ONLY on genuine horizontal stagnation at the doorway — never merely because a
-     * step-through is in progress. The historical jump-while-stepping motivations (the door's
-     * 3-pixel leaf collision, pressure plates, overhanging stair thresholds) are all stall
-     * scenarios, so jump-on-stagnation covers them a few ticks later; a bot that is actually
-     * progressing must never be forced airborne into a two-high doorway.
+     * {@link #shouldForceDoorJump(int, boolean)} for a doorway with a clear lintel. The door plan
+     * itself calls the two-argument form (and never jumps while lining up); this is the
+     * stagnation threshold alone.
      */
     public static boolean shouldForceDoorJump(int horizontalStuckTicks) {
         return shouldForceDoorJump(horizontalStuckTicks, false);
     }
 
     /**
-     * As {@link #shouldForceDoorJump(int)}, but never when the cell above the doorway's head
-     * cell (the lintel, {@code doorBase.up(2)}) blocks movement. A 1.8-tall bot in a two-high
-     * doorway has 0.2 of headroom; a jump there leaves it airborne with its head against the
-     * lintel at the threshold, so it can never enter the door column (sandbox S9 1.1.271:
-     * a 45 s stall at an oak doorway with a stone lintel).
+     * Jump ONLY on genuine horizontal stagnation at the doorway — never merely because a
+     * step-through is in progress. The historical jump-while-stepping motivations (the door's
+     * 3-pixel leaf collision, pressure plates, overhanging stair thresholds) are all stall
+     * scenarios, so jump-on-stagnation covers them a few ticks later. The stuck count excludes
+     * ticks spent waiting for the door to open and ticks of sideways lining-up progress
+     * ({@link #nextStuckTicks}).
+     *
+     * <p>Never when the cell above the doorway's head cell (the lintel, {@code doorBase.up(2)})
+     * blocks movement. A 1.8-tall bot in a two-high doorway has 0.2 of headroom; a jump there
+     * leaves it airborne with its head against the lintel at the threshold, so it can never
+     * enter the door column (sandbox S9 1.1.271: a 45 s stall at an oak doorway with a stone lintel).
      */
     public static boolean shouldForceDoorJump(int horizontalStuckTicks, boolean lintelBlocked) {
         return !lintelBlocked && horizontalStuckTicks >= STUCK_JUMP_TICKS;
@@ -120,14 +124,67 @@ public final class FollowDoorRules {
     public static final double DOOR_CLOSE_CLEARANCE_SQ = 4.0D;
 
     /**
-     * Close-behind's "stuck near the door, close anyway" fallback must not shut the door on
-     * someone else using it (sandbox S9: a door closed on a following bot two blocks away).
+     * Close-behind must not shut the door on someone else using it (sandbox S9: a door closed on
+     * a following bot two blocks away). Checked on every close path ({@link #closeBehind}).
      *
      * @param nearestOtherPlayerDistSq squared block distance from the door to the nearest other
      *                                 player, or {@link Double#POSITIVE_INFINITY} if none
      */
     public static boolean mayCloseStuckNearDoor(double nearestOtherPlayerDistSq) {
         return nearestOtherPlayerDistSq > DOOR_CLOSE_CLEARANCE_SQ;
+    }
+
+    /** Smallest shrink of the lateral offset in one tick that counts as lining-up progress (blocks). */
+    public static final double LINE_UP_PROGRESS_EPSILON = 1.0E-3D;
+
+    /**
+     * True when this tick's distance from the doorway lane is smaller than last tick's by more
+     * than {@link #LINE_UP_PROGRESS_EPSILON}. A missing previous reading (NaN) is not progress.
+     */
+    public static boolean liningUpProgressed(double prevAbsOffset, double curAbsOffset) {
+        return !Double.isNaN(prevAbsOffset) && curAbsOffset < prevAbsOffset - LINE_UP_PROGRESS_EPSILON;
+    }
+
+    /**
+     * The door plan's stuck count after this tick. Moving to another column resets it. In the same
+     * column it grows, except on a tick where the bot got closer to the doorway lane while lining
+     * up: sliding sideways inside one block is progress, and counting it spent the 24-tick abort
+     * budget before the bot ever reached the door (fix wave after 1.1.277). Ticks spent waiting
+     * at the door for it to open are not counted at all (the plan's own timeout caps that wait).
+     */
+    public static int nextStuckTicks(int stuckTicks, boolean sameColumn, boolean liningUpProgressed) {
+        if (!sameColumn) {
+            return 0;
+        }
+        return liningUpProgressed ? stuckTicks : stuckTicks + 1;
+    }
+
+    /** Close-behind's last attempt (retries every 520 ms, so about 11 s of trying). */
+    public static final int CLOSE_BEHIND_MAX_ATTEMPT = 20;
+
+    /** Close-behind's verdict for one attempt, given who else is at the door. */
+    public enum CloseBehind {
+        /** Nobody else at the door: close it. */
+        CLOSE,
+        /** Someone is in or next to the doorway: retry later. */
+        WAIT,
+        /** Someone stayed at the door through every attempt: leave it open. */
+        LEAVE_OPEN
+    }
+
+    /**
+     * Every close-behind path (crossed the door plane, abandoned it far away, or stuck near it)
+     * checks this right before closing, so a door is never shut on a bot or player in it. After
+     * {@code maxAttempt} ({@link #CLOSE_BEHIND_MAX_ATTEMPT}) the door is left open rather than
+     * retried forever.
+     *
+     * @param nearestOtherPlayerDistSq as {@link #mayCloseStuckNearDoor}
+     */
+    public static CloseBehind closeBehind(double nearestOtherPlayerDistSq, int attempt, int maxAttempt) {
+        if (mayCloseStuckNearDoor(nearestOtherPlayerDistSq)) {
+            return CloseBehind.CLOSE;
+        }
+        return attempt >= maxAttempt ? CloseBehind.LEAVE_OPEN : CloseBehind.WAIT;
     }
 
     /** Same horizontal column (X/Z), Y ignored — vertical bouncing is not progress. */

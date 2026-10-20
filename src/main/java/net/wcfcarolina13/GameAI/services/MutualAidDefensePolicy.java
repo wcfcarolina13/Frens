@@ -34,6 +34,22 @@ public final class MutualAidDefensePolicy {
         ABORT
     }
 
+    /**
+     * The bot's own hostile scan radius (BotEventHandler's 10-block engage range), squared. A defender
+     * this close to the hostile is already fought by its own combat loop.
+     */
+    public static final double OWN_COMBAT_SCAN_SQ = 10.0D * 10.0D;
+
+    /** Why a defense approach ends without stopping the bot. */
+    public enum Handoff {
+        /** Keep approaching. */
+        NONE,
+        /** A task (a hobby that started mid-approach) now moves the bot. */
+        TASK,
+        /** The bot's own combat has a target, or the hostile is within its own scan. */
+        OWN_COMBAT
+    }
+
     /** The decision and the progress bookkeeping to carry into the next tick. */
     public record Step(Decision decision, double bestDistSq, int noProgressTicks) {
     }
@@ -64,6 +80,27 @@ public final class MutualAidDefensePolicy {
             return new Step(Decision.ABORT, best, stalled);
         }
         return new Step(Decision.CONTINUE, best, stalled);
+    }
+
+    /**
+     * Whether a defense approach hands the bot to another mover this tick. The approach pushes the
+     * bot every tick, so a second mover (its own combat loop, or a task) would fight it for the
+     * input; and stopping the bot on the way out would cancel that mover's work (a bow draw). Either
+     * way the approach did its job: it is a success-handoff, ended without a stop.
+     *
+     * @param hasCombatTarget the bot's own combat loop has picked a target
+     * @param hostileDistSq   squared distance to the hostile walked toward, or
+     *                        {@link Double#POSITIVE_INFINITY} when there is none (approaching the ally)
+     * @param hasActiveTask   a task is running for the bot
+     */
+    public static Handoff defenseHandoff(boolean hasCombatTarget, double hostileDistSq, boolean hasActiveTask) {
+        if (hasActiveTask) {
+            return Handoff.TASK;
+        }
+        if (hasCombatTarget || hostileDistSq <= OWN_COMBAT_SCAN_SQ) {
+            return Handoff.OWN_COMBAT;
+        }
+        return Handoff.NONE;
     }
 
     public static boolean shouldSprint(double distSq) {

@@ -237,6 +237,11 @@ public class BotEventHandler {
     private static final long ARMOR_AUDIT_COOLDOWN_TICKS = 60L; // 3 seconds at 20 tps
     /** Per-bot current combat target UUID for threat-scoring stickiness. */
     private static final Map<UUID, UUID> COMBAT_TARGET = new ConcurrentHashMap<>();
+
+    /** Whether the bot's own combat loop currently has a target. Any thread. */
+    public static boolean hasCombatTarget(UUID botId) {
+        return botId != null && COMBAT_TARGET.containsKey(botId);
+    }
     /** Teleport detection: last known position per bot, updated each tick. */
     private static final Map<UUID, Vec3d> TELEPORT_DETECT_LAST_POS = new ConcurrentHashMap<>();
     /** Grace period after external teleport: suppress surface recovery until this tick. */
@@ -4903,6 +4908,17 @@ public class BotEventHandler {
         return blocked;
     }
 
+    /** The doorway and distance from its lane on a bot's last lining-up tick. */
+    private record FollowDoorLineUp(BlockPos doorBase, double absOffset) {
+    }
+
+    /**
+     * Last lining-up reading per bot, so a tick that slid closer to the lane is not counted as
+     * stuck ({@link FollowDoorRules#nextStuckTicks}). One entry per bot; keyed to its door, so an
+     * entry left by an earlier plan never counts for another door. Server thread.
+     */
+    private static final Map<UUID, FollowDoorLineUp> FOLLOW_DOOR_LINE_UP = new ConcurrentHashMap<>();
+
     private static boolean tickFollowDoorPlan(ServerPlayerEntity bot, UUID botId, FollowDoorPlan plan) {
         if (bot == null || botId == null || plan == null) {
             return false;
@@ -4912,6 +4928,7 @@ public class BotEventHandler {
             FOLLOW_DOOR_LAST_BLOCK.remove(botId);
             FOLLOW_DOOR_STUCK_TICKS.remove(botId);
             FOLLOW_DOOR_RECOVERY.remove(botId);
+            FOLLOW_DOOR_LINE_UP.remove(botId);
             return false;
         }
 
@@ -5049,16 +5066,32 @@ public class BotEventHandler {
         // where a trapped bot needed to back out of a corner to find an exit door; that use
         // case will need its own, separate handling (see construction-era context), but it
         // should not live in the general follow-mode door plan path.
+        //
+        // At the approach cell with the door still shut: waiting for it to open is not a stall,
+        // so it is not counted. The plan's own timeout (expiresAtMs, checked before this method)
+        // caps the wait.
+        if (!plan.stepping() && distSq <= 2.25D && !doorOpen) {
+            return true;
+        }
+        boolean lineUpProgress = false;
+        if (liningUp) {
+            double absOffset = Math.abs(doorwayAim.lateralOffset());
+            FollowDoorLineUp last = FOLLOW_DOOR_LINE_UP.get(botId);
+            lineUpProgress = last != null && last.doorBase().equals(doorBase)
+                    && FollowDoorRules.liningUpProgressed(last.absOffset(), absOffset);
+            FOLLOW_DOOR_LINE_UP.put(botId, new FollowDoorLineUp(doorBase.toImmutable(), absOffset));
+        } else {
+            FOLLOW_DOOR_LINE_UP.remove(botId);
+        }
         BlockPos curBlock = bot.getBlockPos();
         BlockPos prev = FOLLOW_DOOR_LAST_BLOCK.get(botId);
-        int stuck = FOLLOW_DOOR_STUCK_TICKS.getOrDefault(botId, 0);
         // Compare X/Z only: a jump in place flips BlockPos Y (65↔66) every airborne tick,
         // and full-equality comparison let that bounce reset the counter — which is why the
         // 24-tick stuck-abort never fired during the observed 5s doorway pin.
-        if (FollowDoorRules.samePlanColumn(prev, curBlock)) {
-            stuck++;
-        } else {
-            stuck = 0;
+        boolean sameColumn = FollowDoorRules.samePlanColumn(prev, curBlock);
+        int stuck = FollowDoorRules.nextStuckTicks(FOLLOW_DOOR_STUCK_TICKS.getOrDefault(botId, 0),
+                sameColumn, lineUpProgress);
+        if (!sameColumn) {
             FOLLOW_DOOR_LAST_BLOCK.put(botId, curBlock.toImmutable());
         }
         FOLLOW_DOOR_STUCK_TICKS.put(botId, stuck);
@@ -5072,16 +5105,17 @@ public class BotEventHandler {
             FOLLOW_DOOR_LAST_BLOCK.remove(botId);
             FOLLOW_DOOR_STUCK_TICKS.remove(botId);
             FOLLOW_DOOR_RECOVERY.remove(botId);
+            FOLLOW_DOOR_LINE_UP.remove(botId);
             return false;
         }
 
         if (distSq <= 2.25D) {
             if (!plan.stepping()) {
-                // Only flip to stepping when the door is confirmed open. The tick-loop
-                // door-open above handles retries; we just check the result here.
-                if (!doorOpen) {
-                    return true;
-                }
+                // The door is open here (a shut door returned above). Stepping is a new phase
+                // with its own lining-up: it starts with a fresh stuck budget, not what the
+                // approach left over.
+                FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+                FOLLOW_DOOR_LINE_UP.remove(botId);
                 FOLLOW_DOOR_PLAN.put(botId, new FollowDoorPlan(
                         doorBase.toImmutable(),
                         approachPos,
@@ -5103,6 +5137,7 @@ public class BotEventHandler {
             FOLLOW_DOOR_LAST_BLOCK.remove(botId);
             FOLLOW_DOOR_STUCK_TICKS.remove(botId);
             FOLLOW_DOOR_RECOVERY.remove(botId);
+            FOLLOW_DOOR_LINE_UP.remove(botId);
             FOLLOW_LAST_DOOR_BASE.put(botId, plan.doorBase());
             FOLLOW_LAST_DOOR_CROSS_MS.put(botId, System.currentTimeMillis());
             FOLLOW_REPLAN_AFTER_DOOR_MS.put(botId, System.currentTimeMillis());
