@@ -137,8 +137,8 @@ public final class MutualAidDefensePolicy {
 
     /**
      * Whether an item translation key names a melee weapon. "axe" alone also matched every
-     * pickaxe, so a bot with only a pickaxe counted as armed; an axe now needs "axe" not preceded
-     * by "pick".
+     * pickaxe (and "waxed_*"), so a bot with only a pickaxe counted as armed; an axe now needs the
+     * item name to end in "axe" (not "pickaxe").
      */
     public static boolean isMeleeWeaponKey(String key) {
         if (key == null || key.isEmpty()) {
@@ -147,15 +147,9 @@ public final class MutualAidDefensePolicy {
         if (key.contains("sword") || key.contains("trident") || key.contains("mace") || key.contains("dagger")) {
             return true;
         }
-        int from = 0;
-        int at;
-        while ((at = key.indexOf("axe", from)) >= 0) {
-            if (at < 4 || !key.startsWith("pick", at - 4)) {
-                return true;
-            }
-            from = at + 3;
-        }
-        return false;
+        // The axe ends the item name: "axe" inside a name matched every waxed_* block.
+        String path = key.substring(key.lastIndexOf('.') + 1);
+        return path.endsWith("axe") && !path.endsWith("pickaxe");
     }
 
     public static boolean shouldSprint(double distSq) {

@@ -742,6 +742,10 @@ public final class WoodcutCleanupSkill implements Skill {
                             LOGGER.debug("woodcut_cleanup: heuristic scaffold skip {} (tree soil)", pos.toShortString());
                             continue;
                         }
+                        if (isPlayerStandingOnColumn(world, pos)) {
+                            LOGGER.debug("woodcut_cleanup: heuristic scaffold skip {} (player on column)", pos.toShortString());
+                            continue;
+                        }
                         if (trySimpleScaffoldMine(bot, source, world, pos)) {
                             scaffoldMined++;
                         }
@@ -827,6 +831,9 @@ public final class WoodcutCleanupSkill implements Skill {
                                 (!dirtLike || treeSoil || anyTreeSoil) && OwnedScaffoldRegistry.isOwned(bot, world, pos),
                                 treeSoil,
                                 anyTreeSoil)) {
+                            continue;
+                        }
+                        if (isPlayerStandingOnColumn(world, pos)) {
                             continue;
                         }
                         MineAttemptResult mineResult = mineWithRetries(bot, source, pos, placedPillar, scaffoldMemory, false);
@@ -933,21 +940,30 @@ public final class WoodcutCleanupSkill implements Skill {
         return WoodcutScaffoldMemoryStore.get(sharedState, botUuid, world.getRegistryKey().getValue().toString(), true);
     }
 
-    private void trimScaffoldMemoryInPlace(Set<Long> memory) {
-        if (memory == null) {
-            return;
+    /**
+     * Whether any player, bot or human (this bot included), stands on the column through
+     * {@code pos} (finding 52). Phase 1 still takes down this bot's remembered pillar. A
+     * read-only position scan; a list that changes mid-copy counts as occupied.
+     */
+    private static boolean isPlayerStandingOnColumn(ServerWorld world, BlockPos pos) {
+        List<ServerPlayerEntity> players;
+        try {
+            players = new ArrayList<>(world.getPlayers());
+        } catch (RuntimeException e) {
+            return true;
         }
-        int overflow = memory.size() - WoodcutScaffoldMemoryStore.MAX_POSITIONS;
-        if (overflow <= 0) {
-            return;
+        for (ServerPlayerEntity player : players) {
+            if (player == null || player.isRemoved() || player.isSpectator()) {
+                continue;
+            }
+            if (WoodcutCleanupDiagnostics.standsOnColumn(
+                    player.getBlockX(), player.getBlockY(), player.getBlockZ(),
+                    pos.getX(), pos.getY(), pos.getZ(),
+                    WoodcutCleanupDiagnostics.STANDS_ON_COLUMN_MAX_ABOVE)) {
+                return true;
+            }
         }
-        // Best-effort trim: drop arbitrary entries.
-        var it = memory.iterator();
-        while (overflow > 0 && it.hasNext()) {
-            it.next();
-            it.remove();
-            overflow--;
-        }
+        return false;
     }
 
     private void recordScaffoldPlacement(Set<Long> memory, BlockPos pos) {
@@ -955,7 +971,7 @@ public final class WoodcutCleanupSkill implements Skill {
             return;
         }
         memory.add(pos.asLong());
-        trimScaffoldMemoryInPlace(memory);
+        WoodcutScaffoldMemoryStore.trim(memory);
     }
 
     private static long regionVolume(BlockPos min, BlockPos max) {

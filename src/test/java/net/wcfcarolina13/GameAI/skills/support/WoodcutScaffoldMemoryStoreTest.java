@@ -100,4 +100,21 @@ class WoodcutScaffoldMemoryStoreTest {
         WoodcutScaffoldMemoryStore.clearForBot(shared, null);
         assertTrue(shared.isEmpty());
     }
+
+    @Test
+    void aReadWritesNothing() {
+        Map<String, Object> shared = new HashMap<>();
+        assertNull(WoodcutScaffoldMemoryStore.get(shared, alex, OVERWORLD, false));
+        assertFalse(WoodcutScaffoldMemoryStore.contains(shared, alex, OVERWORLD, 1L));
+        WoodcutScaffoldMemoryStore.forget(shared, alex, OVERWORLD, 1L);
+        assertTrue(shared.isEmpty());
+    }
+
+    @Test
+    void aReadInAnotherDimensionLeavesNoDimensionBehind() {
+        Map<String, Object> shared = new HashMap<>();
+        WoodcutScaffoldMemoryStore.record(shared, alex, OVERWORLD, 5L, 0L);
+        assertNull(WoodcutScaffoldMemoryStore.get(shared, alex, NETHER, false));
+        assertFalse(shared.containsKey(WoodcutScaffoldMemoryStore.dimensionKey(alex)));
+    }
 }

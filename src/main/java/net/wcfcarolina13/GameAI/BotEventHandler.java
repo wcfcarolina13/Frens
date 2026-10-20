@@ -2347,6 +2347,11 @@ public class BotEventHandler {
         BlockPos navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
         Vec3d navGoalPos = targetPos;
         boolean usingWaypoints = false;
+        // Last waypoint of a live follow: reached at the old 1.5 and stopped at personal space,
+        // so a bot without line of sight does not walk into the player's block.
+        boolean lastLiveWaypoint = false;
+        // The path turns or changes height at the current waypoint: no sprint into it.
+        boolean waypointTurns = false;
         ArrayDeque<BlockPos> waypoints = FollowStateService.FOLLOW_WAYPOINTS.get(botId);
         int waypointCount = waypoints != null ? waypoints.size() : 0;
         if (waypoints != null) {
@@ -2389,9 +2394,15 @@ public class BotEventHandler {
 	                        nextWp = new int[] {nextPos.getX(), nextPos.getY(), nextPos.getZ()};
 	                    }
 	                }
-	                if (net.wcfcarolina13.GameAI.services.follow.FollowWaypointReachPolicy.reached(
-	                        botBlock.getX(), botBlock.getY(), botBlock.getZ(),
-	                        peek.getX(), peek.getY(), peek.getZ(), nextWp)) {
+	                boolean peekLastLive = nextWp == null && fixedGoal == null && target != null;
+	                boolean peekReached = peekLastLive
+	                        ? net.wcfcarolina13.GameAI.services.follow.FollowWaypointReachPolicy.reachedLastLive(
+	                                botBlock.getX(), botBlock.getY(), botBlock.getZ(),
+	                                peek.getX(), peek.getY(), peek.getZ())
+	                        : net.wcfcarolina13.GameAI.services.follow.FollowWaypointReachPolicy.reached(
+	                                botBlock.getX(), botBlock.getY(), botBlock.getZ(),
+	                                peek.getX(), peek.getY(), peek.getZ(), nextWp);
+	                if (peekReached) {
 	                    waypoints.pollFirst();
 	                    FollowStateService.FOLLOW_LAST_DISTANCE_SQ.remove(botId);
 	                    FollowStateService.FOLLOW_STAGNANT_TICKS.remove(botId);
@@ -2403,6 +2414,9 @@ public class BotEventHandler {
                 navGoalBlock = peek;
                 navGoalPos = Vec3d.ofCenter(peek);
                 usingWaypoints = true;
+                lastLiveWaypoint = peekLastLive;
+                waypointTurns = net.wcfcarolina13.GameAI.services.follow.FollowWaypointSprintPolicy.turnsAt(
+                        botBlock.getX(), botBlock.getZ(), peek.getX(), peek.getY(), peek.getZ(), nextWp);
                 break;
             }
             if (waypoints.isEmpty()) {
@@ -2553,10 +2567,15 @@ public class BotEventHandler {
         }
         if (usingWaypoints) {
             double sprintDistanceSq = Math.max(distanceSq, progressDistSq);
-            boolean sprint = sprintDistanceSq > FOLLOW_SPRINT_DISTANCE_SQ;
+            boolean sprint = net.wcfcarolina13.GameAI.services.follow.FollowWaypointSprintPolicy.allowSprint(
+                    sprintDistanceSq > FOLLOW_SPRINT_DISTANCE_SQ, waypointTurns);
             // 0.3 (was 1.0): stopping 1.0 short left the bot in the neighbouring block, so the
             // waypoint was never reached and every replan produced the same plan (finding 50).
-            moveToward(bot, navGoalPos, FOLLOW_WAYPOINT_STOP_DISTANCE, sprint);
+            // The last waypoint of a live follow is usually the player's block: personal space.
+            moveToward(bot, navGoalPos,
+                    net.wcfcarolina13.GameAI.services.follow.FollowWaypointReachPolicy.stopDistance(
+                            lastLiveWaypoint, desiredSpace, FOLLOW_WAYPOINT_STOP_DISTANCE),
+                    sprint);
         } else {
             // If we're physically blocked (glass/fence/door), don't "settle" just because we're close in Euclidean distance.
             boolean allowCloseStop = canSee && !directBlocked;

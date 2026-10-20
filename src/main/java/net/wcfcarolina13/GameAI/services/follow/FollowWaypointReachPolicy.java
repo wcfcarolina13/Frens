@@ -15,7 +15,32 @@ package net.wcfcarolina13.GameAI.services.follow;
  */
 public final class FollowWaypointReachPolicy {
 
+    /** The pre-finding-47 reach (3D block distance squared), kept for the last waypoint. */
+    public static final double LAST_LIVE_REACH_SQ = 2.25D;
+
     private FollowWaypointReachPolicy() {}
+
+    /**
+     * Reach for the last waypoint of a plan that follows a live player. That waypoint is usually
+     * the player's own block, so the in-column rule drove the bot into the player whenever the
+     * line of sight was blocked (personal space only stops a bot that can see). The old 3D
+     * distance (&le; 2.25) applies instead.
+     */
+    public static boolean reachedLastLive(int botX, int botY, int botZ,
+                                          int peekX, int peekY, int peekZ) {
+        long dx = peekX - botX;
+        long dy = peekY - botY;
+        long dz = peekZ - botZ;
+        return dx * dx + dy * dy + dz * dz <= LAST_LIVE_REACH_SQ;
+    }
+
+    /**
+     * How close the bot walks to a waypoint before stopping: the last waypoint of a live follow
+     * stops at personal space, any other at {@code columnStop} (inside the waypoint's column).
+     */
+    public static double stopDistance(boolean lastLiveWaypoint, double personalSpace, double columnStop) {
+        return lastLiveWaypoint ? Math.max(columnStop, personalSpace) : columnStop;
+    }
 
     /**
      * @param next the waypoint after {@code peek} as {x, y, z}, or null when {@code peek} is last

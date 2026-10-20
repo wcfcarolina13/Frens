@@ -822,6 +822,7 @@ public final class FollowPathService {
             zs[i] = r.getZ();
         }
         BlockPos lastKept = raw.get(0);
+        int firstCorner = -1; // index into points of the first corner after the pinned lead-in
         for (int i = 1; i < n; i++) {
             if (i <= pinned) {
                 lastKept = raw.get(i);
@@ -832,6 +833,9 @@ public final class FollowPathService {
             boolean farEnough = lastKept.getSquaredDistance(p) >= 9.0D; // ~3 blocks
             boolean door = snapshot.isDoorCell(p);
             if (door || shapeNode || farEnough) {
+                if (shapeNode && firstCorner < 0) {
+                    firstCorner = points.size();
+                }
                 points.add(p.toImmutable());
                 lastKept = p;
             }
@@ -841,26 +845,13 @@ public final class FollowPathService {
             points.add(raw.get(raw.size() - 1).toImmutable());
         }
 
-        // Downsample if too many.
+        // Downsample if too many, keeping the first corner and its neighbours (the corner nearest
+        // the bot is the one it is about to cut).
         if (points.size() > maxWaypoints) {
-            int locked = Math.max(0, Math.min(pinned, maxWaypoints - 1));
-            ArrayList<BlockPos> sampled = new ArrayList<>(maxWaypoints);
-            for (int i = 0; i < locked; i++) {
-                sampled.add(points.get(i));
-            }
-
-            int remainingSlots = maxWaypoints - locked;
-            if (remainingSlots <= 1) {
-                sampled.add(points.get(points.size() - 1));
-            } else {
-                int startIdx = locked;
-                int endIdx = points.size() - 1;
-                sampled.add(points.get(startIdx));
-                for (int i = 1; i < remainingSlots - 1; i++) {
-                    int idx = startIdx + (int) Math.round((i / (double) (remainingSlots - 1)) * (endIdx - startIdx));
-                    sampled.add(points.get(Math.min(endIdx, Math.max(startIdx, idx))));
-                }
-                sampled.add(points.get(endIdx));
+            int[] keepIdx = FollowWaypointCompressionPolicy.selectIndices(points.size(), maxWaypoints, pinned, firstCorner);
+            ArrayList<BlockPos> sampled = new ArrayList<>(keepIdx.length);
+            for (int idx : keepIdx) {
+                sampled.add(points.get(idx));
             }
             points = sampled;
         }

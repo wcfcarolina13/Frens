@@ -177,7 +177,8 @@ public final class FollowMovementService {
                 return;
             }
         }
-        if (tryLocalObstacleNudge(bot, waypointCenter)) {
+        // Drop/idle sweep and arrow recovery have no leaf clear: the nudge still sidesteps leaves.
+        if (tryLocalObstacleNudge(bot, waypointCenter, false)) {
             return;
         }
         if (tryDropoffGuard(bot, waypointCenter)) {
@@ -356,7 +357,7 @@ public final class FollowMovementService {
 
         // If we are pressed against a too-tall obstacle, do a small sidestep to try a new lane.
         // This is intentionally lightweight and non-destructive.
-        if (tryLocalObstacleNudge(bot, targetPos)) {
+        if (tryLocalObstacleNudge(bot, targetPos, true)) {
             return;
         }
         if (tryDropoffGuard(bot, targetPos)) {
@@ -389,7 +390,11 @@ public final class FollowMovementService {
         applyHumanLikeForwardInput(bot, targetPos, sprint, impulse, 0.12D);
     }
 
-    private static boolean tryLocalObstacleNudge(ServerPlayerEntity bot, Vec3d targetPos) {
+    /**
+     * @param leafClearOwnsLeaves true only for the follow tick, whose leaf gate clears a leaf
+     *                            ahead; other callers would be pinned under it, so they sidestep
+     */
+    private static boolean tryLocalObstacleNudge(ServerPlayerEntity bot, Vec3d targetPos, boolean leafClearOwnsLeaves) {
         if (bot == null || targetPos == null) {
             return false;
         }
@@ -433,7 +438,7 @@ public final class FollowMovementService {
         // A breakable leaf at head height ahead is for the leaf clear, not a sidestep: the nudge
         // rocked a bot under a wall-to-wall leaf row across a block boundary and kept resetting
         // the leaf-clear stillness gate (finding 50).
-        if (LeafClearService.isBreakableLeaf(world, front.up())) {
+        if (leafClearOwnsLeaves && LeafClearService.isBreakableLeaf(world, front.up())) {
             return false;
         }
 

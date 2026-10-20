@@ -205,6 +205,18 @@ final class WoodcutCleanupDiagnostics {
         return out;
     }
 
+    /** How far above a column block a standing player still counts as on that pillar. */
+    static final int STANDS_ON_COLUMN_MAX_ABOVE = 8;
+
+    /**
+     * Whether a player whose feet are in block (px, py, pz) stands on the column through block
+     * (x, y, z): same block X and Z, and up to {@code maxAbove} blocks above it (finding 52: the
+     * heuristic scan and the fallback sweep tore down another bot's pillar under its feet).
+     */
+    static boolean standsOnColumn(int px, int py, int pz, int x, int y, int z, int maxAbove) {
+        return px == x && pz == z && py > y && py - y <= maxAbove;
+    }
+
     /** Time the post-loop fallback sweep (scan plus any mining it finds) may take. */
     static final long FALLBACK_SWEEP_BUDGET_MS = 3_000L;
 

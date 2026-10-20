@@ -52,8 +52,11 @@ public final class WoodcutScaffoldMemoryStore {
         Object storedDim = sharedState.get(dimensionKey(bot));
         if (storedDim instanceof String stored && !stored.equals(dimension)) {
             sharedState.remove(positionsKey);
+            sharedState.remove(dimensionKey(bot));
         }
-        sharedState.put(dimensionKey(bot), dimension);
+        if (create) {
+            sharedState.put(dimensionKey(bot), dimension);
+        }
 
         Object raw = sharedState.get(positionsKey);
         if (raw instanceof Set<?> existing) {
@@ -118,7 +121,11 @@ public final class WoodcutScaffoldMemoryStore {
         }
     }
 
-    private static void trim(Set<Long> set) {
+    /** Caps a scaffold set at {@link #MAX_POSITIONS}, dropping arbitrary entries. */
+    public static void trim(Set<Long> set) {
+        if (set == null) {
+            return;
+        }
         int overflow = set.size() - MAX_POSITIONS;
         if (overflow <= 0) {
             return;

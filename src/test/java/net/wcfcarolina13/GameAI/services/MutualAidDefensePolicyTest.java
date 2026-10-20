@@ -374,4 +374,12 @@ class MutualAidDefensePolicyTest {
         }
         throw new AssertionError(signature + " body not closed");
     }
+
+    @Test
+    void waxedBlocksAreNotAxes() {
+        assertFalse(MutualAidDefensePolicy.isMeleeWeaponKey("block.minecraft.waxed_copper_block"));
+        assertFalse(MutualAidDefensePolicy.isMeleeWeaponKey("block.minecraft.waxed_oxidized_cut_copper"));
+        assertFalse(MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.waxed_exposed_copper_door"));
+        assertTrue(MutualAidDefensePolicy.isMeleeWeaponKey("item.minecraft.netherite_axe"));
+    }
 }

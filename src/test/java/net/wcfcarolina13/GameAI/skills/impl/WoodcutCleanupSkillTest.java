@@ -471,4 +471,21 @@ class WoodcutCleanupSkillTest {
         assertTrue(cleanup.contains("if (added > 0) {\n                            // Fresh targets: work them before the next refresh, not straight into one.\n                            sinceLastScan = 0;"),
                 "a merge that added targets resets sinceLastScan");
     }
+
+    @Test
+    void aPlayerOnTopOfTheColumnStandsOnIt() {
+        int max = WoodcutCleanupDiagnostics.STANDS_ON_COLUMN_MAX_ABOVE;
+        assertTrue(WoodcutCleanupDiagnostics.standsOnColumn(10, 65, 20, 10, 64, 20, max));
+        assertTrue(WoodcutCleanupDiagnostics.standsOnColumn(10, 72, 20, 10, 64, 20, max));
+    }
+
+    @Test
+    void aPlayerBesideBelowOrFarAboveTheColumnDoesNot() {
+        int max = WoodcutCleanupDiagnostics.STANDS_ON_COLUMN_MAX_ABOVE;
+        assertFalse(WoodcutCleanupDiagnostics.standsOnColumn(11, 65, 20, 10, 64, 20, max));
+        assertFalse(WoodcutCleanupDiagnostics.standsOnColumn(10, 65, 21, 10, 64, 20, max));
+        assertFalse(WoodcutCleanupDiagnostics.standsOnColumn(10, 64, 20, 10, 64, 20, max));
+        assertFalse(WoodcutCleanupDiagnostics.standsOnColumn(10, 60, 20, 10, 64, 20, max));
+        assertFalse(WoodcutCleanupDiagnostics.standsOnColumn(10, 73, 20, 10, 64, 20, max));
+    }
 }
