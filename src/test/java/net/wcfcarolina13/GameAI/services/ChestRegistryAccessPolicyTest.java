@@ -248,6 +248,33 @@ class ChestRegistryAccessPolicyTest {
     }
 
     @Test
+    void dimensionFallbackIsCheckedBeforeWrongTripAndEverythingElse() {
+        // The fallback trip lands at Overworld spawn, so the destination never matches the chest.
+        assertEquals(Arrival.DIMENSION_FALLBACK, ChestRegistryAccessPolicy.checkArrival(true, false, true, 0.0, true));
+        assertEquals(Arrival.DIMENSION_FALLBACK, ChestRegistryAccessPolicy.checkArrival(true, true, true, 0.0, true));
+        assertEquals(Arrival.DIMENSION_FALLBACK,
+                ChestRegistryAccessPolicy.checkArrival(true, false, false, Double.NaN, false));
+    }
+
+    @Test
+    void withoutDimensionFallbackTheFiveArgFormMatchesTheFourArgForm() {
+        boolean[] bools = {false, true};
+        double[] dists = {0.0, 64.0, 64.01, Double.NaN};
+        for (boolean dest : bools) {
+            for (boolean chest : bools) {
+                for (double d : dists) {
+                    for (boolean reg : bools) {
+                        assertEquals(ChestRegistryAccessPolicy.checkArrival(dest, chest, d, reg),
+                                ChestRegistryAccessPolicy.checkArrival(false, dest, chest, d, reg));
+                    }
+                }
+            }
+        }
+        assertEquals(Arrival.WRONG_TRIP, ChestRegistryAccessPolicy.checkArrival(false, false, true, 0.0, true));
+        assertEquals(Arrival.TAKE, ChestRegistryAccessPolicy.checkArrival(false, true, true, 0.0, true));
+    }
+
+    @Test
     void notAChestIsCheckedBeforeReachAndRegistry() {
         assertEquals(Arrival.NOT_A_CHEST, ChestRegistryAccessPolicy.checkArrival(true, false, 1e9, true));
         assertEquals(Arrival.NOT_A_CHEST, ChestRegistryAccessPolicy.checkArrival(true, false, 0.0, false));

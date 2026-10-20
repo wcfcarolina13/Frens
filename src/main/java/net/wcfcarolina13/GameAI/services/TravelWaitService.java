@@ -107,6 +107,16 @@ public final class TravelWaitService {
         return seconds >= 60 ? (seconds / 60) + "m " + (seconds % 60) + "s" : seconds + "s";
     }
 
+    /**
+     * The destination label of the bot's waiting retry ({@code BlockPos.toShortString()} of the
+     * destination, as the cooldown gate enqueues it), or null when none is waiting.
+     */
+    public static String pendingLabel(UUID botUuid) {
+        if (botUuid == null) return null;
+        PendingTravel pending = PENDING.get(botUuid);
+        return pending == null ? null : pending.label;
+    }
+
     public static void cancel(UUID botUuid) {
         if (botUuid != null) {
             PENDING.remove(botUuid);

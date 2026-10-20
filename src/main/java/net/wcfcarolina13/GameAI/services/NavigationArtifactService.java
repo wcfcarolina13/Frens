@@ -649,6 +649,33 @@ public final class NavigationArtifactService {
         }
     }
 
+    /** The post-arrival action scheduled for a bot, or null. Read-only. */
+    public static PostArrivalAction peekPostArrival(String botAlias) {
+        return botAlias == null ? null : PENDING_POST_ARRIVAL.get(botAlias.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /**
+     * Removes the bot's scheduled withdraw only if it is still a withdraw at {@code target}; any
+     * other action (a newer collect, a death retrieval, a skill resume) is left alone.
+     *
+     * @return the removed action, or null when nothing matched
+     */
+    public static PostArrivalAction clearPostArrival(String botAlias, BlockPos target) {
+        if (botAlias == null || target == null) return null;
+        String key = botAlias.toLowerCase(java.util.Locale.ROOT);
+        PostArrivalAction current = PENDING_POST_ARRIVAL.get(key);
+        if (current == null || !CollectSchedulePolicy.isWithdraw(current.type())
+                || !target.equals(current.target())) {
+            return null;
+        }
+        if (!PENDING_POST_ARRIVAL.remove(key, current)) return null;
+        // A saved travel carries its action: save again so a reload doesn't bring the withdraw back.
+        if (getPendingTravelByName(botAlias) != null) {
+            flushPendingTravels();
+        }
+        return current;
+    }
+
     /** Post-spawn setup waiting for the bot entity to appear in the player manager. */
     private record PostSpawnSetup(String botAlias, ServerWorld world, Vec3d spawnPos, BlockPos dest,
                                   RegistryKey<World> dim, PendingTravel travel,
@@ -997,6 +1024,23 @@ public final class NavigationArtifactService {
                     notifyOwner(server, ownerUuid,
                             "\u00A7c" + botAlias + " is resting " + timeStr + " before traveling to "
                             + destLabel + ". I'll keep busy meanwhile.\u00A7r");
+                    // One retry per bot: this one replaces any earlier retry. When the earlier one was
+                    // a collect trip, its withdraw would ride this unrelated trip and be dropped
+                    // silently on arrival, so cancel it here and say so.
+                    String replacedLabel = TravelWaitService.pendingLabel(bot.getUuid());
+                    if (replacedLabel != null && !replacedLabel.equals(destLabel)) {
+                        PostArrivalAction riding = peekPostArrival(botAlias);
+                        if (riding != null && CollectSchedulePolicy.isWithdraw(riding.type())
+                                && riding.target() != null
+                                && replacedLabel.equals(riding.target().toShortString())
+                                && clearPostArrival(botAlias, riding.target()) != null) {
+                            LOGGER.info("Cooldown retry to {} replaced {}'s collect retry to {}; withdraw cancelled",
+                                    destLabel, botAlias, replacedLabel);
+                            notifyOwner(server, riding.ownerUuid(),
+                                    "\u00A7e" + botAlias + "'s earlier collect at " + replacedLabel
+                                    + " was cancelled by the trip to " + destLabel + ".\u00A7r");
+                        }
+                    }
                     final int retryDelayTicks = delayTicks;
                     // Take the freshly re-resolved bot from the wait service — the original entity
                     // is dead after a respawn and retrying against it is a no-op.
@@ -1557,6 +1601,11 @@ public final class NavigationArtifactService {
                 // requested destination (Overworld spawn on dimension fallback). On any other trip the
                 // chest's chunk need not be loaded, so don't read the world there.
                 boolean destinationMatches = chestPos.equals(ps.dest());
+                // Dimension fallback: this collect trip landed at Overworld spawn instead. Only when
+                // the trip's requested destination was this chest — a leftover action on an
+                // unrelated fallback trip stays a silent WRONG_TRIP (1.1.220 ruling).
+                boolean collectTripFellBack = ps.dimensionFallback() && ps.travel() != null
+                        && chestPos.equals(ps.travel().destination());
                 var be = destinationMatches ? w.getBlockEntity(chestPos) : null;
                 // Take only from a chest (trapped chests extend ChestBlockEntity) that the bot actually
                 // landed next to and that is in its own registry here — a forged withdraw action must
@@ -1570,6 +1619,7 @@ public final class NavigationArtifactService {
                         keys, chestPos.getX(), chestPos.getY(), chestPos.getZ())
                         != ChestRegistryAccessPolicy.Target.NOT_REGISTERED;
                 ChestRegistryAccessPolicy.Arrival arrival = ChestRegistryAccessPolicy.checkArrival(
+                        collectTripFellBack,
                         destinationMatches,
                         be instanceof net.minecraft.block.entity.ChestBlockEntity,
                         arrBot.squaredDistanceTo(Vec3d.ofCenter(chestPos)),
@@ -1597,6 +1647,13 @@ public final class NavigationArtifactService {
 
                     // Handle return trip.
                     handlePostCollectReturn(server, arrBot, ps.botAlias(), finalReturnMode, action);
+                } else if (arrival == ChestRegistryAccessPolicy.Arrival.DIMENSION_FALLBACK) {
+                    // Landed at Overworld spawn: no chunk read, no return trip.
+                    LOGGER.info("Post-arrival: {} withdraw at {} skipped: target dimension unavailable",
+                            ps.botAlias(), chestPos.toShortString());
+                    notifyOwner(server, action.ownerUuid(), "\u00A7e" + ps.botAlias()
+                            + " couldn't reach the chest's dimension, so nothing was collected from "
+                            + chestPos.toShortString() + ".\u00A7r");
                 } else if (arrival == ChestRegistryAccessPolicy.Arrival.WRONG_TRIP) {
                     // Not the collect trip: drop the action. No owner message, no return trip.
                     LOGGER.info("Post-arrival: {} withdraw dropped: trip to {} is not the collect trip to {}",

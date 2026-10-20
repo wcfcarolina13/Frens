@@ -11,8 +11,10 @@ import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
 import net.wcfcarolina13.GameAI.services.ChestRegistryAccessPolicy;
+import net.wcfcarolina13.GameAI.services.CollectSchedulePolicy;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.NavigationArtifactService;
+import net.wcfcarolina13.GameAI.services.TravelWaitService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -133,7 +135,14 @@ public final class ChestRegistryNetworkManager {
             int z = nz.intValue();
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
-            if (bot == null) return;
+            if (bot == null) {
+                // A fast-traveling bot is out of the world until it arrives.
+                if (NavigationArtifactService.getPendingTravelByName(botName) != null) {
+                    net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(player.getCommandSource(),
+                            "\u00A7e" + botName + " is traveling right now. Try again when it arrives.\u00A7r");
+                }
+                return;
+            }
             if (!authorize("collect", player, server, bot, botName)) return;
 
             String rawMode = parsed.get("mode") instanceof String s2 ? s2 : null;
@@ -181,29 +190,70 @@ public final class ChestRegistryNetworkManager {
                 // Go mode: fast travel to chest, no withdrawal.
                 LOGGER.info("Chest go: {} sending {} to chest at {},{},{} (dist={})",
                         player.getName().getString(), botName, x, y, z, (int) distance);
-                NavigationArtifactService.beginDelayedTravel(
+                // A Go is not a Collect: a withdraw still waiting from an earlier Collect would
+                // otherwise fire on this trip (same chest) or ride along and be dropped.
+                NavigationArtifactService.PostArrivalAction pending =
+                        NavigationArtifactService.peekPostArrival(botName);
+                if (pending != null && CollectSchedulePolicy.isWithdraw(pending.type()) && pending.target() != null
+                        && NavigationArtifactService.clearPostArrival(botName, pending.target()) != null) {
+                    LOGGER.info("Chest go: cleared {}'s pending collect at {}", botName,
+                            pending.target().toShortString());
+                    net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(player.getCommandSource(),
+                            "\u00A7e" + botName + "'s collect at " + pending.target().toShortString()
+                            + " was cancelled by this trip.\u00A7r");
+                }
+                boolean started = NavigationArtifactService.beginDelayedTravel(
                         server, bot, botName, chestPos,
                         world.getRegistryKey(), delayTicks, player.getUuid());
-                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
-                        player.getCommandSource(),
-                        botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s).");
+                // When refused, the gate has already told the owner why (and a cooldown queues a retry).
+                if (started) {
+                    net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                            player.getCommandSource(),
+                            botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s).");
+                }
             } else {
                 // Collect mode: fast travel to chest, withdraw on arrival, then optionally return.
                 LOGGER.info("Chest collect: {} sending {} to chest at {},{},{} (dist={}, return={})",
                         player.getName().getString(), botName, x, y, z, (int) distance, returnTo);
+                NavigationArtifactService.PostArrivalAction prev = NavigationArtifactService.peekPostArrival(botName);
+                boolean replacesOther = prev != null && CollectSchedulePolicy.replacedDifferentTarget(prev.type(),
+                        prev.target() == null ? null
+                                : new int[] {prev.target().getX(), prev.target().getY(), prev.target().getZ()},
+                        new int[] {x, y, z});
+                // Schedule before the travel starts: the travel's save picks the withdraw up.
                 // Store return mode in action type: "withdraw:stay", "withdraw:player", "withdraw:home".
                 NavigationArtifactService.schedulePostArrival(botName,
                         new NavigationArtifactService.PostArrivalAction(
                                 "withdraw:" + returnTo, chestPos, player.getUuid(),
                                 net.minecraft.util.math.Vec3d.of(bot.getBlockPos())));
-                NavigationArtifactService.beginDelayedTravel(
+                boolean started = NavigationArtifactService.beginDelayedTravel(
                         server, bot, botName, chestPos,
                         world.getRegistryKey(), delayTicks, player.getUuid());
-                String etaMsg = botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s).";
-                if (!"stay".equals(returnTo)) {
-                    etaMsg += " Will return to " + returnTo + " after collecting.";
+                // A cooldown refusal queues a retry to this chest that must keep its withdraw; any
+                // other refusal queues nothing, so the withdraw must not wait for an unrelated trip.
+                boolean retryQueued = !started
+                        && chestPos.toShortString().equals(TravelWaitService.pendingLabel(bot.getUuid()));
+                boolean kept = CollectSchedulePolicy.keepAction(started, retryQueued);
+                if (!kept) {
+                    NavigationArtifactService.clearPostArrival(botName, chestPos);
+                    LOGGER.info("Chest collect: travel for {} to {} refused with no retry; withdraw cleared",
+                            botName, chestPos.toShortString());
                 }
-                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(player.getCommandSource(), etaMsg);
+                // Overwriting cancelled the earlier collect either way; say so only once this one's fate is known.
+                if (replacesOther) {
+                    String earlier = prev.target().toShortString();
+                    net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(player.getCommandSource(), kept
+                            ? "\u00A7eReplaced the collect at " + earlier + " with " + chestPos.toShortString() + ".\u00A7r"
+                            : "\u00A7eThe collect at " + earlier + " was cancelled.\u00A7r");
+                }
+                // When refused, the gate has already told the owner why.
+                if (started) {
+                    String etaMsg = botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s).";
+                    if (!"stay".equals(returnTo)) {
+                        etaMsg += " Will return to " + returnTo + " after collecting.";
+                    }
+                    net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(player.getCommandSource(), etaMsg);
+                }
             }
 
         } catch (Exception e) {

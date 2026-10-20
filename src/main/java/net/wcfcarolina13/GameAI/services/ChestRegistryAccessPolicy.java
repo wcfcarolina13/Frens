@@ -141,22 +141,35 @@ public final class ChestRegistryAccessPolicy {
     }
 
     /** Outcome of {@link #checkArrival}. */
-    public enum Arrival { TAKE, WRONG_TRIP, NOT_A_CHEST, TOO_FAR, NOT_REGISTERED }
+    public enum Arrival { TAKE, DIMENSION_FALLBACK, WRONG_TRIP, NOT_A_CHEST, TOO_FAR, NOT_REGISTERED }
 
     /**
      * Whether an arrived bot may withdraw from the chest its pending withdraw action names.
      *
-     * <p>Evaluation order: the trip's destination is not that chest → {@link Arrival#WRONG_TRIP}
+     * <p>Evaluation order: the collect trip landed at Overworld spawn because the chest's dimension
+     * was unavailable → {@link Arrival#DIMENSION_FALLBACK} (the owner is told nothing was collected);
+     * the trip's destination is not that chest → {@link Arrival#WRONG_TRIP}
      * (the action was left over from a collect whose travel never started, and this arrival is an
      * unrelated trip); no chest there → {@link Arrival#NOT_A_CHEST}; not
      * {@link #withinArrivalReach} → {@link Arrival#TOO_FAR}; not in the bot's registry →
      * {@link Arrival#NOT_REGISTERED}; otherwise {@link Arrival#TAKE}.
      *
-     * @param destinationMatches whether the trip's requested destination equals the action's chest
+     * @param dimensionFallback  this collect trip landed at Overworld spawn instead of the chest
+     *                           (the caller passes true only when the trip's requested destination
+     *                           was this chest, so a leftover action on an unrelated fallback trip
+     *                           stays a silent {@link Arrival#WRONG_TRIP})
+     * @param destinationMatches whether the trip's destination equals the action's chest
      * @param isChest            whether the block entity at the chest position is a chest
      * @param distanceSq         squared distance from the arrived bot to the chest centre
      * @param registered         whether the chest position is in the bot's registry
      */
+    public static Arrival checkArrival(boolean dimensionFallback, boolean destinationMatches, boolean isChest,
+                                       double distanceSq, boolean registered) {
+        if (dimensionFallback) return Arrival.DIMENSION_FALLBACK;
+        return checkArrival(destinationMatches, isChest, distanceSq, registered);
+    }
+
+    /** {@link #checkArrival(boolean, boolean, boolean, double, boolean)} for a trip that reached its dimension. */
     public static Arrival checkArrival(boolean destinationMatches, boolean isChest,
                                        double distanceSq, boolean registered) {
         if (!destinationMatches) return Arrival.WRONG_TRIP;
