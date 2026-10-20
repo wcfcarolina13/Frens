@@ -55,6 +55,8 @@ import net.wcfcarolina13.GameAI.skills.support.RelocationWalkPolicy;
 import net.wcfcarolina13.GameAI.skills.support.ScaffoldMaterialPolicy;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutRefusedTargets;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutScaffoldMemoryStore;
+import net.wcfcarolina13.GameAI.skills.support.RecentTreeSoilLedger;
 import net.wcfcarolina13.GameAI.skills.support.BaseVerdictMemo;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutFailureStreakPolicy;
 import net.wcfcarolina13.GameAI.skills.support.WoodcutOutcomePolicy;
@@ -269,10 +271,6 @@ public final class WoodcutSkill implements Skill {
     );
 
     // Ephemeral memory (persists across woodcut/woodcut_cleanup until another skill starts).
-    private static final String WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY = "woodcut.scaffoldMemory.positions";
-    private static final String WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY = "woodcut.scaffoldMemory.dimension";
-    private static final String WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY = "woodcut.scaffoldMemory.updatedAt";
-    private static final int WOODCUT_SCAFFOLD_MEMORY_MAX = 2048;
     private static final List<Item> SAPLING_ITEMS = List.of(
             Items.OAK_SAPLING,
             Items.SPRUCE_SAPLING,
@@ -1236,6 +1234,7 @@ public final class WoodcutSkill implements Skill {
                     failedBaseReasons.put(target.base().toImmutable(), harvest.detail());
                     if (logsCutFromTree > 0) {
                         cutTreeBases.add(target.base().toImmutable());
+                        recordFelledTreeSoil(bot, target.base());
                     }
                     if (harvest.failureReason() == WoodcutFailureReason.PROTECTED_AT_MINING) {
                         miningProtectedFailures++;
@@ -1283,6 +1282,7 @@ public final class WoodcutSkill implements Skill {
                 felled++;
                 consecutiveFailures = 0;
                 cutTreeBases.add(target.base().toImmutable());
+                recordFelledTreeSoil(bot, target.base());
                 sinceCleanup++;
                 LOGGER.info("Woodcut target cleared: base={} logs={} logsCut={} felled={} target={}",
                         target.base().toShortString(), reachSession.trunkMineAttemptsStarted, logsCutFromTree, felled,
@@ -1452,76 +1452,32 @@ public final class WoodcutSkill implements Skill {
         }
     }
 
-    private void recordScaffoldPlacement(Map<String, Object> sharedState, ServerWorld world, BlockPos pos) {
+    // Each bot's own scaffold memory (finding 52): another bot's cleanup never tears it down.
+    private void recordScaffoldPlacement(UUID botUuid, Map<String, Object> sharedState, ServerWorld world, BlockPos pos) {
         if (sharedState == null || world == null || pos == null) {
             return;
         }
-        String dimension = world.getRegistryKey().getValue().toString();
         try {
-            Object rawDim = sharedState.get(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY);
-            if (rawDim instanceof String s && !s.equals(dimension)) {
-                sharedState.remove(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
-            }
-            sharedState.put(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY, dimension);
-            sharedState.put(WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY, System.currentTimeMillis());
-
-            Object raw = sharedState.get(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
-            @SuppressWarnings("unchecked")
-            Set<Long> set = raw instanceof Set<?> existing ? (Set<Long>) existing : null;
-            if (set == null) {
-                set = new HashSet<>();
-                sharedState.put(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY, set);
-            }
-            set.add(pos.asLong());
-            if (set.size() > WOODCUT_SCAFFOLD_MEMORY_MAX) {
-                int toRemove = set.size() - WOODCUT_SCAFFOLD_MEMORY_MAX;
-                var it = set.iterator();
-                while (toRemove > 0 && it.hasNext()) {
-                    it.next();
-                    it.remove();
-                    toRemove--;
-                }
-            }
+            WoodcutScaffoldMemoryStore.record(sharedState, botUuid,
+                    world.getRegistryKey().getValue().toString(), pos.asLong(), System.currentTimeMillis());
         } catch (Exception ignored) {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private Set<Long> getScaffoldMemory(Map<String, Object> sharedState, ServerWorld world, boolean create) {
+    private Set<Long> getScaffoldMemory(UUID botUuid, Map<String, Object> sharedState, ServerWorld world, boolean create) {
         if (sharedState == null || world == null) {
             return null;
         }
-        String dimension = world.getRegistryKey().getValue().toString();
-        Object rawDim = sharedState.get(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY);
-        if (rawDim instanceof String stored && !stored.equals(dimension)) {
-            sharedState.remove(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
-        }
-        sharedState.put(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY, dimension);
-
-        Object raw = sharedState.get(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
-        if (raw instanceof Set<?> existing) {
-            try {
-                return (Set<Long>) existing;
-            } catch (ClassCastException ignored) {
-                sharedState.remove(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
-            }
-        }
-        if (!create) {
-            return null;
-        }
-        Set<Long> created = new HashSet<>();
-        sharedState.put(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY, created);
-        return created;
+        return WoodcutScaffoldMemoryStore.get(sharedState, botUuid,
+                world.getRegistryKey().getValue().toString(), create);
     }
 
-    private void forgetScaffoldPlacement(Map<String, Object> sharedState, ServerWorld world, BlockPos pos) {
+    private void forgetScaffoldPlacement(UUID botUuid, Map<String, Object> sharedState, ServerWorld world, BlockPos pos) {
         if (sharedState == null || world == null || pos == null) {
             return;
         }
-        Set<Long> memory = getScaffoldMemory(sharedState, world, false);
-        if (memory != null) {
-            memory.remove(pos.asLong());
-        }
+        WoodcutScaffoldMemoryStore.forget(sharedState, botUuid,
+                world.getRegistryKey().getValue().toString(), pos.asLong());
     }
 
     private void recordCleanupFloater(ServerPlayerEntity bot, Map<String, Object> sharedState, ServerWorld world, BlockPos pos) {
@@ -1663,7 +1619,7 @@ public final class WoodcutSkill implements Skill {
                 }
             }
         }
-        Set<Long> memory = getScaffoldMemory(sharedState, world, false);
+        Set<Long> memory = getScaffoldMemory(bot.getUuid(), sharedState, world, false);
         if (memory != null) {
             for (Long packed : memory) {
                 if (packed == null) {
@@ -2218,7 +2174,7 @@ public final class WoodcutSkill implements Skill {
         ScaffoldService.OwnedTeardownResult result = ScaffoldService.teardownOwnedScaffold(
                 bot, owned, ScaffoldService.OWNED_TEARDOWN_BUDGET_MS, true, false);
         for (BlockPos removed : result.removedPositions()) {
-            forgetScaffoldPlacement(sharedState, world, removed);
+            forgetScaffoldPlacement(bot.getUuid(), sharedState, world, removed);
             if (reachSession != null) {
                 reachSession.recordRemoval(removed);
             }
@@ -2432,7 +2388,7 @@ public final class WoodcutSkill implements Skill {
                 if (isWithinReach(bot, bridge)) {
                     LookController.faceBlock(bot, bridge);
                     if (mineBlock(bot, bridge, false)) {
-                        forgetScaffoldPlacement(sharedState, world, bridge);
+                        forgetScaffoldPlacement(bot.getUuid(), sharedState, world, bridge);
                         reachSession.recordRemoval(bridge);
                     }
                 }
@@ -2539,7 +2495,7 @@ public final class WoodcutSkill implements Skill {
                             aboveColumn.toShortString());
                 } else if (!world.getBlockState(columnBlock).isAir() && reachSession.placedKeys.contains(columnBlock.asLong())) {
                     if (mineAdaptiveBlock(bot, columnBlock, target.base(), reachSession)) {
-                        forgetScaffoldPlacement(sharedState, world, columnBlock);
+                        forgetScaffoldPlacement(bot.getUuid(), sharedState, world, columnBlock);
                         reachSession.recordRemoval(columnBlock);
 
                         // Wait for gravity
@@ -5165,7 +5121,7 @@ public final class WoodcutSkill implements Skill {
         BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, placePos, Direction.UP, PILLAR_BLOCKS,
                 false, ownScaffold);
         if (result.success()) {
-            recordScaffoldPlacement(sharedState, world, placePos);
+            recordScaffoldPlacement(bot.getUuid(), sharedState, world, placePos);
             if (reachSession != null) {
                 reachSession.recordPlacement(placePos);
             }
@@ -5210,7 +5166,7 @@ public final class WoodcutSkill implements Skill {
                             altSupport != null ? altSupport.toShortString() : "none");
                 }
                 if (altResult.success()) {
-                    recordScaffoldPlacement(sharedState, world, alt);
+                    recordScaffoldPlacement(bot.getUuid(), sharedState, world, alt);
                     if (reachSession != null) {
                         reachSession.recordPlacement(alt);
                     }
@@ -5243,7 +5199,7 @@ public final class WoodcutSkill implements Skill {
         }
         BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, below, Direction.UP, PILLAR_BLOCKS);
         if (result.success()) {
-            recordScaffoldPlacement(sharedState, world, below);
+            recordScaffoldPlacement(bot.getUuid(), sharedState, world, below);
             if (reachSession != null) {
                 reachSession.recordPlacement(below);
             }
@@ -5546,7 +5502,7 @@ public final class WoodcutSkill implements Skill {
                 continue;
             }
             if (world.getBlockState(placed).isAir()) {
-                forgetScaffoldPlacement(sharedState, world, placed);
+                forgetScaffoldPlacement(bot.getUuid(), sharedState, world, placed);
                 reachSession.recordRemoval(placed);
                 continue;
             }
@@ -5556,7 +5512,7 @@ public final class WoodcutSkill implements Skill {
                     LOGGER.info("Woodcut scaffold cleanup: bridged to safety, cleaned {} from new position",
                             placed.toShortString());
                     if (world.getBlockState(placed).isAir()) {
-                        forgetScaffoldPlacement(sharedState, world, placed);
+                        forgetScaffoldPlacement(bot.getUuid(), sharedState, world, placed);
                         reachSession.recordRemoval(placed);
                     }
                     continue;
@@ -5577,7 +5533,7 @@ public final class WoodcutSkill implements Skill {
             }
             LookController.faceBlock(bot, placed);
             if (mineBlock(bot, placed, false) || world.getBlockState(placed).isAir()) {
-                forgetScaffoldPlacement(sharedState, world, placed);
+                forgetScaffoldPlacement(bot.getUuid(), sharedState, world, placed);
                 reachSession.recordRemoval(placed);
                 // Wait for gravity to settle the bot onto the next block down.
                 sleepQuiet(150L);
@@ -5680,7 +5636,7 @@ public final class WoodcutSkill implements Skill {
             if (world.getBlockState(bridgePos).getCollisionShape(world, bridgePos).isEmpty()) {
                 if (BotActions.placeBlockAt(bot, bridgePos, Direction.UP, PILLAR_BLOCKS)) {
                     bridgeBlocks.add(bridgePos);
-                    recordScaffoldPlacement(sharedState, world, bridgePos);
+                    recordScaffoldPlacement(bot.getUuid(), sharedState, world, bridgePos);
                     if (reachSession != null) reachSession.recordPlacement(bridgePos);
                 }
             }
@@ -5704,7 +5660,7 @@ public final class WoodcutSkill implements Skill {
                 for (BlockPos bp : bridgeBlocks) {
                     if (isWithinReach(bot, bp)) {
                         mineBlock(bot, bp, false);
-                        forgetScaffoldPlacement(sharedState, world, bp);
+                        forgetScaffoldPlacement(bot.getUuid(), sharedState, world, bp);
                         if (reachSession != null) reachSession.recordRemoval(bp);
                     }
                 }
@@ -5717,7 +5673,7 @@ public final class WoodcutSkill implements Skill {
             BlockPos bp = bridgeBlocks.get(i);
             if (isWithinReach(bot, bp)) {
                 mineBlock(bot, bp, false);
-                forgetScaffoldPlacement(sharedState, world, bp);
+                forgetScaffoldPlacement(bot.getUuid(), sharedState, world, bp);
                 if (reachSession != null) reachSession.recordRemoval(bp);
             }
         }
@@ -6295,7 +6251,7 @@ public final class WoodcutSkill implements Skill {
                 LOGGER.info("Woodcut bounded: dropping out-of-bounds recovery placement {}", placed.toShortString());
                 continue;
             }
-            recordScaffoldPlacement(sharedState, world, placed);
+            recordScaffoldPlacement(bot.getUuid(), sharedState, world, placed);
             if (reachSession != null) {
                 reachSession.recordPlacement(placed);
             }
@@ -6535,7 +6491,7 @@ public final class WoodcutSkill implements Skill {
         }
         Map<String, Object> runState = axeBootstrapSharedState.get(bot.getUuid());
         if (runState != null && bot.getEntityWorld() instanceof ServerWorld world) {
-            Set<Long> memory = getScaffoldMemory(runState, world, false);
+            Set<Long> memory = getScaffoldMemory(bot.getUuid(), runState, world, false);
             return memory != null && memory.contains(below.asLong());
         }
         return false;
@@ -7268,7 +7224,7 @@ public final class WoodcutSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world) || base == null || sharedState == null) {
             return;
         }
-        Set<Long> memory = getScaffoldMemory(sharedState, world, false);
+        Set<Long> memory = getScaffoldMemory(bot.getUuid(), sharedState, world, false);
         if (memory == null || memory.isEmpty()) {
             return;
         }
@@ -7327,6 +7283,27 @@ public final class WoodcutSkill implements Skill {
     /** The claim key for a tree base in the bot's dimension. */
     private static WoodcutTreeClaims.TreeKey treeKey(ServerPlayerEntity bot, BlockPos base) {
         return new WoodcutTreeClaims.TreeKey(dimensionId(bot), base.getX(), base.getY(), base.getZ());
+    }
+
+    /**
+     * Shares the soil ring under a felled or partly felled base with every bot's cleanup for
+     * {@link RecentTreeSoilLedger#DEFAULT_TTL_MS} (finding 52).
+     */
+    private static void recordFelledTreeSoil(ServerPlayerEntity bot, BlockPos base) {
+        if (bot == null || base == null) {
+            return;
+        }
+        RecentTreeSoilLedger.shared().recordSoilRing(dimensionId(bot), base.getX(), base.getY(), base.getZ(),
+                System.currentTimeMillis());
+    }
+
+    /**
+     * Whether the cell is in the soil ring of any bot's live tree claim, for the cleanup's
+     * any-tree-soil veto (finding 52).
+     */
+    static boolean isLiveClaimTreeSoil(String dimension, BlockPos pos) {
+        return pos != null && TREE_CLAIMS.liveClaimSoilRingContains(dimension, pos.getX(), pos.getY(), pos.getZ(),
+                System.currentTimeMillis());
     }
 
     private static String dimensionId(ServerPlayerEntity bot) {

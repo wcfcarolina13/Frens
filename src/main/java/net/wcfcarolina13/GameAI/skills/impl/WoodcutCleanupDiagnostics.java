@@ -176,13 +176,17 @@ final class WoodcutCleanupDiagnostics {
      * the sweep mined the natural stone the bot stood on because stone is a pillar material.
      * {@code treeSoil} marks the soil a felled trunk stood on: mined only when this bot placed it
      * (finding 38, 1.1.274: the sweep dug out the dirt under a felled trunk and a bot fell in).
+     * {@code anyTreeSoil} marks soil of any tree, any bot's: the shared recent-soil ledger, a live
+     * claim's ring, or a log or sapling right above. It vetoes the dirt-like shape rule but not this
+     * bot's own remembered or owned scaffold (finding 52: one bot's sweep dug out the dirt under
+     * another bot's tree). {@code remembered} must be this bot's own memory.
      */
     static boolean fallbackMayMinePillarBlock(boolean dirtLike, boolean remembered, boolean ownedScaffold,
-                                              boolean treeSoil) {
+                                              boolean treeSoil, boolean anyTreeSoil) {
         if (remembered || ownedScaffold) {
             return true;
         }
-        return dirtLike && !treeSoil;
+        return dirtLike && !treeSoil && !anyTreeSoil;
     }
 
     /**

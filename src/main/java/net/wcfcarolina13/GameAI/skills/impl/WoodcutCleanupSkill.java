@@ -29,6 +29,8 @@ import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.services.LeafClearService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
+import net.wcfcarolina13.GameAI.skills.support.RecentTreeSoilLedger;
+import net.wcfcarolina13.GameAI.skills.support.WoodcutScaffoldMemoryStore;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.WoodcutCleanupMemoryService;
 import net.wcfcarolina13.GameAI.services.construction.OwnedScaffoldRegistry;
@@ -97,10 +99,8 @@ public final class WoodcutCleanupSkill implements Skill {
 
     private static final long PILLAR_STEP_DELAY_MS = 250L;
 
-    // Ephemeral memory shared with woodcut. Cleared when any non-woodcut skill starts.
-    private static final String WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY = "woodcut.scaffoldMemory.positions";
-    private static final String WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY = "woodcut.scaffoldMemory.dimension";
-    private static final int WOODCUT_SCAFFOLD_MEMORY_MAX = 2048;
+    // Scaffold memory is per bot and shared with that bot's woodcut (WoodcutScaffoldMemoryStore).
+    // Cleared when that bot starts a non-woodcut skill.
 
     /**
      * Blocks the heuristic passes treat as leftover pillar, and cleanup's own pillar material. No
@@ -349,7 +349,7 @@ public final class WoodcutCleanupSkill implements Skill {
 
         // Track blocks we place during reach attempts so we can reliably undo them.
         List<BlockPos> placedPillar = new ArrayList<>();
-        Set<Long> scaffoldMemory = getOrCreateScaffoldMemory(context.sharedState(), world);
+        Set<Long> scaffoldMemory = getOrCreateScaffoldMemory(context.sharedState(), botUuid, world);
         Set<Long> floaterMemory = WoodcutCleanupMemoryService.getOrCreate(context.sharedState(), botUuid, world);
 
         try {
@@ -734,6 +734,14 @@ public final class WoodcutCleanupSkill implements Skill {
                         if (TreeDetector.isNearHumanBlocks(world, pos, 3) || TreeDetector.isProtected(world, pos)) {
                             continue;
                         }
+                        // Dirt that is any tree's soil (any bot's) goes only when this bot placed it.
+                        if (isDirtLikeScaffold(world.getBlockState(pos))
+                                && isAnyTreeSoil(world, pos, protectedSoil)
+                                && !(scaffoldMemory != null && scaffoldMemory.contains(pos.asLong()))
+                                && !OwnedScaffoldRegistry.isOwned(bot, world, pos)) {
+                            LOGGER.debug("woodcut_cleanup: heuristic scaffold skip {} (tree soil)", pos.toShortString());
+                            continue;
+                        }
                         if (trySimpleScaffoldMine(bot, source, world, pos)) {
                             scaffoldMined++;
                         }
@@ -810,12 +818,15 @@ public final class WoodcutCleanupSkill implements Skill {
                         // Stone-type material, and the soil a felled trunk stood on, only when this
                         // bot placed it (never the ground it stands on).
                         boolean treeSoil = protectedSoil.contains(pos.asLong());
+                        // Any tree's soil, any bot's (finding 52); only dirt-like blocks are asked.
+                        boolean anyTreeSoil = dirtLike && !treeSoil && isAnyTreeSoil(world, pos, protectedSoil);
                         if (!WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(
                                 dirtLike,
                                 (scaffoldMemory != null && scaffoldMemory.contains(pos.asLong()))
                                         || placedPillar.contains(pos),
-                                (!dirtLike || treeSoil) && OwnedScaffoldRegistry.isOwned(bot, world, pos),
-                                treeSoil)) {
+                                (!dirtLike || treeSoil || anyTreeSoil) && OwnedScaffoldRegistry.isOwned(bot, world, pos),
+                                treeSoil,
+                                anyTreeSoil)) {
                             continue;
                         }
                         MineAttemptResult mineResult = mineWithRetries(bot, source, pos, placedPillar, scaffoldMemory, false);
@@ -914,43 +925,19 @@ public final class WoodcutCleanupSkill implements Skill {
                 : SkillExecutionResult.failure(playerLine);
     }
 
-    @SuppressWarnings("unchecked")
-    private Set<Long> getOrCreateScaffoldMemory(Map<String, Object> sharedState, ServerWorld world) {
-        if (sharedState == null || world == null) {
+    /** This bot's own scaffold memory (finding 52: never another bot's pillar). */
+    private Set<Long> getOrCreateScaffoldMemory(Map<String, Object> sharedState, UUID botUuid, ServerWorld world) {
+        if (sharedState == null || world == null || botUuid == null) {
             return null;
         }
-
-        String dim = world.getRegistryKey().getValue().toString();
-        Object existingDim = sharedState.get(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY);
-        if (existingDim instanceof String stored && !stored.equals(dim)) {
-            // Dimension changed; discard old memory.
-            sharedState.remove(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
-            sharedState.put(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY, dim);
-        } else if (existingDim == null) {
-            sharedState.put(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY, dim);
-        }
-
-        Object existing = sharedState.get(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
-        if (existing instanceof Set<?> rawSet) {
-            try {
-                Set<Long> typed = (Set<Long>) rawSet;
-                trimScaffoldMemoryInPlace(typed);
-                return typed;
-            } catch (ClassCastException ignored) {
-                // Fall through and replace with a clean set.
-            }
-        }
-
-        Set<Long> created = new HashSet<>();
-        sharedState.put(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY, created);
-        return created;
+        return WoodcutScaffoldMemoryStore.get(sharedState, botUuid, world.getRegistryKey().getValue().toString(), true);
     }
 
     private void trimScaffoldMemoryInPlace(Set<Long> memory) {
         if (memory == null) {
             return;
         }
-        int overflow = memory.size() - WOODCUT_SCAFFOLD_MEMORY_MAX;
+        int overflow = memory.size() - WoodcutScaffoldMemoryStore.MAX_POSITIONS;
         if (overflow <= 0) {
             return;
         }
@@ -2083,6 +2070,31 @@ public final class WoodcutCleanupSkill implements Skill {
             }
         }
         return false;
+    }
+
+    private static boolean isDirtLikeScaffold(BlockState state) {
+        return state != null && DIRT_LIKE_SCAFFOLD.contains(state.getBlock().asItem());
+    }
+
+    /**
+     * Whether the block is the soil of any tree, any bot's (finding 52): this run's felled soil,
+     * the shared ledger of trees felled in the last ten minutes, the ring under a live tree claim,
+     * or a log or sapling standing right on it.
+     */
+    private boolean isAnyTreeSoil(ServerWorld world, BlockPos pos, Set<Long> protectedSoil) {
+        if (protectedSoil != null && protectedSoil.contains(pos.asLong())) {
+            return true;
+        }
+        String dimension = world.getRegistryKey().getValue().toString();
+        if (RecentTreeSoilLedger.shared().contains(dimension, pos.getX(), pos.getY(), pos.getZ(),
+                System.currentTimeMillis())) {
+            return true;
+        }
+        if (WoodcutSkill.isLiveClaimTreeSoil(dimension, pos)) {
+            return true;
+        }
+        BlockState above = world.getBlockState(pos.up());
+        return above.isIn(BlockTags.LOGS) || above.isIn(BlockTags.SAPLINGS);
     }
 
     private boolean hasGrassPlantAbove(ServerWorld world, BlockPos pos) {

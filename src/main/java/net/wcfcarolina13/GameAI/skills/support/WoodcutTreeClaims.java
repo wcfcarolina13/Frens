@@ -176,6 +176,27 @@ public final class WoodcutTreeClaims {
         return Math.abs(ax - bx) <= radius && Math.abs(az - bz) <= radius;
     }
 
+    /**
+     * Whether the cell lies in the soil ring ({@link RecentTreeSoilLedger#soilRingContains}) of any
+     * bot's live claim in this dimension, this bot's own included: a tree being cut right now keeps
+     * its soil before it lands in the ledger (finding 52).
+     */
+    public boolean liveClaimSoilRingContains(String dimension, int x, int y, int z, long nowMs) {
+        if (dimension == null) {
+            return false;
+        }
+        for (Map.Entry<TreeKey, Claim> entry : claims.entrySet()) {
+            TreeKey tree = entry.getKey();
+            if (entry.getValue().expired(nowMs) || !dimension.equals(tree.dimension())) {
+                continue;
+            }
+            if (RecentTreeSoilLedger.soilRingContains(tree.x(), tree.y(), tree.z(), x, y, z)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The live owner of the tree, or null when it is free or its claim expired. */
     public UUID ownerOf(TreeKey tree, long nowMs) {
         Claim claim = tree == null ? null : claims.get(tree);

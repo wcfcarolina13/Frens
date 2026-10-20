@@ -248,4 +248,27 @@ class WoodcutTreeClaimsTest {
         assertFalse(claims.tryClaim(TREE_A, alex, RUN_1, TTL + 1, TTL));
         assertEquals(bob, claims.ownerOfNear(TREE_A, 70, alex, TTL + 1));
     }
+
+    @Test
+    void soilRingQuerySeesAnyBotsLiveClaimUntilReleaseOrExpiry() {
+        WoodcutTreeClaims claims = new WoodcutTreeClaims();
+        assertTrue(claims.tryClaim(TREE_A, bob, RUN_1, 0L, TTL));
+        // The 3x3 ring one block under Bob's base (10, 64, 20), whoever asks.
+        assertTrue(claims.liveClaimSoilRingContains(OVERWORLD, 10, 63, 20, 1L));
+        assertTrue(claims.liveClaimSoilRingContains(OVERWORLD, 9, 63, 21, 1L));
+        assertTrue(claims.liveClaimSoilRingContains(OVERWORLD, 11, 63, 19, 1L));
+        // Outside the ring: two blocks away, the base level, two below, another dimension.
+        assertFalse(claims.liveClaimSoilRingContains(OVERWORLD, 12, 63, 20, 1L));
+        assertFalse(claims.liveClaimSoilRingContains(OVERWORLD, 10, 64, 20, 1L));
+        assertFalse(claims.liveClaimSoilRingContains(OVERWORLD, 10, 62, 20, 1L));
+        assertFalse(claims.liveClaimSoilRingContains(NETHER, 10, 63, 20, 1L));
+        assertFalse(claims.liveClaimSoilRingContains(null, 10, 63, 20, 1L));
+        // Expired claim: no longer protects.
+        assertFalse(claims.liveClaimSoilRingContains(OVERWORLD, 10, 63, 20, TTL));
+        // Released claim: no longer protects.
+        assertTrue(claims.tryClaim(TREE_A, bob, RUN_2, TTL, TTL));
+        assertTrue(claims.liveClaimSoilRingContains(OVERWORLD, 10, 63, 20, TTL + 1));
+        assertTrue(claims.release(TREE_A, bob, RUN_2));
+        assertFalse(claims.liveClaimSoilRingContains(OVERWORLD, 10, 63, 20, TTL + 1));
+    }
 }

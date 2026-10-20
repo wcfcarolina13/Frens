@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.skills;
 
+import net.wcfcarolina13.GameAI.skills.support.WoodcutScaffoldMemoryStore;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -47,10 +48,6 @@ public final class SkillManager {
     private static final int DROP_SWEEP_MAX_TARGETS = 6;
     private static final long DROP_SWEEP_MAX_DURATION_MS = 10_000L;
 
-    // Ephemeral woodcut state (kept across woodcut/woodcut_cleanup/drop_sweep runs, cleared when any other skill starts).
-    private static final String WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY = "woodcut.scaffoldMemory.positions";
-    private static final String WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY = "woodcut.scaffoldMemory.dimension";
-    private static final String WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY = "woodcut.scaffoldMemory.updatedAt";
     static {
         DebugFileLogger.log("SkillManager.staticInit start");
         register(new DirtShovelSkill());
@@ -202,7 +199,7 @@ public final class SkillManager {
         }
         TaskService.TaskTicket ticket = ticketOpt.get();
 
-        // Clear woodcut scaffold memory when switching away from woodcut flows.
+        // Clear this bot's woodcut scaffold memory when it switches away from woodcut flows.
         try {
             if (context != null && context.sharedState() != null
                     && name != null
@@ -211,9 +208,8 @@ public final class SkillManager {
                     // drop_sweep only picks up items, and players run it between a woodcut and
                     // its cleanup; wiping here left the woodcut's scaffold for good.
                     && !"drop_sweep".equalsIgnoreCase(name)) {
-                context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
-                context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY);
-                context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY);
+                // Only this bot's scaffold memory (finding 52): another bot's woodcut keeps its own.
+                WoodcutScaffoldMemoryStore.clearForBot(context.sharedState(), botUuid);
                 WoodcutCleanupMemoryService.clearForBot(context.sharedState(), botUuid);
             }
         } catch (Exception ignored) {

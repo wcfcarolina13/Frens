@@ -12,22 +12,35 @@ class WoodcutCleanupSkillTest {
     @Test
     void fallbackSweepMinesStoneOnlyWhenTheBotPlacedIt() {
         // Natural stone under the bot: never mined.
-        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, false, false));
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, false, false, false));
         // Remembered or owned scaffold stone: mined.
-        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, true, false, false));
-        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, true, false));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, true, false, false, false));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, true, false, false));
         // Dirt keeps its shape-based checks (done by the caller).
-        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false, false));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false, false, false));
     }
 
     @Test
     void fallbackSweepLeavesTheSoilUnderAFelledTrunk() {
         // Finding 38: natural dirt the trunk stood on stays, so no hole opens where the tree was.
-        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false, true));
-        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, false, true));
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false, true, false));
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, false, true, false));
         // Unless this bot placed it there.
-        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, true, false, true));
-        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, true, true));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, true, false, true, false));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, true, true, false));
+    }
+
+    @Test
+    void fallbackSweepLeavesAnyTreesSoilUnlessThisBotPlacedIt() {
+        // Finding 52: natural dirt under another bot's tree (ledger, live claim, log above) stays.
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false, false, true));
+        // This bot's own remembered or owned pillar on a ring cell still goes.
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, true, false, false, true));
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, true, false, true));
+        // Natural dirt that is no tree's soil keeps the shape rule.
+        assertTrue(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(true, false, false, false, false));
+        // Stone is unaffected: still only when placed.
+        assertFalse(WoodcutCleanupDiagnostics.fallbackMayMinePillarBlock(false, false, false, false, true));
     }
 
     @Test
