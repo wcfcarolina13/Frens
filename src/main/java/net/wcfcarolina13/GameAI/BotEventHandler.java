@@ -4968,7 +4968,30 @@ public class BotEventHandler {
         BlockPos goal = plan.stepping() ? stepPos : approachPos;
         Vec3d goalCenter = Vec3d.ofCenter(goal);
         double distSq = bot.squaredDistanceTo(goalCenter);
-        boolean sprint = distSq > FOLLOW_SPRINT_DISTANCE_SQ;
+        // Line up with the doorway before stepping in (sandbox S9 1.1.271: bots steered
+        // straight at the step cell from off the centre line and pressed into the frame edge
+        // until the stuck-abort fired). The lane is the middle of the clear gap, read from the
+        // door's own collision shape so an open door's 3/16 slab is accounted for.
+        FollowDoorRules.DoorwayAim doorwayAim = null;
+        Vec3d moveTarget = goalCenter;
+        if (plan.stepping()) {
+            boolean alongX = Math.abs(stepPos.getX() - doorBase.getX()) >= Math.abs(stepPos.getZ() - doorBase.getZ());
+            double laneOffset = 0.0D;
+            net.minecraft.util.shape.VoxelShape doorShape = doorState.getCollisionShape(world, doorBase);
+            if (!doorShape.isEmpty()) {
+                Box box = doorShape.getBoundingBox();
+                laneOffset = alongX
+                        ? FollowDoorRules.openDoorLaneOffset(box.minZ, box.maxZ)
+                        : FollowDoorRules.openDoorLaneOffset(box.minX, box.maxX);
+            }
+            doorwayAim = FollowDoorRules.doorwayAim(bot.getX(), bot.getZ(),
+                    doorBase.getX() + 0.5D, doorBase.getZ() + 0.5D,
+                    stepPos.getX() + 0.5D, stepPos.getZ() + 0.5D,
+                    laneOffset, FollowDoorRules.DOORWAY_ALIGN_TOLERANCE);
+            moveTarget = new Vec3d(doorwayAim.aimX(), goalCenter.y, doorwayAim.aimZ());
+        }
+        boolean liningUp = doorwayAim != null && doorwayAim.liningUp();
+        boolean sprint = !liningUp && distSq > FOLLOW_SPRINT_DISTANCE_SQ;
         LookController.faceBlock(bot, goal);
         BotActions.sprint(bot, sprint);
         // User-observed asymmetry: the bot passes through doors reliably when the commander
@@ -5000,13 +5023,23 @@ public class BotEventHandler {
         // (a) motivations — the door's 3-pixel leaf collision, pressure plates, overhanging
         // stair thresholds — are all *stall* scenarios, so jump-on-stagnation covers them a
         // few ticks later; a bot that is actually progressing must never be forced airborne.
+        // Never jump under a blocked lintel (doorBase.up(2)): the 0.2 headroom of a two-high
+        // doorway leaves a jumping bot airborne against the lintel at the threshold. Nor while
+        // lining up sideways — that is progress, not a stall a jump can fix.
         int currentStuck = FOLLOW_DOOR_STUCK_TICKS.getOrDefault(botId, 0);
-        if (FollowDoorRules.shouldForceDoorJump(currentStuck) && bot.isOnGround()) {
+        BlockPos lintelPos = doorBase.up(2);
+        boolean lintelBlocked = !world.getBlockState(lintelPos).getCollisionShape(world, lintelPos).isEmpty();
+        if (!liningUp && FollowDoorRules.shouldForceDoorJump(currentStuck, lintelBlocked) && bot.isOnGround()) {
             BotActions.jump(bot);
         } else {
             BotActions.autoJumpIfNeeded(bot);
         }
-        BotActions.applyMovementInput(bot, goalCenter, sprint ? 0.18 : 0.14);
+        // Sideways correction is damped (impulse scales with the remaining offset) so the bot
+        // settles onto the lane instead of sliding across it.
+        double impulse = liningUp
+                ? Math.max(0.03D, Math.min(0.10D, Math.abs(doorwayAim.lateralOffset()) * 0.35D))
+                : (sprint ? 0.18 : 0.14);
+        BotActions.applyMovementInput(bot, moveTarget, impulse);
 
         // Stuck tracking: bot's BlockPos hasn't changed in N ticks.
         // Villager learning: when stuck, vanilla mob AI cancels/replans — it never retreats

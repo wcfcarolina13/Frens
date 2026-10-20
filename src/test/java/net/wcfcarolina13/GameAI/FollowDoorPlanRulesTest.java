@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -46,5 +47,98 @@ class FollowDoorPlanRulesTest {
         // (door leaf collision, pressure plate, overhanging stair) — now the jump helps.
         assertTrue(FollowDoorRules.shouldForceDoorJump(8));
         assertTrue(FollowDoorRules.shouldForceDoorJump(20));
+    }
+
+    private static final double EPS = 1e-9;
+    private static final double TOL = FollowDoorRules.DOORWAY_ALIGN_TOLERANCE;
+
+    @Test
+    void noForcedJumpUnderABlockedLintel() {
+        // Sandbox S9 1.1.271: oak door under a stone lintel; the jump at stuck>=8 only
+        // pinned the bot airborne against the lintel.
+        assertFalse(FollowDoorRules.shouldForceDoorJump(30, true));
+        assertFalse(FollowDoorRules.shouldForceDoorJump(8, true));
+    }
+
+    @Test
+    void jumpStillAllowedWithHeadroom() {
+        assertFalse(FollowDoorRules.shouldForceDoorJump(7, false));
+        assertTrue(FollowDoorRules.shouldForceDoorJump(8, false));
+        assertTrue(FollowDoorRules.shouldForceDoorJump(30, false));
+    }
+
+    @Test
+    void offLaneBotLinesUpSidewaysBeforeEnteringXAxisDoor() {
+        // S9 geometry: door cell 50,_,50, step 49,_,50, bot pressed at x=51.30.
+        FollowDoorRules.DoorwayAim aim = FollowDoorRules.doorwayAim(
+                51.30, 50.80, 50.5, 50.5, 49.5, 50.5, TOL);
+        assertTrue(aim.liningUp());
+        assertEquals(51.30, aim.aimX(), EPS, "sideways only: stay level with the bot along the passage");
+        assertEquals(50.5, aim.aimZ(), EPS, "onto the door axis");
+        assertEquals(0.30, aim.lateralOffset(), EPS);
+    }
+
+    @Test
+    void alignedBotAimsAtTheStepCell() {
+        FollowDoorRules.DoorwayAim aim = FollowDoorRules.doorwayAim(
+                51.30, 50.55, 50.5, 50.5, 49.5, 50.5, TOL);
+        assertFalse(aim.liningUp());
+        assertEquals(49.5, aim.aimX(), EPS);
+        assertEquals(50.5, aim.aimZ(), EPS);
+    }
+
+    @Test
+    void zAxisDoorLinesUpOnX() {
+        // door 10,_,20, step 10,_,21 (passage along +Z); bot 0.3 off in X, still short of the door.
+        FollowDoorRules.DoorwayAim aim = FollowDoorRules.doorwayAim(
+                10.80, 19.70, 10.5, 20.5, 10.5, 21.5, TOL);
+        assertTrue(aim.liningUp());
+        assertEquals(10.5, aim.aimX(), EPS);
+        assertEquals(19.70, aim.aimZ(), EPS);
+
+        FollowDoorRules.DoorwayAim aligned = FollowDoorRules.doorwayAim(
+                10.55, 19.70, 10.5, 20.5, 10.5, 21.5, TOL);
+        assertFalse(aligned.liningUp());
+        assertEquals(10.5, aligned.aimX(), EPS);
+        assertEquals(21.5, aligned.aimZ(), EPS);
+    }
+
+    @Test
+    void botAlreadyInTheDoorCellKeepsGoing() {
+        // Centre inside the door cell: sideways correction there only scrapes the frame.
+        FollowDoorRules.DoorwayAim aim = FollowDoorRules.doorwayAim(
+                50.60, 50.80, 50.5, 50.5, 49.5, 50.5, TOL);
+        assertFalse(aim.liningUp());
+        assertEquals(49.5, aim.aimX(), EPS);
+    }
+
+    @Test
+    void openDoorSlabShiftsTheLaneToTheClearGap() {
+        // Open door slab at local [0, 3/16]: clear gap [3/16, 1], centre 19/32.
+        assertEquals(3.0 / 32.0, FollowDoorRules.openDoorLaneOffset(0.0, 0.1875), EPS);
+        assertEquals(-3.0 / 32.0, FollowDoorRules.openDoorLaneOffset(0.8125, 1.0), EPS);
+        // Closed door across the passage spans the cell laterally: no shift.
+        assertEquals(0.0, FollowDoorRules.openDoorLaneOffset(0.0, 1.0), EPS);
+        assertEquals(0.0, FollowDoorRules.openDoorLaneOffset(0.0, 0.0), EPS);
+
+        // A bot on the cell centre line is within tolerance of 50.5 but 0.094 off the gap
+        // centre, so with the slab known it still lines up.
+        FollowDoorRules.DoorwayAim aim = FollowDoorRules.doorwayAim(
+                51.30, 50.50, 50.5, 50.5, 49.5, 50.5, 3.0 / 32.0, TOL);
+        assertTrue(aim.liningUp());
+        assertEquals(50.5 + 3.0 / 32.0, aim.aimZ(), EPS);
+        FollowDoorRules.DoorwayAim aligned = FollowDoorRules.doorwayAim(
+                51.30, 50.60, 50.5, 50.5, 49.5, 50.5, 3.0 / 32.0, TOL);
+        assertFalse(aligned.liningUp());
+        assertEquals(49.5, aligned.aimX(), EPS);
+        assertEquals(50.5 + 3.0 / 32.0, aligned.aimZ(), EPS, "walk in along the gap centre, not the cell centre");
+    }
+
+    @Test
+    void stuckCloseBehindWaitsForOtherPlayersAtTheDoor() {
+        assertFalse(FollowDoorRules.mayCloseStuckNearDoor(1.0), "a bot in the next cell");
+        assertFalse(FollowDoorRules.mayCloseStuckNearDoor(4.0), "two blocks away still counts");
+        assertTrue(FollowDoorRules.mayCloseStuckNearDoor(5.0));
+        assertTrue(FollowDoorRules.mayCloseStuckNearDoor(Double.POSITIVE_INFINITY), "nobody else around");
     }
 }

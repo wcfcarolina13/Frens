@@ -2929,6 +2929,21 @@ public final class MovementService {
                     return;
                 }
                 if (stuckNearDoor) {
+                    // Never shut the door on someone else in it (sandbox S9 1.1.271: closed on a
+                    // following bot two blocks away). Any other player counts: bots and the
+                    // followed player are both players.
+                    double nearestOtherSq = Double.POSITIVE_INFINITY;
+                    for (ServerPlayerEntity other : world.getPlayers()) {
+                        if (other == bot || other.isRemoved() || other.isSpectator()) {
+                            continue;
+                        }
+                        nearestOtherSq = Math.min(nearestOtherSq, other.getBlockPos().getSquaredDistance(doorPos));
+                    }
+                    if (!net.wcfcarolina13.GameAI.FollowDoorRules.mayCloseStuckNearDoor(nearestOtherSq)) {
+                        maybeLogDoor(bot, doorPos, "door-close wait: another player at the door (attempt=" + attempt + ")");
+                        scheduleDoorCloseInternal(server, botUuid, worldKey, doorPos, travelDir, attempt + 1);
+                        return;
+                    }
                     maybeLogDoor(bot, doorPos, "door-close: stuck near door, closing anyway after " + attempt + " attempts");
                 }
             }
