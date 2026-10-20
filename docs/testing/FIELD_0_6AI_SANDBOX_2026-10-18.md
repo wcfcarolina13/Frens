@@ -83,6 +83,8 @@ JvmArgs restored. The 175 MB S13 log was gzipped to `logs/2026-10-19-3.log.gz` (
 
 ## Findings (backlog for a fix build)
 
+**Fixed in 1.1.277** (2026-10-19/20, sandbox-checked on the 1.1.277 jar (md5 45aa2300...), replays `frens_1_1_277_6bo_canopy_flood.zip` (23:30-00:07) and `frens_1_1_277_6bo_souls_woodcut_follow_mine.zip` (00:07-00:19), `tools/sandbox/fix277.py`; Phase 6bo): 48's backoff (a floating bot backs off from its 2nd failure, `Stuck-escape backoff: Flood1 failed surface recovery 2 times at Y=102 while floating in water, pausing retries for 30 s`, then 60 s and 120 s; `ascent failed` every 75-90 s instead of every 10 s; Bob reached the 600 s step at his 9th failure (00:06:47), was 167 WARN lines in 28 minutes; "I'm stuck in a flooded hole and can't climb out." once), soul stage directions (none in 34 soul chat lines from 6 DMs and 7 scenes, but the model wrote none either: 0 in 14 raw replies through the Ollama tap, only "(get it?)", dialogue the punctuation rule keeps), woodcut detect (24 and 12 ms with four trees standing, `logs=20 ... nearest=246, 120, 417 bases=4`, was 374-394 ms; all four felled, both bots `success=true`), and no regression in follow over hills or mining beside a zombie. Partial: 48's ledge (carved in 11 s with a stone pickaxe, 80 s bare-handed, but the bot never climbs onto it: `climbed out=false`, finding 49). Not fixed: 47 on the staged canopy. With a detour the bot stalls on a diagonal step down past the end leaf (finding 50); with a wall-to-wall leaf row the old `head-not-passable` loop is unchanged, 75-77 lines a minute with no leaf clear. At the original spot near 61, 77, 266 Fol followed 46 blocks south and ended 1.1 blocks from the player. New: 49-52. Still open: 3, 47, 48 (backoff half fixed; its escape half continues as 49), 49-52.
+
 **Fixed in 1.1.276** (2026-10-19, sandbox-checked, replays `frens_1_1_276_6bn_fix_checks.zip`, `frens_1_1_276_6bn_fix_checks_fishing.zip`, `frens_1_1_276_6bn_fix_checks_abr1.zip` and `frens_1_1_276_6bn_fix_checks_follow_275.zip`, `tools/sandbox/fix276.py`; Phase 6bn): 43 (fishing search 13-31 ms on fresh ponds with the snapshot built in 5-8 ms, was 1781 / 8392 ms; hangout scan 2 ms and its first move within a second), 44 (one "sees 1 hostile(s) nearby" line, 0 WARN lines, was 444; a caged zombie: mined on to 10 stone; a free zombie: fought, then mined; a creeper: fled and stayed clear), 45 (Sweep Souls3 retires its 4 copied records, `destroyed=true`; AB R1 untouched, deposit works), 39 and 14 with 43. 46 closed by 44's ruling (its pause line still unseen). Partial: woodcut detect with trees standing 374-394 ms (was 1091-1541), the per-log checks still read the world (deferred); empty detects 0-1 ms, relocation sampling reaches 117/120 in 1-10 ms. Craft table scan 1.47 ms and farm water scans 4-6 ms (new lines, no before). New: 47, 48. Still open: 3, 47, 48.
 
 **Fixed in 1.1.275** (2026-10-19, sandbox-checked, replays `frens_1_1_275_6bm_fix_checks.zip`, `frens_1_1_275_6bm_fix_checks_chest_owner.zip`, `frens_1_1_275_6bm_fix_checks_chest_foreign.zip` and `frens_1_1_275_6bm_fix_checks_threat_skeleton.zip`, `tools/sandbox/fix275.py`; Phase 6bm): 37 (0 threat lines in 61 s near a frozen zombie, was 16; the once-per-pause announcement was not reached because no run paused a task, finding 46), 38 (the dirt under the felled trunk stays, the bot's 7 scaffold blocks removed), 40 (Sweep Souls3 starts empty with `chestLike=0`, AB R1 adopts with `chestLike=1`, also over Sweep Souls3's 1.1.274 claim, deposit works), 41 (one-tree run ends `success=true`, no "Repeated failures"; the plain command prints "Cleared the local woodcut area after 1 target(s)."), 42 ("Desperate food" 1-2 lines in 45 s, no starvation pause while eating). Partial: 39 (snapshot skipped, 1781 ms, but 8392 ms when one stand needs A*; finding 43). New: 43-46. Still open: 3, 14 (as 39/43), 43-46.
@@ -294,7 +296,34 @@ Pass 3 (1.1.271, sessions S5 on, see "Pass 3 sessions"):
     with `pillarUp ... not on ground` and `ensureAtSurface: Bob pillar recovery placed no blocks reason=not-on-ground` as the top
     `sb_flood` lines. The interval never backs off and nothing frees him.
 
-Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat; two bots took the
+49. **A floating bot carves its ledge but does not climb onto it (medium).** 1.1.277 sandbox 2026-10-19, Sweep Souls3, a 1x1x3
+    pocket under 21 blocks of stone (a 27x27 stone block at Y 100-125, water at 102, solid below), Flood1 with a stone pickaxe and
+    16 cobblestone, the owner 48 blocks away: `Bot Flood1 trapped in water at 420, 102, 660: carving a ledge on north floor=420,
+    102, 659 mine=2 depthToSky=23` 23:37:01 and `Bot Flood1 ledge at 420, 103, 659 ready, climbed out=false now at 420, 102, 660`
+    23:37:12. Both cells were mined; the bot stayed afloat at Y 102.7-102.9, then `pillarUp step 0/6: Flood1 not on ground` and
+    `Surface recovery stalled without gaining height.` until the 120 s backoff step; no second carve or climb in 4 minutes.
+    Bare-handed (FloodB1) the same after 80 s of mining (23:41:42 to 23:43:02), 7 minutes watched. The ledge floor is level with
+    the water, so the bot has to rise a full block out of the water onto it (`swimToShore(bot, 3, 4_000L)`).
+50. **Follow stalls at the end of a canopy row, on a diagonal step down past the end leaf (medium).** 1.1.277 sandbox 2026-10-19
+    23:49 and 2026-10-20 00:00-00:03, the scoper's repro (a grass deck, the area south one block lower, oak leaves
+    `persistent=false` at Y+1 over the first lower row from X-6 to X+6, a log column at X+7, the player at Z+8): Canopy walked to
+    the west end of the row and stopped at 294.0, 120, 660.7 with `navGoal=293, 119, 661` (one block down and diagonal, past the
+    corner of the leaf at 294, 121, 661) for the whole 55-60 s of each of four runs (`/bot follow`, `/bot stop` then `/bot
+    follow`, `/bot follow-distance 3 Canopy`), `directBlocked=true`, 0-2 `head-not-passable` lines, no leaf clear. The step's
+    own headroom cell (`to.up(2)` = 293, 121, 661) is air, so the 1.1.277 transition check allows it; the bot likely catches on
+    the leaf beside the diagonal (not shown by the movement-gate log, which logged 0-2 rejects). The 1.1.276 stall at the original oak also had a navGoal one block down and diagonal.
+51. **A bot that keeps following after an external `/tp` aborts every leaf clear (minor).** 1.1.277 sandbox 2026-10-19 23:54:
+    `External teleport detected for Canopy (moved 58 blocks in 1 tick) — clearing tasks and goals` calls
+    `TaskService.forceAbort` and leaves follow mode on, so the latch stays set; the next follow leaf clears each logged
+    `Mining ... 296, 121, 661 with minecraft:bread` and `Mining aborted for Canopy at ...` (5 times, 23:54:59-23:55:28). A fresh
+    follow command clears the latch per the 1.1.277 changelog (not exercised here: no leaf was mined after a fresh command);
+    the teleport path does not.
+52. **A woodcutter's cleanup sweep mines the dirt under another bot's tree (minor).** 1.1.277 sandbox 2026-10-20 00:14, fix276's
+    4-tree deck: W2 felled the tree at 244, 120, 414; W1 then logged `Mining ... 244, 119, 414 with minecraft:dirt` 00:14:57 and
+    `woodcut_cleanup: fallback sweep removed 1 extra items (logs+scaffold)`, leaving a hole in the deck where the trunk stood.
+    Finding 38's fix keeps a bot's own tree soil; the sweep does not know another bot's tree.
+
+Observations, not findings: soul lines carry stage directions in parentheses ("(chuckles)", "(dryly)") into chat (1.1.277 strips a word list; raw scene replies from the 1.1.275/276 tap sessions also used words not on it: skeptical, cautious, curious, smirking, muttering, absent-mindedly, trails off, calling, turns); two bots took the
 same bed at night (21:01:38); `gpt-oss:20b` returns empty `content` (all of it is reasoning), so it cannot be a soul model as wired;
 after the S6 trim, the shelved bots Ash, Birch and Cedar came back on the next launch as lowercase `ash`, `birch`, `cedar` at world
 spawn, probably a side effect of trimming their name-keyed entries, not a mod bug until reproduced.

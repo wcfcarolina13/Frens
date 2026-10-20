@@ -31,7 +31,7 @@ Fix build from the 1.1.276 sandbox check (findings 47, 48), one sandbox observat
 - **Tests** 3111 → 3159.
 - **Deferred:** a bot standing on the floor of a flooded pocket (on ground) is not covered by the ledge carve or the backoff fix; `findNearestTree` and the ring/nearby tree finders still read the world per block; a remembered cleanup log in an unloaded chunk now fails its mine attempt instead of loading the chunk; repeated asterisk directions ("*sighs* *sighs*") survive; the stair-escape and woodcut ascent paths still pause on flood.
 
-**Field checks:** SANDBOX
+**Field checks:** sandbox-checked 2026-10-20 (Phase 6bo, `tools/sandbox/fix277.py`, replays `frens_1_1_277_6bo_canopy_flood`, `frens_1_1_277_6bo_souls_woodcut_follow_mine`): PASS woodcut detect (12-24 ms with four trees standing, was 374-394; all felled), flooded-pocket backoff (30 s from the 2nd failure, then 60 and 120 s; Bob 600 s at his 9th), stage directions (none in 34 soul chat lines, but the model wrote none in 14 raw replies, so the strip was not exercised), follow over hills and at the original oak, mining beside a zombie. PARTIAL ledge carve (carved in 11 s, 80 s bare-handed; the bot never climbs onto it, finding 49). FAIL canopy step down on the staged repro (stall on a diagonal step past the end leaf, finding 50; a wall-to-wall row still loops `head-not-passable` with no leaf clear, 47 open). New findings 51 (an external `/tp` latch aborts follow leaf clears), 52 (a cleanup sweep mines another bot's tree soil).
 
 ## Worker scans read each chunk once (hangout, fishing, woodcut, crafting, farm), a miner fights what it would fight and works past the rest, copied chest records retired; 1.1.276 (2026-10-19)
 
