@@ -29,6 +29,11 @@ public final class MovementAbortPolicy {
         }
     }
 
+    public static <T> Supplier<T> guard(Supplier<T> action, T fallback) {
+        BooleanSupplier abort = CURRENT.get();
+        return () -> abort == null || !abort.getAsBoolean() ? action.get() : fallback;
+    }
+
     /** Capture the worker's check before dispatching a steering step to the server thread. */
     public static Runnable guard(Runnable action) {
         BooleanSupplier abort = CURRENT.get();

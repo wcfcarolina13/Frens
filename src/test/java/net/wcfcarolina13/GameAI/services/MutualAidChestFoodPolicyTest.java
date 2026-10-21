@@ -304,8 +304,18 @@ class MutualAidChestFoodPolicyTest {
         String source = mutualAidSource();
         // The two tick-side make-room calls were its only uses: nothing in mutual aid offloads to a chest.
         assertFalse(source.contains("offloadCheapItemsToNearbyChest"), "mutual aid still offloads to a chest");
+        String recipientHop = bodyOf(source, "boolean ensureInventorySpaceForAidRecipient(");
+        assertTrue(recipientHop.contains("BotActions.callOnServerThread"), "recipient make-room must hop to the server");
+        assertTrue(recipientHop.contains("ensureInventorySpaceForAidRecipientOnServer"), "the hop must run the drop helper");
+        String recipientDrop = bodyOf(source, "boolean ensureInventorySpaceForAidRecipientOnServer(");
+        assertTrue(recipientDrop.contains("MutualAidMakeRoomPolicy.decideForRecipient("));
+        assertTrue(recipientDrop.contains("TaskService.getActiveTaskInfo(recipient.getUuid())"));
+        assertTrue(recipientDrop.contains("active.origin() == TaskService.Origin.AMBIENT"),
+                "idle hobbies must be distinguished from commanded skills by ticket origin");
+        assertTrue(recipientDrop.indexOf("TaskService.getActiveTaskInfo(recipient.getUuid())")
+                < recipientDrop.indexOf("dropCheapStackForSpace"), "active skills must be checked before a drop");
         for (String signature : List.of("boolean tryMakeSpaceForNearbyDroppedFood(",
-                "boolean ensureInventorySpaceForAidRecipient(")) {
+                "boolean ensureInventorySpaceForAidRecipientOnServer(")) {
             String makeRoom = bodyOf(source, signature);
             for (String banned : List.of("depositMatchingWalkOnly", "placeChestNearBot", "MovementService",
                     "ChestStoreService")) {
@@ -326,7 +336,7 @@ class MutualAidChestFoodPolicyTest {
         assertTrue(bodyOf(source, "boolean tryMakeSpaceForNearbyDroppedFood(")
                         .contains("mayMakeRoom(bot, MutualAidMakeRoomPolicy.Kind.FOOD_PICKUP, nowTick)"),
                 "the food pickup should read its own backoff");
-        assertTrue(bodyOf(source, "boolean ensureInventorySpaceForAidRecipient(")
+        assertTrue(bodyOf(source, "boolean ensureInventorySpaceForAidRecipientOnServer(")
                         .contains("mayMakeRoom(recipient, roomKind, nowTick)"),
                 "a recipient should read the backoff of the kind it is receiving");
         assertTrue(bodyOf(source, "void holdOffMakeRoom(").contains(".put(kind, "),

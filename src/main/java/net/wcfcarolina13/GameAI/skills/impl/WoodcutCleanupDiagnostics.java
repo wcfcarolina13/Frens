@@ -113,40 +113,52 @@ final class WoodcutCleanupDiagnostics {
      * scans resume at {@code cursor} and wrap at the end, so they cover new ground instead of the
      * same prefix from the same corner.
      */
-    record ScanCoverage(long volume, long cursor, long scannedTotal, long scannedSinceLastFind) {
+    record ScanCoverage(long volume, long cursor, long scannedTotal, long scannedSinceLastFind,
+                        long unknownCells, long unknownSinceLastFind) {
 
         static ScanCoverage start(long volume) {
-            return new ScanCoverage(Math.max(0L, volume), 0L, 0L, 0L);
+            return new ScanCoverage(Math.max(0L, volume), 0L, 0L, 0L, 0L, 0L);
         }
 
         /** After a scan that looked at {@code scanned} blocks from the cursor; {@code found} resets the empty run. */
         ScanCoverage afterScan(long scanned, boolean found) {
+            return afterScan(scanned, found, 0L);
+        }
+
+        /** Count unavailable cells separately; they must not erase coverage of loaded cells. */
+        ScanCoverage afterScan(long scanned, boolean found, long unknown) {
             long n = Math.max(0L, scanned);
+            long missing = Math.min(n, Math.max(0L, unknown));
+            long known = n - missing;
             long next = volume <= 0L ? 0L : Math.floorMod(cursor + n, volume);
-            return new ScanCoverage(volume, next, scannedTotal + n, found ? 0L : scannedSinceLastFind + n);
+            return new ScanCoverage(volume, next, scannedTotal + known,
+                    found ? 0L : scannedSinceLastFind + known, unknownCells + missing,
+                    found ? 0L : unknownSinceLastFind + missing);
         }
 
         /** Targets are being worked: the region must be covered again with nothing new before an empty stop. */
         ScanCoverage afterFind() {
-            return scannedSinceLastFind == 0L ? this : new ScanCoverage(volume, cursor, scannedTotal, 0L);
+            return scannedSinceLastFind == 0L && unknownSinceLastFind == 0L ? this
+                    : new ScanCoverage(volume, cursor, scannedTotal, 0L, unknownCells, 0L);
         }
 
-        /** Every block of the region was looked at at least once this run. */
+        /** Full completion requires known reads; unknown visits still count toward the loop stop. */
         boolean fullyCovered() {
-            return scannedTotal >= volume;
+            return unknownCells == 0L && scannedTotal >= volume;
         }
 
         /** Every block was looked at at least once since the last target turned up. */
         boolean coveredSinceLastFind() {
-            return scannedSinceLastFind >= volume;
+            return scannedSinceLastFind + unknownSinceLastFind >= volume;
         }
 
         /** Share of the region scanned this run, 0..1. */
         double fraction() {
-            if (volume <= 0L) {
+            long readableVolume = volume - unknownCells;
+            if (readableVolume <= 0L) {
                 return 1.0D;
             }
-            return Math.min(1.0D, scannedTotal / (double) volume);
+            return Math.min(1.0D, scannedTotal / (double) readableVolume);
         }
     }
 

@@ -4,7 +4,14 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.289) — next session starts here
+## Session Handoff 2026-10-20 (1.1.290) — next session starts here
+
+**State:** main = origin/main @ 1.1.290. Suite 3458 green. Deployed to Nirn. 1.1.290 = backlog 168, 184 and the 1.1.289 review leftovers (moveTo teleport and snapTo writes on the server thread, death during the resume wait prompts "continue?") (Codex; Fable review, fix wave, follow-up). The threading batch from the triage is now done except 210 (wrong as written). Deferred: `sortByVisibility` in cleanup is off on workers (LOS ranking of fast targets dropped); `verifyBeehives` reads blocks under `LOCK` from a worker (pre-existing deadlock risk if a server-thread caller contends); a walk that hit a >750 ms server stall on its snap now replans once, then reports blocked.
+
+**Pending sandbox check:** see the 1.1.286-1.1.289 lists below, plus:
+- 1.1.290: woodcut cleanup at the edge of loaded terrain finishes (no deadline burn) and says it couldn't check everything; logs next to a broken bee nest get cut again; a full-pack bot gets aid while chaining idle hobbies but not during a commanded job; a teleport-fallback walk and segment snaps show no rubber-band.
+
+## Session Handoff 2026-10-20 (1.1.289) — superseded
 
 **State:** main = origin/main @ 1.1.289. Suite 3440 green. Deployed to Nirn. 1.1.289 = backlog 146 (dead escapeStairs chain deleted), 138, 144, 179 (Codex; Fable review; fix wave by a Claude agent while Codex was at its usage limit). **Still open from this batch, give to Codex next:** 168 (woodcut cleanup region scan off-thread: Codex drafted `/private/tmp/frens-cleanup-scan.patch` outside the repo, not applied) and 184 (mutual aid drops recipient items while its task runs: guard on TaskService active task, server thread). Deferred: `player.teleport` before the rescue in `MovementService.moveTo` (~:843) and the `refreshPositionAndAngles`/`setVelocity` in `snapTo` still run on the worker; `runOnServerThread` (`moveForward` etc.) still uses the no-cancel path; a death during the ≤30 s resume wait drops the job without a "continue?" prompt; a 750 ms tool-swap timeout mines with the previous tool.
 
@@ -259,7 +266,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 
 ### Woodcut and mining
 - [x] "mounted leaf clearing still instant" (1.1.234 handoff; deferred again in 1.1.238. 1.1.267 M3 fixed the shears, not the speed) — ✅ 1.1.286 77df45d2 + 4f20d03f
-- [ ] "woodcut cleanup async scan off-thread" (1.1.266 B bounded the scan, it still runs off-thread; 1.1.234 handoff, 2026-10-14)
+- [x] "woodcut cleanup async scan off-thread" (1.1.266 B bounded the scan, it still runs off-thread; 1.1.234 handoff, 2026-10-14) — ✅ 1.1.290
 - [x] "cleanup hand fallback slot 0" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.282 2b9de28c
 - [ ] "woodcut surface-staging cost." (1.1.229 handoff, 2026-10-13)
 - [x] "weapons+food-only inventory mining thrash (pre-existing)" (1.1.229 handoff, 2026-10-13) — ✅ 1.1.273 3d01ec5a (RepollPolicy) + 1.1.274 e4f77737 (cliff-branch loadout); sandbox PASS FIELD_0_6AI_SANDBOX:92
@@ -275,7 +282,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "A server-thread craft with a full inventory: `distributeOutput` / `craftWithPlanks` / `ensurePlanksFromLogs` → `offloadCheapItemsToNearbyChest` → deposit walk or `placeChestNearBot`. Same fix shape; needs its own scope." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 + 5eb24b38 (sandbox 6bq PASS)
 - [x] "`FoodConsumptionConfirmationService.tryHandleConfirmation` has no caller" (was to ride 1.1.225's yes/no router, which did not ship; 1.1.223 handoff, 2026-09-25) — ✅ 1.1.278 410bd6d8 (sandbox 6bp PASS)
 - [x] "Defensive-aid tick freeze (`BotMutualAidService:558`)" ("a 1.6–2.4 s tick freeze when a hostile is near an ally. Needs a one-impulse or worker design."; 1.1.223 handoff, = 1.1.222 deferral 3, 2026-09-25) — ✅ 1.1.278 fdc7690a (sandbox 6bp PASS)
-- [ ] "The MutualAid recipient's inventory is mutated from the donor's tick while its own skill worker may run (pre-existing)." (1.1.222 handoff, 2026-09-25)
+- [x] "The MutualAid recipient's inventory is mutated from the donor's tick while its own skill worker may run (pre-existing)." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.290
 - [x] "`dropCheapStackForSpace` drops the LARGEST stack when nothing is cheap, and the dropped stack can be re-picked after 2 s." ("Needs a cheap-only mode or a longer pickup delay"; 1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 (restated: aid make-room never drops valuables; sandbox 6bq PASS)
 - [x] "A flower keeps targeting a full preferred recipient (cosmetic)." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.283 003fd626
 - [ ] "the per-hobby backoff state is written for hunt and collect_dirt but read only by woodcut — ready if a later item gates `pickHobby` on tool availability." (1.1.216 handoff, 2026-09-07) — 1.1.288: both idle pickers now read it (cook and hangout never record attempts; the axe-bearer woodcut bypass at IdleFallbackGatePolicy:38 remains)

@@ -154,6 +154,10 @@ public final class BotBeehiveRegistryService {
     }
 
     public static void registerBeehive(ServerWorld world, BlockPos pos) {
+        registerBeehive(world, pos, null);
+    }
+
+    private static void registerBeehive(ServerWorld world, BlockPos pos, ChunkBlockReader reader) {
         if (world == null || pos == null) {
             return;
         }
@@ -161,7 +165,7 @@ public final class BotBeehiveRegistryService {
         if (server == null) {
             return;
         }
-        BlockState state = world.getBlockState(pos);
+        BlockState state = reader != null ? reader.state(pos) : world.getBlockState(pos);
         if (!isBeehiveBlock(state)) {
             return;
         }
@@ -211,7 +215,7 @@ public final class BotBeehiveRegistryService {
         }
         int h = Math.max(AUTO_DISCOVERY_HORIZONTAL_RADIUS, horizontalRadius);
         int v = Math.max(AUTO_DISCOVERY_VERTICAL_RADIUS, verticalRadius);
-        verifyBeehives(world);
+        verifyBeehives(world, reader, origin);
         int minX = origin.getX() - h, maxX = origin.getX() + h;
         int minY = origin.getY() - v, maxY = origin.getY() + v;
         int minZ = origin.getZ() - h, maxZ = origin.getZ() + h;
@@ -256,11 +260,15 @@ public final class BotBeehiveRegistryService {
                 .thenComparingInt(BlockPos::getY)
                 .thenComparingInt(BlockPos::getX));
         for (BlockPos pos : found) {
-            registerBeehive(world, pos);
+            registerBeehive(world, pos, reader);
         }
     }
 
     public static void verifyBeehives(ServerWorld world) {
+        verifyBeehives(world, null, null);
+    }
+
+    private static void verifyBeehives(ServerWorld world, ChunkBlockReader reader, BlockPos protectedPos) {
         if (world == null) {
             return;
         }
@@ -278,8 +286,20 @@ public final class BotBeehiveRegistryService {
                 if (record == null || record.destroyed) {
                     continue;
                 }
+                // Unrelated, far-away unloaded hives cannot make this target's scan incomplete.
+                if (protectedPos != null && !record.contains(protectedPos)) {
+                    continue;
+                }
                 BlockPos pos = record.toBlockPos();
-                if (!world.isChunkLoaded(pos) || !isBeehiveBlock(world.getBlockState(pos))) {
+                // A scan cannot invalidate remembered protection in a chunk it cannot read.
+                boolean missing;
+                if (reader != null) {
+                    BlockState state = reader.state(pos);
+                    missing = state != null && !isBeehiveBlock(state);
+                } else {
+                    missing = !world.isChunkLoaded(pos) || !isBeehiveBlock(world.getBlockState(pos));
+                }
+                if (missing) {
                     record.destroyed = true;
                     changed = true;
                 }
@@ -295,6 +315,11 @@ public final class BotBeehiveRegistryService {
 
     @Nullable
     public static BeehiveRecord findProtectingBeehive(ServerWorld world, BlockPos pos) {
+        return findProtectingBeehive(world, null, pos);
+    }
+
+    @Nullable
+    public static BeehiveRecord findProtectingBeehive(ServerWorld world, ChunkBlockReader reader, BlockPos pos) {
         if (world == null || pos == null) {
             return null;
         }
@@ -302,6 +327,9 @@ public final class BotBeehiveRegistryService {
         if (server == null) {
             return null;
         }
+        reader = reader != null ? reader : new ChunkBlockReader(world);
+        // Verify matching records before the cached hit can bypass discovery and its verification.
+        verifyBeehives(world, reader, pos);
         WorldData wd = worldData(server, world);
         synchronized (LOCK) {
             if (wd.hives != null) {
@@ -312,7 +340,8 @@ public final class BotBeehiveRegistryService {
                 }
             }
         }
-        discoverBeehivesNear(world, pos, AUTO_DISCOVERY_HORIZONTAL_RADIUS, AUTO_DISCOVERY_VERTICAL_RADIUS);
+        discoverBeehivesNear(world, reader, pos,
+                AUTO_DISCOVERY_HORIZONTAL_RADIUS, AUTO_DISCOVERY_VERTICAL_RADIUS);
         synchronized (LOCK) {
             if (wd.hives != null) {
                 for (BeehiveRecord record : wd.hives) {

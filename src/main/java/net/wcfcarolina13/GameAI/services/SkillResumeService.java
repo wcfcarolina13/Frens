@@ -35,7 +35,8 @@ public final class SkillResumeService {
     private static final java.util.concurrent.atomic.AtomicLong ARM_IDS = new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.atomic.AtomicLong EXECUTION_IDS = new java.util.concurrent.atomic.AtomicLong();
     private static final Set<UUID> RESUME_INTENT = ConcurrentHashMap.newKeySet();
-    private static final Map<UUID, Object> DEFERRED_RESUMES = new ConcurrentHashMap<>();
+    private record DeferredResume(PendingSkill pending, Object identity) {}
+    private static final Map<UUID, DeferredResume> DEFERRED_RESUMES = new ConcurrentHashMap<>();
     /** Bots whose last pending skill was paused for a protected-zone refusal — Resume should grant a 60s zone override. */
     private static final Set<UUID> ZONE_OVERRIDE_PENDING = ConcurrentHashMap.newKeySet();
     private static final long ZONE_OVERRIDE_DURATION_MS = 60_000L;
@@ -144,9 +145,10 @@ public final class SkillResumeService {
     }
 
     public static void handleDeath(ServerPlayerEntity bot) {
-        DEFERRED_RESUMES.remove(bot.getUuid());
+        DeferredResume deferred = DEFERRED_RESUMES.remove(bot.getUuid());
         clearSunriseResume(bot.getUuid());
-        PendingSkill pending = LAST_SKILL_BY_BOT.get(bot.getUuid());
+        PendingSkill pending = LAST_SKILL_BY_BOT.compute(bot.getUuid(), (uuid, current) ->
+                SurfaceRecoveryResumePolicy.pendingAfterDeath(current, deferred != null ? deferred.pending() : null));
         if (pending == null) {
             return;
         }
@@ -433,7 +435,7 @@ public final class SkillResumeService {
         notifyDecision(pending, false);
         boolean zoneOverride = ZONE_OVERRIDE_PENDING.remove(pending.botUuid());
         clearPending(pending.botUuid());
-        Object request = new Object();
+        DeferredResume request = new DeferredResume(pending, new Object());
         DEFERRED_RESUMES.put(pending.botUuid(), request);
         long startedAt = System.nanoTime();
         server.execute(() -> resumeAfterRecovery(pending, autoTriggered, source, server,
@@ -442,7 +444,7 @@ public final class SkillResumeService {
 
     private static void resumeAfterRecovery(PendingSkill pending, boolean autoTriggered,
                                             ServerCommandSource source, MinecraftServer server,
-                                            Object request, boolean zoneOverride, long startedAt,
+                                            DeferredResume request, boolean zoneOverride, long startedAt,
                                             boolean waitNoticeSent) {
         MinecraftServer currentServer = net.wcfcarolina13.Frens.serverInstance;
         if (TaskService.isServerStopping() || server.isStopped() || !server.isOnThread()

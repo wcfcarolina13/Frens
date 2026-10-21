@@ -1998,10 +1998,10 @@ public final class BotIdleHobbiesService {
      *
      * <p>{@code ActiveTaskInfo.name()} is the ticket name, which {@code TaskService.beginSkill}
      * builds as {@code "skill:" + skillName} — so the prefix has to come off before comparing.
-     * Ambient hobbies do not carry {@code Origin.AMBIENT} (they go through
-     * {@code SkillManager.runSkill} → {@code beginSkill}, not {@code beginAmbientSkill}), so the
-     * name is the only usable discriminator; a commander-issued {@code /bot woodcut} therefore also
-     * matches, which merely means the fallback waits out its remaining cooldown afterwards.
+     * Ambient hobbies carry {@code Origin.AMBIENT} via {@code _origin=ambient}, but that identifies
+     * any hobby, not this wooden fallback run. This check uses only the skill name, so a
+     * commander-issued {@code /bot woodcut} also matches, which merely means the fallback waits
+     * out its remaining cooldown afterwards.
      */
     private static boolean isWoodenFallbackOwnTask(TaskService.ActiveTaskInfo activeTask) {
         if (activeTask == null || activeTask.name() == null) {

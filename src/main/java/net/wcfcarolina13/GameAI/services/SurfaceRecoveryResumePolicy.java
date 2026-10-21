@@ -7,6 +7,10 @@ public final class SurfaceRecoveryResumePolicy {
 
     public enum Action { CANCEL, WAIT, RESUME, RESUME_AFTER_TIMEOUT }
 
+    public static <T> T pendingAfterDeath(T currentRecord, T deferredRecord) {
+        return currentRecord != null ? currentRecord : deferredRecord;
+    }
+
     public static Action action(boolean currentRequest, boolean botAvailable,
                                 boolean recoveryActive, long elapsedMs) {
         if (!currentRequest || !botAvailable) {

@@ -826,24 +826,24 @@ public final class MovementService {
             return new MovementResult(false, mode, player.getBlockPos(), label + ": aborted");
         }
 
-        ServerWorld world = getWorld(player);
-        BlockPos safe = findNearbyStandable(world, destination, 2, 2);
-        if (safe == null) safe = destination;
-        player.teleport(world, safe.getX() + 0.5, safe.getY(), safe.getZ() + 0.5, java.util.Set.of(), player.getYaw(), player.getPitch(), true);
-        // Post-arrival stability: if the teleport landed the bot inside a wall
-        // (findNearbyStandable returned null and we fell back to the raw
-        // destination), trigger the burial rescue immediately. Vanilla's
-        // own isInsideWall() is the source of truth here — no reinventing
-        // collision logic. Without this, the bot would have to wait for the
-        // next BotRescueService tick and could take suffocation damage in the
-        // meantime.
-        if (player.isInsideWall()) {
-            LOGGER.warn("Movement teleport landed {} inside a wall at {} — triggering immediate rescue",
-                    player.getName().getString(), safe.toShortString());
-            BotActions.callOnServerThread(player, () -> BotRescueService.rescueFromBurial(player), 750L, false);
-        }
-        boolean success = true;
-        String rawResult = "Teleported successfully";
+        boolean success = BotActions.callOnServerThread(player, MovementAbortPolicy.guard(() -> {
+            if (abortRequested(player)) {
+                return false;
+            }
+            ServerWorld world = getWorld(player);
+            BlockPos safe = findNearbyStandable(world, destination, 2, 2);
+            if (safe == null) safe = destination;
+            player.teleport(world, safe.getX() + 0.5, safe.getY(), safe.getZ() + 0.5,
+                    java.util.Set.of(), player.getYaw(), player.getPitch(), true);
+            // Check and rescue in the same server action so a failed hop cannot rescue an unmoved bot.
+            if (player.isInsideWall()) {
+                LOGGER.warn("Movement teleport landed {} inside a wall at {} — triggering immediate rescue",
+                        player.getName().getString(), safe.toShortString());
+                BotRescueService.rescueFromBurial(player);
+            }
+            return true;
+        }, false), 750L, false);
+        String rawResult = success ? "Teleported successfully" : "Teleport failed or aborted";
 
         if (success) {
             BlockPos post = player.getBlockPos();
@@ -2440,8 +2440,8 @@ public final class MovementService {
         // never snap through walls/obstacles.
         if (allowSnap && remaining <= 2.2D && SkillPreferences.teleportDuringSkills(player)) {
             LOGGER.warn("walkSegment snap forward to {}", segment.end());
-            snapTo(player, segment.end());
-            return new SegmentResult(true, true);
+            boolean snapped = snapTo(player, segment.end());
+            return new SegmentResult(snapped, snapped);
         }
         return new SegmentResult(false, false);
     }
@@ -5072,24 +5072,26 @@ public final class MovementService {
         return true;
     }
 
-    private static void snapTo(ServerPlayerEntity player, BlockPos target) {
+    private static boolean snapTo(ServerPlayerEntity player, BlockPos target) {
         if (player == null || target == null) {
-            return;
+            return false;
         }
-        Vec3d center = centerOf(target);
-        player.refreshPositionAndAngles(center.x, center.y, center.z, player.getYaw(), player.getPitch());
-        player.setVelocity(Vec3d.ZERO);
-        player.velocityDirty = true;
-        LOGGER.info("Snap repositioned {} to {}", player.getName().getString(), target.toShortString());
-        // Post-arrival stability: snapTo doesn't validate the destination cell,
-        // so if the snap lands the bot in a wall, hand off to rescue right
-        // away. Same reasoning as the teleport-fallback site above — using
-        // vanilla's isInsideWall() instead of duplicating collision logic.
-        if (player.isInsideWall()) {
-            LOGGER.warn("Snap landed {} inside a wall at {} — triggering immediate rescue",
-                    player.getName().getString(), target.toShortString());
-            BotActions.callOnServerThread(player, () -> BotRescueService.rescueFromBurial(player), 750L, false);
-        }
+        return BotActions.callOnServerThread(player, MovementAbortPolicy.guard(() -> {
+            if (abortRequested(player)) {
+                return false;
+            }
+            Vec3d center = centerOf(target);
+            player.refreshPositionAndAngles(center.x, center.y, center.z, player.getYaw(), player.getPitch());
+            player.setVelocity(Vec3d.ZERO);
+            player.velocityDirty = true;
+            LOGGER.info("Snap repositioned {} to {}", player.getName().getString(), target.toShortString());
+            if (player.isInsideWall()) {
+                LOGGER.warn("Snap landed {} inside a wall at {} — triggering immediate rescue",
+                        player.getName().getString(), target.toShortString());
+                BotRescueService.rescueFromBurial(player);
+            }
+            return true;
+        }, false), 750L, false);
     }
 
     private static boolean inputStepToward(ServerPlayerEntity player,

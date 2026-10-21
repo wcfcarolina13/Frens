@@ -3,10 +3,42 @@ package net.wcfcarolina13.GameAI.services;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class MovementAbortPolicyTest {
+    @Test
+    void queuedMutationRetainsTicketCancellationAndReturnsItsFallback() throws InterruptedException {
+        AtomicBoolean cancelled = new AtomicBoolean();
+        AtomicBoolean mutated = new AtomicBoolean();
+        AtomicReference<Boolean> result = new AtomicReference<>();
+        Supplier<Boolean> mutation = MovementAbortPolicy.withAbort(cancelled::get,
+                () -> MovementAbortPolicy.guard(() -> {
+                    mutated.set(true);
+                    return true;
+                }, false));
+        cancelled.set(true);
+        Thread server = new Thread(() -> result.set(mutation.get()));
+        server.start();
+        server.join();
+        assertEquals(Boolean.FALSE, result.get());
+        assertFalse(mutated.get());
+    }
+
+    @Test
+    void activeQueuedMutationReturnsItsResultAfterTheWorkerScopeEnds() {
+        Supplier<String> mutation = MovementAbortPolicy.withAbort(() -> false,
+                () -> MovementAbortPolicy.guard(() -> "moved", "cancelled"));
+        assertEquals("moved", mutation.get());
+    }
+
+    @Test
+    void unscopedMutationRunsNormally() {
+        assertEquals("moved", MovementAbortPolicy.guard(() -> "moved", "cancelled").get());
+    }
+
     @Test
     void replacedTicketStillAbortsAfterBotLatchClears() {
         AtomicBoolean ticketReplaced = new AtomicBoolean();

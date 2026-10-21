@@ -4,8 +4,27 @@ import org.junit.jupiter.api.Test;
 
 import static net.wcfcarolina13.GameAI.services.SurfaceRecoveryResumePolicy.Action.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class SurfaceRecoveryResumePolicyTest {
+    @Test
+    void deathDuringRecoveryRestoresTheDeferredJobForTheContinuePrompt() {
+        Object deferredJob = new Object();
+        assertSame(deferredJob, SurfaceRecoveryResumePolicy.pendingAfterDeath(null, deferredJob));
+    }
+
+    @Test
+    void deathKeepsANewerRecordedJobInsteadOfRestoringTheOldDeferredJob() {
+        Object currentJob = new Object();
+        assertSame(currentJob, SurfaceRecoveryResumePolicy.pendingAfterDeath(currentJob, new Object()));
+    }
+
+    @Test
+    void cancelledRecoveryDoesNotRestoreAJobOnDeath() {
+        assertNull(SurfaceRecoveryResumePolicy.pendingAfterDeath(null, null));
+    }
+
     @Test
     void resumesImmediatelyWithoutRecovery() {
         assertEquals(RESUME, SurfaceRecoveryResumePolicy.action(true, true, false, 0L));

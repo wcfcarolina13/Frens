@@ -44,6 +44,7 @@ public final class ChunkBlockReader {
     private final BlockPos.Mutable cursor = new BlockPos.Mutable();
     private long lastChunkKey = Long.MIN_VALUE;
     private WorldChunk lastChunk;
+    private long unloadedReadCount;
 
     public ChunkBlockReader(ServerWorld world) {
         this.world = world;
@@ -61,6 +62,7 @@ public final class ChunkBlockReader {
     public WorldChunk chunk(int chunkX, int chunkZ) {
         long key = ChunkPos.toLong(chunkX, chunkZ);
         if (key == lastChunkKey) {
+            if (lastChunk == null) unloadedReadCount++;
             return lastChunk;
         }
         WorldChunk c;
@@ -72,7 +74,13 @@ public final class ChunkBlockReader {
         }
         lastChunkKey = key;
         lastChunk = c;
+        if (c == null) unloadedReadCount++;
         return c;
+    }
+
+    /** Counts missing-chunk reads, including cached misses; out-of-height cells do not count. */
+    public long unloadedReadCount() {
+        return unloadedReadCount;
     }
 
     private WorldChunk loadChunk(int cx, int cz) {

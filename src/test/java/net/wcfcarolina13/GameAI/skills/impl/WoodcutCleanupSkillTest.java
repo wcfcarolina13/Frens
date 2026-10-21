@@ -497,7 +497,7 @@ class WoodcutCleanupSkillTest {
         String body = detector.substring(detector.indexOf("static boolean isStandingTreeForWoodcut(ChunkBlockReader reader, BlockPos logPos) {"));
         body = body.substring(0, body.indexOf("\n    }\n"));
         assertTrue(body.contains("resolveStandingTreeBasic(reader, logPos, TreeDetectionMode.STRICT_STANDING)"), body);
-        assertTrue(body.contains("!getWoodcutProtectionDecision(world, basic.get().base(), Math.max(4, basic.get().height())).blocked()"), body);
+        assertTrue(body.contains("!getWoodcutProtectionDecision(reader.world(), basic.get().base(), Math.max(4, basic.get().height())).blocked()"), body);
         assertFalse(body.contains("buildTreeTarget"), body);
         String memo = detector.substring(detector.indexOf("public static final class CleanupScanMemo {"));
         memo = memo.substring(0, memo.indexOf("\n    }\n"));

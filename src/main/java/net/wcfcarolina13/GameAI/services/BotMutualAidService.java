@@ -1586,13 +1586,23 @@ public final class BotMutualAidService {
         if (recipient == null || recipient.getCommandSource() == null) {
             return false;
         }
+        return BotActions.callOnServerThread(recipient,
+                () -> ensureInventorySpaceForAidRecipientOnServer(recipient, kind, nowTick), 750L, false);
+    }
+
+    private static boolean ensureInventorySpaceForAidRecipientOnServer(ServerPlayerEntity recipient, AidKind kind, long nowTick) {
+        if (recipient.isRemoved() || !recipient.isAlive() || TaskService.isServerStopping()) {
+            return false;
+        }
         MutualAidMakeRoomPolicy.Kind roomKind = switch (kind) {
             case FOOD -> MutualAidMakeRoomPolicy.Kind.FOOD_SHARE;
             case GEAR -> MutualAidMakeRoomPolicy.Kind.GEAR;
             case FLOWER -> MutualAidMakeRoomPolicy.Kind.FLOWER;
         };
-        MutualAidMakeRoomPolicy.Decision room = MutualAidMakeRoomPolicy.decide(
-                roomKind, recipient.getInventory().getEmptySlot() != -1);
+        TaskService.ActiveTaskInfo active = TaskService.getActiveTaskInfo(recipient.getUuid()).orElse(null);
+        MutualAidMakeRoomPolicy.Decision room = MutualAidMakeRoomPolicy.decideForRecipient(
+                roomKind, recipient.getInventory().getEmptySlot() != -1,
+                active != null, active != null && active.origin() == TaskService.Origin.AMBIENT);
         if (room != MutualAidMakeRoomPolicy.Decision.DROP) {
             return room == MutualAidMakeRoomPolicy.Decision.NOT_NEEDED;
         }

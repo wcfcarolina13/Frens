@@ -450,10 +450,9 @@ public final class TreeDetector {
         if (reader == null) {
             return false;
         }
-        ServerWorld world = reader.world();
         Optional<BasicTreeInfo> basic = resolveStandingTreeBasic(reader, logPos, TreeDetectionMode.STRICT_STANDING);
         return basic.isPresent()
-                && !getWoodcutProtectionDecision(world, basic.get().base(), Math.max(4, basic.get().height())).blocked();
+                && !getWoodcutProtectionDecision(reader.world(), basic.get().base(), Math.max(4, basic.get().height())).blocked();
     }
 
     /**
@@ -755,6 +754,7 @@ public final class TreeDetector {
         if (world == null || pos == null) {
             return WOODCUT_ALLOWED;
         }
+        // Hive discovery covers a wider area than this log's classification reads.
         if (BotBeehiveRegistryService.findProtectingBeehive(world, pos) != null) {
             return new WoodcutProtectionDecision(true, "beehive");
         }

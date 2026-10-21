@@ -170,7 +170,8 @@ public final class WoodcutCleanupSkill implements Skill {
     private record CleanupTargetCollection(List<CleanupTarget> targets,
                                            WoodcutCleanupDiagnostics.CleanupScanStats stats,
                                            boolean complete,
-                                           long scanned) {
+                                           long scanned,
+                                           long unknownCells) {
     }
 
     private final class CleanupScanAccumulator {
@@ -197,14 +198,11 @@ public final class WoodcutCleanupSkill implements Skill {
             dispositions.putIfAbsent(key, disposition.kind());
         }
 
-        CleanupTargetCollection build(ServerPlayerEntity bot) {
-            return build(bot, true, 0L);
-        }
-
-        CleanupTargetCollection build(ServerPlayerEntity bot, boolean complete, long scanned) {
+        CleanupTargetCollection build(ServerPlayerEntity bot, boolean complete, long scanned,
+                                      boolean sortByVisibility, long unknownCells) {
             List<CleanupTarget> targets = new ArrayList<>(orderedTargets.values());
             targets.sort(Comparator.<CleanupTarget>comparingInt(t -> priorityFor(t.kind()))
-                    .thenComparingInt(t -> hasLineOfSight(bot, Vec3d.ofCenter(t.pos())) ? 0 : 1)
+                    .thenComparingInt(t -> sortByVisibility && hasLineOfSight(bot, Vec3d.ofCenter(t.pos())) ? 0 : 1)
                     .thenComparingDouble(t -> t.pos().getSquaredDistance(bot.getBlockPos()))
                     .thenComparing((a, b) -> Integer.compare(b.pos().getY(), a.pos().getY())));
 
@@ -234,7 +232,8 @@ public final class WoodcutCleanupSkill implements Skill {
                             rejectedGrounded,
                             summarizeReasons(protectedReasons)),
                     complete,
-                    scanned);
+                    scanned,
+                    unknownCells);
         }
 
         private String summarizeReasons(Map<String, Integer> reasons) {
@@ -400,7 +399,7 @@ public final class WoodcutCleanupSkill implements Skill {
                             }
                         }
                         boolean emptyMerge = added == 0 && cachedTargets.isEmpty();
-                        coverage = coverage.afterScan(fullScan.scanned(), !emptyMerge);
+                        coverage = coverage.afterScan(fullScan.scanned(), !emptyMerge, fullScan.unknownCells());
                         LOGGER.info("woodcut_cleanup async scan merged: {} new targets, {} total, complete={} budgetMs={} scanned={} coverage={} sinceLastFind={}/{}",
                                 added, cachedTargets.size(), fullScan.complete(),
                                 WoodcutCleanupDiagnostics.ASYNC_SCAN_BUDGET_MS, fullScan.scanned(),
@@ -458,7 +457,7 @@ public final class WoodcutCleanupSkill implements Skill {
                     LOGGER.info("woodcut_cleanup fast scan: rememberedTargets={} overheadTargets={} attemptedTargets={} minedLogs={}",
                             rememberedTargets, overheadTargets, attemptedTargets, logsMined);
 
-                    // Launch full region scan in background (thread-safe: read-only world access).
+                    // Scan through a per-worker chunk reader, as in the main woodcut scan.
                     // Only once the last one merged: a finished scan not merged yet would be dropped,
                     // and the next scan must start at the cursor the last one left.
                     if (asyncScan == null) {
@@ -897,7 +896,7 @@ public final class WoodcutCleanupSkill implements Skill {
         );
         WoodcutCleanupDiagnostics.CleanupScanStats remainingStats = remainingCollection.stats();
         List<CleanupTarget> remainingVisibleLogs = remainingCollection.targets();
-        coverage = coverage.afterScan(remainingCollection.scanned(), !remainingVisibleLogs.isEmpty());
+        coverage = coverage.afterScan(remainingCollection.scanned(), !remainingVisibleLogs.isEmpty(), remainingCollection.unknownCells());
         int remainingOverhead = (int) remainingVisibleLogs.stream()
                 .filter(t -> t.kind() == CleanupTargetKind.OVERHEAD_SUSPENDED)
                 .count();
@@ -912,7 +911,7 @@ public final class WoodcutCleanupSkill implements Skill {
         // Nothing removed and part of the region never scanned: not a verdict that nothing is left.
         boolean uncoveredEmpty = WoodcutCleanupDiagnostics.isUncoveredNothingToDo(
                 scanSuccess, logsMined, scaffoldMined, fullyCovered);
-        boolean success = scanSuccess && !uncoveredEmpty;
+        boolean success = scanSuccess && !uncoveredEmpty && coverage.unknownCells() == 0L;
         String summary = WoodcutCleanupDiagnostics.buildCompletionSummary(
                 success,
                 logsMined,
@@ -925,11 +924,11 @@ public final class WoodcutCleanupSkill implements Skill {
                 remainingVisibleLogs.size(),
                 remainingStats
         );
-        LOGGER.info("woodcut_cleanup completed: {} [{} remainingRemembered={} remainingOverhead={} finalScanComplete={} coverage={} scanned={}/{} uncoveredEmpty={}]",
+        LOGGER.info("woodcut_cleanup completed: {} [{} remainingRemembered={} remainingOverhead={} finalScanComplete={} coverage={} scanned={}/{} unknownCells={} uncoveredEmpty={}]",
                 summary, remainingStats.formatCounts(), remainingRemembered, remainingOverhead,
                 remainingCollection.complete(),
                 String.format(Locale.ROOT, "%.2f", coverage.fraction()),
-                coverage.scannedTotal(), coverage.volume(), uncoveredEmpty);
+                coverage.scannedTotal(), coverage.volume(), coverage.unknownCells(), uncoveredEmpty);
         boolean blockedOnlyByProtection = WoodcutCleanupDiagnostics.isBlockedOnlyByProtection(
                 scanSuccess, remainingRemembered, remainingOverhead, remainingVisibleLogs.size(), remainingStats);
         String playerLine = WoodcutCleanupDiagnostics.playerLine(scanSuccess, logsMined, scaffoldMined, blockedOnlyByProtection, fullyCovered);
@@ -1008,6 +1007,7 @@ public final class WoodcutCleanupSkill implements Skill {
         if (world == null || floaterMemory == null || floaterMemory.isEmpty()) {
             return 0;
         }
+        ChunkBlockReader reader = new ChunkBlockReader(world);
         int remaining = 0;
         for (Long packed : new ArrayList<>(floaterMemory)) {
             if (packed == null) {
@@ -1017,7 +1017,8 @@ public final class WoodcutCleanupSkill implements Skill {
             if (!isWithinRegion(pos, min, max)) {
                 continue;
             }
-            if (world.getBlockState(pos).isIn(BlockTags.LOGS)) {
+            BlockState state = reader.state(pos);
+            if (state == null || state.isIn(BlockTags.LOGS)) {
                 remaining++;
             } else {
                 floaterMemory.remove(packed);
@@ -1037,11 +1038,12 @@ public final class WoodcutCleanupSkill implements Skill {
                                                        BlockPos max,
                                                        Map<Long, Long> failedCooldowns,
                                                        Set<Long> floaterMemory) {
+        ChunkBlockReader reader = new ChunkBlockReader(world);
         CleanupScanAccumulator accumulator = new CleanupScanAccumulator();
         pruneExpiredCooldowns(failedCooldowns);
-        collectRememberedCleanupTargets(world, min, max, failedCooldowns, floaterMemory, accumulator);
-        collectImmediateOverheadCleanupTargets(world, bot, min, max, failedCooldowns, accumulator);
-        return accumulator.build(bot);
+        collectRememberedCleanupTargets(reader, min, max, failedCooldowns, floaterMemory, accumulator);
+        collectImmediateOverheadCleanupTargets(reader, bot, min, max, failedCooldowns, accumulator);
+        return accumulator.build(bot, true, 0L, world.getServer().isOnThread(), 0L);
     }
 
     private CleanupTargetCollection collectCleanupTargets(ServerWorld world,
@@ -1055,11 +1057,12 @@ public final class WoodcutCleanupSkill implements Skill {
                                                           Set<Long> rejectionCache,
                                                           long startIndex,
                                                           TreeDetector.CleanupScanMemo componentMemo) {
+        ChunkBlockReader reader = new ChunkBlockReader(world);
         CleanupScanAccumulator accumulator = new CleanupScanAccumulator();
         pruneExpiredCooldowns(failedCooldowns);
 
-        collectRememberedCleanupTargets(world, min, max, failedCooldowns, floaterMemory, accumulator);
-        collectImmediateOverheadCleanupTargets(world, bot, min, max, failedCooldowns, accumulator);
+        collectRememberedCleanupTargets(reader, min, max, failedCooldowns, floaterMemory, accumulator);
+        collectImmediateOverheadCleanupTargets(reader, bot, min, max, failedCooldowns, accumulator);
 
         // Walk the box from startIndex and wrap, so a scan cut short by its deadline is resumed by
         // the next one instead of repeating the same prefix from the same corner.
@@ -1071,6 +1074,7 @@ public final class WoodcutCleanupSkill implements Skill {
         int sizeZ = Math.abs(max.getZ() - min.getZ()) + 1;
         long volume = (long) sizeX * sizeY * sizeZ;
         long scanned = 0L;
+        long unknownCells = 0L;
         boolean complete = true;
         for (long i = 0L; i < volume; i++) {
             if (i > 0L && (i & 0x7FL) == 0L) {
@@ -1086,7 +1090,12 @@ public final class WoodcutCleanupSkill implements Skill {
             if (accumulator.orderedTargets.containsKey(packed)) {
                 continue;
             }
-            if (!world.getBlockState(pos).isIn(BlockTags.LOGS)) {
+            BlockState state = reader.state(pos);
+            if (state == null) {
+                unknownCells++;
+                continue;
+            }
+            if (!state.isIn(BlockTags.LOGS)) {
                 continue;
             }
             if (isCoolingDown(pos, failedCooldowns)) {
@@ -1098,7 +1107,14 @@ public final class WoodcutCleanupSkill implements Skill {
                 continue;
             }
             CleanupTarget target = new CleanupTarget(pos.toImmutable(), CleanupTargetKind.GENERIC_FLOATING);
-            TreeDetector.CleanupLogDisposition disposition = TreeDetector.classifyCleanupLog(world, pos, false, componentMemo);
+            long readsBefore = reader.unloadedReadCount();
+            TreeDetector.CleanupLogDisposition disposition = TreeDetector.classifyCleanupLog(reader, pos, false, componentMemo);
+            if (!WoodcutCleanupReadPolicy.readsKnown(readsBefore, reader.unloadedReadCount())) {
+                // The classifier may have memoised an incomplete component or standing-tree verdict.
+                unknownCells++;
+                componentMemo.clear();
+                continue;
+            }
             if (!disposition.actionable()) {
                 accumulator.record(pos, null, disposition);
                 rejectionCache.add(packed);
@@ -1106,16 +1122,17 @@ public final class WoodcutCleanupSkill implements Skill {
             }
             accumulator.record(pos, target, disposition);
         }
-        return accumulator.build(bot, complete, scanned);
+        // Visibility ranking raycasts the world; region scans keep kind/distance ordering instead.
+        return accumulator.build(bot, complete, scanned, false, unknownCells);
     }
 
-    private void collectRememberedCleanupTargets(ServerWorld world,
+    private void collectRememberedCleanupTargets(ChunkBlockReader reader,
                                                  BlockPos min,
                                                  BlockPos max,
                                                  Map<Long, Long> failedCooldowns,
                                                  Set<Long> floaterMemory,
                                                  CleanupScanAccumulator accumulator) {
-        if (world == null || floaterMemory == null || floaterMemory.isEmpty()) {
+        if (reader == null || floaterMemory == null || floaterMemory.isEmpty()) {
             return;
         }
         for (Long packed : new ArrayList<>(floaterMemory)) {
@@ -1126,26 +1143,34 @@ public final class WoodcutCleanupSkill implements Skill {
             if (!isWithinRegion(pos, min, max)) {
                 continue;
             }
-            if (!world.getBlockState(pos).isIn(BlockTags.LOGS)) {
+            BlockState state = reader.state(pos);
+            if (WoodcutCleanupReadPolicy.shouldForgetRemembered(state != null, state != null && state.isIn(BlockTags.LOGS))) {
                 floaterMemory.remove(packed);
+            }
+            if (state == null || !state.isIn(BlockTags.LOGS)) {
                 continue;
             }
             if (isCoolingDown(pos, failedCooldowns)) {
                 continue;
             }
             CleanupTarget target = new CleanupTarget(pos.toImmutable(), CleanupTargetKind.REMEMBERED_LEFTOVER);
-            TreeDetector.CleanupLogDisposition disposition = classifyCleanupTarget(world, target);
+            long readsBefore = reader.unloadedReadCount();
+            TreeDetector.CleanupLogDisposition disposition = TreeDetector.classifyCleanupLog(
+                    reader, pos, true, null);
+            if (!WoodcutCleanupReadPolicy.readsKnown(readsBefore, reader.unloadedReadCount())) {
+                continue;
+            }
             accumulator.record(pos, disposition.actionable() ? target : null, disposition);
         }
     }
 
-    private void collectImmediateOverheadCleanupTargets(ServerWorld world,
+    private void collectImmediateOverheadCleanupTargets(ChunkBlockReader reader,
                                                         ServerPlayerEntity bot,
                                                         BlockPos min,
                                                         BlockPos max,
                                                         Map<Long, Long> failedCooldowns,
                                                         CleanupScanAccumulator accumulator) {
-        if (world == null || bot == null) {
+        if (reader == null || bot == null) {
             return;
         }
         BlockPos origin = bot.getBlockPos();
@@ -1160,14 +1185,20 @@ public final class WoodcutCleanupSkill implements Skill {
                 Math.min(max.getZ(), origin.getZ() + 4)
         );
         for (BlockPos pos : BlockPos.iterate(scanMin, scanMax)) {
-            if (!world.getBlockState(pos).isIn(BlockTags.LOGS)) {
+            BlockState state = reader.state(pos);
+            if (state == null || !state.isIn(BlockTags.LOGS)) {
                 continue;
             }
             if (isCoolingDown(pos, failedCooldowns)) {
                 continue;
             }
             CleanupTarget target = new CleanupTarget(pos.toImmutable(), CleanupTargetKind.OVERHEAD_SUSPENDED);
-            TreeDetector.CleanupLogDisposition disposition = classifyCleanupTarget(world, target);
+            long readsBefore = reader.unloadedReadCount();
+            TreeDetector.CleanupLogDisposition disposition = TreeDetector.classifyCleanupLog(
+                    reader, pos, false, null);
+            if (!WoodcutCleanupReadPolicy.readsKnown(readsBefore, reader.unloadedReadCount())) {
+                continue;
+            }
             if (!disposition.actionable()
                     || disposition.kind() != TreeDetector.CleanupLogDispositionKind.SUSPENDED_FRAGMENT) {
                 accumulator.record(pos, null, disposition);
@@ -1175,7 +1206,11 @@ public final class WoodcutCleanupSkill implements Skill {
             }
             // Reject branches of living trees — the BFS classification can miss offset
             // canopy branches, so verify the log isn't connected to a soil-grounded trunk.
-            if (isConnectedToGroundedTree(world, pos, 12)) {
+            boolean grounded = isConnectedToGroundedTree(reader, pos, 12);
+            if (!WoodcutCleanupReadPolicy.readsKnown(readsBefore, reader.unloadedReadCount())) {
+                continue;
+            }
+            if (grounded) {
                 accumulator.record(pos, null, disposition);
                 continue;
             }
@@ -1190,7 +1225,12 @@ public final class WoodcutCleanupSkill implements Skill {
      * sitting on stone/cobblestone/air is scaffold debris or a genuine floater.
      */
     private static boolean isConnectedToGroundedTree(ServerWorld world, BlockPos start, int maxTraversal) {
-        if (world == null || start == null || !world.getBlockState(start).isIn(BlockTags.LOGS)) {
+        return world != null && isConnectedToGroundedTree(new ChunkBlockReader(world), start, maxTraversal);
+    }
+
+    private static boolean isConnectedToGroundedTree(ChunkBlockReader reader, BlockPos start, int maxTraversal) {
+        BlockState initial = start == null ? null : reader.state(start);
+        if (initial == null || !initial.isIn(BlockTags.LOGS)) {
             return false;
         }
         Deque<BlockPos> queue = new ArrayDeque<>();
@@ -1200,8 +1240,8 @@ public final class WoodcutCleanupSkill implements Skill {
         while (!queue.isEmpty() && visited.size() <= maxTraversal) {
             BlockPos pos = queue.poll();
             // Check if this log is sitting on valid soil.
-            BlockState below = world.getBlockState(pos.down());
-            if (!below.isIn(BlockTags.LOGS) && TreeDetector.isValidSoil(below)) {
+            BlockState below = reader.state(pos.down());
+            if (below != null && !below.isIn(BlockTags.LOGS) && TreeDetector.isValidSoil(below)) {
                 return true;
             }
             // Expand to adjacent log blocks.
@@ -1210,7 +1250,8 @@ public final class WoodcutCleanupSkill implements Skill {
                 if (visited.contains(nb.asLong())) {
                     continue;
                 }
-                if (world.getBlockState(nb).isIn(BlockTags.LOGS)) {
+                BlockState neighbor = reader.state(nb);
+                if (neighbor != null && neighbor.isIn(BlockTags.LOGS)) {
                     visited.add(nb.asLong());
                     queue.add(nb.toImmutable());
                 }
@@ -1223,15 +1264,15 @@ public final class WoodcutCleanupSkill implements Skill {
         if (world == null || target == null || target.pos() == null) {
             return new CleanupProtectionDecision(false, "none");
         }
-        TreeDetector.CleanupLogDisposition disposition = classifyCleanupTarget(world, target);
+        ChunkBlockReader reader = new ChunkBlockReader(world);
+        boolean remembered = target.kind() == CleanupTargetKind.REMEMBERED_LEFTOVER;
+        TreeDetector.CleanupLogDisposition disposition = TreeDetector.classifyCleanupLog(reader, target.pos(), remembered, null);
+        if (!WoodcutCleanupReadPolicy.readsKnown(0L, reader.unloadedReadCount())) {
+            return new CleanupProtectionDecision(true, "unloaded-chunk");
+        }
         return disposition.actionable()
                 ? new CleanupProtectionDecision(false, "none")
                 : new CleanupProtectionDecision(true, disposition.reason());
-    }
-
-    private TreeDetector.CleanupLogDisposition classifyCleanupTarget(ServerWorld world, CleanupTarget target) {
-        boolean remembered = target != null && target.kind() == CleanupTargetKind.REMEMBERED_LEFTOVER;
-        return TreeDetector.classifyCleanupLog(world, target != null ? target.pos() : null, remembered);
     }
 
     private int priorityFor(CleanupTargetKind kind) {

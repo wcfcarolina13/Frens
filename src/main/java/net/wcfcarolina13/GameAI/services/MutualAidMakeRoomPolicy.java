@@ -57,6 +57,13 @@ public final class MutualAidMakeRoomPolicy {
         return kind == Kind.FLOWER ? Decision.DECLINE : Decision.DROP;
     }
 
+    /** Commanded skills own their inventory; idle hobbies may make room for aid. */
+    public static Decision decideForRecipient(Kind kind, boolean hasEmptySlot,
+                                              boolean hasActiveTask, boolean activeIsAmbient) {
+        Decision decision = decide(kind, hasEmptySlot);
+        return decision == Decision.DROP && hasActiveTask && !activeIsAmbient ? Decision.DECLINE : decision;
+    }
+
     /**
      * Whether a make-room drop may be tried at {@code nowTick}.
      *

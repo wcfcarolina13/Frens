@@ -10,6 +10,31 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MutualAidMakeRoomPolicyTest {
+    @Test
+    void activeRecipientDefersGearDropUntilItsTaskFinishes() {
+        assertEquals(Decision.DECLINE, MutualAidMakeRoomPolicy.decideForRecipient(Kind.GEAR, false, true, false));
+        assertEquals(Decision.DROP, MutualAidMakeRoomPolicy.decideForRecipient(Kind.GEAR, false, false, false));
+    }
+
+    @Test
+    void activeRecipientCanAcceptAidThatNeedsNoDrop() {
+        assertEquals(Decision.NOT_NEEDED, MutualAidMakeRoomPolicy.decideForRecipient(Kind.GEAR, true, true, false));
+        assertEquals(Decision.NOT_NEEDED, MutualAidMakeRoomPolicy.decideForRecipient(Kind.FOOD_SHARE, false, true, false));
+        assertEquals(Decision.DECLINE, MutualAidMakeRoomPolicy.decideForRecipient(Kind.FLOWER, false, true, false));
+    }
+
+    @Test
+    void idleHobbyAllowsGearDropWhileACommandedSkillStillDefersIt() {
+        assertEquals(Decision.DROP, MutualAidMakeRoomPolicy.decideForRecipient(Kind.GEAR, false, true, true));
+        assertEquals(Decision.DECLINE, MutualAidMakeRoomPolicy.decideForRecipient(Kind.GEAR, false, true, false));
+    }
+
+    @Test
+    void idleHobbyDoesNotChangeFlowerOrFoodHandoffRules() {
+        assertEquals(Decision.DECLINE, MutualAidMakeRoomPolicy.decideForRecipient(Kind.FLOWER, false, true, true));
+        assertEquals(Decision.NOT_NEEDED, MutualAidMakeRoomPolicy.decideForRecipient(Kind.FOOD_SHARE, false, true, true));
+        assertEquals(Decision.NOT_NEEDED, MutualAidMakeRoomPolicy.decideForRecipient(Kind.GEAR, true, true, true));
+    }
 
     // ── decide ───────────────────────────────────────────────────────────────────────────────
 

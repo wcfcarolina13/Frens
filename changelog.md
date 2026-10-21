@@ -2,6 +2,20 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Woodcut cleanup scan reads chunks safely, mutual aid waits for a commanded job, teleport and snap on the server thread, broken bee nests stop protecting; 1.1.290 (2026-10-20)
+
+Codex build finishing the threading batch (backlog 168, 184) and the 1.1.289 review leftovers, with a Fable review, a fix wave and a follow-up.
+
+- **The woodcut cleanup scan no longer reads the live world from a worker** (backlog 168; `WoodcutCleanupReadPolicy`): it reads through `ChunkBlockReader`. A cell in an unloaded chunk is "unknown": never mined, its remembered entry kept, and its verdict not cached. Unknown cells count toward coverage, so the run still stops (review: one unloaded chunk had made it run to its deadline), but the result is reported as a partial scan, not "nothing left", and the completion log names `unknownCells`. The pre-mine recheck skips a target whose check touched an unloaded chunk. Beehive discovery uses its own reader, so a hive lookup near unloaded terrain no longer marks logs unknown.
+- **A broken bee nest stops protecting nearby logs** (follow-up): the registry verifies a hive record before using it as protection; before this, a remembered hive that a player had broken kept every log within 4 blocks off-limits for the life of the save.
+- **Mutual aid doesn't edit a bot's pack during its commanded job** (backlog 184): the recipient's make-room drop runs on the server thread and waits while the recipient runs a commanded task; idle hobbies (`Origin.AMBIENT`) don't block it.
+- **Teleport fallback and segment snaps run on the server thread** (1.1.289 deferral): `moveTo`'s teleport and `snapTo`'s position and velocity writes share the 750 ms server hop with the burial rescue. A snap that times out leaves the segment incomplete, so the walker replans once instead of planning from a spot it never reached.
+- **A death during the resume wait asks "continue?"** (1.1.289 deferral): the job is kept during the surface-recovery wait and restored on death.
+- **Tests** 3440 → 3458.
+- **Deferred:** cleanup no longer ranks fast targets by line of sight (that was an off-thread raycast); `verifyBeehives` still reads blocks under its lock from a worker (pre-existing); a walk that hits a >750 ms server stall now replans once, then reports blocked.
+
+**Field checks:** SANDBOX
+
 ## Buried-bot rescue and tool swaps on the server thread, resume waits for surface recovery, dead stair-escape code removed; 1.1.289 (2026-10-20)
 
 Codex threading batch from the 2026-10-19 backlog triage (rows 146, 138, 144, 179), with a Fable review and a fix wave. Rows 168 and 184 were not finished (Codex usage limit) and stay open.
