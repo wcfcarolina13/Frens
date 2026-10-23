@@ -444,3 +444,32 @@ From the 1.1.291 release (2026-10-23):
   - Claude watches for: a permission refusal for the guest and none for the host.
   - Pass when: the guest is refused and the host still has every host action.
   - Prep: host authority now compares the host profile UUID instead of the name. Needs a second Minecraft account, so the sandbox cannot do it.
+
+From the 6bt-6cb sandbox sweep (1.1.292, 2026-10-23, `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`):
+
+- [ ] **Phase 6bu: A fortify run that finds a cavity speaks the callout aloud (1.1.283)** (joins Block B)
+  - Bradley does: with bot voices on, run fortify on ground that has a small hidden cavity (a pocket or air gap in the wall line).
+  - Claude watches for: one of the five cavity chat lines ("Noted a pocket in the wall, flagging it for you." and the others in the checklist).
+  - Pass when: the chat line is heard as well as read, in the bot's voice.
+  - Prep: the sandbox runs muted, so only the chat half can be checked there.
+- [ ] **Phase 6bv: Voice mute toggles still apply (1.1.284)** (joins Block B)
+  - Bradley does: in the voice settings, mute two or three voice categories, then unmute one, while bots are talking.
+  - Pass when: muted categories stay silent, the unmuted one speaks again, and the choice survives a rejoin.
+- [ ] **Phase 6bw: Collect re-checks permission on arrival (1.1.285)** (joins Block D)
+  - Bradley does: let the second player, who may collect from a bot's chest, start a Collect, then remove that permission (or `/deop` them) while the bot is walking.
+  - Claude watches for: "<bot> arrived, but you no longer have permission to collect from its chest. Nothing was collected."
+  - Pass when: the line comes on arrival and the chest is unchanged.
+- [ ] **Phase 6bx: A mounted bot under leaves mines them at normal speed (1.1.286)** (joins Block C or the sandbox)
+  - Bradley does: ride with a bot on a horse under low oak leaves, and past a few leaves he placed by hand (persistent).
+  - Claude watches for: with the `mount-leaf` and `leaf-clear-service` loggers at DEBUG, `Leaf clear: bot=<name> mining=... toward=...` and `leaf-mine start [mounted]: bot=<name> pos=...`; no stuck line while riding.
+  - Pass when: leaves take a normal break time (not instant), the tool is picked once, and his placed leaves are left alone.
+  - Prep: needs the player riding, which the sandbox driver can't do well.
+- [ ] **Phase 6by: A non-owner can't rename or delete someone else's zone (1.1.287)** (joins Block D)
+  - Bradley does: as the second non-op player, open Base Manager > Protected Zones and try to rename and delete one of Bradley's zones, a base auto-zone (`base:X`) and the player's own zone.
+  - Pass when: only the player's own zone changes, with the owner/op/host refusal lines for the others; `/bot zone remove` on a zone with no owner gives no crash.
+- [ ] **Phase 6by: Only a bot owner, an op or the host can map a village (1.1.287)** (joins Block D)
+  - Bradley does: as the second non-op player who owns no bot, press Map Village near a village; then again after giving that player a bot.
+  - Pass when: "Only a bot owner, an operator or the host can map a village." without a bot, allowed with one.
+- [ ] **Phase 6by: An ownerless wall can be claimed only by an op or the host (1.1.287)** (joins Block D)
+  - Bradley does: Unclaim a wall in the Base Manager, then as the second non-op player press Claim Wall on it; then claim it back as the host.
+  - Pass when: the non-op player gets "This wall has no recorded owner or builder. Only an operator or the host can claim it." and the host can claim it.

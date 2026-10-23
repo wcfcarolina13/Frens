@@ -22,7 +22,7 @@ criteria need it (fix277 polled every 3-5 s).
   fix280.py woodcut [nosap]       check 5 (finding 52): fix277's 4-tree deck, W1 and W2; nosap: W2's saplings cleared every 2 s,
                                   so it can't replant. Reads the 4 base cells (Y-1) before and after, greps `Mining` at them, and
                                   matches every mined cell against the other bot's polled feet.
-  fix280.py aid [bow|bowarmor] [clear]   check 6 (findings 53/54): fix278's aid stage (Bob between Jake and the zombie on one line) with
+  fix280.py aid [bow|bowarmor|swordbow] [clear]   check 6 (findings 53/54): fix278's aid stage (Bob between Jake and the zombie on one line) with
                                   Jake's full position tracked, Bob's health, `Mutual aid:` lines and `ff_received` lines.
                                   clear: the control, the zombie summoned between Jake and Bob (a clear line at first).
   fix280.py open [dist]           check 7 (finding 55): Opener stood dist (16) blocks away, /bot open Opener; screen_info at 1 s
@@ -389,12 +389,16 @@ elif st == "aid":
     chat("/kill @e[type=arrow]", 1)
     clear = len(sys.argv) > 3 and sys.argv[3] == "clear"
     jx, bx, zx = cx - 8, cx + 7, (cx + 2 if clear else cx + 11)  # Bob between Jake and the zombie (clear: zombie between)
+    if variant == "swordbow":
+        zx = jx + 4  # 1.1.286: inside 5 blocks a sword-and-bow defender melees
     for b, x_ in (("Jake", jx), ("Bob", bx)):
         chat(f"/bot stop {b}", 1)
         chat(f"/tp {b} {x_} {Y} {cz}", 2)
         chat(f"/clear {b}", 1)
         chat(f"/effect clear {b}", 1)
     give("Jake", "bow 1", "arrow 32", "bread 8")
+    if variant == "swordbow":
+        give("Jake", "iron_sword 1")
     if variant == "bowarmor":
         chat("/item replace entity Jake armor.chest with iron_chestplate", 1)
     chat("/effect give Jake saturation 3 10 true", 3)

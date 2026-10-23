@@ -12,7 +12,9 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 **Deferred (with reasons):** a bot that walks into the End exit portal itself detaches and waits in limbo until teleported (pre-existing, vanilla credits path, scope against Carpet's EntityPlayerMPFake; javap the 1.21.11 yarn jar for the method name first). `MiningTool.switchToTool` has the same timeout-as-false pattern (milder: falls back). 100 ms server-thread sleep on the death path (`AutoFaceEntity.handleBotRespawn`). An End exit still ends the running skill (it holds the old entity), no automatic re-run. From the 1.1.291 list, still open: furnace walk-back after lost reach, ritual crash journal, empty bucket after a refused adoption, 0600 store file mode.
 
-**Pending:** field Phase 6cc on Nirn, guided LAN-guest check, field phases 6bt-6cb not sandbox-checked.
+**Sweep results (6bt-6cb on 1.1.292, `docs/testing/FIELD_6BT_6CB_SANDBOX_2026-10-23.md`):** 9 pass and ticked, 2 pass with a gap (two-bot cleanup 1 run, tool swaps without stone), 12 not run, 7 Bradley-only (now in the guided session). Two FAILs for a fix build: (1) following up a leafy step, the leaf over the bot's own head is never mined (`leaf-action ... BYPASS_STEP` only, `LeafClearService`/`MovementService`); (2) `/bot place` onto a snow layer walks the bot on the server thread (tick frozen ~14 s) then throws "An unexpected error occurred" (`modCommandRegistry.attemptPlacement`). Rerun 6bz1 (fortify/shelter onto snow) with fix 2.
+
+**Pending:** field Phase 6cc on Nirn, guided LAN-guest check, the two 6bt-6cb FAILs above.
 
 ## Session Handoff 2026-10-23 (1.1.292) — superseded
 

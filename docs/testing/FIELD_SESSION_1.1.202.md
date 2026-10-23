@@ -2249,173 +2249,205 @@ Sandbox 2026-10-20 on the 1.1.281 jar (md5 45431a42...), save "Sweep Souls3" (ea
 
 ## Phase 6bt — 1.1.282 fix checks (1.1.282)
 
-Not sandbox-checked yet: 1.1.282-1.1.287 are queued for one combined sandbox run (RALPH_TASK handoff, "Pending sandbox check"). Log-only changes not listed here: chest-pull pauses and pending pulls cleared at server stop (backlog 218).
+Sandbox-checked 2026-10-23 on 1.1.292 (`FIELD_6BT_6CB_SANDBOX_2026-10-23.md`, replay `frens_1_1_292_6bt_6cb_sweep.zip`). Log-only changes not listed here: chest-pull pauses and pending pulls cleared at server stop (backlog 218).
 
-- [ ] **Woodcut cleanup with a hotbar full of tools and weapons never swings one at leaves (1.1.282).**
+- [x] **Woodcut cleanup with a hotbar full of tools and weapons never swings one at leaves (1.1.282).**
+  - Sandbox 2026-10-23 (1.1.292): PASS: sharpness sword in slot 0 + 8 tools, cleanup done in 7 s, no `Mining ... with` a sword/trident/bow line, held axe/dirt/shovel/empty. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: fill all nine hotbar slots of a bot with tools and weapons (an enchanted sword in slot 0), have it fell a tree, and let woodcut cleanup run under the canopy.
   - Claude watches for: `woodcut_cleanup starting`, `woodcut_cleanup target selected: kind=...`, `woodcut_cleanup completed`; the leaf clear itself is skipped with no log line (visual: the held item while it clears).
   - Pass when: the bot never breaks a leaf with the sword or a tool from slot 0; leaves it can't clear are left, and the logs still come down.
-- [ ] **A full-pack refusal of a stone tool says nothing about cobbled deepslate (1.1.282).**
+- [x] **A full-pack refusal of a stone tool says nothing about cobbled deepslate (1.1.282).**
+  - Sandbox 2026-10-23 (1.1.292): PASS: `fix281.py craft full` Smith12, pack-full line once, no `craft (quiet)` line, no deepslate/blackstone line in the log. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: let a bot with wooden tools, cobblestone, sticks and a full pack idle near a crafting table (the 6bs set-up; `fix281.py craft full` in the sandbox).
   - Claude watches for: "My pack's full, so I can't craft stone pickaxe right now." and `craft (quiet) <name>: ...` lines after it.
   - Pass when: the pack-full line comes once, and no `craft (quiet)` line after it names cobbled deepslate or blackstone ("I need 3 cobbled deepslate ...", finding 61).
 - [ ] **A chest a bot can't place for storage is logged (1.1.282).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN: no store run placed a chest. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: ask a bot that carries a chest to store its loot where there is no room to place one (a 1x2 tunnel, or standing in water).
   - Claude watches for: `Store chest placement miss: no placeable spot near <pos> (bot=<name>)` or `Store chest placement miss: placed at <pos> but found <block> (bot=<name>)`.
   - Pass when: a placement that fails leaves one of those lines (log-level change; check it only when a store run happens anyway).
 
 ## Phase 6bu — 1.1.283 fix checks (1.1.283)
 
-Not sandbox-checked yet (queued with 6bt). The punctuation guard now covering JSON resources is test-only (no field check).
+Sandbox-checked 2026-10-23 on 1.1.292 (`FIELD_6BT_6CB_SANDBOX_2026-10-23.md`, replay `frens_1_1_292_6bt_6cb_sweep.zip`). The punctuation guard now covering JSON resources is test-only (no field check).
 
 - [ ] **A fortify run that finds a cavity speaks the callout aloud (1.1.283).**
+  - Sandbox 2026-10-23 (1.1.292): Bradley only (audible), in `GUIDED_SESSION_BRADLEY.md`. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: with bot voices on, run fortify on ground that has a small hidden cavity (a pocket or air gap in the wall line).
   - Claude watches for: chat line "Noted a pocket in the wall, flagging it for you.", "Found a tiny cavity here. It's safe but needs eyes on.", "Here's the gap I marked. No mobs, just a small void.", "Spotting the ignored cavity. We can patch later together." or "This nook is harmless, but I'm calling it out for you." (no log line for the sound; audible).
   - Pass when: the chat line is heard as well as read, in the bot's voice.
 - [ ] **A flower gift skips a recipient with a full pack (1.1.283).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN (time). See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: have two bots idle together, the giver carrying flowers and the other with every inventory slot full (no slot that takes a flower); then free a slot.
   - Claude watches for: `Mutual aid: <giver> offered a flower to <recipient>; awaiting acknowledgment`.
   - Pass when: no flower offer goes to the full bot (no walk-over or offer line for it), and an offer can come once it has room.
 
 ## Phase 6bv — 1.1.284 fix checks (1.1.284)
 
-Not sandbox-checked yet (queued with 6bt).
+Sandbox-checked 2026-10-23 on 1.1.292 (`FIELD_6BT_6CB_SANDBOX_2026-10-23.md`, replay `frens_1_1_292_6bt_6cb_sweep.zip`).
 
-- [ ] **At sunset a bot comes to its owner more than 48 blocks away (1.1.284).**
+- [x] **At sunset a bot comes to its owner more than 48 blocks away (1.1.284).**
+  - Sandbox 2026-10-23 (1.1.292): PASS: owner 90 blocks off, `Auto-return at sunset triggered`, `Sunset segment ... finder=unified pathLen=86 -> 55 -> 26`, reached him in 25 s (needs `/bot auto_return_sunset on <bot>`). See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: leave an owned bot working 60-150 blocks from him in the same dimension (no base nearer) and wait for sunset.
   - Claude watches for: `Auto-return at sunset triggered for <name> (day=... tod=...)`, `Sent sunset auto-return notification to ...`, `Sunset segment for <name> finder=... pathLen=... next=...` heading toward him.
   - Pass when: the bot travels to him rather than to a nearer player or ally bot, or staying put.
 - [ ] **Voice mute toggles still apply (1.1.284).**
+  - Sandbox 2026-10-23 (1.1.292): Bradley only (audible), in `GUIDED_SESSION_BRADLEY.md`. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: in the voice settings, mute two or three voice categories, then unmute one, while bots are talking.
   - Claude watches for: (no log line; audible).
   - Pass when: muted categories stay silent, the unmuted one speaks again, and the choice survives a rejoin.
 
 ## Phase 6bw — 1.1.285 fix checks (1.1.285)
 
-Not sandbox-checked yet (queued with 6bt). Two items need a second, non-op player.
+Sandbox-checked 2026-10-23 on 1.1.292 (`FIELD_6BT_6CB_SANDBOX_2026-10-23.md`, replay `frens_1_1_292_6bt_6cb_sweep.zip`). Two items need a second, non-op player.
 
-- [ ] **A starving strip-mine bot reaches its owner from far away (1.1.285).**
+- [x] **A starving strip-mine bot reaches its owner from far away (1.1.285).**
+  - Sandbox 2026-10-23 (1.1.292): PASS: owner 102 blocks away got `SM: I'm starving and out of food. Stripmine paused. Feed me, then /bot resume.` See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: start a strip mine (`/bot skill stripmine`, or collect dirt) on a bot with no food, walk 100+ blocks away, and wait until it starves.
   - Claude watches for: chat line "I'm starving and out of food. Stripmine paused. Feed me, then /bot resume." (collect dirt: "I'm starving and out of food. Paused. Feed me, then /bot resume.").
   - Pass when: he sees the line at that distance.
 - [ ] **An "Allow once" supply grant works while the owner is away (1.1.285).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN: two setup misses (chest past the 12-block scan; one axe hit `RESERVE_EXHAUSTED`). Use 2 stone axes. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: answer a bot's chest supply ask with [Allow once], then walk far off before it takes the items (or let it re-ask for the same chest and item later).
   - Claude watches for: `[supply] request bot=<name> chest=... item=... qty=... need=... outcome=COVERED_BY_GRANT` (not `OWNER_NOT_NEARBY`), then `[supply] transfer bot=<name> ... moved=...`.
   - Pass when: the bot takes what was granted once, with no second prompt, and the grant is then spent.
 - [ ] **Collect re-checks permission on arrival (1.1.285; needs a second, non-op player).**
+  - Sandbox 2026-10-23 (1.1.292): Bradley only (second player), in `GUIDED_SESSION_BRADLEY.md`. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: let a second player who may collect from a bot's chest start a Collect, then remove that permission (or `/deop` them) while the bot is walking.
   - Claude watches for: chat line "<bot> arrived, but you no longer have permission to collect from its chest. Nothing was collected."
   - Pass when: the line comes on arrival and the chest is unchanged.
 - [ ] **A hand-placed chest on a destroyed record stays unlisted (1.1.285).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: break a chest a bot registered, place a new chest by hand on the same spot, then reopen the bot's chest list or let it look for supplies.
   - Claude watches for: no `[supply]` request or withdraw line naming that chest's position (no log line for the record itself; visual in the chest list).
   - Pass when: the hand-placed chest is not listed or used until a bot places and registers a chest there.
 
 ## Phase 6bx — 1.1.286 fix checks (1.1.286)
 
-Not sandbox-checked yet (queued with 6bt). The stair-escape rewrite was reverted (unreachable path), so there is nothing to check for backlog 146.
+Sandbox-checked 2026-10-23 on 1.1.292 (`FIELD_6BT_6CB_SANDBOX_2026-10-23.md`, replay `frens_1_1_292_6bt_6cb_sweep.zip`). The stair-escape rewrite was reverted (unreachable path), so there is nothing to check for backlog 146.
 
 - [ ] **Following through oak leaves at a step up, the bot mines the leaf and gets past (1.1.286).**
+  - Sandbox 2026-10-23 (1.1.292): FAIL: east route, 19 s stuck, `leaf-action ... BYPASS_STEP` only (no `MINING_STARTED`), the leaf over the bot's own head (jump headroom) never mined, `feet-not-passable` rejects at the step. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: walk up a one-block step whose top is in oak leaves (feet and head height) with a bot following; the fix277/280 `canopy` east route in the sandbox.
   - Claude watches for: `leaf-action: toward=... action=MINING_STARTED target=... stagnant=...` (the old `leaf-cleared` line is gone), then `Mining complete at ...`; `Follow status: bot=<name>` with the same `dist=` for 5 s or more.
   - Pass when: the leaf is mined and the bot is past the step within about 10 s (finding 56: five `leaf-cleared` lines and no mine).
-- [ ] **A bow-only defender sidesteps and shoots past an ally; a sword-and-bow one melees up close (1.1.286).**
+- [x] **A bow-only defender sidesteps and shoots past an ally; a sword-and-bow one melees up close (1.1.286).**
+  - Sandbox 2026-10-23 (1.1.292): PASS: bow-only Jake sidestepped 2 blocks, 2 arrows, 0 `ff_received`; sword-and-bow (new `fix280.py aid swordbow`) `profile=sword-sweep`, zombie dead in 2 s. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: fix278 `aid bowarmor` with Bob in the line: once with Jake holding only a bow and arrows, once with a sword as well and the zombie inside 5 blocks.
   - Claude watches for: `Mutual aid: Jake hands its defend_hostile approach to its own combat`, arrows fired, `ff_received` for Bob, Jake's movement.
   - Pass when: bow-only Jake steps sideways or back to a clear line and shoots, never hitting Bob; sword-and-bow Jake inside 5 blocks fights with the sword (finding 60).
 - [ ] **A mounted bot under leaves mines them at normal speed (1.1.286).**
+  - Sandbox 2026-10-23 (1.1.292): Bradley only (he rides), in `GUIDED_SESSION_BRADLEY.md`. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: ride with a bot on a horse under low oak leaves, and past a few leaves he placed by hand (persistent).
   - Claude watches for: with the `mount-leaf` and `leaf-clear-service` loggers at DEBUG, `Leaf clear: bot=<name> mining=... toward=...` and `leaf-mine start [mounted]: bot=<name> pos=...`; no stuck line while riding.
   - Pass when: leaves take a normal break time (not instant), the tool is picked once, and his placed leaves are left alone.
 - [ ] **A supply ask counts a double chest once (1.1.286).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN: `/bot set hunger 3` opened no `[supply] request` in 75 s (two tries). See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: put a known count of an item a bot needs (e.g. 20 cobblestone, split over both halves) in a double chest, and let the bot ask for it.
   - Claude watches for: `[supply] request bot=<name> chest=... item=... qty=... need=...` and `[supply] withdraw ... moved=...`.
   - Pass when: the asked and moved amounts match the total in the double chest, not one half or double.
-- [ ] **The settings file no longer pins the default pathfinder (1.1.286).**
+- [x] **The settings file no longer pins the default pathfinder (1.1.286).**
+  - Sandbox 2026-10-23 (1.1.292): PASS (file-save path, not the GUI): key removed before launch, the game saved the file all session and on quit with no `"pathfinder"` line, bots used `finder=unified`. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: on a fresh config, open and save the Frens settings once without touching the pathfinder, then look at `config/settings.json5`.
   - Claude watches for: (no log line; visual) a `"pathfinder"` line in the file.
   - Pass when: the file has no `"pathfinder"` line until he picks one, and bots still use the default pathfinder.
 
 ## Phase 6by — 1.1.287 fix checks (1.1.287)
 
-Not sandbox-checked yet (queued with 6bt). Riskiest: the two-bot tree cleanup (finding 59, cause not proven) and the permission gates, which need a second, non-op player (on a LAN world with cheats every guest is an op, so the gates can't be shown there).
+Sandbox-checked 2026-10-23 on 1.1.292 (`FIELD_6BT_6CB_SANDBOX_2026-10-23.md`, replay `frens_1_1_292_6bt_6cb_sweep.zip`). Riskiest: the two-bot tree cleanup (finding 59, cause not proven) and the permission gates, which need a second, non-op player (on a LAN world with cheats every guest is an op, so the gates can't be shown there).
 
 - [ ] **RISKY: two bots cleaning the same felled tree leave no scaffold dirt and no hole in natural soil (1.1.287, finding 59).**
+  - Sandbox 2026-10-23 (1.1.292): PASS in 1 run of the 2-3 asked: touching fancy oaks, Wb worked Wa's canopy, deck left with 0 dirt/cobblestone above and 0 soil holes. Not ticked until rerun. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: have two bots fell and clean up the same tree (or two trees whose canopies touch) on grass, both using dirt pillars; repeat two or three times.
   - Claude watches for: `woodcut_cleanup scaffold phase: removeScaffold=... shouldAbort=...`, `woodcut_cleanup completed: ...`, `woodcut_cleanup target failed: kind=... pos=... reason=...`.
   - Pass when: no dirt pillar or scaffold block is left standing (grass-topped ones included), and no natural block under a tree is mined. Any leftover block: note its position and which bot built there.
 - [ ] **RISKY: a non-owner can't rename or delete someone else's zone (1.1.287; needs a second, non-op player).**
+  - Sandbox 2026-10-23 (1.1.292): Bradley only (second player), in `GUIDED_SESSION_BRADLEY.md`. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: as a second non-op player, open the Base Manager's Protected Zones and try to rename and delete one of Bradley's zones, a base auto-zone (`base:X`) and the player's own zone (e.g. a village it mapped).
   - Claude watches for: chat line "Only the zone's owner, an operator or the host can rename or delete this zone.", "Only an operator or the host can rename or delete a base's automatic zone.", or "No zone named '<name>' found." for a zone hidden from that player.
   - Pass when: only the player's own zone changes; also `/bot zone remove` on a zone with no owner gives no crash.
 - [ ] **RISKY: only a bot owner, an op or the host can map a village (1.1.287; needs a second, non-op player).**
+  - Sandbox 2026-10-23 (1.1.292): Bradley only (second player), in `GUIDED_SESSION_BRADLEY.md`. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: as a second non-op player who owns no bot, press Map Village in the Base Manager near a village; then again after giving that player a bot.
   - Claude watches for: chat line "Only a bot owner, an operator or the host can map a village."
   - Pass when: refused without a bot, allowed with one.
 - [ ] **RISKY: an ownerless wall can be claimed only by an op or the host (1.1.287; needs a second, non-op player).**
+  - Sandbox 2026-10-23 (1.1.292): Bradley only (second player), in `GUIDED_SESSION_BRADLEY.md`. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: unclaim a wall (Unclaim in the Base Manager), then as the second non-op player press Claim Wall on it; then claim it back as the host.
   - Claude watches for: chat line "This wall has no recorded owner or builder. Only an operator or the host can claim it."
   - Pass when: the non-op player is refused and the host can claim it.
-- [ ] **A stopped tool search stays stopped (1.1.287).**
+- [x] **A stopped tool search stays stopped (1.1.287).**
+  - Sandbox 2026-10-23 (1.1.292): PASS: stop while the axe prompt was open, then follow: no `[supply]` request/withdraw after, never walked to the chest. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: give a bot a task that needs a tool it lacks (so it starts looking in chests), `/bot stop` while it searches, then give it a new task straight away.
   - Claude watches for: `[supply] tool scan for <name>: ...` before the stop, and no `[supply] request` or `[supply] withdraw` line for that bot after it; the bot's path.
   - Pass when: the bot never walks to the chest or takes the tool after the stop, and does the new task.
 - [ ] **A double chest with one half in an unloaded chunk is skipped, not half-read (1.1.287).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN (chunk-edge setup). See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: place a double chest across a chunk border at the edge of loaded terrain, with the item a bot needs, and let the bot ask for supplies while the far half is unloaded; then again with both halves loaded.
   - Claude watches for: `[supply] request bot=<name> chest=... outcome=DENIED(DENY_UNLOADED)`, then a request at the next chest.
   - Pass when: the half-loaded chest is skipped with no partial take and no lost "Yes"; with both halves loaded it is used.
 
 ## Phase 6bz — 1.1.288 fix checks (1.1.288)
 
-Not sandbox-checked yet (queued with 6bt). Riskiest: timed clutter clearing, which changed the shared placement path.
+Sandbox-checked 2026-10-23 on 1.1.292 (`FIELD_6BT_6CB_SANDBOX_2026-10-23.md`, replay `frens_1_1_292_6bt_6cb_sweep.zip`). Riskiest: timed clutter clearing, which changed the shared placement path.
 
 - [ ] **RISKY: fortify or a shelter inside a mapped village places onto short grass, snow and carpet (1.1.288, backlog 147).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN; worth running with the 6bz2 fix. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: inside a mapped village, put snow layers, a carpet and short grass on cells a fortify wall or a shelter will use; run it.
   - Claude watches for: placement reasons `clearing-occupied=`, `failed-to-clear-occupied`, `clearing-busy` in placement failure logs (a few `clearing-occupied` on snow/carpet are normal; `failed-to-clear-occupied` is not).
   - Pass when: the blocks get placed; snow and carpet are mined with a visible break animation and drop their item; grass vanishes instantly; the bot ends holding what it held before (or its block item).
 - [ ] **`/bot place` onto snow still works in one command (1.1.288).**
+  - Sandbox 2026-10-23 (1.1.292): FAIL: 2 tries, bot walks to the snow cell on the server thread (tick frozen ~14 s, `Can't keep up`), then "An unexpected error occurred trying to execute that command"; same spot without snow placed in 3 s. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: look at a snow layer and run `/bot place crafting_table` (or furnace/chest) for a bot.
   - Claude watches for: (no log line; visual).
   - Pass when: the block is placed on the first command.
 - [ ] **An automatic return refused for combat says so once (1.1.288, backlog 148).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN: the notice is on the fast-travel combat gate, needs a lodestone return. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: let a bot's sunset return start while a hostile is near it, and keep the fight going for a few minutes; then type `/bot return` (or the return command) during the fight.
   - Claude watches for: the owner's chat line for the refusal, and its timestamps.
   - Pass when: the automatic refusal appears once, again only after about 3 minutes or when the reason changes (combat → food); the typed command gets its answer every time.
 - [ ] **A bot under an oak canopy counts as at the surface; a bot in a cave under one leaf does not (1.1.288, backlog 145).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN: `/bot go_to` did not move the trapped bot, no recovery triggered. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: trap a bot in a pocket under a dense oak canopy on grass, then in a shallow cave whose mouth has a leaf block above.
   - Claude watches for: surface-recovery lines (`[surface]`, `ensureAtSurface`, pillar/stair escape) for each case.
   - Pass when: under the canopy, no dig-up or pillar recovery starts; in the cave, recovery runs as before.
 
 ## Phase 6ca — 1.1.289 fix checks (1.1.289)
 
-Not sandbox-checked yet (queued with 6bt). Riskiest: the shared server-call helper now cancels queued actions on timeout.
+Sandbox-checked 2026-10-23 on 1.1.292 (`FIELD_6BT_6CB_SANDBOX_2026-10-23.md`, replay `frens_1_1_292_6bt_6cb_sweep.zip`). Riskiest: the shared server-call helper now cancels queued actions on timeout.
 
-- [ ] **RISKY: a buried or wedged bot is dug out cleanly (1.1.289, backlog 138).**
+- [x] **RISKY: a buried or wedged bot is dug out cleanly (1.1.289, backlog 138).**
+  - Sandbox 2026-10-23 (1.1.292): PASS (log): buried farming bot, `emergency snap recovery [fully-encased-suffocation]`, out in ~1 s at 20 HP, 0 `Moved wrongly`, no double placement (stutter not judged visually). See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: bury a farming bot to the head in dirt (or wedge a returning bot in a 1x1 hole) and watch it recover.
   - Claude watches for: burial rescue lines from `BotRescueService` and any `Moved wrongly` / position-correction warnings.
   - Pass when: the bot gets out with no rubber-banding or stutter, and no placement happens twice.
 - [ ] **A resume waits for the bot to reach the surface (1.1.289, backlog 179).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN (time). See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: pause a bot's job, then answer "yes" (or `/bot resume`) while it is climbing out of a hole.
   - Claude watches for: chat line "<bot> will continue once it's back on the surface." (once).
   - Pass when: the line appears once and the job resumes after the bot surfaces; a `/bot stop` during the wait cancels it.
 - [ ] **Mining tool swaps still happen while walking (1.1.289, backlog 144).**
+  - Sandbox 2026-10-23 (1.1.292): PARTIAL: axe for logs, shovel for dirt, hand for leaves; no stone met, pickaxe swap not shown. Not ticked. See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: send a bot on a woodcut or strip-mine job through mixed terrain.
   - Claude watches for: `Tool select:` / `Tool switch:` lines.
   - Pass when: the bot holds the right tool for each block (axe for logs, pickaxe for stone).
 
 ## Phase 6cb — 1.1.290 fix checks (1.1.290)
 
-Not sandbox-checked yet (queued with 6bt). Riskiest: the cleanup scan now goes through the shared chunk reader.
+Sandbox-checked 2026-10-23 on 1.1.292 (`FIELD_6BT_6CB_SANDBOX_2026-10-23.md`, replay `frens_1_1_292_6bt_6cb_sweep.zip`). Riskiest: the cleanup scan now goes through the shared chunk reader.
 
 - [ ] **RISKY: woodcut cleanup at the edge of loaded terrain finishes and says it was partial (1.1.290, backlog 168).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN (chunk-edge setup). See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: fell a tree near the edge of view distance (stand so part of the 37-block area around the bot is unloaded), then let cleanup run.
   - Claude watches for: `woodcut_cleanup completed: ... unknownCells=...` with a nonzero count.
   - Pass when: cleanup ends in normal time (not at its deadline), the player line says it couldn't check everything, and no block in the unloaded part was touched.
-- [ ] **Logs next to a broken bee nest get cut again (1.1.290).**
+- [x] **Logs next to a broken bee nest get cut again (1.1.290).**
+  - Sandbox 2026-10-23 (1.1.292): PASS: `protection=beehive` with the nest, nest set to air, next run `protected=0` and `Got 5 logs from that tree.` See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: let a bot see a bee nest on a tree (so it's remembered), break the nest, then order woodcut on that tree.
   - Claude watches for: no "beehive" protection reason for those logs after the nest is gone.
   - Pass when: the bot cuts the tree.
 - [ ] **Mutual aid waits for a commanded job but not for an idle hobby (1.1.290, backlog 184).**
+  - Sandbox 2026-10-23 (1.1.292): NOT RUN (time). See `FIELD_6BT_6CB_SANDBOX_2026-10-23.md`.
   - Bradley does: fill a bot's pack, then trigger aid toward it once during `/bot woodcut` and once while it is idling with a hobby.
   - Claude watches for: mutual-aid make-room lines.
   - Pass when: during the commanded job no item is dropped from its pack; during the hobby, aid proceeds.
