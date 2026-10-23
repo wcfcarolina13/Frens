@@ -62,7 +62,7 @@ public final class ChestRegistryNetworkManager {
                 CompanionCommunicationPolicy.resolveOwnerUuid(bot),
                 bot instanceof createFakePlayer,
                 Frens.isOperator(player),
-                server.isHost(new net.minecraft.server.PlayerConfigEntry(player.getGameProfile())));
+                BotAccessGate.isHost(server, player));
         if (access.allowed()) return true;
 
         LOGGER.warn("[chest-registry] denied {} from {} for {}: {}",

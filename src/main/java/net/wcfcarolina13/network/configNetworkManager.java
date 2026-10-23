@@ -184,7 +184,7 @@ public final class configNetworkManager {
         if (Frens.isOperator(player)) {
             return true;
         }
-        return server.isHost(new net.minecraft.server.PlayerConfigEntry(player.getGameProfile()));
+        return BotAccessGate.isHost(server, player);
     }
 
     // ------------------------------------------------------------------ server receivers

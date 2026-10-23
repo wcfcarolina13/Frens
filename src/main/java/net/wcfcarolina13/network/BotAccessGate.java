@@ -1,7 +1,6 @@
 package net.wcfcarolina13.network;
 
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.Frens;
@@ -72,9 +71,14 @@ public final class BotAccessGate {
 
     /** Whether {@code p} hosts the integrated server (the single-player owner, op or not). */
     public static boolean isHost(ServerPlayerEntity p) {
-        MinecraftServer server = Frens.serverInstance;
-        if (p == null || server == null) return false;
-        return server.isHost(new PlayerConfigEntry(p.getGameProfile()));
+        return p != null && isHost(p.getCommandSource().getServer(), p);
+    }
+
+    public static boolean isHost(MinecraftServer server, ServerPlayerEntity p) {
+        if (p == null || server == null || p.getCommandSource().getServer() != server) return false;
+        var host = server.getHostProfile();
+        return HostPermissionPolicy.isIntegratedHost(server.isDedicated(), p.getUuid(),
+                host == null ? null : host.id());
     }
 
     /**

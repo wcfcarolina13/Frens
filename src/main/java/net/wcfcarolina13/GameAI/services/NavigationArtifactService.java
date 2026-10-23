@@ -1668,7 +1668,7 @@ public final class NavigationArtifactService {
                             action.ownerUuid(), CompanionCommunicationPolicy.resolveOwnerUuid(arrBot),
                             arrBot instanceof createFakePlayer,
                             requester != null && Frens.isOperator(requester),
-                            requester != null && server.isHost(new net.minecraft.server.PlayerConfigEntry(requester.getGameProfile())));
+                            net.wcfcarolina13.network.BotAccessGate.isHost(server, requester));
                     if (!access.allowed()) {
                         notifyOwner(server, action.ownerUuid(), "\u00A7e" + ps.botAlias()
                                 + " arrived, but you no longer have permission to collect from its chest. Nothing was collected.\u00A7r");

@@ -10,7 +10,6 @@ import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -179,7 +178,7 @@ public final class AiSetupNetworkManager {
     }
 
     private static boolean isIntegratedHost(MinecraftServer server, ServerPlayerEntity player) {
-        return server.isHost(new PlayerConfigEntry(player.getGameProfile()));
+        return BotAccessGate.isHost(server, player);
     }
 
     // ── Ollama probe: cached, single in flight ──────────────────────────────

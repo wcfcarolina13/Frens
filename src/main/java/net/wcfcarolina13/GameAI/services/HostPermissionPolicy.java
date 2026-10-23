@@ -1,5 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
+import java.util.UUID;
+
 /**
  * Who counts as a server admin for Frens: an operator, or the host of an integrated server
  * (the player who owns the singleplayer or LAN world). The host is not in ops.json when the
@@ -21,6 +23,11 @@ public final class HostPermissionPolicy {
             return true;
         }
         return isServerAdmin(isOperator, isIntegratedHost);
+    }
+
+    /** Host identity comes from the integrated server profile, never the display name. */
+    public static boolean isIntegratedHost(boolean dedicated, UUID requester, UUID host) {
+        return !dedicated && requester != null && requester.equals(host);
     }
 
     /** Admin-tab and world-level gates for a real player: operator or integrated host. */
