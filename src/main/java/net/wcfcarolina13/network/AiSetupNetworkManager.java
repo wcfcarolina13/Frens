@@ -721,8 +721,7 @@ public final class AiSetupNetworkManager {
         UUID botId = bot.getUuid();
         // cachedState is only a hint that skips a writer task for known bots; bindIfNew re-checks
         // the file on the store's writer thread.
-        if (!NewBotSoulPolicy.shouldEnable(config.getSoulNewBotDefault(), runtime.cachedState(botId).isPresent(),
-                runtime.isMasterEnabled())) {
+        if (!NewBotSoulPolicy.shouldEnable(config.getSoulNewBotDefault(), runtime.cachedState(botId).isPresent())) {
             return;
         }
         String botName = bot.getName().getString();

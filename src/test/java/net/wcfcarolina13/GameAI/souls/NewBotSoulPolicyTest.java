@@ -13,25 +13,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class NewBotSoulPolicyTest {
 
     @Test
-    void yesGivesANewBotASoulWhileSoulChatIsOn() {
-        assertTrue(NewBotSoulPolicy.shouldEnable(true, false, true));
+    void yesGivesANewBotASoul() {
+        assertTrue(NewBotSoulPolicy.shouldEnable(true, false));
     }
 
     @Test
     void notAskedOrNoNeverEnables() {
-        assertFalse(NewBotSoulPolicy.shouldEnable(null, false, true));
-        assertFalse(NewBotSoulPolicy.shouldEnable(false, false, true));
+        assertFalse(NewBotSoulPolicy.shouldEnable(null, false));
+        assertFalse(NewBotSoulPolicy.shouldEnable(false, false));
     }
 
     @Test
     void aBotWithSoulStateIsNeverReEnabled() {
         // A bot someone switched off has a soul.json (active=false): it stays off.
-        assertFalse(NewBotSoulPolicy.shouldEnable(true, true, true));
-    }
-
-    @Test
-    void soulChatOffBindsNothing() {
-        assertFalse(NewBotSoulPolicy.shouldEnable(true, false, false));
+        assertFalse(NewBotSoulPolicy.shouldEnable(true, true));
+        assertFalse(NewBotSoulPolicy.shouldEnable(false, true));
     }
 
     @Test

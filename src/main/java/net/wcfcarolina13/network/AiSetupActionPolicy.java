@@ -96,7 +96,7 @@ public final class AiSetupActionPolicy {
     /** Chat line after the new-bot default changed. */
     public static String newBotSoulMessage(boolean soul) {
         return soul
-                ? "New companions will get a soul when they first join while Soul Chat is on."
+                ? "New companions will get a soul when they first join."
                 : "New companions won't get a soul. You can still enable each one.";
     }
 

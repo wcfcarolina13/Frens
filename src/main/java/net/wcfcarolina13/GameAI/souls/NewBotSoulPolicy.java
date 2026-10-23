@@ -8,8 +8,8 @@ package net.wcfcarolina13.GameAI.souls;
  * <p>"New" means the bot has no soul state file yet. A bot someone switched off has a file
  * (active=false) and is never switched back on here. A bot that existed before the question was
  * answered but was never enabled has no file either, so it counts as new on its next join.
- * Nothing is bound while Soul Chat's master switch is off: no soul.json for a souls-off world,
- * and the bot stays "new" until the switch is on.
+ * Like the checklist's Enable button, this binds even while Soul Chat's master switch is off
+ * (the question comes before step 3), so the bot answers as soon as the switch is turned on.
  */
 public final class NewBotSoulPolicy {
 
@@ -19,9 +19,8 @@ public final class NewBotSoulPolicy {
     /**
      * @param newBotDefault the checklist answer: true, false, or null when not asked yet
      * @param hasSoulState  the bot already has a soul state file (bound, or switched off)
-     * @param soulsEnabled  Soul Chat's master switch
      */
-    public static boolean shouldEnable(Boolean newBotDefault, boolean hasSoulState, boolean soulsEnabled) {
-        return Boolean.TRUE.equals(newBotDefault) && !hasSoulState && soulsEnabled;
+    public static boolean shouldEnable(Boolean newBotDefault, boolean hasSoulState) {
+        return Boolean.TRUE.equals(newBotDefault) && !hasSoulState;
     }
 }
