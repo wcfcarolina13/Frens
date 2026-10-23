@@ -71,7 +71,7 @@ public final class BotRespawnPromptService {
         // Replace any stale prompt for the same bot.
         Pending existing = BY_ALIAS.remove(aliasKey);
         if (existing != null && existing.ownerUuid() != null) {
-            BY_OWNER.remove(existing.ownerUuid());
+            BY_OWNER.remove(existing.ownerUuid(), aliasKey);
         }
 
         if (owner != null) {
@@ -97,23 +97,65 @@ public final class BotRespawnPromptService {
         String normalized = message.trim().toLowerCase(Locale.ROOT);
         if (!normalized.equals("yes") && !normalized.equals("no")) return false;
 
-        Pending p = BY_ALIAS.remove(aliasKey);
-        BY_OWNER.remove(sender.getUuid());
-        if (p == null) return false;
-
+        Pending pending = BY_ALIAS.get(aliasKey);
+        if (pending == null) {
+            BY_OWNER.remove(sender.getUuid(), aliasKey);
+            return false;
+        }
         MinecraftServer server = sender.getCommandSource().getServer();
-        if (server == null) return true;
+        if (!isReplyAuthorized(server, sender, pending)) {
+            refuseReply(sender, pending, aliasKey);
+            return true;
+        }
 
         if (normalized.equals("yes")) {
+            runReplySpawn(server, sender, pending, aliasKey);
+        } else if (BY_ALIAS.remove(aliasKey, pending)) {
+            BY_OWNER.remove(sender.getUuid(), aliasKey);
             ChatUtils.sendSystemMessage(sender.getCommandSource(),
-                    "Respawning " + p.alias() + ".");
-            runSpawn(server, p.alias(), p.spawnMode());
+                    pending.alias() + " will stand down. Use /bot spawn " + pending.alias()
+                            + " to bring them back, or toggle Auto Respawn in Bot Controls.");
         } else {
             ChatUtils.sendSystemMessage(sender.getCommandSource(),
-                    p.alias() + " will stand down. Use /bot spawn " + p.alias()
-                            + " to bring them back, or toggle Auto Respawn in Bot Controls.");
+                    "That respawn request changed. Please use Bot Controls.");
         }
         return true;
+    }
+
+    private static boolean isReplyAuthorized(MinecraftServer server, ServerPlayerEntity sender, Pending pending) {
+        return server != null && !sender.isRemoved()
+                && RespawnReplyPolicy.mayAnswer(sender.getUuid(), pending.ownerUuid(),
+                        CompanionCommunicationPolicy.resolveControllerUuidForAlias(server, pending.alias()),
+                        net.wcfcarolina13.network.BotAccessGate.isServerAdmin(sender));
+    }
+
+    private static void refuseReply(ServerPlayerEntity sender, Pending pending, String aliasKey) {
+        BY_OWNER.remove(sender.getUuid(), aliasKey);
+        ChatUtils.sendSystemMessage(sender.getCommandSource(),
+                "You no longer have permission to answer for " + pending.alias() + ". The respawn request was kept.");
+    }
+
+    private static void runReplySpawn(MinecraftServer server, ServerPlayerEntity sender,
+                                      Pending pending, String aliasKey) {
+        server.execute(() -> {
+            if (BY_ALIAS.get(aliasKey) != pending) return;
+            if (!isReplyAuthorized(server, sender, pending)) {
+                refuseReply(sender, pending, aliasKey);
+                return;
+            }
+            ChatUtils.sendSystemMessage(sender.getCommandSource(), "Respawning " + pending.alias() + ".");
+            if (executeSpawn(server, pending.alias(), pending.spawnMode()) <= 0) {
+                // The spawn command may clear the prompt before it later refuses the spawn.
+                Pending newer = BY_ALIAS.putIfAbsent(aliasKey, pending);
+                if (newer == null || newer == pending) {
+                    BY_OWNER.putIfAbsent(sender.getUuid(), aliasKey);
+                }
+                ChatUtils.sendSystemMessage(sender.getCommandSource(),
+                        "Couldn't respawn " + pending.alias() + ". The respawn request is still pending.");
+            } else if (BY_ALIAS.remove(aliasKey, pending)) {
+                BY_OWNER.remove(sender.getUuid(), aliasKey);
+            }
+        });
     }
 
     /** Clear a pending prompt by alias (no chat feedback). */
@@ -122,7 +164,7 @@ public final class BotRespawnPromptService {
         String aliasKey = alias.toLowerCase(Locale.ROOT);
         Pending p = BY_ALIAS.remove(aliasKey);
         if (p != null && p.ownerUuid() != null) {
-            BY_OWNER.remove(p.ownerUuid());
+            BY_OWNER.remove(p.ownerUuid(), aliasKey);
         }
     }
 
@@ -161,16 +203,20 @@ public final class BotRespawnPromptService {
     }
 
     private static void runSpawn(MinecraftServer server, String alias, String mode) {
-        server.execute(() -> {
-            try {
-                ServerCommandSource src = server.getCommandSource()
-                        .withSilent()
-                        .withPermissions(Frens.OPERATOR_PERMISSIONS);
-                server.getCommandManager().getDispatcher()
-                        .execute("bot spawn " + alias + " " + mode, src);
-            } catch (Throwable t) {
-                LOGGER.warn("Respawn-prompt spawn failed for {}: {}", alias, t.getMessage());
-            }
-        });
+        server.execute(() -> executeSpawn(server, alias, mode));
     }
+
+    private static int executeSpawn(MinecraftServer server, String alias, String mode) {
+        try {
+            ServerCommandSource src = server.getCommandSource()
+                    .withSilent()
+                    .withPermissions(Frens.OPERATOR_PERMISSIONS);
+            return server.getCommandManager().getDispatcher()
+                    .execute("bot spawn " + alias + " " + mode, src);
+        } catch (Throwable t) {
+            LOGGER.warn("Respawn-prompt spawn failed for {}: {}", alias, t.getMessage());
+            return 0;
+        }
+    }
+
 }

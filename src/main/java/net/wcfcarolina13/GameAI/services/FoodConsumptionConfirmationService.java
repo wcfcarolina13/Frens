@@ -27,7 +27,7 @@ public final class FoodConsumptionConfirmationService {
     private static final long DENY_COOLDOWN_MS = 30_000L;
 
     private static final ConcurrentHashMap<UUID, Long> LAST_PROMPT_MS_BY_BOT = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<UUID, Long> DENIED_UNTIL_MS_BY_BOT = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, DeniedConsumption> DENIED_UNTIL_MS_BY_BOT = new ConcurrentHashMap<>();
 
     // Per commander (controller player UUID): pending confirmations by normalized bot alias.
     // Each map is guarded by synchronizing on itself; entries expire after
@@ -41,7 +41,10 @@ public final class FoodConsumptionConfirmationService {
     private record FoodConfirmationState(UUID botUuid, String botName, String itemId, String displayName, long createdAtMs) {
     }
 
-    private record ApprovedConsumption(String itemId, long expiresAtMs) {
+    private record ApprovedConsumption(String itemId, UUID controllerUuid, long expiresAtMs) {
+    }
+
+    private record DeniedConsumption(UUID controllerUuid, long expiresAtMs) {
     }
 
     private FoodConsumptionConfirmationService() {
@@ -93,20 +96,29 @@ public final class FoodConsumptionConfirmationService {
 
         UUID botId = bot.getUuid();
         long now = System.currentTimeMillis();
+        UUID controllerUuid = CompanionCommunicationPolicy.resolveControllerUuid(bot.getCommandSource().getServer(), bot);
 
         // An approval (chat "yes", or a hand-feed the player already confirmed) is checked before the
         // deny cooldown: a hand-fed [Yes] after an earlier chat "no" is the newer, explicit answer.
         String itemId = toItemId(expensiveStack);
         ApprovedConsumption approved = APPROVED_BY_BOT.get(botId);
-        if (approved != null && now <= approved.expiresAtMs && approved.itemId != null && approved.itemId.equals(itemId)) {
-            APPROVED_BY_BOT.remove(botId);
-            return true;
+        if (approved != null) {
+            if (!FoodConfirmReplyPolicy.consentMatches(approved.controllerUuid, controllerUuid)) {
+                APPROVED_BY_BOT.remove(botId, approved);
+            } else if (now <= approved.expiresAtMs && approved.itemId != null && approved.itemId.equals(itemId)
+                    && APPROVED_BY_BOT.remove(botId, approved)) {
+                return true;
+            }
         }
 
-        // If the player recently denied, don't spam.
-        long deniedUntil = DENIED_UNTIL_MS_BY_BOT.getOrDefault(botId, 0L);
-        if (now < deniedUntil) {
-            return false;
+        // A previous owner's denial must not suppress the current owner's prompt.
+        DeniedConsumption denied = DENIED_UNTIL_MS_BY_BOT.get(botId);
+        if (denied != null) {
+            if (!FoodConfirmReplyPolicy.consentMatches(denied.controllerUuid, controllerUuid)) {
+                DENIED_UNTIL_MS_BY_BOT.remove(botId, denied);
+            } else if (now < denied.expiresAtMs) {
+                return false;
+            }
         }
 
         requestConfirmation(bot, expensiveStack, reason);
@@ -123,8 +135,9 @@ public final class FoodConsumptionConfirmationService {
             return;
         }
         UUID botId = bot.getUuid();
+        UUID controllerUuid = CompanionCommunicationPolicy.resolveControllerUuid(bot.getCommandSource().getServer(), bot);
         DENIED_UNTIL_MS_BY_BOT.remove(botId);
-        APPROVED_BY_BOT.put(botId, new ApprovedConsumption(toItemId(stack), System.currentTimeMillis() + APPROVAL_WINDOW_MS));
+        APPROVED_BY_BOT.put(botId, new ApprovedConsumption(toItemId(stack), controllerUuid, System.currentTimeMillis() + APPROVAL_WINDOW_MS));
     }
 
     private static void requestConfirmation(ServerPlayerEntity bot, ItemStack stack, String reason) {
@@ -235,15 +248,23 @@ public final class FoodConsumptionConfirmationService {
             return true;
         }
 
+        ServerPlayerEntity controller = CompanionCommunicationPolicy.resolveController(server, bot);
+        UUID controllerUuid = controller == null ? null : controller.getUuid();
+        if (!FoodConfirmReplyPolicy.canAnswer(commanderId, controllerUuid)) {
+            ChatUtils.sendSystemMessage(commander.getCommandSource(),
+                    "That food request is no longer yours to answer. No consumption decision was changed.");
+            return true;
+        }
+
         if (decision) {
             DENIED_UNTIL_MS_BY_BOT.remove(bot.getUuid());
-            APPROVED_BY_BOT.put(bot.getUuid(), new ApprovedConsumption(state.itemId, System.currentTimeMillis() + APPROVAL_WINDOW_MS));
+            APPROVED_BY_BOT.put(bot.getUuid(), new ApprovedConsumption(state.itemId, controllerUuid, System.currentTimeMillis() + APPROVAL_WINDOW_MS));
             ChatUtils.sendChatMessages(bot.getCommandSource(), "Understood. Using it.", false);
         } else {
             // A "no" after an earlier "yes" is the newer answer: the approval must not outlive it
             // (approvals are checked before the deny cooldown in allowConsumptionOrRequest).
             APPROVED_BY_BOT.remove(bot.getUuid());
-            DENIED_UNTIL_MS_BY_BOT.put(bot.getUuid(), System.currentTimeMillis() + DENY_COOLDOWN_MS);
+            DENIED_UNTIL_MS_BY_BOT.put(bot.getUuid(), new DeniedConsumption(controllerUuid, System.currentTimeMillis() + DENY_COOLDOWN_MS));
             ChatUtils.sendChatMessages(bot.getCommandSource(), "Alright. I'll save it.", false);
         }
 

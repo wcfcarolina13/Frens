@@ -184,6 +184,14 @@ public final class SkillResumeService {
         if (pending == null) {
             return false;
         }
+        MinecraftServer server = sender.getCommandSource().getServer();
+        ServerPlayerEntity bot = server == null ? null : server.getPlayerManager().getPlayer(pending.botUuid());
+        if (!net.wcfcarolina13.network.BotAccessGate.permits(sender, bot, "skill_resume_reply")) {
+            PENDING_BY_RESPONDER.remove(key, pending);
+            ChatUtils.sendSystemMessage(sender.getCommandSource(),
+                    "That bot is unavailable or you no longer have permission to answer. The saved job was kept.");
+            return true;
+        }
         if (normalized.equals("yes")) {
             resume(pending, false, sender.getCommandSource());
         } else {

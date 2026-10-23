@@ -34,39 +34,47 @@ public final class CompanionCommunicationPolicy {
      * Resolve the controlling/owning player for a bot.
      *
      * <p>Primary source: {@link ManualConfig.BotOwnership} (per-alias owner).
-     * Fallback: survival recruitment state's recruitedByUuid when it matches the recruited companion alias.
+     * Only when no owner is recorded, fall back to the matching survival companion's recruiter.
      */
     public static ServerPlayerEntity resolveController(MinecraftServer server, ServerPlayerEntity bot) {
         if (server == null || bot == null) {
             return null;
         }
 
-        UUID ownerUuid = resolveOwnerUuid(bot);
-        if (ownerUuid != null) {
-            ServerPlayerEntity p = server.getPlayerManager().getPlayer(ownerUuid);
-            if (p != null && !p.isRemoved()) {
-                return p;
-            }
-        }
+        UUID controllerUuid = resolveControllerUuid(server, bot);
+        ServerPlayerEntity controller = controllerUuid == null ? null : server.getPlayerManager().getPlayer(controllerUuid);
+        return controller != null && !controller.isRemoved() ? controller : null;
+    }
 
-        // Fallback: in survival recruitment mode, use the recruiter for the recruited companion.
-        try {
-            if (Frens.CONFIG != null) {
-                ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
-                if (st != null) {
-                    String recruitedAlias = st.getBotAlias();
-                    if (recruitedAlias != null && recruitedAlias.equalsIgnoreCase(bot.getName().getString())) {
-                        String recruiterUuid = st.getRecruitedByUuid();
-                        if (recruiterUuid != null && !recruiterUuid.isBlank()) {
-                            return server.getPlayerManager().getPlayer(UUID.fromString(recruiterUuid));
+    /** Current ownership identity, including an ownerless companion's recruiter, even while offline. */
+    public static UUID resolveControllerUuid(MinecraftServer server, ServerPlayerEntity bot) {
+        return resolveControllerUuidForAlias(server, bot == null ? null : bot.getName().getString());
+    }
+
+    /** The same authority lookup for a shelved companion with no live entity. */
+    public static UUID resolveControllerUuidForAlias(MinecraftServer server, String alias) {
+        if (server == null || alias == null || alias.isBlank()) {
+            return null;
+        }
+        return CompanionControllerPolicy.resolve(resolveOwnerUuidForAlias(alias), ownerUuid -> ownerUuid, () -> {
+            // Legacy ownerless companions may still be controlled by their original recruiter.
+            try {
+                if (Frens.CONFIG != null) {
+                    ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+                    if (st != null) {
+                        String recruitedAlias = st.getBotAlias();
+                        if (recruitedAlias != null && recruitedAlias.equalsIgnoreCase(alias)) {
+                            String recruiterUuid = st.getRecruitedByUuid();
+                            if (recruiterUuid != null && !recruiterUuid.isBlank()) {
+                                return UUID.fromString(recruiterUuid);
+                            }
                         }
                     }
                 }
+            } catch (Throwable ignored) {
             }
-        } catch (Throwable ignored) {
-        }
-
-        return null;
+            return null;
+        });
     }
 
     /**
@@ -121,14 +129,17 @@ public final class CompanionCommunicationPolicy {
     }
 
     public static UUID resolveOwnerUuid(ServerPlayerEntity bot) {
-        if (bot == null) {
+        return bot == null ? null : resolveOwnerUuidForAlias(bot.getName().getString());
+    }
+
+    private static UUID resolveOwnerUuidForAlias(String alias) {
+        if (alias == null || alias.isBlank()) {
             return null;
         }
         try {
             if (Frens.CONFIG == null) {
                 return null;
             }
-            String alias = bot.getName().getString();
             ManualConfig.BotOwnership o = Frens.CONFIG.getOwner(alias);
             if (o == null) {
                 return null;

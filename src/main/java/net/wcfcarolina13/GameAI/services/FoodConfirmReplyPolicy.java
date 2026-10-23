@@ -33,6 +33,16 @@ public final class FoodConfirmReplyPolicy {
     private FoodConfirmReplyPolicy() {
     }
 
+    /** A stored prompt cannot authorize a player who no longer controls the bot. */
+    public static boolean canAnswer(java.util.UUID responder, java.util.UUID currentController) {
+        return responder != null && responder.equals(currentController);
+    }
+
+    /** Explicit ownerless hand-feeds stay valid while ownerless; any identity change invalidates consent. */
+    public static boolean consentMatches(java.util.UUID recordedController, java.util.UUID currentController) {
+        return java.util.Objects.equals(recordedController, currentController);
+    }
+
     /**
      * Parses a chat line as an answer to one of the pending prompts.
      *

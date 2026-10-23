@@ -977,6 +977,20 @@ public final class SurvivalRecruitmentService {
             ChatUtils.sendSystemMessage(player.getCommandSource(), "Recruitment already completed in this world.");
             return;
         }
+        String alias = st != null ? st.getBotAlias() : "Jake";
+        var recordedOwner = Frens.CONFIG == null ? null : Frens.CONFIG.getOwner(alias);
+        RecruitmentAccessPolicy.Decision access = RecruitmentAccessPolicy.authorize(alias, botAlias,
+                player.getUuid(), recordedOwner == null ? null : recordedOwner.ownerUuid());
+        if (access == RecruitmentAccessPolicy.Decision.DENY_ALIAS) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(),
+                    "Only the companion offered by this world's recruitment dialogue can be recruited.");
+            return;
+        }
+        if (access == RecruitmentAccessPolicy.Decision.DENY_OWNER) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(),
+                    "This companion already has an owner and cannot be recruited by you.");
+            return;
+        }
         long nowTick = server.getTicks();
 
         // Eligibility can flicker between opening the dialogue and clicking "Recruit".
@@ -1000,7 +1014,6 @@ public final class SurvivalRecruitmentService {
             return;
         }
 
-        String alias = (botAlias == null || botAlias.isBlank()) ? (st != null ? st.getBotAlias() : "Jake") : botAlias.trim();
         ChatUtils.sendSystemMessage(player.getCommandSource(), "Summoning " + alias + "...");
 
         GameMode desiredMode = GameMode.SURVIVAL;
@@ -1090,12 +1103,21 @@ public final class SurvivalRecruitmentService {
         }
         int delay = (attempt == 0) ? 1 : 20; // 1 tick, then retry every second.
         int nextAttempt = attempt + 1;
-        int runAt = server.getTicks() + delay;
-        server.send(new net.minecraft.server.ServerTask(runAt, () -> {
+        TaskService.runOnServerAfterTicks(server, delay, () -> {
             ServerPlayerEntity recruiter = null;
             try {
                 recruiter = recruiterUuid != null ? server.getPlayerManager().getPlayer(recruiterUuid) : null;
             } catch (Throwable ignored) {
+            }
+
+            var recordedOwner = Frens.CONFIG == null ? null : Frens.CONFIG.getOwner(alias);
+            if (!RecruitmentAccessPolicy.stillOwnedBy(recruiterUuid,
+                    recordedOwner == null ? null : recordedOwner.ownerUuid())) {
+                if (recruiter != null && !recruiter.isRemoved()) {
+                    ChatUtils.sendSystemMessage(recruiter.getCommandSource(),
+                            "Recruitment setup stopped because the companion's ownership changed.");
+                }
+                return;
             }
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
@@ -1153,7 +1175,7 @@ public final class SurvivalRecruitmentService {
             if (recruiter != null && !recruiter.isRemoved()) {
                 ChatUtils.sendSystemMessage(recruiter.getCommandSource(), "\u00A7a" + alias + " has arrived.\u00A7r");
             }
-        }));
+        });
     }
 
     private static Vec3d pickSafeSpawnNear(ServerWorld world, BlockPos base, Vec3d fallback) {
