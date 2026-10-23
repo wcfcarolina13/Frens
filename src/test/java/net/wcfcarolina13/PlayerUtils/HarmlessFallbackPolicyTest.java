@@ -57,4 +57,21 @@ class HarmlessFallbackPolicyTest {
         assertNull(HarmlessFallbackPolicy.abortMessage(Next.PROCEED));
         assertNull(HarmlessFallbackPolicy.abortMessage(Next.RETRY));
     }
+
+    @Test
+    void interruptedWorkerCancelsInsteadOfRetryingOrBlamingTheServer() {
+        assertEquals(Next.ABORT_CANCELLED, HarmlessFallbackPolicy.decide(Outcome.TIMED_OUT, 1, true));
+        assertEquals(Next.ABORT_CANCELLED, HarmlessFallbackPolicy.decide(Outcome.TIMED_OUT, 2, true));
+        assertEquals(Next.ABORT_CANCELLED, HarmlessFallbackPolicy.decide(null, 1, true));
+        assertEquals("Mining cancelled.", HarmlessFallbackPolicy.abortMessage(Next.ABORT_CANCELLED));
+        assertNotEquals(HarmlessFallbackPolicy.abortMessage(Next.ABORT_CANCELLED),
+                HarmlessFallbackPolicy.abortMessage(Next.ABORT_SERVER_BUSY));
+    }
+
+    @Test
+    void interruptDoesNotOverrideAHopThatRan() {
+        assertEquals(Next.PROCEED, HarmlessFallbackPolicy.decide(Outcome.EQUIPPED, 1, true));
+        assertEquals(Next.ABORT_NO_SAFE_ITEM, HarmlessFallbackPolicy.decide(Outcome.NO_SAFE_ITEM, 1, true));
+        assertEquals(Next.RETRY, HarmlessFallbackPolicy.decide(Outcome.TIMED_OUT, 1, false));
+    }
 }

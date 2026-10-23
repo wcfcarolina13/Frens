@@ -586,6 +586,9 @@ public class MiningTool {
             return fallback;
         }
         return BotActions.callOnServerThread(bot, () -> {
+            // Keep this try/catch: a step that throws past it reaches the shared hop as a failure,
+            // which maps to the fallback (TIMED_OUT for the harmless equip), so a half-run mutation
+            // would be retried as if it never ran.
             try {
                 T result = task.get();
                 return result == null ? fallback : result;
@@ -603,7 +606,8 @@ public class MiningTool {
     private static String equipHarmlessFallback(ServerPlayerEntity bot, BlockState target, BlockPos pos) {
         for (int attempt = 1; ; attempt++) {
             HarmlessFallbackPolicy.Next next =
-                    HarmlessFallbackPolicy.decide(switchToHarmlessFallback(bot, target), attempt);
+                    HarmlessFallbackPolicy.decide(switchToHarmlessFallback(bot, target), attempt,
+                            Thread.currentThread().isInterrupted());
             if (next == HarmlessFallbackPolicy.Next.PROCEED) {
                 return null;
             }

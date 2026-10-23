@@ -49,10 +49,6 @@ public final class LegacyWorldStateCommand {
             var player = handler.player;
             if (player instanceof createFakePlayer || BotEventHandler.isRegisteredBot(player)
                     || !Frens.isServerAdmin(player.getCommandSource())) return;
-            // Store files that could not be read this game session (moved aside or left in place).
-            for (String line : UnreadableStoreFile.adminNotices()) {
-                player.sendMessage(Text.literal(line), false);
-            }
             var pending = BotWorldStateService.pendingLegacyAliases(server);
             if (!pending.isEmpty()) {
                 player.sendMessage(Text.literal("Frens kept " + pending.size()
@@ -71,6 +67,12 @@ public final class LegacyWorldStateCommand {
                                 + " Review them in that dimension with /bot legacy-state registry preview " + store + "."), false);
                     }
                 }
+            }
+            // Store files that could not be read this game session (moved aside or left in place).
+            // Last: the calls above are what first load the stores, so on a fresh launch the host's
+            // only join would otherwise see an empty list.
+            for (String line : UnreadableStoreFile.adminNotices()) {
+                player.sendMessage(Text.literal(line), false);
             }
         });
     }

@@ -38,7 +38,7 @@ class RespawnResetPolicyTest {
         assertFalse(plan.noteSoulRespawn(), "the soul does not record a respawn");
         assertFalse(plan.sleepBeforeRestart(), "no server-thread sleep");
         assertTrue(plan.clearLeash(), "a dimension change drops the leads too");
-        assertEquals("§eTask stopped: changed dimension.", plan.taskAbortMessage());
+        assertEquals("§eTask ended: changed dimension.", plan.taskAbortMessage());
         assertNull(plan.lateAbortMessage(), "one abort, with the dimension message");
     }
 

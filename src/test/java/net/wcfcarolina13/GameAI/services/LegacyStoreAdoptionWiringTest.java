@@ -71,4 +71,17 @@ class LegacyStoreAdoptionWiringTest {
         int registry = src.indexOf("private static int registry(");
         assertTrue(src.indexOf("if (!Frens.isServerAdmin(source)) return refuse(source);", registry) > registry);
     }
+
+    @Test
+    void joinNoticeListsUnreadableFilesAfterTheCallsThatLoadTheStores() throws Exception {
+        String src = source("Commands/LegacyWorldStateCommand.java");
+        int join = src.indexOf("ServerPlayConnectionEvents.JOIN.register(");
+        int end = src.indexOf("private static LiteralArgumentBuilder<ServerCommandSource> registryCommand()", join);
+        String listener = src.substring(join, end);
+        int notices = listener.indexOf("UnreadableStoreFile.adminNotices()");
+        assertTrue(notices > 0);
+        assertTrue(listener.indexOf("BotWorldStateService.pendingLegacyAliases(server)") < notices);
+        assertTrue(listener.indexOf("registryPreview(store, world)") < notices);
+        assertEquals(-1, listener.indexOf("registryPreview(", notices), "no store load after the notice");
+    }
 }

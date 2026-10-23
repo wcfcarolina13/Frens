@@ -25,7 +25,9 @@ public final class HarmlessFallbackPolicy {
         PROCEED,
         RETRY,
         ABORT_NO_SAFE_ITEM,
-        ABORT_SERVER_BUSY
+        ABORT_SERVER_BUSY,
+        /** The worker was interrupted (the task is being cancelled): stop without blaming the server. */
+        ABORT_CANCELLED
     }
 
     /** Hops allowed in total: the first try plus one retry after a timeout. */
@@ -35,6 +37,7 @@ public final class HarmlessFallbackPolicy {
             "⚠️ Cannot mine: could not equip a safe tool or empty hand.";
     public static final String SERVER_BUSY_MESSAGE =
             "⚠️ Cannot mine: the server was too busy to switch tools.";
+    public static final String CANCELLED_MESSAGE = "Mining cancelled.";
 
     private HarmlessFallbackPolicy() {
     }
@@ -44,11 +47,24 @@ public final class HarmlessFallbackPolicy {
      * A null outcome is treated as a hop that did not run.
      */
     public static Next decide(Outcome outcome, int attempt) {
+        return decide(outcome, attempt, false);
+    }
+
+    /**
+     * As {@link #decide(Outcome, int)}, with whether the worker thread is interrupted. The server hop
+     * returns its fallback (TIMED_OUT) on an interrupt and restores the flag, so an interrupted
+     * worker's TIMED_OUT is a cancel: retrying would wait another 2 s and "server too busy" would be
+     * a false report.
+     */
+    public static Next decide(Outcome outcome, int attempt, boolean interrupted) {
         if (outcome == Outcome.EQUIPPED) {
             return Next.PROCEED;
         }
         if (outcome == Outcome.NO_SAFE_ITEM) {
             return Next.ABORT_NO_SAFE_ITEM;
+        }
+        if (interrupted) {
+            return Next.ABORT_CANCELLED;
         }
         return attempt < MAX_ATTEMPTS ? Next.RETRY : Next.ABORT_SERVER_BUSY;
     }
@@ -60,6 +76,9 @@ public final class HarmlessFallbackPolicy {
         }
         if (next == Next.ABORT_SERVER_BUSY) {
             return SERVER_BUSY_MESSAGE;
+        }
+        if (next == Next.ABORT_CANCELLED) {
+            return CANCELLED_MESSAGE;
         }
         return null;
     }

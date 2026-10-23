@@ -64,6 +64,9 @@ class RespawnHandlingWiringTest {
         String targets = block(reset, "if (plan.clearTargets())");
         assertTrue(targets.contains("setBaseTarget(bot, null)") && targets.contains("setFollowTarget(bot, null)"));
         assertTrue(reset.contains("plan.relocate() ? moveToRespawnPoint(bot, srv) : null"));
+        // Alive dimension exit: no teleport, but the End safe position is replaced by where the bot stands.
+        assertTrue(block(reset, "} else if (!plan.relocate())")
+                .contains("BotStuckService.setLastSafePosition(bot.getUuid(), bot.getEntityPos())"));
         String mode = block(reset, "if (plan.resetMode())");
         assertTrue(mode.contains("setMode(bot, Mode.IDLE)"));
         assertTrue(block(reset, "if (plan.regroupChat())").contains("has regrouped and is ready to re-engage."));

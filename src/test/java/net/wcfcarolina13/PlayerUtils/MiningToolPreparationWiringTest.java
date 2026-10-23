@@ -50,7 +50,8 @@ class MiningToolPreparationWiringTest {
                 + "                        ? HarmlessFallbackPolicy.Outcome.EQUIPPED\n"
                 + "                        : HarmlessFallbackPolicy.Outcome.NO_SAFE_ITEM;"));
         String equip = block(source, "private static String equipHarmlessFallback(");
-        assertTrue(equip.contains("HarmlessFallbackPolicy.decide(switchToHarmlessFallback(bot, target), attempt)"));
+        assertTrue(equip.contains("HarmlessFallbackPolicy.decide(switchToHarmlessFallback(bot, target), attempt,\n"
+                + "                            Thread.currentThread().isInterrupted())"));
         assertTrue(equip.contains("return HarmlessFallbackPolicy.abortMessage(next);"));
         assertTrue(equip.contains("LOGGER.info("));
         String acceptable = block(source, "private static boolean isNonWeaponMiningFallback(");

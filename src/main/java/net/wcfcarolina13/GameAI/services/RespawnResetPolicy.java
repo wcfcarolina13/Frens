@@ -21,8 +21,11 @@ public final class RespawnResetPolicy {
     public static final String DEATH_TASK_ABORT = "§cCurrent task aborted due to respawn.";
     /** The death-path abort latched again by {@code BotEventHandler.onBotRespawn}. */
     public static final String DEATH_LATE_ABORT = "§cTask aborted due to bot respawn.";
-    /** The abort for a bot that changed dimension alive. */
-    public static final String DIMENSION_TASK_ABORT = "§eTask stopped: changed dimension.";
+    /**
+     * The abort for a bot that changed dimension alive. Not "stopped": the soul observer buckets any
+     * "stop" text as a manual stop.
+     */
+    public static final String DIMENSION_TASK_ABORT = "§eTask ended: changed dimension.";
 
     public enum Cause {
         /** The bot died and is respawning. */

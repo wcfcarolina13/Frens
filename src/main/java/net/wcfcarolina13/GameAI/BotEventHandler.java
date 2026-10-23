@@ -910,6 +910,10 @@ public class BotEventHandler {
 
         if (destination != null) {
             BotStuckService.setLastSafePosition(bot.getUuid(), destination.target());
+        } else if (!plan.relocate()) {
+            // Left the End alive: no teleport, but the old safe position is in the End and rescue,
+            // shelter and regroup read it in the current world. Where the bot stands now replaces it.
+            BotStuckService.setLastSafePosition(bot.getUuid(), bot.getEntityPos());
         }
         if (plan.lateAbortMessage() != null) {
             TaskService.forceAbort(bot.getUuid(), plan.lateAbortMessage());
