@@ -720,6 +720,7 @@ Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/a
   `docs/handoffs/ARCHIVE_2026.md` (history only, grep it).
 
 ## Recovered deferrals (2026-10-17)
+Triaged 2026-10-23 (`.superpowers/deferral-triage/triage.md`, Bradley's 7 card rulings): 47 kept, 17 closed.
 
 Deferrals that lived only in superseded handoffs (Ralph retirement audit, `.superpowers/ralph-retirement/audit.md` section 2
 "ORPHAN" rows). Quoted from the source handoff, source in parentheses. `(uncertain)` = the audit could not confirm it is still
@@ -727,16 +728,16 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 
 ### Navigation, pathfinding and stuck escape
 - [x] "go_to plans in `server.getOverworld()` whatever the bot's dimension." (still `server.getOverworld()` in `modCommandRegistry`; 1.1.265 handoff, 2026-10-17) — ✅ 1.1.278 8d6a7880 (sandbox 6bp PASS)
-- [ ] "unified sunset probes returned `pathLen=0` or `7` with `next=none` inside 200 ms, so the return fell back to a direct follow plan to the far anchor. Worth a scope before Slice D." (1.1.265 handoff, 2026-10-17)
-- [ ] "Slice D (remove the legacy boolean and bidir) once the default has held." (1.1.261 handoff; also 1.1.263 and 1.1.242 handoffs, 2026-10-15/17)
+- [ ] **P2 (M)** "unified sunset probes returned `pathLen=0` or `7` with `next=none` inside 200 ms, so the return fell back to a direct follow plan to the far anchor. Worth a scope before Slice D." (1.1.265 handoff, 2026-10-17)
+- [ ] **P3 (M)** "Slice D (remove the legacy boolean and bidir) once the default has held." (1.1.261 handoff; also 1.1.263 and 1.1.242 handoffs, 2026-10-15/17)
 - [x] "after the first shared-settings save the file stores `"pathfinder": "unified"` explicitly rather than null, so a later default change would not move that install." (1.1.261 handoff, 2026-10-17) — ✅ 1.1.286 77df45d2
 - [x] "diagonal wall nudge (eye-box geometry)" (1.1.264 handoff, 2026-10-17) — Source fixed in prior unreleased2026-10-22 phase, extreme-corner regression included. Live field checks remain.
-- [ ] "scaffold Phase 3 pillaring up while on a pillar" (1.1.264 handoff, 2026-10-17)
+- [ ] **P3 (M)** "scaffold Phase 3 pillaring up while on a pillar" (1.1.264 handoff, 2026-10-17)
 - [x] "the two off-thread `rescueFromBurial` callers (ReturnBaseStuck async mine escape, MovementService nudge loop)." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.289
 - [x] "a backup jump-sprint logged `succeeded, now at 199, 110, 202` from inside a closed stone pocket. Worth a scope." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.279 741355c8 + 5eb24b38 (sandbox 6bq PASS)
 - [x] "`ReturnBaseStuckService` counters clear only on arrival at base, so a later return inherits `backupAttempted` from an earlier stuck episode (seen in the sandbox). Worth a scope." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.279 741355c8 (sandbox 6bq PASS)
-- [ ] "blind walkDirect fallback after no path" (1.1.239 handoff, 2026-10-14)
-- [ ] "hand-dig stair escape for a bot with no blocks." (1.1.236 handoff; also 1.1.239 handoff, 2026-10-14; 1.1.240 `TerrainMovePolicy` places dirt stairs but has no no-blocks dig)
+- [ ] **P2 (M)** "blind walkDirect fallback after no path" (1.1.239 handoff, 2026-10-14)
+- [ ] **P2 (M)** "hand-dig stair escape for a bot with no blocks." (1.1.236 handoff; also 1.1.239 handoff, 2026-10-14; 1.1.240 `TerrainMovePolicy` places dirt stairs but has no no-blocks dig)
 - [x] "BotActions.moveRelative same-cell teleport" ("probable IN_WALL root, shared hot file"; 1.1.233 handoff; also 1.1.229 handoff, 2026-10-13) — ✅ 1.1.279 2a42404b + 5eb24b38 (sandbox 6bq: drowning/drop/door/stair PASS, kiting a field item)
 - [x] "MovementService off-thread tool swaps" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.289
 - [x] "isAtSurface strict under canopy" (1.1.234 handoff, 2026-10-14) — ✅ 1.1.288
@@ -744,31 +745,31 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "clutter clears ... still instant" (snow/carpet clutter; 1.1.234 handoff, 2026-10-14) — ✅ 1.1.288
 - [x] "long automatic return refusals (combat/cooldown/food) still in chat." (1.1.234 handoff, 2026-10-14) — ✅ 1.1.288
 - [x] "Return-base door/escape server-thread traverses (BEH ~3603/~3630): let the tripwire name them first." (1.1.223 handoff, 2026-09-25) — stale (triage 2026-10-19): Mode.RETURNING_BASE is never set; return-to-base runs via FOLLOW (BEH:1336, :3165)
-- [ ] "redstone step 2 (use plates and buttons, iron doors with triggers)" (1.1.223 handoff, 2026-09-25)
-- [ ] "`LeafClearAction`/`LeafClearResult` still on MovementService." (2026-09-05 late night handoff; also 2026-09-05 night and later handoffs)
-- [ ] (uncertain) "Duplicate \"Returning to base\" messages on each sunset return." (Farm Pipeline next-session notes, 2026-04-08)
-- [ ] (uncertain) "Follow mode stuck at 1-block Y differences. Bot can see commander but `directBlocked=true` when 1 block above." (Farm Pipeline next-session notes, 2026-04-08)
-- [ ] (uncertain) "Bot standing at end of staircase not trying to walk around." ("can't build a multi-level path through interior stairs around a column"; Door passage series notes, 2026-04-16)
-- [ ] (uncertain) "The `ensureAtSurface` / `nudgeToward failed` loop at session start ... Triggered when bot starts with `leavesTrap=true` under canopy." (Farm Pipeline next-session notes, 2026-04-08)
-- [ ] "shallow pits with diagonal one-block exits, verifying fewer repeated micro-hop local-escape restarts" (validation ask, likely stale after the 1.1.240+ finder work; Recent Session Notes, 2026-03-31)
+- [ ] **P2 (L)** "redstone step 2 (use plates and buttons, iron doors with triggers)" (1.1.223 handoff, 2026-09-25)
+- [ ] **P3 (S)** "`LeafClearAction`/`LeafClearResult` still on MovementService." (2026-09-05 late night handoff; also 2026-09-05 night and later handoffs)
+- [ ] **P3 (S)** (uncertain) "Duplicate \"Returning to base\" messages on each sunset return." (Farm Pipeline next-session notes, 2026-04-08) (retest in sandbox)
+- [ ] **P3 (S)** (uncertain) "Follow mode stuck at 1-block Y differences. Bot can see commander but `directBlocked=true` when 1 block above." (Farm Pipeline next-session notes, 2026-04-08) (retest in sandbox)
+- [ ] **P3 (M)** (uncertain) "Bot standing at end of staircase not trying to walk around." ("can't build a multi-level path through interior stairs around a column"; Door passage series notes, 2026-04-16) (retest in sandbox)
+- [x] (uncertain) "The `ensureAtSurface` / `nudgeToward failed` loop at session start ... Triggered when bot starts with `leavesTrap=true` under canopy." (Farm Pipeline next-session notes, 2026-04-08) → covered by the field item "A bot under an oak canopy counts as at the surface" (1.1.288 749b8c7a, backlog 145) (triage 2026-10-23)
+- [x] "shallow pits with diagonal one-block exits, verifying fewer repeated micro-hop local-escape restarts" (validation ask, likely stale after the 1.1.240+ finder work; Recent Session Notes, 2026-03-31) ✅ stale: a March validation ask, the stuck path was reworked since (1.1.236, 1.1.239, 1.1.264, 1.1.279 741355c8) and those have their own field items (triage 2026-10-23)
 
 ### Construction, scaffold and shelter
-- [ ] Pillar and leaf migrations onto the shared services: "`FarmSkill.pillarEscape`; `WoodcutSkill.pillarUp`, `HovelPerimeterBuilder.pillarUp`, `WoodcutSkill.clearBlockingLeaves`" (reasons: "timing/placement differ from ScaffoldService — a behaviour change, judge in the field first", "need 2–3 options each, fragile skills"; deferred in 1.1.208, repeated in the 2026-09-05 handoffs and 1.1.216 handoff)
-- [ ] "Egress follow-ups: outside→inside entry routing, and Fortify onto the shared helper." (hovel `enterInteriorViaDoor`; 1.1.218 ruling "don't touch Fortify" for now; 1.1.218 handoff, repeated 1.1.219-1.1.222, 2026-09-25)
-- [ ] "inline four single-caller delegates (`tryBreakThroughObstacle` ×2, `attemptFinalizeCarveTransaction`, `isCarveEligibleForBreakAttempt`)" (1.1.210 Minor 3; 2026-09-05 late night handoff, repeated through 1.1.216)
-- [ ] (uncertain) "Suffocation during scaffold descent — bot embeds in terrain after dropping through scaffold gaps." (Farm Pipeline next-session notes, 2026-04-08)
-- [ ] (uncertain) "Shelter-breakfree misfires on indoor spawn." ("When bot legitimately respawns inside an enclosed structure ... auto-mines upward, destroying stairs"; Door passage series notes, 2026-04-16)
-- [ ] (uncertain) "This change intentionally breaks the old shelter-escape \"trapped in corner, needs door as exit\" behavior ... re-address later." (Door passage series notes, 2026-04-16)
+- [ ] **P3 (M)** Pillar and leaf migrations onto the shared services: "`FarmSkill.pillarEscape`; `WoodcutSkill.pillarUp`, `HovelPerimeterBuilder.pillarUp`, `WoodcutSkill.clearBlockingLeaves`" (reasons: "timing/placement differ from ScaffoldService — a behaviour change, judge in the field first", "need 2–3 options each, fragile skills"; deferred in 1.1.208, repeated in the 2026-09-05 handoffs and 1.1.216 handoff)
+- [ ] **P3 (M)** "Egress follow-ups: outside→inside entry routing, and Fortify onto the shared helper." (hovel `enterInteriorViaDoor`; 1.1.218 ruling "don't touch Fortify" for now; 1.1.218 handoff, repeated 1.1.219-1.1.222, 2026-09-25)
+- [ ] **P3 (S)** "inline four single-caller delegates (`tryBreakThroughObstacle` ×2, `attemptFinalizeCarveTransaction`, `isCarveEligibleForBreakAttempt`)" (1.1.210 Minor 3; 2026-09-05 late night handoff, repeated through 1.1.216)
+- [ ] **P3 (S)** (uncertain) "Suffocation during scaffold descent — bot embeds in terrain after dropping through scaffold gaps." (Farm Pipeline next-session notes, 2026-04-08) (retest in sandbox)
+- [ ] **P2 (S)** (uncertain) "Shelter-breakfree misfires on indoor spawn." ("When bot legitimately respawns inside an enclosed structure ... auto-mines upward, destroying stairs"; Door passage series notes, 2026-04-16)
+- [x] (uncertain) "This change intentionally breaks the old shelter-escape \"trapped in corner, needs door as exit\" behavior ... re-address later." (Door passage series notes, 2026-04-16) → covered by "Doorway / pressure plate stuck (still recurring)" in P1 below (triage 2026-10-23)
 
 ### Woodcut and mining
 - [x] "mounted leaf clearing still instant" (1.1.234 handoff; deferred again in 1.1.238. 1.1.267 M3 fixed the shears, not the speed) — ✅ 1.1.286 77df45d2 + 4f20d03f
 - [x] "woodcut cleanup async scan off-thread" (1.1.266 B bounded the scan, it still runs off-thread; 1.1.234 handoff, 2026-10-14) — ✅ 1.1.290
 - [x] "cleanup hand fallback slot 0" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.282 2b9de28c
-- [ ] "woodcut surface-staging cost." (1.1.229 handoff, 2026-10-13)
+- [ ] **P3 (S)** "woodcut surface-staging cost." (1.1.229 handoff, 2026-10-13)
 - [x] "weapons+food-only inventory mining thrash (pre-existing)" (1.1.229 handoff, 2026-10-13) — ✅ 1.1.273 3d01ec5a (RepollPolicy) + 1.1.274 e4f77737 (cliff-branch loadout); sandbox PASS FIELD_0_6AI_SANDBOX:92
-- [ ] (uncertain) "WoodcutSkill still reports `soilFail=29` out of 31 logs in dense forest" ("May need to revisit the soil/hazard heuristic for bounded-mode farm clearing"; Farm Pipeline next-session notes, 2026-04-08)
-- [ ] "woodcut trunk-entry cases that previously carved `grass_block` / `dirt` support under the stand" (validation ask, likely stale; Recent Session Notes, 2026-03-31)
-- [ ] "standalone and idle woodcut runs, verifying `Planted sapling at ...` or explicit replant skip summaries after per-tree cleanup" (validation ask, likely stale; Recent Session Notes, 2026-03-31)
+- [ ] **P3 (S)** (uncertain) "WoodcutSkill still reports `soilFail=29` out of 31 logs in dense forest" ("May need to revisit the soil/hazard heuristic for bounded-mode farm clearing"; Farm Pipeline next-session notes, 2026-04-08) (retest in sandbox)
+- [x] "woodcut trunk-entry cases that previously carved `grass_block` / `dirt` support under the stand" (validation ask, likely stale; Recent Session Notes, 2026-03-31) ✅ stale: trunk entry was replaced by mine-from-outside on 2026-04-01, soil protection came in 1.1.275 and 1.1.280 7a4fecfb, field "Two woodcutters leave each other's tree soil and pillars alone" PASS (triage 2026-10-23)
+- [ ] **P3 (S)** "standalone and idle woodcut runs, verifying `Planted sapling at ...` or explicit replant skip summaries after per-tree cleanup" (validation ask, likely stale; Recent Session Notes, 2026-03-31)
 
 ### Survival, hunger, crafting, farming and mutual aid
 - [x] "bundle food in the no-food warning" (1.1.239 handoff, 2026-10-14) — ✅ 1.1.279 1fedf1ce (sandbox 6bq PASS)
@@ -782,34 +783,34 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "`dropCheapStackForSpace` drops the LARGEST stack when nothing is cheap, and the dropped stack can be re-picked after 2 s." ("Needs a cheap-only mode or a longer pickup delay"; 1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 (restated: aid make-room never drops valuables; sandbox 6bq PASS)
 - [x] "A flower keeps targeting a full preferred recipient (cosmetic)." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.283 003fd626
 - [x] "the per-hobby backoff state is written for hunt and collect_dirt but read only by woodcut — ready if a later item gates `pickHobby` on tool availability." (1.1.216 handoff, 2026-09-07) — 1.1.288: both idle pickers now read it (cook and hangout never record attempts; axe-bearer bypass and repeated availability reset fixed in source 2026-10-21, unreleased; field check pending)
-- [ ] "Farm manual placement still has multiple `Heightmap.Type.WORLD_SURFACE` / `findSurfaceY` call sites outside `assessFarmSite`." ("If they misbehave in forests, apply the same walkable-ground-Y treatment"; Farm Pipeline next-session notes, 2026-04-08)
-- [ ] (uncertain) "PvE only. ... Alliances feature is the planned PvP gate, not yet built." (Tamed-animal defense notes, 2026-04-11)
-- [ ] Field check (from .ralph/progress.md, 2026-03-27, never moved to a field phase; re-check against current hunger/cooking code first): spawn bot, give sword, set hunger to 3, verify it hunts and doesn't stop until 4+ food items (.ralph/progress.md, now in docs/handoffs/ARCHIVE_2026.md)
-- [ ] Field check (same source): after a hunt, the bot walks to a furnace and cooks all raw food types in turn (.ralph/progress.md)
-- [ ] Field check (same source): give the bot raw chicken + raw porkchop, verify the idle hobby picks "cook" (.ralph/progress.md)
-- [ ] Field check (same source): bot at food=8 with zero inventory food, verify auto-hunt still triggers (.ralph/progress.md)
+- [x] ✅ Ruled 2026-10-23 (Bradley): won't do, no field symptom. Reopen only if one appears (triage 2026-10-23, Bradley ruling). Was: "Farm manual placement still has multiple `Heightmap.Type.WORLD_SURFACE` / `findSurfaceY` call sites outside `assessFarmSite`." ("If they misbehave in forests, apply the same walkable-ground-Y treatment"; Farm Pipeline next-session notes, 2026-04-08)
+- [x] ✅ Ruled 2026-10-23 (Bradley): bots never fight players, warn only. Alliances already exist (`PlayerAllianceService`, used by `BotAnimalDefenseService`) (triage 2026-10-23, Bradley ruling). Was: (uncertain) "PvE only. ... Alliances feature is the planned PvP gate, not yet built." (Tamed-animal defense notes, 2026-04-11)
+- [ ] **P2 (S)** Field check (from .ralph/progress.md, 2026-03-27, never moved to a field phase; re-check against current hunger/cooking code first): spawn bot, give sword, set hunger to 3, verify it hunts and doesn't stop until 4+ food items (.ralph/progress.md, now in docs/handoffs/ARCHIVE_2026.md) (update pass conditions first: auto-hunt threshold 10, food reserve 8, no stop-at-4 target)
+- [ ] **P2 (S)** Field check (same source): after a hunt, the bot walks to a furnace and cooks all raw food types in turn (.ralph/progress.md) (update pass conditions first: auto-hunt threshold 10, food reserve 8, no stop-at-4 target)
+- [ ] **P2 (S)** Field check (same source): give the bot raw chicken + raw porkchop, verify the idle hobby picks "cook" (.ralph/progress.md) (update pass conditions first: auto-hunt threshold 10, food reserve 8, no stop-at-4 target)
+- [ ] **P2 (S)** Field check (same source): bot at food=8 with zero inventory food, verify auto-hunt still triggers (.ralph/progress.md) (update pass conditions first: auto-hunt threshold 10, food reserve 8, no stop-at-4 target)
 
 ### Multiplayer, ownership and permissions
 - [x] "join-check commander radius" (48; 1.1.236 handoff, 2026-10-14) — ✅ 1.1.284 c982f8b6
-- [ ] "multiplayer roster payload" (1.1.236 handoff, 2026-10-14)
+- [ ] **P3 (M)** "multiplayer roster payload" (1.1.236 handoff, 2026-10-14)
 - [x] "level-name-keyed stores (chest/furnace/beehive registries, hunt + crafting history, fortifications, mapped villages" (1.1.256 fixed spawns only; 1.1.234 handoff, 2026-10-14) — Source complete unreleased2026-10-22: chest was already fingerprinted; remaining stores plus hunting settings isolated with explicit retained-original recovery. Full3652/3652. Field migration checks remain.
 - [x] "D7 non-op zone edit/delete" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.287
 - [x] "anyone can map a village" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.287
 - [x] "claim an ownerless wall" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.287
-- [ ] "typed /bot ... for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
-- [ ] "SPAWN for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
+- [x] ✅ Ruled 2026-10-23 (Bradley): screens only, non-op owners get no typed /bot and no spawn. A server option only if an admin asks (triage 2026-10-23, Bradley ruling). Was: "typed /bot ... for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
+- [x] ✅ Ruled 2026-10-23 (Bradley): screens only, no spawn for non-op owners (same ruling as the line above) (triage 2026-10-23, Bradley ruling). Was: "SPAWN for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
 - [x] "resurrection owner clause." (1.1.233 handoff, 2026-10-13) ✅ 1.1.272 (Questing-off ritual: owner, op or host)
-- [ ] "After 6ac/6ad results: bot-slot check refuse mode" (6ad item 7 was clean; `AuthorizedBotDispatch` is still WARN-only; 1.1.233 handoff; also 1.1.232 "D5 refuse mode", 2026-10-13)
+- [ ] **P2 (S)** "After 6ac/6ad results: bot-slot check refuse mode" (6ad item 7 was clean; `AuthorizedBotDispatch` is still WARN-only; 1.1.233 handoff; also 1.1.232 "D5 refuse mode", 2026-10-13)
 - [x] "A bot respawned by the End exit is a plain `ServerPlayerEntity`, so it gets \"not a companion\" until it is recreated." ("fails closed, and the mod's 78 other `instanceof` checks share it"; 1.1.220 handoff, 2026-09-25) — Source fixed unreleased2026-10-22 with exact respawn constructor redirect; actual offline Mixin transformation validated, full3652/3652. Live End/mod coexistence check remains.
 - [x] (uncertain) "An offline-mode LAN guest using the host's name passes `isHost`; `configNetworkManager` has the same gap." (1.1.220 handoff, 2026-09-25) — Shared host gate now compares UUID and captured server, unreleased2026-10-22; full3652/3652. Same-UUID spoof authentication is not solved.
-- [ ] (uncertain) "misleading \"Out of range\" text after an inventory deny (modCommandRegistry)" (1.1.224 handoff/changelog deferral, 2026-09-25)
+- [x] (uncertain) "misleading \"Out of range\" text after an inventory deny (modCommandRegistry)" (1.1.224 handoff/changelog deferral, 2026-09-25) ✅ done: access is checked first, then the real reason is named (too far or another dimension), 1.1.280 51363665 (triage 2026-10-23)
 - [x] "the recruiter-fallback prompt edge in `resolveController`" (1.1.224 changelog deferral, 2026-09-25) — Current-owner authority and stale/cache food consent fixed in source, unreleased 2026-10-21; focused 28/28, full 3549/3549. Field checks remain.
 - [x] "each rejected preference packet still queues one server task" (1.1.224 changelog deferral, 2026-09-25) — Retargeted 2026-10-21: redundant application dispatch removed in source; Fabric initial dispatch remains. Full-state/resync behavior retained; focus 15/15, full 3549/3549. Unreleased.
-- [ ] (uncertain) "the reporter says brand-new worlds failed too, which the per-world key should prevent." ("server is full" report; suspects global `config/frens/` sidecars and legacy level-name-only keys; 1.1.226 handoff, 2026-10-13)
+- [x] (uncertain) "the reporter says brand-new worlds failed too, which the per-world key should prevent." ("server is full" report; suspects global `config/frens/` sidecars and legacy level-name-only keys; 1.1.226 handoff, 2026-10-13) ✅ done: global spawn accessor and legacy slots removed in 1.1.256 20ae0bae, remaining level-name stores isolated in 1.1.291 7030d816, field 6ad "A new world starts clean" PASS 2026-10-17. The 7-saved-bots case stays open as field item 6x (triage 2026-10-23)
 
 ### Supplies and chests
-- [ ] Ruled 2026-10-23 (Bradley): one combined ask. The bot works out everything a craft needs and asks the chest once ("I need 3 planks and 2 sticks from your chest, OK?"), one approval covers the set. Medium build, not yet scheduled. Was: "Worker skills can't craft from chest materials. There is one prompt per bot, so a plank ask blocks the tool ask. Fixing it needs WaitMode through `ensure*`/`craftGeneric` plus need-bundling, which is Phase 4 and needs a ruling." (1.1.221 handoff; also 1.1.222 handoff, 2026-09-25)
-- [ ] "Supplies Phase 4: the storage-room walkthrough, need-driven armour requests while following, and the WaitMode/need-bundling ruling above." (1.1.221 handoff; also 1.1.222 handoff, 2026-09-25)
+- [ ] **P2 (M)** Ruled 2026-10-23 (Bradley): one combined ask. The bot works out everything a craft needs and asks the chest once ("I need 3 planks and 2 sticks from your chest, OK?"), one approval covers the set. Medium build, not yet scheduled. Was: "Worker skills can't craft from chest materials. There is one prompt per bot, so a plank ask blocks the tool ask. Fixing it needs WaitMode through `ensure*`/`craftGeneric` plus need-bundling, which is Phase 4 and needs a ruling." (1.1.221 handoff; also 1.1.222 handoff, 2026-09-25)
+- [ ] **P3 (L)** "Supplies Phase 4: the storage-room walkthrough, need-driven armour requests while following, and the WaitMode/need-bundling ruling above." (1.1.221 handoff; also 1.1.222 handoff, 2026-09-25)
 - [x] "`grantableEstimate` works per chest half, so it under-counts double chests." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.286 77df45d2
 - [x] "Three \"other half of a double chest\" helpers could be one." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.288
 - [x] "CraftingHelper pull hint maps aren't cleared at stop (bounded wall-clock hints)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c
@@ -824,36 +825,36 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "A server-thread chest placement miss logs only at DEBUG." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c
 
 ### Souls, dialogue and audio
-- [ ] "Audio for \"Hey, incoming!\"." (also listed in untracked `AUDIO_NEEDED.md`; 1.1.261 handoff, 2026-10-17)
+- [x] "Audio for \"Hey, incoming!\"." (also listed in untracked `AUDIO_NEEDED.md`; 1.1.261 handoff, 2026-10-17) → covered by "Ruled 2026-10-23 (Bradley): text only" (placeholder voice lines) below (triage 2026-10-23)
 - [x] "Extend the punctuation guard to the JSON resources." (1.1.261 handoff, 2026-10-17) — ✅ 1.1.283 003fd626
-- [ ] Ruled 2026-10-23 (Bradley): text only. Lines with only silent placeholder sounds show as chat text, voice skips them, placeholders removed (going into 1.1.295). Was: (uncertain) "#10 audio regeneration (needs Bradley's triage)" = "The missing `snow_golem_ammo` and other voice clips." (1.1.239 `ef4ea499` added empty-sound stubs only; 1.1.239 handoff, 2026-10-14; 1.1.223 handoff, 2026-09-25)
-- [ ] "Later: scene smoothing step 2 (scene boundaries in history)" (1.1.223 handoff, 2026-09-25)
-- [ ] "self-directed goals (proposer-only)." (1.1.223 handoff, 2026-09-25)
+- [ ] **P1 (S)** Ruled 2026-10-23 (Bradley): text only. Lines with only silent placeholder sounds show as chat text, voice skips them, placeholders removed (going into 1.1.295). Was: (uncertain) "#10 audio regeneration (needs Bradley's triage)" = "The missing `snow_golem_ammo` and other voice clips." (1.1.239 `ef4ea499` added empty-sound stubs only; 1.1.239 handoff, 2026-10-14; 1.1.223 handoff, 2026-09-25) (with the 1.1.295 session)
+- [ ] **P3 (M)** "Later: scene smoothing step 2 (scene boundaries in history)" (1.1.223 handoff, 2026-09-25)
+- [ ] **P3 (L)** "self-directed goals (proposer-only)." (1.1.223 handoff, 2026-09-25)
 - [x] "The Pocket installer's pre-wait EOF read, which can hang." (1.1.223 handoff, 2026-09-25) — ✅ 1.1.279 911b1243 (unit-tested; not run in the sandbox)
-- [ ] "HEARD records (the owner's own replies) are never marked private." (1.1.224 changelog deferral, 2026-09-25)
-- [ ] "remote model pulls and voice installs on the server host" (1.1.225 handoff, 2026-09-26)
-- [ ] "a voice-preset picker" (1.1.225 handoff, 2026-09-26)
-- [ ] "a persona picker" (1.1.225 handoff, 2026-09-26)
-- [ ] "auto-enable on spawn" (souls; 1.1.225 handoff, 2026-09-26)
-- [ ] "dry-run generation" (1.1.225 handoff, 2026-09-26)
-- [ ] "Addressee deferrals: mid-sentence third-person mentions, \"you and Bob\" clauses, human nicknames." (1.1.219 handoff; repeated 1.1.220-1.1.222, 2026-09-25)
-- [ ] "the new `ollama usage` log lets `NUM_CTX` be right-sized." (1.1.217 handoff, 2026-09-25)
-- [ ] "Unifying the two scripted services' cooldown implementations: larger refactor, no remaining field symptom." (1.1.216 handoff, 2026-09-07)
-- [ ] (uncertain) "Adding a reason enum to `SkillExecutionResult`: touches every skill call site" (reads as won't-do; 1.1.216 handoff, 2026-09-07)
-- [ ] "`threads.closed` matching (needs a per-question `SoulMindOps.markAnswered` overload)" (1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
-- [ ] "`BAD_AT` from repeated `TASK_FAILED`" (1.1.213-1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
-- [ ] "TEASE peer rule once `SoulSpeechAct` rides on `GroupSceneTurn`" (1.1.212-1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
+- [ ] **P2 (S)** "HEARD records (the owner's own replies) are never marked private." (1.1.224 changelog deferral, 2026-09-25)
+- [ ] **P3 (M)** "remote model pulls and voice installs on the server host" (1.1.225 handoff, 2026-09-26)
+- [ ] **P3 (S)** "a voice-preset picker" (1.1.225 handoff, 2026-09-26)
+- [ ] **P3 (S)** "a persona picker" (1.1.225 handoff, 2026-09-26)
+- [ ] **P2 (S)** Ruled 2026-10-23 (Bradley): ask once in the AI setup checklist ("Give new companions a soul when Ollama is ready?"), and the answer becomes the default for new bots. Was: "auto-enable on spawn" (souls; 1.1.225 handoff, 2026-09-26)
+- [ ] **P3 (S)** "dry-run generation" (1.1.225 handoff, 2026-09-26)
+- [ ] **P3 (M)** "Addressee deferrals: mid-sentence third-person mentions, \"you and Bob\" clauses, human nicknames." (1.1.219 handoff; repeated 1.1.220-1.1.222, 2026-09-25)
+- [ ] **P3 (S)** "the new `ollama usage` log lets `NUM_CTX` be right-sized." (1.1.217 handoff, 2026-09-25)
+- [x] ✅ Ruled 2026-10-23 (Bradley): won't do, no field symptom. Reopen only if one appears (triage 2026-10-23, Bradley ruling). Was: "Unifying the two scripted services' cooldown implementations: larger refactor, no remaining field symptom." (1.1.216 handoff, 2026-09-07)
+- [x] ✅ Ruled 2026-10-23 (Bradley): won't do, no field symptom. Reopen only if one appears (triage 2026-10-23, Bradley ruling). Was: (uncertain) "Adding a reason enum to `SkillExecutionResult`: touches every skill call site" (reads as won't-do; 1.1.216 handoff, 2026-09-07)
+- [ ] **P3 (S)** "`threads.closed` matching (needs a per-question `SoulMindOps.markAnswered` overload)" (1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
+- [ ] **P3 (S)** "`BAD_AT` from repeated `TASK_FAILED`" (1.1.213-1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
+- [ ] **P3 (M)** "TEASE peer rule once `SoulSpeechAct` rides on `GroupSceneTurn`" (1.1.212-1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
 - [x] "`SoulBanterDirector.relationsEnabled()` static read → supplier" (1.1.216 and earlier handoffs, 2026-09-06/07) — Source-complete in the unreleased 2026-10-21 diff: live supplier injected by SoulRuntime; focused 98/98 and full direct JUnit 3471/3471. Not committed, released or field-checked.
-- [ ] "`MIN_TRIGRAMS` 3→4" ("if the field session shows quoted-idiom drops"; 1.1.216 and earlier handoffs, 2026-09-06/07)
-- [ ] "OWNER_DAMAGE-peer rule deferred (event carries only `ownerId`)." (1.1.212 handoff, 2026-09-06 evening)
-- [ ] "ring idle eviction only if a leak shows" (1.1.211 handoff, 2026-09-06)
+- [x] ✅ Ruled 2026-10-23 (Bradley): won't do, no field symptom. Reopen only if one appears (triage 2026-10-23, Bradley ruling). Was: "`MIN_TRIGRAMS` 3→4" ("if the field session shows quoted-idiom drops"; 1.1.216 and earlier handoffs, 2026-09-06/07)
+- [ ] **P3 (S)** "OWNER_DAMAGE-peer rule deferred (event carries only `ownerId`)." (1.1.212 handoff, 2026-09-06 evening)
+- [x] ✅ Ruled 2026-10-23 (Bradley): won't do, no field symptom. Reopen only if one appears (triage 2026-10-23, Bradley ruling). Was: "ring idle eviction only if a leak shows" (1.1.211 handoff, 2026-09-06)
 - [x] "Deferred minors from the 1.1.203 branch: mask receiver unthrottled; wire cap 64 vs 9 ids" (voice mute masks; 2026-09-04 evening handoff) — ✅ 1.1.284 c982f8b6 (cap only; throttle dropped: it lost the last toggle)
-- [ ] "Pocket voice cloning (HF-gated)" (never built, "Not in this cut" in 1.1.198; Backlog Lineup 2026-09-03 Lane 3)
-- [ ] (uncertain) "ontology Phase 3 / second scripted-text personality (spec first)" (ontology half done; may mean the soul personality Silas shipped in 1.1.204; 2026-09-05 handoffs)
+- [x] ✅ Ruled 2026-10-23 (Bradley): skip voice cloning, presets only (triage 2026-10-23, Bradley ruling). Was: "Pocket voice cloning (HF-gated)" (never built, "Not in this cut" in 1.1.198; Backlog Lineup 2026-09-03 Lane 3)
+- [ ] **P3 (M)** (uncertain) "ontology Phase 3 / second scripted-text personality (spec first)" (ontology half done; may mean the soul personality Silas shipped in 1.1.204; 2026-09-05 handoffs)
 
 ### MCP fork and tooling
 - [x] "keyboard in-world" (minecraft-mod-mcp fork; open in `docs/testing/MCP_MOD_IMPROVEMENTS.md`; 1.1.236 handoff, 2026-10-14) — ✅ MCP fork 71efa71 (docs/testing/MCP_MOD_IMPROVEMENTS.md:47)
-- [ ] "per-action control mode upstream PR." ("Upstream PR plan ... nothing sent" in `MCP_MOD_IMPROVEMENTS.md`; 1.1.236 handoff, 2026-10-14)
+- [ ] **P3 (S)** Ruled 2026-10-23 (Bradley): send the security PRs only (loopback bind with browser-request refusal, safe screenshot paths). Claude drafts each PR text for Bradley's OK first, nothing sent yet. Per-action control mode stays fork-only. Was: "per-action control mode upstream PR." ("Upstream PR plan ... nothing sent" in `MCP_MOD_IMPROVEMENTS.md`; 1.1.236 handoff, 2026-10-14)
 
 ### Docs and process
 - [x] ✅ Ruled 2026-10-18: per instance (CLAUDE.md and the release skill updated). Was: Needs Bradley: "scope the CLAUDE.md pre-deploy check to the target instance (`pgrep -f "PrismLauncher/instances/1.21.11/natives"`). The any-instance pattern blocks every release while a sandbox test runs." (1.1.263 handoff, 2026-10-17)
@@ -861,11 +862,11 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] ✅ 1.1.268 Ruled 2026-10-18: lower the survival food cutoff to 8 (food keeps 8, other materials 16, `472afa60`). Was: Needs Bradley: confirm "Food reserve 16 as the survival cutoff (early game: a bot can't eat from a chest holding ≤16 bread)." (provisional ruling made on his behalf in 1.1.221; 1.1.221 and 1.1.222 handoffs, 2026-09-25)
 - [x] ✅ Ruled 2026-10-18: keep 4 (com.bradley.ollama-env LaunchAgent, measured for souls). Was: Needs Bradley: "Whether to lower `OLLAMA_NUM_PARALLEL`." ("machine-wide; other local jobs share it"; 1.1.217 through 1.1.222 handoffs, 2026-09-25)
 - [x] ✅ Ruled 2026-10-23 (Bradley): keep both, relations and PlayerMemory do different jobs and never disagreed in play. Earlier: Ruled 2026-10-18: decide after the 6aj-6bg field sweep (note any disagreement seen in play). Sweep done 2026-10-18: no disagreement seen, decision due. Was: Needs Bradley: "relations coexist with `PlayerMemory`, decide after the field session" (1.1.211 handoff, 2026-09-06)
-- [ ] Ruled 2026-10-23 (Bradley): publish 1.1.295 after its sandbox check, with notes refreshed for 1.1.231 through 1.1.295; Bradley OKs the exact text and uploads. Earlier: Ruled 2026-10-18: publish the first build after the field sweep with no high-severity failures (likely 1.1.268); notes prepared for Bradley's OK, he uploads. 1.1.268 qualifies; draft notes in `.superpowers/sdd/modrinth/MODRINTH_NOTES_1.1.268_DRAFT.md`, awaiting his OK. Was: Needs Bradley: "1.1.231–1.1.233 NOT published" on Modrinth (now everything after 1.1.230; held by the "no Modrinth until the live playthroughs settle" ruling, 2026-10-14; 1.1.233 handoff, 2026-10-13)
-- [ ] (uncertain) "5. Fresh-install part 2." (no clean-instance run recorded; 1.1.236 handoff; also 1.1.234, 1.1.229, 1.1.227 and 1.1.225 handoffs)
-- [ ] (uncertain) "(mention the REI/EMI/JEI note)" in the Modrinth changelog (1.1.228 handoff, 2026-10-13)
-- [ ] (uncertain) "Session cards: task_43ec92da (merged finder, now largely done) and task_e6032cb8 (audit) can be dismissed or re-scoped by Bradley." (1.1.242 handoff, 2026-10-15)
-- [ ] Tamed-animal defense "Manual verification checklist (15 items) is in the spec" (`docs/superpowers/specs/2026-04-11-tamed-animal-defense-design.md`), not in the field checklist (Tamed-animal defense notes, 2026-04-11)
+- [ ] **P1 (S)** Ruled 2026-10-23 (Bradley): publish 1.1.295 after its sandbox check, with notes refreshed for 1.1.231 through 1.1.295; Bradley OKs the exact text and uploads. Earlier: Ruled 2026-10-18: publish the first build after the field sweep with no high-severity failures (likely 1.1.268); notes prepared for Bradley's OK, he uploads. 1.1.268 qualifies; draft notes in `.superpowers/sdd/modrinth/MODRINTH_NOTES_1.1.268_DRAFT.md`, awaiting his OK. Was: Needs Bradley: "1.1.231–1.1.233 NOT published" on Modrinth (now everything after 1.1.230; held by the "no Modrinth until the live playthroughs settle" ruling, 2026-10-14; 1.1.233 handoff, 2026-10-13) (with the 1.1.295 session)
+- [ ] **P1 (M)** (uncertain) "5. Fresh-install part 2." (no clean-instance run recorded; 1.1.236 handoff; also 1.1.234, 1.1.229, 1.1.227 and 1.1.225 handoffs) In progress: handed to the 1.1.295 session, Claude runs it before the 1.1.295 public release.
+- [ ] **P1 (S)** (uncertain) "(mention the REI/EMI/JEI note)" in the Modrinth changelog (1.1.228 handoff, 2026-10-13) (with the 1.1.295 session)
+- [x] (uncertain) "Session cards: task_43ec92da (merged finder, now largely done) and task_e6032cb8 (audit) can be dismissed or re-scoped by Bradley." (1.1.242 handoff, 2026-10-15) ✅ stale: both jobs are finished (unified finder default in 1.1.261, dead-code audit 1.1.243 to 1.1.251), dismissing the chips is a click in Bradley's UI (triage 2026-10-23)
+- [ ] **P3 (S)** Tamed-animal defense "Manual verification checklist (15 items) is in the spec" (`docs/superpowers/specs/2026-04-11-tamed-animal-defense-design.md`), not in the field checklist (Tamed-animal defense notes, 2026-04-11)
 - [x] fabric.mod.json still declares ~1.21.10 though the 1.21.10 instances were removed 2026-10-11 (audit side finding) — ✅ 1.1.288
 
 ## Backlog Lineup 2026-09-03
