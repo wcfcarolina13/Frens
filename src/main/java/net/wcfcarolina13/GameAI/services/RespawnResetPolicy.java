@@ -71,4 +71,12 @@ public final class RespawnResetPolicy {
     public static Plan plan(boolean alive) {
         return plan(causeOf(alive));
     }
+
+    /**
+     * Whether a skill hands back the follow it suspended at start. An abort drops it, except the
+     * dimension-exit abort: a bot leaving the End alive keeps its trip, follow included.
+     */
+    public static boolean resumeFollowAfterSkill(boolean abortRequested, String abortReason) {
+        return !abortRequested || DIMENSION_TASK_ABORT.equals(abortReason);
+    }
 }

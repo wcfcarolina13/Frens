@@ -49,4 +49,18 @@ class RespawnResetPolicyTest {
         assertEquals(SurvivalLatchPolicy.Decision.CLEAR_AND_PROCEED,
                 SurvivalLatchPolicy.decide(true, reason, false));
     }
+
+    @Test
+    void aSkillResumesFollowUnlessAbortedForAnythingButTheDimensionExit() {
+        assertTrue(RespawnResetPolicy.resumeFollowAfterSkill(false, ""));
+        assertTrue(RespawnResetPolicy.resumeFollowAfterSkill(false, null));
+        assertTrue(RespawnResetPolicy.resumeFollowAfterSkill(true, RespawnResetPolicy.DIMENSION_TASK_ABORT),
+                "leaving the End alive keeps follow");
+        assertTrue(RespawnResetPolicy.resumeFollowAfterSkill(true, RespawnResetPolicy.plan(true).taskAbortMessage()));
+        assertFalse(RespawnResetPolicy.resumeFollowAfterSkill(true, RespawnResetPolicy.DEATH_TASK_ABORT));
+        assertFalse(RespawnResetPolicy.resumeFollowAfterSkill(true, RespawnResetPolicy.DEATH_LATE_ABORT));
+        assertFalse(RespawnResetPolicy.resumeFollowAfterSkill(true, "§cTask stopped by player."));
+        assertFalse(RespawnResetPolicy.resumeFollowAfterSkill(true, ""));
+        assertFalse(RespawnResetPolicy.resumeFollowAfterSkill(true, null));
+    }
 }

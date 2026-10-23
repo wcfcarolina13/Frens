@@ -297,8 +297,13 @@ public final class SkillManager {
             // Complete before resuming follow: setFollowMode refuses while this ticket is still
             // active, which used to chat "Busy with another task right now." and drop the follow.
             TaskService.complete(ticket, success);
-            if (!abortRequested) {
-                resumeFollowMode(botPlayer, context.botSource().getServer(), followResume);
+            if (net.wcfcarolina13.GameAI.services.RespawnResetPolicy.resumeFollowAfterSkill(abortRequested, abortReason)) {
+                // A bot that left the End alive is a new entity: resume on the live one.
+                net.minecraft.server.MinecraftServer server = context.botSource().getServer();
+                ServerPlayerEntity liveBot = server != null && botUuid != null
+                        ? server.getPlayerManager().getPlayer(botUuid)
+                        : null;
+                resumeFollowMode(liveBot != null ? liveBot : botPlayer, server, followResume);
             }
             if (success && botPlayer != null && name != null
                     && CELEBRATORY_SKILLS.contains(name.toLowerCase())) {

@@ -92,6 +92,20 @@ class RespawnHandlingWiringTest {
     }
 
     @Test
+    void skillExitResumesFollowThroughThePolicyOnTheLiveEntity() throws IOException {
+        String skills = flatten(Path.of("src/main/java/net/wcfcarolina13/GameAI/skills/SkillManager.java"));
+        String gate = "if (net.wcfcarolina13.GameAI.services.RespawnResetPolicy.resumeFollowAfterSkill(abortRequested, abortReason))";
+        String resume = block(skills, gate);
+        assertTrue(resume.contains("server.getPlayerManager().getPlayer(botUuid)"));
+        assertTrue(resume.contains("resumeFollowMode(liveBot != null ? liveBot : botPlayer, server, followResume)"));
+        assertFalse(skills.contains("if (!abortRequested) { resumeFollowMode("));
+        // The ticket completes before the resume, so setFollowMode does not see the skill as busy.
+        assertTrue(skills.indexOf("TaskService.complete(ticket, success);") < skills.indexOf(gate));
+        // The drop sweep stays gated on any abort.
+        assertTrue(skills.contains("&& !abortRequested && !isInventoryFull(botPlayer)"));
+    }
+
+    @Test
     void theNameMatchedPerBotRespawnListenerIsGone() {
         assertFalse(Files.exists(Path.of("src/main/java/net/wcfcarolina13/Entity/RespawnHandler.java")));
     }
