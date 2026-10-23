@@ -1138,18 +1138,18 @@ public class FarmSkill implements Skill {
         for (int x = footprint.minX(); x <= footprint.maxX(); x++) {
             for (int z = footprint.minZ(); z <= footprint.maxZ(); z++) {
                 BlockPos columnBase = new BlockPos(x, targetY, z);
-                Integer surfaceY = findSurfaceY(world, columnBase);
-                if (surfaceY == null) {
+                int columnWalkableY = SafePositionService.getWalkableGroundY(world, x, z);
+                if (columnWalkableY <= world.getBottomY()) {
                     String rejectReason = "no-solid-support pos=" + columnBase.toShortString();
                     return FarmSiteAssessment.reject(targetY, rejectReason, FarmTerrainPrepPlan.unsupported(rejectReason));
                 }
+                int surfaceY = columnWalkableY - 1;
                 int diff = surfaceY - targetY;
                 // Check what's sitting on top of the walkable ground: WORLD_SURFACE
                 // would see canopy tops in a forest. getWalkableGroundY skips
                 // logs/leaves, so the block at walkableY is what sits directly
                 // above the first solid column block — water there means the
                 // column is underwater.
-                int columnWalkableY = SafePositionService.getWalkableGroundY(world, x, z);
                 BlockState topState = world.getBlockState(new BlockPos(x, columnWalkableY, z));
                 boolean waterSurface = topState.isOf(Blocks.WATER);
                 if (diff > maxCutDepth) {

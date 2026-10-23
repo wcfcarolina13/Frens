@@ -148,7 +148,8 @@ public final class SmeltingService {
                 try {
                     ServerWorld liveWorld = server.getWorld(worldKey);
                     ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
-                    if (liveWorld == null || liveBot == null || liveBot.isRemoved()) {
+                    if (liveWorld == null || liveBot == null || liveBot.isRemoved()
+                            || liveBot.getEntityWorld() != liveWorld) {
                         loadResult.complete(false);
                         return;
                     }
@@ -261,6 +262,12 @@ public final class SmeltingService {
                             return;
                         }
 
+                        if (liveBot.getEntityWorld() != liveWorld
+                                || !ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
+                            pollResult.cancel(false);
+                            return;
+                        }
+
                         // Eat from output if hungry
                         ItemStack output = furnace.getStack(2);
                         if (!output.isEmpty() && liveBot.getHungerManager().getFoodLevel() < 18) {
@@ -299,6 +306,10 @@ public final class SmeltingService {
                 } catch (java.util.concurrent.TimeoutException e) {
                     LOGGER.warn("cookAllFoodSync: poll future timed out");
                     break;
+                } catch (java.util.concurrent.CancellationException e) {
+                    LOGGER.info("cookAllFoodSync: {} can no longer interact with furnace at {}",
+                            bot.getName().getString(), furnacePos.toShortString());
+                    break;
                 } catch (Exception e) {
                     LOGGER.warn("cookAllFoodSync: poll future failed: {}", e.getMessage());
                     break;
@@ -315,7 +326,9 @@ public final class SmeltingService {
                 try {
                     ServerWorld liveWorld = server.getWorld(worldKey);
                     ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
-                    if (liveWorld == null || liveBot == null || liveBot.isRemoved()) {
+                    if (liveWorld == null || liveBot == null || liveBot.isRemoved()
+                            || liveBot.getEntityWorld() != liveWorld
+                            || !ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
                         evacuateFuture.complete(null);
                         return;
                     }

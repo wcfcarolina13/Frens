@@ -351,25 +351,27 @@ public final class BotRescueService {
         // to prevent.
         if (takingSuffocationDamage && !stuckInBlocks) {
             double botX = bot.getX(), botZ = bot.getZ();
-            for (Direction dir : Direction.Type.HORIZONTAL) {
-                BlockPos adjacent = feet.offset(dir);
+            var body = bot.getBoundingBox();
+            for (var nudge : WallClipNudgePolicy.candidates(botX, botZ,
+                    body.minX, body.maxX, body.minZ, body.maxZ)) {
+                BlockPos adjacent = new BlockPos(nudge.wallX(), feet.getY(), nudge.wallZ());
                 // Feet OR head row: vanilla isInsideWall tests the eye-level box, so a
                 // head-level block beside the bot clips it too (1.1.262).
                 if (!isWallBeside(world, adjacent)) {
                     continue;
                 }
                 boolean headLevelOnly = isWallBesideHeadOnly(world, adjacent);
-                double nudgeX = -dir.getOffsetX() * 0.4;
-                double nudgeZ = -dir.getOffsetZ() * 0.4;
-                if (!isNudgeDestinationSafe(world, botX + nudgeX, bot.getY(), botZ + nudgeZ)) {
+                double nudgeX = nudge.dx();
+                double nudgeZ = nudge.dz();
+                if (!isNudgeDestinationSafe(bot, world, botX + nudgeX, bot.getY(), botZ + nudgeZ)) {
                     LOGGER.debug("Bot {} skipping {} nudge — destination not clear (would drill into opposing wall)",
-                            bot.getName().getString(), dir.asString());
+                            bot.getName().getString(), adjacent.toShortString());
                     continue;
                 }
                 bot.setPosition(botX + nudgeX, bot.getY(), botZ + nudgeZ);
                 bot.velocityDirty = true;
                 LOGGER.info("Bot {} nudged away from wall {} to escape collision clip{}",
-                        bot.getName().getString(), dir.asString(), headLevelOnly ? " (head-level)" : "");
+                        bot.getName().getString(), adjacent.toShortString(), headLevelOnly ? " (head-level)" : "");
                 return true;
             }
             // No adjacent solid block found OR every nudge destination was a wall —
@@ -798,20 +800,22 @@ public final class BotRescueService {
             // Nudge the bot away from the nearest solid block. Same destination-
             // safety check as the suffocation rescue path — without it, a tight
             // corridor would have us drill the bot into the opposing wall.
-            for (Direction dir : Direction.Type.HORIZONTAL) {
-                BlockPos adjacent = feet.offset(dir);
+            var body = bot.getBoundingBox();
+            for (var nudge : WallClipNudgePolicy.candidates(bot.getX(), bot.getZ(),
+                    body.minX, body.maxX, body.minZ, body.maxZ)) {
+                BlockPos adjacent = new BlockPos(nudge.wallX(), feet.getY(), nudge.wallZ());
                 if (!isWallBeside(world, adjacent)) {
                     continue;
                 }
-                double nudgeX = -dir.getOffsetX() * 0.4;
-                double nudgeZ = -dir.getOffsetZ() * 0.4;
-                if (!isNudgeDestinationSafe(world, bot.getX() + nudgeX, bot.getY(), bot.getZ() + nudgeZ)) {
+                double nudgeX = nudge.dx();
+                double nudgeZ = nudge.dz();
+                if (!isNudgeDestinationSafe(bot, world, bot.getX() + nudgeX, bot.getY(), bot.getZ() + nudgeZ)) {
                     continue;
                 }
                 bot.setPosition(bot.getX() + nudgeX, bot.getY(), bot.getZ() + nudgeZ);
                 bot.velocityDirty = true;
                 LOGGER.info("Bot {} spawn clip — nudged away from {} wall",
-                        bot.getName().getString(), dir.asString());
+                        bot.getName().getString(), adjacent.toShortString());
                 break;
             }
         }
@@ -907,14 +911,14 @@ public final class BotRescueService {
      * service stays self-contained and we don't add a public dependency
      * across packages just for two call sites.
      */
-    private static boolean isNudgeDestinationSafe(ServerWorld world, double x, double y, double z) {
+    private static boolean isNudgeDestinationSafe(ServerPlayerEntity bot, ServerWorld world,
+                                                 double x, double y, double z) {
         if (world == null) return false;
         BlockPos feet = BlockPos.ofFloored(x, y, z);
         BlockPos head = feet.up();
         BlockState feetState = world.getBlockState(feet);
         BlockState headState = world.getBlockState(head);
-        // Air, fluid, plant litter, climbable, etc. are all fine — we just need
-        // the bot's bbox not to fully embed in a solid cell.
+        // Keep the cell/hazard checks, then validate the whole translated body.
         boolean feetClear = feetState.isAir()
                 || isClimbableNonBlocking(feetState)
                 || feetState.getCollisionShape(world, feet).isEmpty();
@@ -924,7 +928,8 @@ public final class BotRescueService {
         // Cobweb, fire and powder snow have empty collision: only the hazard check stops
         // a nudge into them.
         boolean hazard = BotHazardService.isDeadlyBlock(feetState) || BotHazardService.isDeadlyBlock(headState);
-        return feetClear && headClear && !hazard;
+        var targetBox = bot.getBoundingBox().offset(x - bot.getX(), y - bot.getY(), z - bot.getZ());
+        return feetClear && headClear && !hazard && world.isSpaceEmpty(bot, targetBox);
     }
 
     /** Cell the bot can occupy from the side: pathable partial or climbable. */
