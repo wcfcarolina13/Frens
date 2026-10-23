@@ -37,7 +37,8 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
 
     /** Playback boundary — production is {@link GroupScenePlayback}. */
     public interface ScenePlayer {
-        void enqueue(GroupScenePlayback.PlayableScene scene);
+        /** @return true when playback accepted the scene; false when it was dropped unplayed. */
+        boolean enqueue(GroupScenePlayback.PlayableScene scene);
 
         boolean hasActiveScene(UUID ownerId);
     }
@@ -346,6 +347,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         }
 
         boolean handedOff;
+        boolean dropped = false;
         synchronized (sceneLock) {
             handedOff = isCurrent(turn, outcome);
             if (handedOff) {
@@ -354,19 +356,51 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                 // again so the same voice never plays twice in a row. Solo scenes keep their breaks.
                 List<SoulGroupTypes.SceneLine> lines = SoulGroupResponseValidator.mergeSpeakerRuns(
                         applyNovelty(turn, parse.lines()), rosterNames.size() <= 1);
-                applySideChannel(turn, correlationId, privateSeedOwner, rosterNames, parse.sideChannelRaw(),
-                        () -> isCurrent(pending));
 
+                // Put before enqueue: playback may commit the first line before enqueue returns.
                 sceneResults.put(correlationId, result);
-                player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines, privateSeedOwner));
-                LOGGER.info("[souls] scene correlationId={} owner={} kind={} rosterSize={} lines={} queueDepth={} "
+                if (!player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines, privateSeedOwner))) {
+                    // Playback refused the scene (another one is live for this owner, or no
+                    // playback machine). It never plays, so sceneFinished never runs: release its
+                    // metadata here and close the turn through failTurn below. Its side channel is
+                    // not applied: a scene nobody heard must not change anyone's mind.
+                    sceneResults.remove(correlationId);
+                    handedOff = false;
+                    dropped = true;
+                    LOGGER.info("[souls] scene correlationId={} owner={} kind={} lines={} outcome=scene-dropped",
+                            correlationId, turn.ownerId(), turn.kind(), lines.size());
+                } else {
+                    applySideChannel(turn, correlationId, privateSeedOwner, rosterNames, parse.sideChannelRaw(),
+                            () -> isCurrent(pending));
+                    LOGGER.info("[souls] scene correlationId={} owner={} kind={} rosterSize={} lines={} queueDepth={} "
                                 + "provider={} model={} providerMs={} totalMs={} privateSeed={} outcome=scene-started",
                         correlationId, turn.ownerId(), turn.kind(), turn.roster().size(), lines.size(),
                         queueDepthAtSubmit, result.provider(), result.model(), result.elapsedMillis(),
                         elapsedMs(submitStartNanos), privateSeedOwner != null);
+                }
             }
         }
+        if (dropped) {
+            // The established release path: appends the FAILURE record, sends the status to a
+            // player-asked scene, completes FAILED, and the submit() completion hook removes the
+            // pendingScenes entry.
+            failTurn(turn, token, correlationId, SoulTypes.FailureCode.OVERLOADED, result.provider(),
+                    result.model(), result.elapsedMillis(), outcome);
+            return;
+        }
         outcome.complete(handedOff ? Submission.SCENE_STARTED : Submission.FAILED);
+    }
+
+    /** Test seam: whether a scene is still tracked as pending for this correlation id. */
+    boolean hasPendingScene(UUID correlationId) {
+        synchronized (sceneLock) {
+            return pendingScenes.containsKey(correlationId);
+        }
+    }
+
+    /** Test seam: whether provider metadata is still held for this correlation id. */
+    boolean hasSceneResult(UUID correlationId) {
+        return sceneResults.containsKey(correlationId);
     }
 
     /**

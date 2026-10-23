@@ -22,6 +22,7 @@ import java.util.concurrent.Executors;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SoulGroupConversationServiceTest {
@@ -100,6 +101,30 @@ class SoulGroupConversationServiceTest {
         assertEquals(1, records.size());
         assertEquals(SoulTypes.TurnKind.HEARD, records.get(0).kind());
         assertEquals("Bradley: what should we do tonight", records.get(0).content());
+    }
+
+    @Test
+    void rejectedEnqueueFailsTheTurnAndLeavesNothingPending() throws Exception {
+        player.reject = true;
+        var submission = service.submit(turn).get(2, SECONDS);
+        // failTurn completes on the store writer; one empty task flushes its completion hook.
+        storeExecutor.submit(() -> { }).get(2, SECONDS);
+
+        assertEquals(SoulGroupConversationService.Submission.FAILED, submission);
+        assertTrue(player.enqueued.isEmpty());
+        assertFalse(service.hasPendingScene(turn.routingId()), "dropped scene must not stay pending");
+        assertFalse(service.hasSceneResult(turn.routingId()), "dropped scene metadata must be released");
+        assertEquals(List.of(SoulTypes.TurnKind.HEARD, SoulTypes.TurnKind.FAILURE),
+                partyRecords().stream().map(SoulTypes.ConversationRecord::kind).toList());
+        assertEquals(1, status.messages.size());
+
+        // The owner is not left busy: the next scene plays.
+        player.reject = false;
+        provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(
+                true, "Jake: Mining tonight.\nSara: Fishing is safer.", null, "test", "test-model",
+                5L, null, null, null)));
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED,
+                service.submit(sceneTurn("again")).get(2, SECONDS));
     }
 
     @Test
@@ -576,9 +601,14 @@ class SoulGroupConversationServiceTest {
     private static final class FakeScenePlayer implements SoulGroupConversationService.ScenePlayer {
         final List<GroupScenePlayback.PlayableScene> enqueued = new CopyOnWriteArrayList<>();
         volatile boolean active;
+        volatile boolean reject;
 
-        @Override public void enqueue(GroupScenePlayback.PlayableScene scene) {
+        @Override public boolean enqueue(GroupScenePlayback.PlayableScene scene) {
+            if (reject) {
+                return false;
+            }
             enqueued.add(scene);
+            return true;
         }
 
         @Override public boolean hasActiveScene(UUID ownerId) {

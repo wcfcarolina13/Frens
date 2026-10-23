@@ -1218,11 +1218,9 @@ public final class SoulRuntime {
                 partyStore, groupPromptAssembler, scheduler, provider, groupValidator, settings,
                 new SoulGroupConversationService.ScenePlayer() {
                     @Override
-                    public void enqueue(GroupScenePlayback.PlayableScene scene) {
+                    public boolean enqueue(GroupScenePlayback.PlayableScene scene) {
                         GroupScenePlayback playback = scenePlayback;
-                        if (playback != null) {
-                            playback.enqueue(scene);
-                        }
+                        return playback != null && playback.enqueue(scene);
                     }
 
                     @Override

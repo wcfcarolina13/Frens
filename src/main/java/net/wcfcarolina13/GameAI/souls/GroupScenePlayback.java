@@ -166,14 +166,21 @@ public final class GroupScenePlayback {
         this.ambientVoiceAllowed = Objects.requireNonNull(ambientVoiceAllowed, "ambientVoiceAllowed");
     }
 
-    /** Thread-safe; called from the group service's provider-completion thread. */
-    public void enqueue(PlayableScene scene) {
+    /**
+     * Thread-safe; called from the group service's provider-completion thread.
+     *
+     * @return true when the scene was accepted; false when the owner already has an active
+     *         scene and this one was dropped (the caller must release it).
+     */
+    public boolean enqueue(PlayableScene scene) {
         SceneState previous = scenes.putIfAbsent(scene.turn().ownerId(), new SceneState(scene));
         if (previous != null) {
-            // Guarded upstream by hasActiveScene; defensive only.
+            // Guarded upstream by hasActiveScene; reachable only when two scenes race past it.
             LOGGER.warn("[souls] scene-playback owner={} already has an active scene; dropping",
                     scene.turn().ownerId());
+            return false;
         }
+        return true;
     }
 
     public boolean hasActiveScene(UUID ownerId) {
