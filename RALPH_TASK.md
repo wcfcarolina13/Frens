@@ -4,7 +4,15 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-23 (1.1.291) — next session starts here
+## Session Handoff 2026-10-23 (1.1.292) — next session starts here
+
+**State:** 1.1.292 on main and deployed to Nirn. It fixes the one failure from the 1.1.291 sandbox sweep: the idle resource woodcut started in a burst (up to 10 per second) and the refused duplicates pushed its backoff to the cap. Fixed by arming the in-flight cooldowns before the submit, sandbox-checked (`frens_1_1_292_idle_woodcut_once.zip`).
+
+**Sweep results (1.1.291, `docs/testing/FIELD_CODEX_WAVE_SANDBOX_2026-10-23.md`):** farm, furnace reach, mining, ritual payment order, hunt settings carry-over, quarantine and smoke pass. Not run: diagonal wall-clip nudge (the older immediate escape freed the bot first) and the busy co-sleep retry (the busy task ended instantly). The wake greeting delay passed.
+
+**Pending:** field Phase 6cc on Nirn, guided LAN-guest check, everything listed under the 1.1.291 handoff below (deferred minors, Codex limits). Field phases 6bt-6cb (1.1.282-1.1.290) are still not sandbox-checked.
+
+## Session Handoff 2026-10-23 (1.1.291) — superseded
 
 **State:** 1.1.291 on main and deployed to Nirn (1.21.11). It ships the Codex wave below (every "shipped in 1.1.291" handoff) after a Fable review, one fix wave, a scoped Fable re-review and a sandbox check with Carpet 1.4.194 installed. Changelog entry "Codex reliability, access and save-isolation wave, reviewed and hardened; 1.1.291" has the details, rulings and kept limits. Reviews: `.superpowers/codex-wave-backup-2026-10-22/fable-review.md` and `fable-rereview.md` (untracked).
 

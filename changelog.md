@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Idle resource woodcut starts once instead of in a burst; 1.1.292 (2026-10-23)
+
+Found by the 1.1.291 sandbox sweep (`docs/testing/FIELD_CODEX_WAVE_SANDBOX_2026-10-23.md`, item 4).
+
+- **The idle "needs tools, no wood" woodcut started up to 10 times in one second** when its gate opened. The skill only claims the bot's task slot once the worker runs it, and this path (unlike the wooden fallback and the normal hobby path) set no cooldown before submitting, so every tick until then submitted another run. The refused duplicates each counted as a failure, so the backoff jumped straight to its 10-minute cap instead of starting at 60 s. `BotIdleHobbiesService.maybeHandleIdleWoodcutForResources` now arms the 12 s decision and fallback cooldowns before the submit, and the finish handler re-arms them as before. Probably older than 1.1.291.
+- **Sandbox check:** the same pit setup now logs one `Idle resource woodcut` start and zero "Another skill is already running" (1.1.291: 10 starts, 9 refused, same second). Replay `frens_1_1_292_idle_woodcut_once.zip`.
+- **Tests** 3675 → 3676 (`IdleResourceWoodcutInFlightWiringTest`).
+
+**Field checks:** none new (sandbox-checked).
+
 ## Codex reliability, access and save-isolation wave, reviewed and hardened; 1.1.291 (2026-10-23)
 
 Codex wrote this wave between 1.1.290 and 2026-10-22 (its per-fix notes follow as subsections). Claude committed it in 13 lanes unchanged, ran a Fable review of the whole diff, one fix wave, a scoped Fable re-review and a sandbox check with Carpet installed.
