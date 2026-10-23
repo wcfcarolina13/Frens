@@ -590,7 +590,8 @@ public final class SoulGroupPromptAssembler {
     private HistoryBlock boundedHistory(List<SoulTypes.ConversationRecord> partyHistory,
                                        SoulPrivacyPolicy.Audience audience) {
         List<SoulTypes.ConversationRecord> relevant = new ArrayList<>();
-        for (SoulTypes.ConversationRecord record : partyHistory) {
+        // 1.1.296: the owner's HEARD line in a privately seeded scene shares that scene's mark.
+        for (SoulTypes.ConversationRecord record : SoulPrivacyPolicy.withInheritedPrivacy(partyHistory)) {
             if (record.kind() == SoulTypes.TurnKind.HEARD
                     && record.content().startsWith(BANTER_HEARD_PREFIX)) {
                 continue; // stale banter seed — never replays as a player utterance

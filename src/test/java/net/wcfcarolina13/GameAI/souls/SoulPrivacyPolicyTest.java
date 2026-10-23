@@ -210,4 +210,62 @@ class SoulPrivacyPolicyTest {
         assertEquals(OWNER, decision.owner());
         assertTrue(decision.conflictingOwners());
     }
+
+    // === 1.1.296: the owner's HEARD line inherits its scene's privateTo ===
+
+    private static SoulTypes.ConversationRecord line(UUID scene, SoulTypes.TurnKind kind, String content, UUID privateTo) {
+        return new SoulTypes.ConversationRecord(scene, 0L, 0L, kind, content, java.time.Instant.EPOCH,
+                "", "", null, null, List.of(), privateTo);
+    }
+
+    @Test void heardInheritsThePrivateMarkOfItsSceneSpokenLine() {
+        UUID scene = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> out = SoulPrivacyPolicy.withInheritedPrivacy(List.of(
+                line(scene, SoulTypes.TurnKind.HEARD, "Roti: yeah, still scared", null),
+                line(scene, SoulTypes.TurnKind.SPOKEN, "Jake: still scared of the dark?", OWNER)));
+        assertEquals(2, out.size());
+        assertEquals(OWNER, out.get(0).privateTo());
+        assertEquals("Roti: yeah, still scared", out.get(0).content());
+        assertEquals(SoulTypes.TurnKind.HEARD, out.get(0).kind());
+        assertFalse(SoulPrivacyPolicy.admitsRecord(out.get(0), SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER, OTHER))));
+        assertTrue(SoulPrivacyPolicy.admitsRecord(out.get(0), SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER))));
+    }
+
+    @Test void unrelatedHeardStaysUnmarked() {
+        List<SoulTypes.ConversationRecord> in = List.of(
+                line(UUID.randomUUID(), SoulTypes.TurnKind.HEARD, "Roti: evening all", null),
+                line(UUID.randomUUID(), SoulTypes.TurnKind.SPOKEN, "Jake: still scared of the dark?", OWNER),
+                line(UUID.randomUUID(), SoulTypes.TurnKind.SPOKEN, "Sara: evening!", null));
+        List<SoulTypes.ConversationRecord> out = SoulPrivacyPolicy.withInheritedPrivacy(in);
+        assertEquals(in, out);
+        assertEquals(null, out.get(0).privateTo());
+    }
+
+    @Test void inheritanceNeverRewritesSpokenOrAnExistingMark() {
+        UUID scene = UUID.randomUUID();
+        SoulTypes.ConversationRecord publicSpoken = line(scene, SoulTypes.TurnKind.SPOKEN, "Sara: hi", null);
+        SoulTypes.ConversationRecord failure = line(scene, SoulTypes.TurnKind.FAILURE, "", null);
+        List<SoulTypes.ConversationRecord> out = SoulPrivacyPolicy.withInheritedPrivacy(List.of(
+                publicSpoken, failure, line(scene, SoulTypes.TurnKind.SPOKEN, "Jake: hm", OWNER)));
+        assertEquals(publicSpoken, out.get(0));
+        assertEquals(failure, out.get(1));
+    }
+
+    @Test void inheritanceHandlesNullAndEmptyInput() {
+        assertEquals(List.of(), SoulPrivacyPolicy.withInheritedPrivacy(null));
+        assertEquals(List.of(), SoulPrivacyPolicy.withInheritedPrivacy(List.of()));
+        List<SoulTypes.ConversationRecord> withNull = new java.util.ArrayList<>();
+        withNull.add(null);
+        withNull.add(spoken(null));
+        assertEquals(1, SoulPrivacyPolicy.withInheritedPrivacy(withNull).size());
+    }
+
+    @Test void digestVisibilityOfAnInheritedHeardAloneIsPrivate() {
+        UUID scene = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> out = SoulPrivacyPolicy.withInheritedPrivacy(List.of(
+                line(scene, SoulTypes.TurnKind.HEARD, "Roti: yeah", null),
+                line(scene, SoulTypes.TurnKind.SPOKEN, "Jake: still scared?", OWNER)));
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE,
+                SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, out.subList(0, 1)));
+    }
 }

@@ -341,4 +341,37 @@ class SoulMemoryDigestOpsTest {
         assertEquals("Roti new fact one", archived.archivedPlayerMemories().get(0).fact());
         assertEquals("Roti new fact two", archived.archivedPlayerMemories().get(1).fact());
     }
+
+    // === 1.1.296: the owner's HEARD line inherits its scene's privateTo in the digest ===
+
+    @Test void heardOfAPrivatelySeededSceneIsPrivateToItsOwnerInTheDigest() {
+        UUID scene = UUID.randomUUID();
+        UUID other = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> r = List.of(
+                rec(SoulTypes.TurnKind.HEARD, "Roti: yes, still scared of the dark", scene, List.of(BOT)),
+                spokenPrivate("Jake: we will keep a torch lit.", scene, PLAYER));
+        SoulMemoryDigestOps.Material own = SoulMemoryDigestOps.gather(
+                r, new SoulTypes.ConversationCursor(1L, 0L), BOT, "Jake", "Roti", true, PLAYER);
+        assertEquals(PLAYER, own.records().get(0).privateTo(), "HEARD inherits the mark");
+        // The memory stays PRIVATE even if the clerk only kept the owner's own HEARD line.
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE,
+                SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, own.records().subList(0, 1)));
+        // Another player's digest never sees the owner's reply.
+        SoulMemoryDigestOps.Material theirs = SoulMemoryDigestOps.gather(
+                r, new SoulTypes.ConversationCursor(1L, 0L), BOT, "Jake", "Roti", true, other);
+        assertFalse(theirs.text().contains("still scared"), theirs.text());
+    }
+
+    @Test void heardWhoseSpokenSiblingsFallInALaterBatchIsNotMarkedResidual() {
+        // Documented residual (1.1.296): inheritance is read-time and per batch. If the digest
+        // cursor splits a scene (its HEARD read before its private SPOKEN lines were committed),
+        // the HEARD in the earlier batch has nothing to inherit from and stays PUBLIC.
+        UUID scene = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> r = List.of(
+                rec(SoulTypes.TurnKind.HEARD, "Roti: yes, still scared of the dark", scene, List.of(BOT)));
+        SoulMemoryDigestOps.Material m = SoulMemoryDigestOps.gather(
+                r, new SoulTypes.ConversationCursor(1L, 0L), BOT, "Jake", "Roti", true, PLAYER);
+        assertEquals(SoulTypes.MemoryVisibility.PUBLIC,
+                SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, m.records()));
+    }
 }

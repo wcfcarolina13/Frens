@@ -117,6 +117,42 @@ public final class SoulPrivacyPolicy {
     }
 
     /**
+     * 1.1.296: a copy of {@code records} in which every unmarked HEARD record takes the
+     * {@code privateTo} of a marked record sharing its {@code correlationId}. Only SPOKEN lines are
+     * marked on disk, and they are written after the scene's privacy is decided, but the HEARD that
+     * opened the scene was written before. Without this, a privately seeded scene's lines are
+     * withheld from a later shared prompt or digest while the owner's own message in that scene
+     * (often a reply to earlier private lines) still replays as ordinary party speech. Read-time
+     * only: nothing on disk changes. Input order is kept; null entries are dropped.
+     */
+    public static List<SoulTypes.ConversationRecord> withInheritedPrivacy(List<SoulTypes.ConversationRecord> records) {
+        if (records == null || records.isEmpty()) {
+            return List.of();
+        }
+        java.util.Map<UUID, UUID> ownerByScene = new java.util.HashMap<>();
+        for (SoulTypes.ConversationRecord record : records) {
+            if (record != null && record.privateTo() != null) {
+                ownerByScene.putIfAbsent(record.correlationId(), record.privateTo());
+            }
+        }
+        List<SoulTypes.ConversationRecord> out = new ArrayList<>(records.size());
+        for (SoulTypes.ConversationRecord record : records) {
+            if (record == null) {
+                continue;
+            }
+            UUID owner = ownerByScene.get(record.correlationId());
+            if (owner != null && record.privateTo() == null && record.kind() == SoulTypes.TurnKind.HEARD) {
+                record = new SoulTypes.ConversationRecord(record.correlationId(), record.epoch(),
+                        record.sequence(), record.kind(), record.content(), record.occurredAt(),
+                        record.provider(), record.model(), record.elapsedMillis(), record.failureCode(),
+                        record.participants(), owner);
+            }
+            out.add(record);
+        }
+        return out;
+    }
+
+    /**
      * Whether {@code records} holds at least one PRIVATE-marked record that {@code audience}
      * admits — i.e. replaying them makes the prompt privately seeded for that record's owner.
      * Returns that owner, or null when every admitted record is ordinary.

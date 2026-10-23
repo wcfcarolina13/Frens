@@ -938,4 +938,41 @@ class SoulGroupPromptAssemblerTest {
         assertFalse(line.isEmpty());
         assertTrue(line.length() <= SoulGroupPromptAssembler.MAX_STATE_CHARS_PER_BOT, "" + line.length());
     }
+
+    // === 1.1.296: the owner's HEARD line in a privately seeded scene is private too ===
+
+    private static SoulTypes.ConversationRecord sceneLine(UUID scene, long seq, SoulTypes.TurnKind kind,
+                                                          String content, UUID privateTo) {
+        return new SoulTypes.ConversationRecord(scene, 0L, seq, kind, content, Instant.EPOCH, "", "", null, null,
+                List.of(), privateTo);
+    }
+
+    @Test
+    void heardOfAPrivatelySeededSceneIsSkippedWhenAnotherHumanIsOnline() {
+        UUID owner = UUID.randomUUID();
+        UUID jake = UUID.randomUUID();
+        UUID sara = UUID.randomUUID();
+        UUID privateScene = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> history = List.of(
+                record(0, SoulTypes.TurnKind.HEARD, "Bradley: evening plans?"),
+                sceneLine(privateScene, 1, SoulTypes.TurnKind.HEARD, "Bradley: yes, still scared of the dark", null),
+                sceneLine(privateScene, 2, SoulTypes.TurnKind.SPOKEN, "Jake: we will keep a torch lit.", owner));
+        SoulGroupTypes.GroupSceneTurn shared =
+                sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner, UUID.randomUUID()));
+        List<String> replayed = contents(assembler.assemble(UUID.randomUUID(), "m", shared, twoProfiles(),
+                history, Duration.ofSeconds(5)));
+        assertFalse(replayed.contains("Bradley: yes, still scared of the dark"), "owner's reply leaked");
+        assertFalse(replayed.contains("Jake: we will keep a torch lit."));
+        assertTrue(replayed.contains("Bradley: evening plans?"), "unrelated HEARD still replays");
+        assertEquals(null, assembler.assembleWithPrivacy(UUID.randomUUID(), "m", shared, twoProfiles(),
+                history, Duration.ofSeconds(5)).historyOwner());
+
+        // Owner alone: both replay and the new scene is seeded by the history.
+        SoulGroupTypes.GroupSceneTurn alone =
+                sceneWithOnline(SoulGroupTypes.SceneKind.PLAYER, owner, jake, sara, Set.of(owner));
+        SoulGroupPromptAssembler.Assembled assembled = assembler.assembleWithPrivacy(UUID.randomUUID(), "m",
+                alone, twoProfiles(), history, Duration.ofSeconds(5));
+        assertTrue(contents(assembled.request()).contains("Bradley: yes, still scared of the dark"));
+        assertEquals(owner, assembled.historyOwner());
+    }
 }

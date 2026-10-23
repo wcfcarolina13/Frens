@@ -105,7 +105,9 @@ final class SoulMemoryDigestOps {
     static Material gather(List<SoulTypes.ConversationRecord> sinceRecords,
                            SoulTypes.ConversationCursor from, UUID botId, String botName,
                            String playerName, boolean party, UUID playerId) {
-        List<SoulTypes.ConversationRecord> all = sinceRecords == null ? List.of() : sinceRecords;
+        // 1.1.296: a HEARD record takes the privateTo of its scene's marked SPOKEN lines in this
+        // batch, so digestible/digestVisibility treat the owner's own reply as private too.
+        List<SoulTypes.ConversationRecord> all = SoulPrivacyPolicy.withInheritedPrivacy(sinceRecords);
         if (all.isEmpty()) {
             return new Material(List.of(), "", 0, from);
         }
