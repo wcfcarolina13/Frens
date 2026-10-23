@@ -194,9 +194,12 @@ public class MiningTool {
                         targetBlockPos,
                         bestTool.isEmpty() ? "empty-hand" : bestTool.getItem().toString(),
                         bot.getAbilities().creativeMode);
-                if (!switchToTool(bot, bestTool) && !switchToHarmlessFallback(bot, blockState)) {
-                    miningResult.complete("⚠️ Cannot mine: could not equip a safe tool or empty hand.");
-                    return miningResult;
+                if (!switchToTool(bot, bestTool)) {
+                    String refusal = equipHarmlessFallback(bot, blockState, targetBlockPos);
+                    if (refusal != null) {
+                        miningResult.complete(refusal);
+                        return miningResult;
+                    }
                 }
             } else {
                 ItemStack held = bot.getMainHandStack();
@@ -204,16 +207,18 @@ public class MiningTool {
                     LOGGER.info("Mining {} refusing to preserve held weapon {}; switching to harmless fallback",
                             targetBlockPos,
                             held.getItem());
-                    if (!switchToHarmlessFallback(bot, blockState)) {
-                        miningResult.complete("⚠️ Cannot mine: could not equip a safe tool or empty hand.");
+                    String refusal = equipHarmlessFallback(bot, blockState, targetBlockPos);
+                    if (refusal != null) {
+                        miningResult.complete(refusal);
                         return miningResult;
                     }
                     held = bot.getMainHandStack();
                 } else if (wastesDrop(held, blockState)) {
                     LOGGER.info("Mining {} refusing to preserve held shears on leaves; switching to harmless fallback",
                             targetBlockPos);
-                    if (!switchToHarmlessFallback(bot, blockState)) {
-                        miningResult.complete("⚠️ Cannot mine: could not equip a safe tool or empty hand.");
+                    String refusal = equipHarmlessFallback(bot, blockState, targetBlockPos);
+                    if (refusal != null) {
+                        miningResult.complete(refusal);
                         return miningResult;
                     }
                     held = bot.getMainHandStack();
@@ -346,9 +351,12 @@ public class MiningTool {
                                     repolled.isEmpty() ? "empty-hand" : repolled.getItem().toString(),
                                     targetBlockPos);
                             boolean swapped = switchToTool(bot, repolled);
-                            if (!swapped && !switchToHarmlessFallback(bot, currentState)) {
-                                miningResult.complete("⚠️ Cannot mine: could not equip a safe tool or empty hand.");
-                                return;
+                            if (!swapped) {
+                                String refusal = equipHarmlessFallback(bot, currentState, targetBlockPos);
+                                if (refusal != null) {
+                                    miningResult.complete(refusal);
+                                    return;
+                                }
                             }
                             lastRepollSwap.set(bot.getMainHandStack().copy());
                             // Recalculate required ticks from the new tool; only a faster tool
@@ -588,16 +596,50 @@ public class MiningTool {
         }, 2_000L, fallback);
     }
 
-    private static boolean switchToHarmlessFallback(ServerPlayerEntity bot, BlockState target) {
+    /**
+     * Equips the harmless fallback, retrying once when the server hop did not run
+     * ({@link HarmlessFallbackPolicy}). Returns null when the hand is safe, else the refusal text.
+     */
+    private static String equipHarmlessFallback(ServerPlayerEntity bot, BlockState target, BlockPos pos) {
+        for (int attempt = 1; ; attempt++) {
+            HarmlessFallbackPolicy.Next next =
+                    HarmlessFallbackPolicy.decide(switchToHarmlessFallback(bot, target), attempt);
+            if (next == HarmlessFallbackPolicy.Next.PROCEED) {
+                return null;
+            }
+            if (next == HarmlessFallbackPolicy.Next.RETRY) {
+                LOGGER.debug("Mining {}: harmless fallback hop timed out, retrying once", pos);
+                continue;
+            }
+            if (next == HarmlessFallbackPolicy.Next.ABORT_SERVER_BUSY) {
+                LOGGER.info("Mining {}: server too busy to switch to a harmless fallback (hop timed out {} times)",
+                        pos, attempt);
+            }
+            return HarmlessFallbackPolicy.abortMessage(next);
+        }
+    }
+
+    /**
+     * One fallback hop. TIMED_OUT is the hop's own fallback, so it means the step never ran (the
+     * shared hop cancels a timed-out task); a step that ran and threw reports NO_SAFE_ITEM.
+     */
+    private static HarmlessFallbackPolicy.Outcome switchToHarmlessFallback(ServerPlayerEntity bot, BlockState target) {
         if (bot == null) {
-            return false;
+            return HarmlessFallbackPolicy.Outcome.NO_SAFE_ITEM;
         }
         // Scans, selects and verifies the held fallback in one server-thread unit.
         return callOnServer(bot, () -> {
-            switchToHarmlessFallbackOnThread(bot, target);
-            ItemStack held = bot.getMainHandStack();
-            return held.isEmpty() || (isNonWeaponMiningFallback(held) && !wastesDrop(held, target));
-        }, Boolean.FALSE);
+            try {
+                switchToHarmlessFallbackOnThread(bot, target);
+                ItemStack held = bot.getMainHandStack();
+                return held.isEmpty() || (isNonWeaponMiningFallback(held) && !wastesDrop(held, target))
+                        ? HarmlessFallbackPolicy.Outcome.EQUIPPED
+                        : HarmlessFallbackPolicy.Outcome.NO_SAFE_ITEM;
+            } catch (Throwable t) {
+                LOGGER.debug("Harmless fallback step failed: {}", t.toString());
+                return HarmlessFallbackPolicy.Outcome.NO_SAFE_ITEM;
+            }
+        }, HarmlessFallbackPolicy.Outcome.TIMED_OUT);
     }
 
     private static void switchToHarmlessFallbackOnThread(ServerPlayerEntity bot, BlockState target) {

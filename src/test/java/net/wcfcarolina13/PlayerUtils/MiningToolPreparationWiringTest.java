@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MiningToolPreparationWiringTest {
     private static final Path MAIN = Path.of("src/main/java/net/wcfcarolina13/PlayerUtils");
-    private static final String REFUSAL = "Cannot mine: could not equip a safe tool or empty hand.";
+    private static final String EQUIP = "String refusal = equipHarmlessFallback(bot, ";
 
     @Test
     void bothToolHopsUseCancellableDispatchAndKeepInlineFailureFallback() throws IOException {
@@ -38,12 +38,21 @@ class MiningToolPreparationWiringTest {
     @Test
     void harmlessFallbackReportsTheActualHeldSafetyInsideTheServerAction() throws IOException {
         String source = source("MiningTool.java");
-        String body = block(source, "private static boolean switchToHarmlessFallback(");
+        String body = block(source, "private static HarmlessFallbackPolicy.Outcome switchToHarmlessFallback(");
         assertTrue(body.contains("return callOnServer(bot, () ->"));
-        assertTrue(body.contains("}, Boolean.FALSE)"));
+        // Only a hop that never ran reports TIMED_OUT; a step that threw on the server did run.
+        assertTrue(body.contains("}, HarmlessFallbackPolicy.Outcome.TIMED_OUT)"));
+        String caught = body.substring(body.indexOf("catch (Throwable t)"));
+        assertTrue(caught.contains("return HarmlessFallbackPolicy.Outcome.NO_SAFE_ITEM;"));
         assertTrue(body.indexOf("switchToHarmlessFallbackOnThread(bot, target)")
                 < body.indexOf("ItemStack held = bot.getMainHandStack()"));
-        assertTrue(body.contains("return held.isEmpty() || (isNonWeaponMiningFallback(held) && !wastesDrop(held, target));"));
+        assertTrue(body.contains("return held.isEmpty() || (isNonWeaponMiningFallback(held) && !wastesDrop(held, target))\n"
+                + "                        ? HarmlessFallbackPolicy.Outcome.EQUIPPED\n"
+                + "                        : HarmlessFallbackPolicy.Outcome.NO_SAFE_ITEM;"));
+        String equip = block(source, "private static String equipHarmlessFallback(");
+        assertTrue(equip.contains("HarmlessFallbackPolicy.decide(switchToHarmlessFallback(bot, target), attempt)"));
+        assertTrue(equip.contains("return HarmlessFallbackPolicy.abortMessage(next);"));
+        assertTrue(equip.contains("LOGGER.info("));
         String acceptable = block(source, "private static boolean isNonWeaponMiningFallback(");
         assertTrue(acceptable.contains("!isWeaponOnlyItem(stack)"));
         assertTrue(acceptable.contains("stack.get(DataComponentTypes.FOOD) == null"));
@@ -55,15 +64,15 @@ class MiningToolPreparationWiringTest {
         String source = source("MiningTool.java");
         String initial = source.substring(source.indexOf("if (!preserveSelectedHotbarItem)"),
                 source.indexOf("// Harvest-level protection"));
-        String normalGuard = "if (!switchToTool(bot, bestTool) && !switchToHarmlessFallback(bot, blockState))";
+        String normalGuard = "if (!switchToTool(bot, bestTool))";
         assertRefuses(block(initial, normalGuard), "return miningResult;");
         String preserve = initial.substring(initial.indexOf("} else {"));
-        String guard = "if (!switchToHarmlessFallback(bot, blockState))";
+        String guard = EQUIP + "blockState, targetBlockPos);";
         int first = preserve.indexOf(guard);
         int second = preserve.indexOf(guard, first + guard.length());
         assertTrue(first >= 0 && second > first);
-        assertRefuses(block(preserve.substring(first), guard), "return miningResult;");
-        assertRefuses(block(preserve.substring(second), guard), "return miningResult;");
+        assertRefuses(preserve.substring(first, second), "return miningResult;");
+        assertRefuses(preserve.substring(second), "return miningResult;");
         assertTrue(source.indexOf(normalGuard) < source.indexOf("bot.swingHand(Hand.MAIN_HAND)"));
         assertTrue(source.indexOf(normalGuard) < source.indexOf("MINING_EXECUTOR.scheduleAtFixedRate"));
     }
@@ -71,7 +80,7 @@ class MiningToolPreparationWiringTest {
     @Test
     void failedRepollFallbackStopsBeforeProgressAndBreakMutation() throws IOException {
         String source = source("MiningTool.java");
-        String guard = "if (!swapped && !switchToHarmlessFallback(bot, currentState))";
+        String guard = "if (!swapped)";
         assertRefuses(block(source, guard), "return;");
         int refusalAt = source.indexOf(guard);
         assertTrue(refusalAt < source.indexOf("lastRepollSwap.set(bot.getMainHandStack().copy())"));
@@ -88,9 +97,11 @@ class MiningToolPreparationWiringTest {
     }
 
     private static void assertRefuses(String body, String returnStatement) {
-        assertTrue(body.contains("miningResult.complete("));
-        assertTrue(body.contains(REFUSAL));
-        assertTrue(body.contains(returnStatement));
+        int equip = body.indexOf(EQUIP);
+        int refuse = body.indexOf("if (refusal != null) {");
+        int complete = body.indexOf("miningResult.complete(refusal);");
+        int ret = body.indexOf(returnStatement);
+        assertTrue(equip >= 0 && refuse > equip && complete > refuse && ret > complete, body);
     }
 
     private static String source(String name) throws IOException {
