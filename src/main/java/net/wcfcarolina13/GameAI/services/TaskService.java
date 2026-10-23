@@ -687,7 +687,10 @@ public final class TaskService {
     }
 
     private static void dispatchMessage(TaskTicket ticket, String message) {
-        ServerCommandSource source = ticket.source();
+        dispatchMessage(ticket.source(), message);
+    }
+
+    private static void dispatchMessage(ServerCommandSource source, String message) {
         if (SERVER_STOPPING || source == null || message == null || message.isBlank()) {
             return;
         }
@@ -698,21 +701,33 @@ public final class TaskService {
         server.execute(() -> ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), message));
     }
 
-    /** Aborts the bot's task on respawn; {@code reason} comes from {@link RespawnResetPolicy}. */
+    /**
+     * Aborts the bot's task on respawn; {@code reason} comes from {@link RespawnResetPolicy}.
+     * The reason is announced through the new bot entity: the ticket's source holds the entity
+     * vanilla removed on respawn, and a removed bot's chat is dropped.
+     */
     public static void onBotRespawn(ServerPlayerEntity bot, String reason) {
         if (bot == null) {
             return;
         }
-        forceAbort(bot.getUuid(), reason);
+        ABORT_LATCH.put(key(bot.getUuid()), reason == null ? "" : reason);
+        TaskTicket ticket = ACTIVE.get(key(bot.getUuid()));
+        if (ticket != null && abortTicket(ticket, reason, false)) {
+            dispatchMessage(bot.getCommandSource(), reason != null && !reason.isBlank()
+                    ? reason
+                    : "§cHalting current task.");
+        }
     }
 
     private static void abortTicket(TaskTicket ticket, String reason) {
         abortTicket(ticket, reason, true);
     }
 
-    private static void abortTicket(TaskTicket ticket, String reason, boolean dispatchMessage) {
+    /** Returns true when this call cancelled the ticket (the case that announces the reason). */
+    private static boolean abortTicket(TaskTicket ticket, String reason, boolean dispatchMessage) {
         ABORT_LATCH.put(key(ticket.botUuid()), reason == null ? "" : reason);
-        if (ticket.requestCancel(reason)) {
+        boolean cancelled = ticket.requestCancel(reason);
+        if (cancelled) {
             ticket.setState(State.ABORTED);
             if (dispatchMessage) {
                 dispatchMessage(ticket, reason != null && !reason.isBlank()
@@ -727,6 +742,7 @@ public final class TaskService {
         // The background thread should check isCancelRequested() and exit gracefully,
         // but we don't want to block new skill starts if pathfinding gets stuck.
         ACTIVE.remove(key(ticket.botUuid()), ticket);
+        return cancelled;
     }
 
     /**
