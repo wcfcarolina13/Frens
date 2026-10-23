@@ -184,3 +184,75 @@ Replay `frens_1_1_291_smoke_follow_woodcut_deposit`.
 ## State after the sweep
 
 Lock released, game closed. Sandbox mods: Flashback, fabric-api, frens-1.1.291, minecraft-mcp-hardened. Muted (master 0). `settings.json5` and `crafting_history.json` restored from backups, test `hunt_config.json` and `.bad-` file moved to the scratch folder. The "Wall Test" save was changed: test platforms near x 1000 to 1310, z 1000, a Nether pad at 0,120,0 with a forceload at 0 0, bots despawned or shelved, and the time left at night.
+
+## 1.1.293 check
+
+Same instance and save ("Wall Test", fingerprint `New World#f2e9c6a8`), jar `frens-1.1.293-release+1.21.11.jar` (md5 35933f98...), muted, no Carpet, one launch. Script `tools/sandbox/fix293.py` (stages `setup`, `endexit`, `death`, `mine`). Overworld deck at 1500,120,1000, End deck at 100,50,0 (forceloaded during the run, removed after). The End dragon was alive and was killed first. Every check used a bot name never used in this save. Replay `frens_1_1_293_end_exit_death_mining` (the whole run). Log copy: session scratch `session293.log`.
+
+| # | Item | Result |
+|---|---|---|
+| A | End exit keeps follow, no second relocation | PASS |
+| A+ | End exit with a running task | Task ends and follow resumes: PASS. "Task ended: changed dimension." in chat: FAIL (never reaches chat) |
+| B | Death respawn routine runs once | PASS |
+| C | Mining, pickaxe and harmless fallback | PASS |
+| D | No store notice at admin join | PASS |
+
+### A. End exit keeps follow: PASS
+
+Bot Ender293a: spawned on the overworld deck, `/bot base set endexitender293a`, moved to the End deck, `/bot follow Ender293a` with the player beside it. Then an `end_portal` block at its feet (it detaches into limbo), the player back to the overworld, `/tp Ender293a RotiWokeman`.
+
+```
+[13:07:15] AFTER_RESPAWN fired for bot Ender293a (alive flag=true)
+[13:07:15] Bot Ender293a respawned and initialized.
+[13:07:15] Follow status: bot=Ender293a botPos=-7, 76, -10 target=RotiWokeman targetPos=1503, 120, 1000 dist=1817.18 ...
+[13:07:19] Follow decision: bot=Ender293a botPos=-7, 76, -9 msg=skip-door-magnet: forcing direct follow dist=1816.70
+```
+
+One AFTER_RESPAWN line, zero `Respawn for Ender293a: resolved`, zero "regrouped", zero `Detected bot respawn` (the deleted per-bot handler). Vanilla put the bot at world spawn (-6.3, 76.4, -8.6). It stayed in follow mode and started walking toward the player 1800 blocks away. After the player was teleported 12 blocks from it, the bot closed to 2.45 blocks. Bag unchanged (8 bread). No task was running, so no task line, as expected. A follow order replaces the directed base target (`setReturnToBase` and follow clear each other), so follow is the observable here.
+
+Before 1.1.293 (1.1.290 log `2026-10-23-7.log.gz`, bot Endy) the same exit logged `Respawn for Endy: resolved to 100.5, 49.1, 0.5` twice: the death reset ran 1+N times and moved the bot.
+
+### A+. End exit with a running task: task end PASS, chat line FAIL
+
+Bots Ender293b and Ender293d: as in A, plus a diamond pickaxe and `/bot skill mining descent 4` started before the portal (Ender293d with the player waiting beside world spawn so chat is in range; Ender293c's run did not count because the descent ended on its own, "Hazard: There's a drop ahead.", one second before the exit).
+
+```
+[13:15:57] AFTER_RESPAWN fired for bot Ender293d (alive flag=true)
+[13:15:57] Task 'skill:mining' aborted: §eTask ended: changed dimension.
+[13:15:57] Dialogue routed: botSender=true bot=Ender293d -> recipient=RotiWokeman
+[13:15:57] [FollowAssert] task-resume bot=Ender293d mode=follow target=RotiWokeman resumed=true result='Now following RotiWokeman.'
+[13:15:57] Skill 'mining' finished for bot Ender293d: success=false msg='Descent aborted: failed to advance (direct: no walkable path reason=BOXED_IN plan=p6).'
+[13:15:57] [CHAT] Descent aborted: failed to advance (direct: no walkable path reason=BOXED_IN plan=p6).
+```
+
+The task ends with the new reason, then the bot follows again and reached 2.97 blocks of the player. No regroup line, no relocation. But "Task ended: changed dimension." never reaches chat: after `Dialogue routed` there is no `Sending chat message` and no `Scripted chat suppressed` line, so `CompanionCommunicationPolicy.canBotChatToController` returned false. Likely cause (not confirmed by a debug line): `TaskService.dispatchMessage` sends through the ticket's command source, which belongs to the old bot entity that vanilla removed at the exit, and the policy refuses a removed bot first. The player only sees the skill's own failure text ("Descent aborted: failed to advance ... not-at-origin" for Ender293b, "... BOXED_IN" for Ender293d). Repro: `fix293.py endexit <new bot> task spawn fast`. Not fixed here.
+
+### B. Death respawn routine runs once: PASS
+
+Bot Dier293b beside world spawn (so the chat line is in range), `/kill Dier293b`.
+
+```
+[13:13:22] AFTER_RESPAWN did not fire for bot Dier293b; forcing respawn routine
+[13:13:22] [Frens] Respawn for Dier293b: resolved to 0.5, 73.1, 0.5 (world spawn near 0, 73, 0)
+[13:13:22] [CHAT] Dier293b: Dier293b has regrouped and is ready to re-engage.
+```
+
+One "resolved" line, one regroup message, bot at world spawn, with 8 bots spawned this session. On a fake-player death vanilla does not fire AFTER_RESPAWN, so the Frens fallback runs the routine; the deleted handler only listened to AFTER_RESPAWN, so the 1+N duplication was on the End exit path (see A), not here. An earlier run far from spawn (Dier293 at 1530,120,1000) also had one "resolved" line, and its regroup line was dropped for distance (the bot lands at spawn, out of chat range), which is the normal range rule.
+
+### C. Mining: PASS
+
+Minny293 with a diamond pickaxe, `/bot skill mining`: 12 `Mining ... with minecraft:diamond_pickaxe` lines, `Skill 'mining' finished for bot Minny293: success=true msg='Collected 10 stone blocks.'`.
+
+Sword293 with a diamond sword selected and a diamond pickaxe in the bag (the skill's pickaxe gate refuses a sword-only bot before `MiningTool`), `/bot skill mining descent 2` on a dirt deck. The best tool for dirt was the empty hand, so `switchToTool` returned false and the harmless fallback ran: `Mining class_2338{x=1590, y=119, z=1001} with bare-hands` three times, the bot ended with an empty hand selected. The descent then stopped on "Hazard: There's a drop ahead." (the deck floats over air, my setup). Zero "could not equip a safe tool", zero "too busy" in the whole session.
+
+Odd but harmless: twice Minny293 logged `Mining ... with minecraft:bread (delta=Infinity, ticks=1)` for a block it had just mined (an air target, finished at once).
+
+### D. Store notice: PASS
+
+`grep -c "Frens could not read" latest.log` = 0 after the admin join and for the whole session.
+
+### Other
+
+Zero ERROR or Exception lines in the session, two "Can't keep up" (one 3.4 s spike right after the first End exit). The player fell into the End void once during my first setup (the deck was built after the teleport); setup now forceloads and builds the End deck first. After a cross-dimension `/tp`, `External teleport detected ... clearing tasks and goals` is logged but the follow target is kept. Ender293a (still following) was carried between dimensions by `Follow dimension handoff` when the player changed dimension.
+
+State after: lock released, game closed, muted. Sandbox mods now carry frens-1.1.293. Test bots despawned. "Wall Test" changed: decks at 1500-1600,120,1000 and End 94-106,44-49,-6..6 (end stone), End dragon killed, End forceload removed.
