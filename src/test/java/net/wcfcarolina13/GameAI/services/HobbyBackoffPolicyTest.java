@@ -165,17 +165,37 @@ class HobbyBackoffPolicyTest {
     // dependent and flipped on movement alone, which wiped the backoff and re-opened the storm.
 
     @Test
-    void aProbeThatFindsNothingDoesNotResetTheBackoff() {
-        assertFalse(HobbyBackoffPolicy.probeClearsBackoff(false, false));
+    void axeReadinessDistinguishesInputsFromAHeldTool() {
+        assertEquals(0, HobbyBackoffPolicy.axeReadiness(false, false));
+        assertEquals(1, HobbyBackoffPolicy.axeReadiness(false, true));
+        assertEquals(2, HobbyBackoffPolicy.axeReadiness(true, false));
+        assertEquals(2, HobbyBackoffPolicy.axeReadiness(true, true));
     }
 
     @Test
-    void anAvailabilityFlipResetsTheBackoff() {
-        // false -> true: the axe is now held, or its inputs are.
-        assertFalse(HobbyBackoffPolicy.probeClearsBackoff(false, false));
-        assertTrue(HobbyBackoffPolicy.probeClearsBackoff(true, false));
-        assertTrue(HobbyBackoffPolicy.probeClearsBackoff(false, true));
-        assertTrue(HobbyBackoffPolicy.probeClearsBackoff(true, true));
+    void onlyAnImprovementBeyondTheFailedAttemptResetsBackoff() {
+        for (int failed = 0; failed <= 2; failed++) {
+            for (int current = 0; current <= 2; current++) {
+                assertEquals(current > failed, HobbyBackoffPolicy.availabilityImproved(failed, current));
+            }
+        }
+        assertFalse(HobbyBackoffPolicy.availabilityImproved(null, 2));
+    }
+
+    @Test
+    void losingAndRegainingTheSameToolDoesNotInvalidateAFailureWithThatTool() {
+        int failedReadiness = HobbyBackoffPolicy.axeReadiness(true, false);
+        assertFalse(HobbyBackoffPolicy.availabilityImproved(failedReadiness, 0));
+        assertFalse(HobbyBackoffPolicy.availabilityImproved(failedReadiness, 1));
+        assertFalse(HobbyBackoffPolicy.availabilityImproved(failedReadiness, 2));
+    }
+
+    @Test
+    void aRetryFailureWithImprovedToolsRequiresAnotherImprovement() {
+        assertTrue(HobbyBackoffPolicy.availabilityImproved(0, 1));
+        assertFalse(HobbyBackoffPolicy.availabilityImproved(1, 1));
+        assertTrue(HobbyBackoffPolicy.availabilityImproved(1, 2));
+        assertFalse(HobbyBackoffPolicy.availabilityImproved(2, 2));
     }
 
     @Test

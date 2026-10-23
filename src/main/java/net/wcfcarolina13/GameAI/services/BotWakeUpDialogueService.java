@@ -143,13 +143,14 @@ public final class BotWakeUpDialogueService {
             // sleep screen fades out. Use the *Forced variant so an unrelated ambient line that
             // fires during the 2 s fade-out doesn't suppress the wake-up via the global
             // recently-shown check.
-            long dueTick = nowTick + DISPLAY_DELAY_TICKS;
-            server.send(new net.minecraft.server.ServerTask((int) dueTick, () -> {
-                if (bot == null || bot.isRemoved()) return;
+            TaskService.runOnServerAfterTicks(server, DISPLAY_DELAY_TICKS, () -> {
+                if (bot.isRemoved() || bot.isSleeping()
+                        || server.getPlayerManager().getPlayer(botId) != bot
+                        || !BotEventHandler.isRegisteredBot(bot)) return;
                 boolean fired = CompanionContextReactionService.playWakeUpForced(bot);
                 LOGGER.info("Wake-up line for bot {}: {}",
                         bot.getName().getString(), fired ? "fired" : "not fired (cooldown)");
-            }));
+            });
 
             LOGGER.info("Scheduled voiced wake-up line for bot {} in {} ticks", bot.getName().getString(), DISPLAY_DELAY_TICKS);
         }
@@ -252,15 +253,20 @@ public final class BotWakeUpDialogueService {
         // Schedule a delayed retry for bots skipped due to transient conditions (active task).
         if (!retryBots.isEmpty()) {
             UUID playerUuid = player.getUuid();
-            server.send(new net.minecraft.server.ServerTask((int) (nowTick + CO_SLEEP_RETRY_DELAY_TICKS), () -> {
+            TaskService.runOnServerAfterTicks(server, CO_SLEEP_RETRY_DELAY_TICKS, () -> {
                 ServerPlayerEntity retryPlayer = server.getPlayerManager().getPlayer(playerUuid);
                 if (retryPlayer == null || retryPlayer.isRemoved() || !retryPlayer.isSleeping()) return;
                 long retryTick = server.getTicks();
                 LOGGER.info("Co-sleep retry: checking {} bot(s) that were busy earlier", retryBots.size());
                 for (UUID botId : retryBots) {
                     ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botId);
-                    if (bot == null || bot.isRemoved() || bot.isSleeping()) continue;
+                    if (bot == null || bot.isRemoved() || bot.isSleeping()
+                            || !BotEventHandler.isRegisteredBot(bot)) continue;
                     if (bot.getEntityWorld() != retryPlayer.getEntityWorld()) continue;
+                    ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(server, bot);
+                    if (commander == null || !commander.getUuid().equals(retryPlayer.getUuid())) continue;
+                    if (BotZzzSleepService.isInSleepCycle(botId)
+                            || BotZzzSleepService.isLoggedOff(bot.getName().getString())) continue;
                     if (TaskService.hasActiveTask(botId)) {
                         LOGGER.info("Co-sleep retry: {} still has active task, giving up", bot.getName().getString());
                         continue;
@@ -276,7 +282,7 @@ public final class BotWakeUpDialogueService {
                     LOGGER.info("Co-sleep retry: {} going to sleep (task cleared)", bot.getName().getString());
                     scheduleCoSleep(server, bot);
                 }
-            }));
+            });
         }
     }
 

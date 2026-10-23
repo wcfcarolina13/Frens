@@ -218,21 +218,14 @@ public final class HobbyBackoffPolicy {
         return nowTick - last >= Math.max(intervalTicks, 0L);
     }
 
-    /**
-     * Whether what a probe found justifies dropping the backoff.
-     *
-     * <p>Only a definitive availability flip counts: the tool is now held, or the bot holds the
-     * inputs to make one. Anything weaker — the bot moved, picked something up, a container came
-     * into range — is <em>not</em> a reset trigger. That distinction is the whole point: the
-     * coarse accessible-supply signature the scheduler also tracks is position-dependent, so a
-     * following bot with no axe flips it merely by walking, and resetting on it re-opens the
-     * restart storm this class exists to prevent.
-     *
-     * @param toolHeld  the needed tool is now in the bot's inventory
-     * @param craftable the bot can craft it right now from what it holds
-     */
-    public static boolean probeClearsBackoff(boolean toolHeld, boolean craftable) {
-        return toolHeld || craftable;
+    /** Inventory-only axe readiness: absent, craftable, or held. */
+    public static int axeReadiness(boolean axeHeld, boolean axeCraftable) {
+        return axeHeld ? 2 : axeCraftable ? 1 : 0;
+    }
+
+    /** A failure with the same or better tools must keep its backoff. */
+    public static boolean availabilityImproved(Integer failedReadiness, int currentReadiness) {
+        return failedReadiness != null && currentReadiness > failedReadiness;
     }
 
     /** Human-readable one-liner for the scheduler's "still backing off" log line. */

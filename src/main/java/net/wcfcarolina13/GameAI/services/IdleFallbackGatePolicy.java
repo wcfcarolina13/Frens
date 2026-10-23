@@ -26,18 +26,14 @@ final class IdleFallbackGatePolicy {
     }
 
     /**
-     * True when the resources woodcut must not start: the bot has no usable axe and the wooden
-     * fallback is still waiting, either inside its per-hobby failure backoff or its flat cooldown.
-     * A woodcut without an axe exits at once with "I have no axe", so starting one here would
-     * bypass the backoff that stops the cd4120ca restart storm.
+     * Every resource woodcut respects the hobby failure backoff. A held axe bypasses only the
+     * flat no-axe fallback cooldown; it does not make failed woodcutting viable again.
      */
     static boolean blocksResourcesWoodcut(boolean hasUsableAxe,
                                           long nowTick,
                                           long woodcutBackoffUntilTick,
                                           long woodenFallbackNextTick) {
-        if (hasUsableAxe) {
-            return false;
-        }
-        return nowTick < woodcutBackoffUntilTick || nowTick < woodenFallbackNextTick;
+        return nowTick < woodcutBackoffUntilTick
+                || (!hasUsableAxe && nowTick < woodenFallbackNextTick);
     }
 }

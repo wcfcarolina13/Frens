@@ -52,7 +52,29 @@ class IdleFallbackGatePolicyTest {
     }
 
     @Test
-    void botWithAnAxeIsNeverBlocked() {
-        assertFalse(IdleFallbackGatePolicy.blocksResourcesWoodcut(true, NOW, NOW + 12_000L, NOW + 12_000L));
+    void heldAxeDoesNotBypassHobbyFailureBackoff() {
+        assertTrue(IdleFallbackGatePolicy.blocksResourcesWoodcut(true, NOW, NOW + 12_000L, NOW + 12_000L));
+        assertTrue(IdleFallbackGatePolicy.blocksResourcesWoodcut(true, NOW, NOW + 1L, 0L));
+    }
+
+    @Test
+    void heldAxeBypassesOnlyTheFlatNoAxeCooldown() {
+        assertFalse(IdleFallbackGatePolicy.blocksResourcesWoodcut(true, NOW, NOW, NOW + 12_000L));
+        assertFalse(IdleFallbackGatePolicy.blocksResourcesWoodcut(true, NOW, 0L, NOW + 12_000L));
+    }
+
+    @Test
+    void unchangedToolsKeepAllWoodcutRoutesBlockedWhileOtherHobbiesCanRun() {
+        int failedReadiness = HobbyBackoffPolicy.axeReadiness(true, false);
+        long woodcutBackoff = NOW + 1200L;
+        for (long tick = NOW; tick < woodcutBackoff; tick++) {
+            assertFalse(HobbyBackoffPolicy.availabilityImproved(failedReadiness,
+                    HobbyBackoffPolicy.axeReadiness(true, false)));
+            // Ordinary fallback cooldowns can be cleared by unrelated tasks or movement.
+            assertTrue(IdleFallbackGatePolicy.blocksResourcesWoodcut(true, tick, woodcutBackoff, 0L));
+            assertFalse(IdleFallbackGatePolicy.allowsHobby(true, tick, woodcutBackoff));
+            assertTrue(IdleFallbackGatePolicy.allowsHobby(true, tick, 0L));
+        }
+        assertFalse(IdleFallbackGatePolicy.blocksResourcesWoodcut(true, woodcutBackoff, woodcutBackoff, 0L));
     }
 }
