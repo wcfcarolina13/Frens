@@ -68,9 +68,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -5114,37 +5112,10 @@ public final class MovementService {
     }
 
     static boolean runOnServerThread(ServerPlayerEntity player, Runnable action) {
-        Runnable guardedAction = MovementAbortPolicy.guard(action);
-        MinecraftServer server = player != null && player.getCommandSource() != null
-                ? player.getCommandSource().getServer()
-                : null;
-        if (server == null) {
-            guardedAction.run();
+        return BotActions.callOnServerThread(player, MovementAbortPolicy.guard(() -> {
+            action.run();
             return true;
-        }
-        if (server.isOnThread()) {
-            guardedAction.run();
-            return true;
-        }
-        CompletableFuture<Void> future = new CompletableFuture<>();
-        server.execute(() -> {
-            try {
-                guardedAction.run();
-                future.complete(null);
-            } catch (Throwable t) {
-                future.completeExceptionally(t);
-            }
-        });
-        try {
-            future.get(750, TimeUnit.MILLISECONDS);
-            return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        } catch (ExecutionException | TimeoutException e) {
-            LOGGER.warn("Walk step failed: {}", e.getMessage());
-            return false;
-        }
+        }, false), 750L, false);
     }
 
     private static void sleep(long millis) {

@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Failed-route memory for movement's local escape and step-up assists (1.1.240).
@@ -51,8 +52,8 @@ public final class FailedRoutePolicy {
         }
         Map<Key, Entry> perBot = failed.computeIfAbsent(botId, id -> new ConcurrentHashMap<>());
         perBot.values().removeIf(e -> !live(e.recordedMs(), nowMs));
-        Entry previous = perBot.get(key);
-        perBot.put(key, new Entry(nowMs, previous == null ? Long.MIN_VALUE : previous.lastSkipLogMs()));
+        perBot.compute(key, (route, previous) ->
+                new Entry(nowMs, previous == null ? Long.MIN_VALUE : previous.lastSkipLogMs()));
     }
 
     /** True when this route failed less than {@link #TTL_MS} ago. */
@@ -69,7 +70,7 @@ public final class FailedRoutePolicy {
             return false;
         }
         if (!live(entry.recordedMs(), nowMs)) {
-            perBot.remove(key);
+            perBot.remove(key, entry);
             return false;
         }
         return true;
@@ -77,11 +78,17 @@ public final class FailedRoutePolicy {
 
     /** Milliseconds this route stays remembered, 0 when it is not (or no longer) remembered. */
     public long remainingMs(UUID botId, Key key, long nowMs) {
-        if (!isFailed(botId, key, nowMs)) {
+        if (botId == null || key == null) {
             return 0L;
         }
-        Entry entry = failed.get(botId).get(key);
-        return entry == null ? 0L : Math.max(0L, TTL_MS - (nowMs - entry.recordedMs()));
+        Map<Key, Entry> perBot = failed.get(botId);
+        Entry entry = perBot == null ? null : perBot.get(key);
+        if (entry == null) return 0L;
+        if (!live(entry.recordedMs(), nowMs)) {
+            perBot.remove(key, entry);
+            return 0L;
+        }
+        return Math.max(0L, TTL_MS - (nowMs - entry.recordedMs()));
     }
 
     /**
@@ -96,15 +103,17 @@ public final class FailedRoutePolicy {
         if (perBot == null) {
             return false;
         }
-        Entry entry = perBot.get(key);
-        if (entry == null || !live(entry.recordedMs(), nowMs)) {
-            return false;
-        }
-        if (entry.lastSkipLogMs() != Long.MIN_VALUE && nowMs - entry.lastSkipLogMs() < SKIP_LOG_INTERVAL_MS) {
-            return false;
-        }
-        perBot.put(key, new Entry(entry.recordedMs(), nowMs));
-        return true;
+        AtomicBoolean claimed = new AtomicBoolean();
+        perBot.computeIfPresent(key, (route, entry) -> {
+            if (!live(entry.recordedMs(), nowMs)
+                    || (entry.lastSkipLogMs() != Long.MIN_VALUE
+                    && nowMs - entry.lastSkipLogMs() < SKIP_LOG_INTERVAL_MS)) {
+                return entry;
+            }
+            claimed.set(true);
+            return new Entry(entry.recordedMs(), nowMs);
+        });
+        return claimed.get();
     }
 
     /**
@@ -132,7 +141,7 @@ public final class FailedRoutePolicy {
             return 0;
         }
         if (!live(at, nowMs)) {
-            perBot.remove(goal);
+            perBot.remove(goal, at);
             return 0;
         }
         return 1;

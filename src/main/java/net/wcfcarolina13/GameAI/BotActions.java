@@ -135,29 +135,11 @@ public final class BotActions {
         if (bot == null || action == null) {
             return false;
         }
-        var server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
-        if (server == null || server.isOnThread()) {
+        // Stop cleanup also uses this helper; walk-abort gates belong on steering callers.
+        return callOnServerThread(bot, () -> {
             action.run();
             return true;
-        }
-        CompletableFuture<Void> future = new CompletableFuture<>();
-        server.execute(() -> {
-            try {
-                action.run();
-                future.complete(null);
-            } catch (Throwable t) {
-                future.completeExceptionally(t);
-            }
-        });
-        try {
-            future.get(Math.max(250L, timeoutMs), TimeUnit.MILLISECONDS);
-            return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        } catch (ExecutionException | TimeoutException e) {
-            return false;
-        }
+        }, timeoutMs, false);
     }
 
     /** Runs an atomic action on the server, waiting only when called from a worker. */

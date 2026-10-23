@@ -3,6 +3,10 @@ package net.wcfcarolina13.GameAI.services;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 
 import static net.wcfcarolina13.GameAI.services.FailedRoutePolicy.TTL_MS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -94,6 +98,95 @@ class FailedRoutePolicyTest {
         memory.clear(BOB);
         assertEquals(0, memory.sidestepsWithinTtl(BOB, goal, 5_000L), "cleared with the bot's routes");
         assertEquals(0, memory.sidestepsWithinTtl(null, goal, 0L));
+    }
+
+    @Test
+    void clearDuringRemainingTimeReadDoesNotThrowOrResurrectTheBot() throws Exception {
+        FailedRoutePolicy memory = new FailedRoutePolicy();
+        memory.record(BOB, GULLY, 1_000L);
+        interleaveNextAccess(memory, "failed", () -> memory.clear(BOB));
+        assertEquals(TTL_MS, memory.remainingMs(BOB, GULLY, 1_000L));
+        assertEquals(0L, memory.remainingMs(BOB, GULLY, 1_000L));
+    }
+
+    @Test
+    void expiredReadCannotDeleteARefreshedRoute() throws Exception {
+        FailedRoutePolicy memory = new FailedRoutePolicy();
+        memory.record(BOB, GULLY, 0L);
+        interleaveNextAccess(memory, "failed", () -> memory.record(BOB, GULLY, TTL_MS));
+        assertFalse(memory.isFailed(BOB, GULLY, TTL_MS));
+        assertTrue(memory.isFailed(BOB, GULLY, TTL_MS + 1));
+    }
+
+    @Test
+    void expiredReadCannotDeleteARefreshedSidestep() throws Exception {
+        FailedRoutePolicy memory = new FailedRoutePolicy();
+        var goal = new FailedRoutePolicy.Goal(10, 64, 0);
+        memory.recordSidestep(BOB, goal, 0L);
+        interleaveNextAccess(memory, "sidesteps", () -> memory.recordSidestep(BOB, goal, TTL_MS));
+        assertEquals(0, memory.sidestepsWithinTtl(BOB, goal, TTL_MS));
+        assertEquals(1, memory.sidestepsWithinTtl(BOB, goal, TTL_MS + 1));
+    }
+
+    @Test
+    void loggingAnOldReadCannotUndoAConcurrentRouteRefresh() throws Exception {
+        FailedRoutePolicy memory = new FailedRoutePolicy();
+        memory.record(BOB, GULLY, 0L);
+        interleaveNextAccess(memory, "failed", () -> memory.record(BOB, GULLY, 10_000L));
+        assertTrue(memory.claimSkipLog(BOB, GULLY, 10_000L));
+        assertEquals(5_000L, memory.remainingMs(BOB, GULLY, 35_000L));
+    }
+
+    @Test
+    void refreshingAnOldReadCannotUndoAConcurrentLogClaim() throws Exception {
+        FailedRoutePolicy memory = new FailedRoutePolicy();
+        memory.record(BOB, GULLY, 0L);
+        interleaveNextAccess(memory, "failed", () -> memory.claimSkipLog(BOB, GULLY, 1_000L));
+        memory.record(BOB, GULLY, 2_000L);
+        assertFalse(memory.claimSkipLog(BOB, GULLY, 2_100L));
+    }
+
+    // Complete one competing operation at a map-access boundary without timing or sleeps.
+    @SuppressWarnings("unchecked")
+    private static void interleaveNextAccess(FailedRoutePolicy memory, String fieldName,
+                                             Runnable competingOperation) throws Exception {
+        var field = FailedRoutePolicy.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        var bots = (Map<UUID, Map<Object, Object>>) field.get(memory);
+        var replacement = new InterleavingMap(bots.get(BOB), competingOperation);
+        bots.put(BOB, replacement);
+    }
+
+    private static final class InterleavingMap extends ConcurrentHashMap<Object, Object> {
+        private final AtomicReference<Runnable> pending;
+
+        InterleavingMap(Map<Object, Object> initial, Runnable competingOperation) {
+            super(initial);
+            pending = new AtomicReference<>(competingOperation);
+        }
+
+        private void interleave() {
+            Runnable action = pending.getAndSet(null);
+            if (action != null) action.run();
+        }
+
+        @Override public Object get(Object key) {
+            Object observed = super.get(key);
+            interleave();
+            return observed;
+        }
+
+        @Override public Object compute(Object key,
+                BiFunction<? super Object, ? super Object, ? extends Object> update) {
+            interleave();
+            return super.compute(key, update);
+        }
+
+        @Override public Object computeIfPresent(Object key,
+                BiFunction<? super Object, ? super Object, ? extends Object> update) {
+            interleave();
+            return super.computeIfPresent(key, update);
+        }
     }
 
     @Test
