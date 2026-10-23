@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashMap;
@@ -31,6 +33,7 @@ public final class BotWorldStateService {
 
     private static final Map<String, Map<String, BotState>> STATE = new HashMap<>();
     private static boolean loaded = false;
+    private static boolean loadFailed = false;
 
     private BotWorldStateService() {}
 
@@ -64,7 +67,7 @@ public final class BotWorldStateService {
         return configDir.resolve("frens").resolve(FILE_NAME);
     }
 
-    private static void ensureLoaded() {
+    private static synchronized void ensureLoaded() {
         if (loaded) return;
         Path file = stateFile();
         if (Files.exists(file)) {
@@ -89,49 +92,86 @@ public final class BotWorldStateService {
                     }
                 }
             } catch (Exception e) {
+                loadFailed = true;
                 LOGGER.warn("Failed to load bot world state: {}", e.getMessage());
             }
         }
         loaded = true;
     }
 
-    private static void flush() {
+    private static synchronized boolean flush() {
+        if (loadFailed) {
+            LOGGER.warn("Bot world state was not saved because its original file could not be read.");
+            return false;
+        }
+        Path temporary = null;
         try {
             Path file = stateFile();
             Files.createDirectories(file.getParent());
-            try (Writer writer = Files.newBufferedWriter(file)) {
+            temporary = Files.createTempFile(file.getParent(), "bot-world-state-", ".tmp");
+            try (Writer writer = Files.newBufferedWriter(temporary)) {
                 GSON.toJson(STATE, writer);
             }
-        } catch (IOException e) {
+            try {
+                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
+        } catch (Exception e) {
             LOGGER.warn("Failed to save bot world state: {}", e.getMessage());
+            return false;
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException e) {
+                    LOGGER.debug("Could not remove world-state temporary file: {}", e.getMessage());
+                }
+            }
         }
     }
 
-    public static Optional<BotState> loadState(MinecraftServer server, String alias) {
+    public static synchronized Optional<BotState> loadState(MinecraftServer server, String alias) {
         ensureLoaded();
-        String key = worldKey(server);
-        String legacyKey = legacyWorldKey(server);
-        Map<String, BotState> worldMap = STATE.get(normalizeAlias(alias));
-        if (worldMap == null) return Optional.empty();
-        BotState state = worldMap.get(key);
-        if (state != null) {
-            return Optional.of(state);
-        }
-
-        // Backward compatibility: pre-fingerprint entries were keyed only by levelName.
-        BotState legacyState = worldMap.get(legacyKey);
-        if (legacyState != null) {
-            worldMap.put(key, legacyState);
-            worldMap.remove(legacyKey);
-            flush();
-            LOGGER.info("Migrated legacy bot world-state key for alias '{}' from '{}' to '{}'.", alias, legacyKey, key);
-            return Optional.of(legacyState);
-        }
-
-        return Optional.empty();
+        return LegacyWorldStateRecoveryPolicy.current(STATE.get(normalizeAlias(alias)), worldKey(server));
     }
 
-    public static void saveState(ServerPlayerEntity bot) {
+    /** Legacy positions are ambiguous: only an administrator's explicit import may copy them. */
+    public static synchronized Optional<BotState> legacyState(MinecraftServer server, String alias) {
+        ensureLoaded();
+        Map<String, BotState> states = STATE.get(normalizeAlias(alias));
+        return states == null ? Optional.empty() : Optional.ofNullable(states.get(legacyWorldKey(server)));
+    }
+
+    public static synchronized java.util.List<String> pendingLegacyAliases(MinecraftServer server) {
+        ensureLoaded();
+        String target = worldKey(server);
+        String legacy = legacyWorldKey(server);
+        return STATE.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && entry.getValue().get(legacy) != null
+                        && !entry.getValue().containsKey(target))
+                .map(Map.Entry::getKey).sorted().toList();
+    }
+
+    public static synchronized LegacyWorldStateRecoveryPolicy.Result importLegacyState(
+            MinecraftServer server, String alias, String confirmation) {
+        ensureLoaded();
+        if (loadFailed) return LegacyWorldStateRecoveryPolicy.Result.SAVE_FAILED;
+        Map<String, BotState> states = STATE.get(normalizeAlias(alias));
+        String target = worldKey(server);
+        var result = LegacyWorldStateRecoveryPolicy.copyLegacy(states, legacyWorldKey(server), target, confirmation);
+        if (result == LegacyWorldStateRecoveryPolicy.Result.IMPORTED) {
+            BotState imported = states.get(target);
+            if (!flush()) {
+                LegacyWorldStateRecoveryPolicy.rollback(states, target, imported);
+                return LegacyWorldStateRecoveryPolicy.Result.SAVE_FAILED;
+            }
+        }
+        return result;
+    }
+
+    public static synchronized void saveState(ServerPlayerEntity bot) {
         if (bot == null || bot.getCommandSource().getServer() == null) return;
         ensureLoaded();
         String alias = normalizeAlias(bot.getName().getString());
@@ -149,7 +189,7 @@ public final class BotWorldStateService {
      * Used by the fast travel system to pre-write the destination as the bot's
      * saved position before removing the bot from the world.
      */
-    public static void saveStateManual(MinecraftServer server, String alias,
+    public static synchronized void saveStateManual(MinecraftServer server, String alias,
                                        double x, double y, double z, float yaw, float pitch) {
         if (server == null || alias == null || alias.isBlank()) return;
         ensureLoaded();
@@ -159,14 +199,14 @@ public final class BotWorldStateService {
         flush();
     }
 
-    public static void saveAll(MinecraftServer server) {
+    public static synchronized void saveAll(MinecraftServer server) {
         if (server == null) return;
         ensureLoaded();
         flush();
     }
 
     /** Clears the saved location snapshot for {@code alias} in the current world. */
-    public static void clearState(MinecraftServer server, String alias) {
+    public static synchronized void clearState(MinecraftServer server, String alias) {
         if (server == null || alias == null || alias.isBlank()) {
             return;
         }
@@ -178,8 +218,7 @@ public final class BotWorldStateService {
         if (worldMap == null) {
             return;
         }
-        boolean removed = worldMap.remove(key) != null;
-        removed = (worldMap.remove(legacyKey) != null) || removed;
+        boolean removed = LegacyWorldStateRecoveryPolicy.clearCurrent(worldMap, legacyKey, key);
         if (removed) {
             if (worldMap.isEmpty()) {
                 STATE.remove(normalizedAlias);
@@ -208,7 +247,7 @@ public final class BotWorldStateService {
     /**
      * Debug helper for identity audits: alias -> world-count snapshot.
      */
-    public static Map<String, Integer> debugAliasWorldCounts() {
+    public static synchronized Map<String, Integer> debugAliasWorldCounts() {
         ensureLoaded();
         Map<String, Integer> out = new HashMap<>();
         for (Map.Entry<String, Map<String, BotState>> entry : STATE.entrySet()) {
@@ -221,7 +260,7 @@ public final class BotWorldStateService {
      * Read-only copy of alias (lower-cased) to the world keys it has a saved position under.
      * Never migrates or flushes. Call on the server thread.
      */
-    public static Map<String, java.util.Set<String>> worldKeysByAlias() {
+    public static synchronized Map<String, java.util.Set<String>> worldKeysByAlias() {
         ensureLoaded();
         Map<String, java.util.Set<String>> out = new HashMap<>();
         for (Map.Entry<String, Map<String, BotState>> entry : STATE.entrySet()) {

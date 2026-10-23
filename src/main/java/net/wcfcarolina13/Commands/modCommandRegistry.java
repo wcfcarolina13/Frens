@@ -338,10 +338,12 @@ public class modCommandRegistry {
 
 
     public static void register() {
+        LegacyWorldStateCommand.registerNotices();
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(
                         literal("bot")
                             .requires(Frens::hasBotCommandPermission)
+                            .then(LegacyWorldStateCommand.command())
                             .then(literal("spawn")
                                 .then(CommandManager.argument("bot_name", StringArgumentType.string())
                                         .then(CommandManager.argument("mode", StringArgumentType.string())

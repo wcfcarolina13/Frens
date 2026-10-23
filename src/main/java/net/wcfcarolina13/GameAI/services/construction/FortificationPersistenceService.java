@@ -6,6 +6,9 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.GameAI.services.BotWorldStateService;
+import net.wcfcarolina13.GameAI.services.WorldStoreKeyPolicy;
+import net.wcfcarolina13.GameAI.services.LegacyRegistryRecoveryPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,6 +16,8 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.util.*;
 
@@ -32,6 +37,7 @@ public final class FortificationPersistenceService {
 
     private static RootData DATA = new RootData();
     private static boolean loaded = false;
+    private static boolean loadFailed = false;
 
     private FortificationPersistenceService() {}
 
@@ -226,8 +232,11 @@ public final class FortificationPersistenceService {
         ensureLoaded();
         synchronized (LOCK) {
             WorldData wd = DATA.worlds.get(worldKey);
-            if (wd == null) return Optional.empty();
+            if (wd == null || wd.fortifications == null) return Optional.empty();
             SavedFortification fort = wd.fortifications.get(normKey(name));
+            if (worldKey.startsWith(BotWorldStateService.currentWorldKey(server) + ":")) {
+                normalizeFortification(fort);
+            }
             return Optional.ofNullable(fort);
         }
     }
@@ -239,7 +248,10 @@ public final class FortificationPersistenceService {
         ensureLoaded();
         synchronized (LOCK) {
             WorldData wd = DATA.worlds.get(worldKey);
-            if (wd == null) return List.of();
+            if (wd == null || wd.fortifications == null) return List.of();
+            if (worldKey.startsWith(BotWorldStateService.currentWorldKey(server) + ":")) {
+                wd.fortifications.values().forEach(FortificationPersistenceService::normalizeFortification);
+            }
             return new ArrayList<>(wd.fortifications.values());
         }
     }
@@ -471,6 +483,12 @@ public final class FortificationPersistenceService {
      * Build the world key from server + world, matching BotHomeService pattern.
      */
     public static String serverWorldKey(MinecraftServer server, ServerWorld world) {
+        String dimension = world != null && world.getRegistryKey() != null
+                ? world.getRegistryKey().getValue().toString() : "unknown";
+        return WorldStoreKeyPolicy.fingerprintKey(BotWorldStateService.currentWorldKey(server), dimension);
+    }
+
+    public static String legacyServerWorldKey(MinecraftServer server, ServerWorld world) {
         String level = server != null && server.getSaveProperties() != null
                 ? server.getSaveProperties().getLevelName()
                 : "unknown";
@@ -481,6 +499,65 @@ public final class FortificationPersistenceService {
     }
 
     // ── Internal persistence ────────────────────────────────────
+
+    public static LegacyRegistryRecoveryPolicy.Preview previewLegacy(ServerWorld world) {
+        ensureLoaded();
+        MinecraftServer server = world.getServer();
+        String legacyKey = legacyServerWorldKey(server, world);
+        String targetKey = serverWorldKey(server, world);
+        synchronized (LOCK) {
+            if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+            WorldData legacy = DATA.worlds.get(legacyKey);
+            List<String> entries = new ArrayList<>();
+            int count = 0;
+            if (legacy != null && legacy.fortifications != null) {
+                for (SavedFortification record : legacy.fortifications.values()) {
+                    if (record == null) continue;
+                    count++;
+                    if (entries.size() < 20) {
+                        String center = record.center != null
+                                ? record.center.x + "," + record.center.y + "," + record.center.z : "unknown";
+                        entries.add(record.name + " center=" + center + " placed=" + record.totalBlocksPlaced + " complete=" + record.complete
+                                + " owner=" + record.ownerUuid);
+                    }
+                }
+            }
+            return new LegacyRegistryRecoveryPolicy.Preview(legacyKey, targetKey, count,
+                    DATA.worlds.containsKey(targetKey), List.copyOf(entries));
+        }
+    }
+
+    public static LegacyRegistryRecoveryPolicy.Result importLegacy(ServerWorld world, String confirmation) {
+        ensureLoaded();
+        MinecraftServer server = world.getServer();
+        String targetKey = serverWorldKey(server, world);
+        synchronized (LOCK) {
+            if (loadFailed) return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+            try {
+                var copy = LegacyRegistryRecoveryPolicy.copyLegacy(DATA.worlds,
+                        legacyServerWorldKey(server, world), targetKey,
+                        BotWorldStateService.currentWorldKey(server), confirmation, legacy -> {
+                            WorldData copied = GSON.fromJson(GSON.toJson(legacy), WorldData.class);
+                            if (copied != null && copied.fortifications != null) {
+                                for (SavedFortification record : copied.fortifications.values()) {
+                                    if (record == null) continue;
+                                    record.worldKey = targetKey;
+                                }
+                            }
+                            return copied;
+                        });
+                if (copy.result() == LegacyRegistryRecoveryPolicy.Result.IMPORTED && !flush()) {
+                    LegacyRegistryRecoveryPolicy.rollback(DATA.worlds, targetKey, copy.imported());
+                    return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+                }
+                return copy.result();
+            } catch (Exception e) {
+                LOGGER.warn("Legacy structure recovery failed: {}", e.getMessage());
+                return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            }
+        }
+    }
 
     private static Path stateFile() {
         Path configDir = FabricLoader.getInstance().getConfigDir();
@@ -496,9 +573,10 @@ public final class FortificationPersistenceService {
                     RootData parsed = GSON.fromJson(reader, RootData.class);
                     if (parsed != null) {
                         DATA = parsed;
-                        normalizeLoadedData();
+                        if (DATA.worlds == null) DATA.worlds = new HashMap<>();
                     }
                 } catch (Exception e) {
+                    loadFailed = true;
                     LOGGER.warn("Failed to load fortification data: {}", e.getMessage());
                     DATA = new RootData();
                 }
@@ -507,42 +585,46 @@ public final class FortificationPersistenceService {
         }
     }
 
-    private static void flush() {
+    private static boolean flush() {
         synchronized (LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Fortification data was not saved because its original file could not be read.");
+                return false;
+            }
+            Path temporary = null;
             try {
                 Path file = stateFile();
                 Files.createDirectories(file.getParent());
-                try (Writer writer = Files.newBufferedWriter(file)) {
+                temporary = Files.createTempFile(file.getParent(), "fortifications-", ".tmp");
+                try (Writer writer = Files.newBufferedWriter(temporary)) {
                     GSON.toJson(DATA, writer);
                 }
-            } catch (IOException e) {
+                try {
+                    Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+                }
+                return true;
+            } catch (Exception e) {
                 LOGGER.warn("Failed to save fortification data: {}", e.getMessage());
+                return false;
+            } finally {
+                if (temporary != null) {
+                    try {
+                        Files.deleteIfExists(temporary);
+                    } catch (IOException e) {
+                        LOGGER.debug("Could not remove registry temporary file: {}", e.getMessage());
+                    }
+                }
             }
         }
     }
 
     private static WorldData worldData(String worldKey) {
         if (DATA.worlds == null) DATA.worlds = new HashMap<>();
-        return DATA.worlds.computeIfAbsent(worldKey, ignored -> new WorldData());
-    }
-
-    private static void normalizeLoadedData() {
-        if (DATA.worlds == null) {
-            DATA.worlds = new HashMap<>();
-            return;
-        }
-        for (WorldData worldData : DATA.worlds.values()) {
-            if (worldData == null) {
-                continue;
-            }
-            if (worldData.fortifications == null) {
-                worldData.fortifications = new HashMap<>();
-                continue;
-            }
-            for (SavedFortification fort : worldData.fortifications.values()) {
-                normalizeFortification(fort);
-            }
-        }
+        WorldData own = DATA.worlds.computeIfAbsent(worldKey, ignored -> new WorldData());
+        if (own.fortifications == null) own.fortifications = new HashMap<>();
+        return own;
     }
 
     private static void normalizeFortification(SavedFortification fort) {

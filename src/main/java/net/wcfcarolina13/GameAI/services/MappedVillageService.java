@@ -11,9 +11,12 @@ import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayout
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,6 +37,7 @@ public final class MappedVillageService {
 
     private static RootData DATA = new RootData();
     private static boolean loaded = false;
+    private static boolean loadFailed = false;
 
     private MappedVillageService() {
     }
@@ -280,6 +284,7 @@ public final class MappedVillageService {
                         DATA = parsed;
                     }
                 } catch (Exception e) {
+                    loadFailed = true;
                     LOGGER.warn("Failed to load mapped villages: {}", e.getMessage());
                     DATA = new RootData();
                 }
@@ -288,20 +293,101 @@ public final class MappedVillageService {
         }
     }
 
+    public static LegacyRegistryRecoveryPolicy.Preview previewLegacy(ServerWorld world) {
+        ensureLoaded();
+        MinecraftServer server = world.getServer();
+        String legacyKey = FortificationPersistenceService.legacyServerWorldKey(server, world);
+        String targetKey = FortificationPersistenceService.serverWorldKey(server, world);
+        synchronized (LOCK) {
+            if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+            WorldData legacy = DATA.worlds.get(legacyKey);
+            List<String> entries = new ArrayList<>();
+            int count = 0;
+            if (legacy != null && legacy.villages != null) {
+                for (MappedVillage record : legacy.villages.values()) {
+                    if (record == null) continue;
+                    count++;
+                    if (entries.size() < 20) {
+                        String center = record.center != null
+                                ? record.center.x + "," + record.center.y + "," + record.center.z : "unknown";
+                        entries.add(record.name + " center=" + center + " dimension=" + record.dimension
+                                + " vertices=" + (record.hullVertices != null ? record.hullVertices.size() : 0));
+                    }
+                }
+            }
+            return new LegacyRegistryRecoveryPolicy.Preview(legacyKey, targetKey, count,
+                    DATA.worlds.containsKey(targetKey), List.copyOf(entries));
+        }
+    }
+
+    public static LegacyRegistryRecoveryPolicy.Result importLegacy(ServerWorld world, String confirmation) {
+        ensureLoaded();
+        MinecraftServer server = world.getServer();
+        String targetKey = FortificationPersistenceService.serverWorldKey(server, world);
+        synchronized (LOCK) {
+            if (loadFailed) return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+            try {
+                var copy = LegacyRegistryRecoveryPolicy.copyLegacy(DATA.worlds,
+                        FortificationPersistenceService.legacyServerWorldKey(server, world), targetKey,
+                        BotWorldStateService.currentWorldKey(server), confirmation, legacy -> {
+                            WorldData copied = GSON.fromJson(GSON.toJson(legacy), WorldData.class);
+                            if (copied != null && copied.villages != null) {
+                                for (MappedVillage record : copied.villages.values()) {
+                                    if (record == null) continue;
+                                    record.worldKey = targetKey;
+                                    record.dimension = world.getRegistryKey().getValue().toString();
+                                }
+                            }
+                            return copied;
+                        });
+                if (copy.result() == LegacyRegistryRecoveryPolicy.Result.IMPORTED && !flush()) {
+                    LegacyRegistryRecoveryPolicy.rollback(DATA.worlds, targetKey, copy.imported());
+                    return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+                }
+                return copy.result();
+            } catch (Exception e) {
+                LOGGER.warn("Legacy structure recovery failed: {}", e.getMessage());
+                return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            }
+        }
+    }
+
     private static Path stateFile() {
         return FabricLoader.getInstance().getConfigDir().resolve("frens").resolve(FILE_NAME);
     }
 
-    private static void flush() {
+    private static boolean flush() {
         synchronized (LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Mapped villages was not saved because its original file could not be read.");
+                return false;
+            }
+            Path temporary = null;
             try {
                 Path file = stateFile();
                 Files.createDirectories(file.getParent());
-                try (Writer writer = Files.newBufferedWriter(file)) {
+                temporary = Files.createTempFile(file.getParent(), "villages-", ".tmp");
+                try (Writer writer = Files.newBufferedWriter(temporary)) {
                     GSON.toJson(DATA, writer);
                 }
+                try {
+                    Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+                }
+                return true;
             } catch (Exception e) {
                 LOGGER.warn("Failed to save mapped villages: {}", e.getMessage());
+                return false;
+            } finally {
+                if (temporary != null) {
+                    try {
+                        Files.deleteIfExists(temporary);
+                    } catch (IOException e) {
+                        LOGGER.debug("Could not remove registry temporary file: {}", e.getMessage());
+                    }
+                }
             }
         }
     }

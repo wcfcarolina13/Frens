@@ -18,6 +18,8 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,6 +43,7 @@ public final class BotFurnaceRegistryService {
 
     private static RootData DATA = new RootData();
     private static boolean loaded = false;
+    private static boolean loadFailed = false;
 
     private BotFurnaceRegistryService() {
     }
@@ -99,6 +102,7 @@ public final class BotFurnaceRegistryService {
                         DATA = parsed;
                     }
                 } catch (Exception e) {
+                    loadFailed = true;
                     LOGGER.warn("Failed to load furnace registry: {}", e.getMessage());
                     DATA = new RootData();
                 }
@@ -107,21 +111,48 @@ public final class BotFurnaceRegistryService {
         }
     }
 
-    private static void flush() {
+    private static boolean flush() {
         synchronized (LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Furnace registry was not saved because its original file could not be read.");
+                return false;
+            }
+            Path temporary = null;
             try {
                 Path file = stateFile();
                 Files.createDirectories(file.getParent());
-                try (Writer writer = Files.newBufferedWriter(file)) {
+                temporary = Files.createTempFile(file.getParent(), "furnace-registry-", ".tmp");
+                try (Writer writer = Files.newBufferedWriter(temporary)) {
                     GSON.toJson(DATA, writer);
                 }
-            } catch (IOException e) {
+                try {
+                    Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+                }
+                return true;
+            } catch (Exception e) {
                 LOGGER.warn("Failed to save furnace registry: {}", e.getMessage());
+                return false;
+            } finally {
+                if (temporary != null) {
+                    try {
+                        Files.deleteIfExists(temporary);
+                    } catch (IOException e) {
+                        LOGGER.debug("Could not remove registry temporary file: {}", e.getMessage());
+                    }
+                }
             }
         }
     }
 
     private static String serverWorldKey(MinecraftServer server, ServerWorld world) {
+        String dimension = world != null && world.getRegistryKey() != null
+                ? world.getRegistryKey().getValue().toString() : "unknown";
+        return WorldStoreKeyPolicy.fingerprintKey(BotWorldStateService.currentWorldKey(server), dimension);
+    }
+
+    private static String legacyServerWorldKey(MinecraftServer server, ServerWorld world) {
         String level = server != null && server.getSaveProperties() != null
                 ? server.getSaveProperties().getLevelName()
                 : "unknown";
@@ -132,13 +163,74 @@ public final class BotFurnaceRegistryService {
     }
 
     private static WorldData worldData(MinecraftServer server, ServerWorld world) {
+        return worldData(server, world, false);
+    }
+
+    private static WorldData worldData(MinecraftServer server, ServerWorld world, boolean create) {
         ensureLoaded();
         String key = serverWorldKey(server, world);
         synchronized (LOCK) {
             if (DATA.worlds == null) {
                 DATA.worlds = new HashMap<>();
             }
-            return DATA.worlds.computeIfAbsent(key, ignored -> new WorldData());
+            WorldData own = DATA.worlds.get(key);
+            if (own != null) return own;
+            if (create) {
+                own = new WorldData();
+                DATA.worlds.put(key, own);
+                return own;
+            }
+            return new WorldData();
+        }
+    }
+
+    public static LegacyRegistryRecoveryPolicy.Preview previewLegacy(ServerWorld world) {
+        ensureLoaded();
+        MinecraftServer server = world.getServer();
+        String legacyKey = legacyServerWorldKey(server, world);
+        String targetKey = serverWorldKey(server, world);
+        synchronized (LOCK) {
+            if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+            WorldData legacy = DATA.worlds.get(legacyKey);
+            List<String> entries = new ArrayList<>();
+            int count = 0;
+            if (legacy != null && legacy.furnacesByShareKey != null) {
+                for (var group : legacy.furnacesByShareKey.entrySet()) {
+                    if (group.getValue() == null) continue;
+                    for (FurnaceRecord record : group.getValue()) {
+                        if (record == null) continue;
+                        count++;
+                        if (entries.size() < 20) entries.add(record.x + "," + record.y + "," + record.z
+                                + " share=" + group.getKey() + " destroyed=" + record.destroyed);
+                    }
+                }
+            }
+            return new LegacyRegistryRecoveryPolicy.Preview(legacyKey, targetKey, count,
+                    DATA.worlds.containsKey(targetKey), List.copyOf(entries));
+        }
+    }
+
+    public static LegacyRegistryRecoveryPolicy.Result importLegacy(ServerWorld world, String confirmation) {
+        ensureLoaded();
+        MinecraftServer server = world.getServer();
+        String targetKey = serverWorldKey(server, world);
+        synchronized (LOCK) {
+            if (loadFailed) return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+            try {
+                var copy = LegacyRegistryRecoveryPolicy.copyLegacy(DATA.worlds,
+                        legacyServerWorldKey(server, world), targetKey,
+                        BotWorldStateService.currentWorldKey(server), confirmation,
+                        legacy -> GSON.fromJson(GSON.toJson(legacy), WorldData.class));
+                if (copy.result() == LegacyRegistryRecoveryPolicy.Result.IMPORTED && !flush()) {
+                    LegacyRegistryRecoveryPolicy.rollback(DATA.worlds, targetKey, copy.imported());
+                    return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+                }
+                return copy.result();
+            } catch (Exception e) {
+                LOGGER.warn("Legacy registry recovery failed: {}", e.getMessage());
+                return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            }
         }
     }
 
@@ -181,7 +273,7 @@ public final class BotFurnaceRegistryService {
             return;
         }
         String blockId = state.getBlock().asItem().toString();
-        WorldData wd = worldData(server, world);
+        WorldData wd = worldData(server, world, true);
         synchronized (LOCK) {
             if (wd.furnacesByShareKey == null) {
                 wd.furnacesByShareKey = new HashMap<>();

@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -32,6 +34,7 @@ public final class HuntConfigService {
 
     private static RootData DATA = new RootData();
     private static boolean loaded = false;
+    private static boolean loadFailed = false;
 
     private HuntConfigService() {}
 
@@ -85,6 +88,14 @@ public final class HuntConfigService {
         public HuntZone huntZone() {
             return HuntZone.fromName(zone);
         }
+
+        public HuntConfig copy() {
+            HuntConfig snapshot = new HuntConfig();
+            snapshot.depopulationEnabled = depopulationEnabled;
+            snapshot.zone = zone;
+            snapshot.selectedTargets = selectedTargets == null ? new ArrayList<>() : new ArrayList<>(selectedTargets);
+            return snapshot;
+        }
     }
 
     // ── Persistence plumbing ────────────────────────────────────────────
@@ -94,6 +105,12 @@ public final class HuntConfigService {
     }
 
     private static String serverWorldKey(MinecraftServer server, ServerWorld world) {
+        String dimension = world != null && world.getRegistryKey() != null
+                ? world.getRegistryKey().getValue().toString() : "unknown";
+        return WorldStoreKeyPolicy.fingerprintKey(BotWorldStateService.currentWorldKey(server), dimension);
+    }
+
+    private static String legacyServerWorldKey(MinecraftServer server, ServerWorld world) {
         String level = server != null && server.getSaveProperties() != null
                 ? server.getSaveProperties().getLevelName()
                 : "unknown";
@@ -118,6 +135,7 @@ public final class HuntConfigService {
                         DATA = parsed;
                     }
                 } catch (Exception e) {
+                    loadFailed = true;
                     LOGGER.warn("Failed to load hunt config: {}", e.getMessage());
                     DATA = new RootData();
                 }
@@ -126,28 +144,102 @@ public final class HuntConfigService {
         }
     }
 
-    private static void flush() {
+    private static boolean flush() {
         synchronized (LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Hunt config was not saved because its original file could not be read.");
+                return false;
+            }
+            Path temporary = null;
             try {
                 Path file = stateFile();
                 Files.createDirectories(file.getParent());
-                try (Writer writer = Files.newBufferedWriter(file)) {
+                temporary = Files.createTempFile(file.getParent(), "hunt-config-", ".tmp");
+                try (Writer writer = Files.newBufferedWriter(temporary)) {
                     GSON.toJson(DATA, writer);
                 }
-            } catch (IOException e) {
+                try {
+                    Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+                }
+                return true;
+            } catch (Exception e) {
                 LOGGER.warn("Failed to save hunt config: {}", e.getMessage());
+                return false;
+            } finally {
+                if (temporary != null) {
+                    try {
+                        Files.deleteIfExists(temporary);
+                    } catch (IOException e) {
+                        LOGGER.debug("Could not remove hunt-config temporary file: {}", e.getMessage());
+                    }
+                }
             }
         }
     }
 
-    private static WorldData worldData(MinecraftServer server, ServerWorld world) {
+    private static WorldData worldData(MinecraftServer server, ServerWorld world, boolean create) {
         ensureLoaded();
         String key = serverWorldKey(server, world);
         synchronized (LOCK) {
             if (DATA.worlds == null) {
+                if (!create) return new WorldData();
                 DATA.worlds = new HashMap<>();
             }
-            return DATA.worlds.computeIfAbsent(key, ignored -> new WorldData());
+            WorldData own = DATA.worlds.get(key);
+            if (own != null) return own;
+            if (!create) return new WorldData();
+            own = new WorldData();
+            DATA.worlds.put(key, own);
+            return own;
+        }
+    }
+
+    public static LegacyRegistryRecoveryPolicy.Preview previewLegacy(ServerWorld world) {
+        ensureLoaded();
+        MinecraftServer server = world.getServer();
+        String legacyKey = legacyServerWorldKey(server, world);
+        String targetKey = serverWorldKey(server, world);
+        synchronized (LOCK) {
+            WorldData legacy = DATA.worlds == null ? null : DATA.worlds.get(legacyKey);
+            List<String> entries = new ArrayList<>();
+            int count = 0;
+            if (legacy != null && legacy.configByBot != null) {
+                for (var entry : legacy.configByBot.entrySet()) {
+                    HuntConfig config = entry.getValue();
+                    if (config == null) continue;
+                    count++;
+                    if (entries.size() < 20) entries.add(entry.getKey() + " depopulation=" + config.depopulationEnabled
+                            + " zone=" + config.zone + " targets=" + config.selectedTargets);
+                }
+            }
+            return new LegacyRegistryRecoveryPolicy.Preview(legacyKey, targetKey, count,
+                    DATA.worlds != null && DATA.worlds.containsKey(targetKey), List.copyOf(entries));
+        }
+    }
+
+    public static LegacyRegistryRecoveryPolicy.Result importLegacy(ServerWorld world, String confirmation) {
+        ensureLoaded();
+        MinecraftServer server = world.getServer();
+        String targetKey = serverWorldKey(server, world);
+        synchronized (LOCK) {
+            if (loadFailed) return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+            try {
+                var copy = LegacyRegistryRecoveryPolicy.copyLegacy(DATA.worlds,
+                        legacyServerWorldKey(server, world), targetKey,
+                        BotWorldStateService.currentWorldKey(server), confirmation,
+                        legacy -> GSON.fromJson(GSON.toJson(legacy), WorldData.class));
+                if (copy.result() == LegacyRegistryRecoveryPolicy.Result.IMPORTED && !flush()) {
+                    LegacyRegistryRecoveryPolicy.rollback(DATA.worlds, targetKey, copy.imported());
+                    return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+                }
+                return copy.result();
+            } catch (Exception e) {
+                LOGGER.warn("Legacy hunt-config recovery failed: {}", e.getMessage());
+                return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            }
         }
     }
 
@@ -160,12 +252,10 @@ public final class HuntConfigService {
         MinecraftServer server = world.getServer();
         if (server == null) return new HuntConfig();
 
-        WorldData wd = worldData(server, world);
+        WorldData wd = worldData(server, world, false);
         synchronized (LOCK) {
-            if (wd.configByBot == null) {
-                wd.configByBot = new HashMap<>();
-            }
-            return wd.configByBot.computeIfAbsent(botKey(bot), k -> new HuntConfig());
+            HuntConfig config = wd.configByBot == null ? null : wd.configByBot.get(botKey(bot));
+            return config == null ? new HuntConfig() : config.copy();
         }
     }
 
@@ -174,7 +264,7 @@ public final class HuntConfigService {
         MinecraftServer server = world.getServer();
         if (server == null) return;
 
-        WorldData wd = worldData(server, world);
+        WorldData wd = worldData(server, world, true);
         synchronized (LOCK) {
             if (wd.configByBot == null) wd.configByBot = new HashMap<>();
             HuntConfig cfg = wd.configByBot.computeIfAbsent(botKey(bot), k -> new HuntConfig());
@@ -188,7 +278,7 @@ public final class HuntConfigService {
         MinecraftServer server = world.getServer();
         if (server == null) return;
 
-        WorldData wd = worldData(server, world);
+        WorldData wd = worldData(server, world, true);
         synchronized (LOCK) {
             if (wd.configByBot == null) wd.configByBot = new HashMap<>();
             HuntConfig cfg = wd.configByBot.computeIfAbsent(botKey(bot), k -> new HuntConfig());
@@ -202,7 +292,7 @@ public final class HuntConfigService {
         MinecraftServer server = world.getServer();
         if (server == null) return;
 
-        WorldData wd = worldData(server, world);
+        WorldData wd = worldData(server, world, true);
         synchronized (LOCK) {
             if (wd.configByBot == null) wd.configByBot = new HashMap<>();
             HuntConfig cfg = wd.configByBot.computeIfAbsent(botKey(bot), k -> new HuntConfig());
@@ -216,10 +306,10 @@ public final class HuntConfigService {
         MinecraftServer server = world.getServer();
         if (server == null) return;
 
-        WorldData wd = worldData(server, world);
+        WorldData wd = worldData(server, world, true);
         synchronized (LOCK) {
             if (wd.configByBot == null) wd.configByBot = new HashMap<>();
-            wd.configByBot.put(botKey(bot), config);
+            wd.configByBot.put(botKey(bot), config.copy());
         }
         flush();
     }
