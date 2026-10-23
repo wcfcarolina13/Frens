@@ -38,6 +38,7 @@ public final class CompanionResurrectionService {
     // Additional (inventory) costs beyond the held Ghast Tear.
     private static final int GOLD_INGOTS_REQUIRED = 4;
     private static final int BLAZE_POWDER_REQUIRED = 1;
+    private static final RitualAttemptPolicy ATTEMPTS = new RitualAttemptPolicy();
 
     public static ActionResult tryHandleUseBlock(ServerPlayerEntity player, ServerWorld world, Hand hand, BlockPos pos) {
         if (player == null || world == null || hand == null || pos == null) {
@@ -104,27 +105,19 @@ public final class CompanionResurrectionService {
             return ActionResult.SUCCESS;
         }
 
-        // Authorization: same as recruitment reset (operator, the integrated-server host but not a
-        // LAN guest, or the recruiter).
-        boolean authorized = false;
-        if (Frens.isOperator(player)) {
-            authorized = true;
-        } else if (net.wcfcarolina13.network.BotAccessGate.isHost(player)) {
-            authorized = true;
-        } else {
-            String recruiter = st.getRecruitedByUuid();
-            if (recruiter != null && !recruiter.isBlank() && recruiter.equals(player.getUuidAsString())) {
-                authorized = true;
-            }
-        }
-
-        if (!authorized) {
+        if (!questRitualAuthorized(player, st)) {
             ChatUtils.sendSystemMessage(player.getCommandSource(), "You can't perform this ritual.");
             return ActionResult.SUCCESS;
         }
 
-        // Clear "dead" state before spawning so auto-presence won't race.
-        return completeRitual(player, world, server, pos, state, charges, held, alias, () -> {
+        long deathEpoch = st.getCompanionDiedAtEpochMs();
+        return completeRitual(player, world, server, pos, hand, alias,
+                () -> SurvivalRecruitmentService.isEnabled(server)
+                        && SurvivalRecruitmentService.getState(server) == st
+                        && st.isRecruited() && st.isCompanionDead()
+                        && alias.equals(st.getBotAlias())
+                        && st.getCompanionDiedAtEpochMs() == deathEpoch
+                        && questRitualAuthorized(player, st), () -> {
             st.setCompanionDead(false);
             st.setCompanionDiedAtEpochMs(0L);
             st.setCompanionDiedDimension(null);
@@ -182,7 +175,11 @@ public final class CompanionResurrectionService {
             return ActionResult.SUCCESS;
         }
 
-        return completeRitual(player, world, server, pos, state, charges, held, alias, () -> {
+        BotDeathRecordService.DeathRecord death = BotDeathRecordService.getBotRecord(server, alias);
+        return completeRitual(player, world, server, pos, hand, alias,
+                () -> !SurvivalRecruitmentService.isEnabled(server)
+                        && death != null && BotDeathRecordService.getBotRecord(server, alias) == death
+                        && ownedRitualAuthorized(player, alias, worldKey), () -> {
             // Un-shelve: drop the session yes/no prompt and let the bot load with the world again.
             BotRespawnPromptService.clear(alias);
             Frens.CONFIG.getOrCreateBotControl(alias, worldKey).setAutoSpawnOnLoad(true);
@@ -218,89 +215,155 @@ public final class CompanionResurrectionService {
         return out;
     }
 
-    /**
-     * Shared ritual tail: real-player name check, offering, anchor charge, {@code markAlive},
-     * then spawn or rebind the bot beside the player. Server thread.
-     */
+    private static boolean questRitualAuthorized(ServerPlayerEntity player, ManualConfig.SurvivalRecruitmentState state) {
+        return Frens.isOperator(player) || net.wcfcarolina13.network.BotAccessGate.isHost(player)
+                || player.getUuidAsString().equals(state.getRecruitedByUuid());
+    }
+
+    private static boolean ownedRitualAuthorized(ServerPlayerEntity player, String alias, String worldKey) {
+        ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(alias, worldKey);
+        ManualConfig.BotOwnership owner = Frens.CONFIG.getOwner(alias);
+        return ctrl != null && !ctrl.isAutoRespawnOnDeath()
+                && ResurrectionEligibilityPolicy.authorized(player.getUuid(),
+                        ResurrectionEligibilityPolicy.parseOwner(owner == null ? null : owner.ownerUuid()),
+                        Frens.isOperator(player), net.wcfcarolina13.network.BotAccessGate.isHost(player));
+    }
+
+    /** Offerings and alive state change only after connection succeeds, in the same server callback. */
     private static ActionResult completeRitual(ServerPlayerEntity player, ServerWorld world, MinecraftServer server,
-                                               BlockPos pos, BlockState state, int charges, ItemStack held,
-                                               String alias, Runnable markAlive) {
-        // Refuse if a real player is online with that name.
-        ServerPlayerEntity existing = server.getPlayerManager().getPlayer(alias);
-        if (existing != null && !existing.isRemoved() && existing.isAlive() && !(existing instanceof createFakePlayer)) {
+                                               BlockPos pos, Hand hand, String alias,
+                                               java.util.function.BooleanSupplier eligible, Runnable markAlive) {
+        ServerPlayerEntity present = server.getPlayerManager().getPlayer(alias);
+        if (present != null && !present.isRemoved() && present.isAlive() && !(present instanceof createFakePlayer)) {
             ChatUtils.sendSystemMessage(player.getCommandSource(), "A real player named '" + alias + "' is online.");
-            ChatUtils.sendSystemMessage(player.getCommandSource(), "The ritual can't find its target.");
             return ActionResult.SUCCESS;
         }
-
-        // Check required items.
-        if (!player.getAbilities().creativeMode) {
-            if (!hasItemCount(player, Items.GOLD_INGOT, GOLD_INGOTS_REQUIRED) || !hasItemCount(player, Items.BLAZE_POWDER, BLAZE_POWDER_REQUIRED)) {
-                ChatUtils.sendSystemMessage(player.getCommandSource(), "The ritual demands an offering.");
-                ChatUtils.sendSystemMessage(player.getCommandSource(), "Required: " + GOLD_INGOTS_REQUIRED + " gold ingots + " + BLAZE_POWDER_REQUIRED + " blaze powder.");
-                return ActionResult.SUCCESS;
-            }
+        if (!offeringPresent(player, hand)) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "The ritual demands a Ghast Tear, "
+                    + GOLD_INGOTS_REQUIRED + " gold ingots and " + BLAZE_POWDER_REQUIRED + " blaze powder.");
+            return ActionResult.SUCCESS;
         }
-
-        // Consume items + anchor charge, then resurrect.
-        if (!player.getAbilities().creativeMode) {
-            held.decrement(1);
-            consumeFromInventory(player, Items.GOLD_INGOT, GOLD_INGOTS_REQUIRED);
-            consumeFromInventory(player, Items.BLAZE_POWDER, BLAZE_POWDER_REQUIRED);
+        RitualAttemptPolicy.Attempt attempt = ATTEMPTS.claim(server, alias);
+        if (attempt == null) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "A ritual for " + alias + " is already underway.");
+            return ActionResult.SUCCESS;
         }
-
-        // Decrement anchor charges by 1.
-        try {
-            world.setBlockState(pos, state.with(RespawnAnchorBlock.CHARGES, Math.max(0, charges - 1)), 3);
-        } catch (Throwable ignored) {
-            // If state update fails, continue anyway.
-        }
-
-        // Clear "dead" state before spawning so auto-presence won't race.
-        markAlive.run();
-
-        // Spawn (or rebind) the companion near the player in the Nether.
-        Vec3d spawn = new Vec3d(player.getX() + 1.0, player.getY(), player.getZ() + 1.0);
-        GameMode desiredMode = GameMode.SURVIVAL;
-        if (Frens.CONFIG != null) {
-            String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
-            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(alias, wk);
-            if (ctrl != null && "creative".equalsIgnoreCase(ctrl.getGameMode())) {
-                desiredMode = GameMode.CREATIVE;
-            }
-        }
-
-        ChatUtils.sendSystemMessage(player.getCommandSource(), "You offer the tear to the anchor...");
-
-        if (existing != null && !existing.isRemoved() && existing.isAlive() && (existing instanceof createFakePlayer)) {
-            // If the fake player is somehow still online, just pull them to the ritual site.
-            existing.teleport(world, spawn.x, spawn.y, spawn.z, java.util.Set.of(), player.getYaw(), player.getPitch(), true);
-            existing.setVelocity(Vec3d.ZERO);
-            try {
-                existing.interactionManager.changeGameMode(desiredMode);
-            } catch (Throwable ignored) {
-            }
-        } else {
-            createFakePlayer.createFake(alias, server, spawn, player.getYaw(), player.getPitch(), world.getRegistryKey(), desiredMode, false);
-        }
-
-        // Ensure the bot is registered/active for the rest of the mod systems.
-        server.execute(() -> {
-            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
-            if (bot != null && !bot.isRemoved() && bot instanceof createFakePlayer) {
-                try {
+        ManualConfig config = Frens.CONFIG;
+        String worldKey = BotWorldStateService.currentWorldKey(server);
+        String owner = ownerIdentity(config, alias);
+        BlockPos anchorPos = pos.toImmutable();
+        ServerPlayerEntity existing = present != null && !present.isRemoved() && present.isAlive() ? present : null;
+        boolean[] anchorConsumed = {false};
+        boolean[] itemsConsumed = {false};
+        java.util.function.BooleanSupplier current = () -> server.isOnThread()
+                && !TaskService.isServerStopping() && !server.isStopped()
+                && (Frens.serverInstance == null || Frens.serverInstance == server)
+                && Frens.CONFIG == config && config != null
+                && server.getWorld(world.getRegistryKey()) == world
+                && worldKey.equals(BotWorldStateService.currentWorldKey(server))
+                && server.getPlayerManager().getPlayer(player.getUuid()) == player
+                && !player.isRemoved() && player.isAlive() && player.getEntityWorld() == world
+                && player.getBlockPos().getSquaredDistance(anchorPos) <= 64
+                && java.util.Objects.equals(owner, ownerIdentity(config, alias))
+                && ATTEMPTS.isCurrent(attempt) && eligible.getAsBoolean();
+        java.util.function.Consumer<Runnable> connectionAttempt = connect -> ATTEMPTS.execute(attempt,
+                () -> current.getAsBoolean() && offeringPresent(player, hand) && chargedAnchor(world, anchorPos)
+                        && sameTarget(server.getPlayerManager().getPlayer(alias), existing),
+                connect, () -> {
+                    // The new target is now online; do not re-run the pre-connection offline check.
+                    ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+                    if (!current.getAsBoolean() || !(bot instanceof createFakePlayer)
+                            || bot.isRemoved() || !bot.isAlive() || bot.getEntityWorld() != world
+                            || bot.getBlockPos().getSquaredDistance(anchorPos) > 64
+                            || !offeringPresent(player, hand) || !chargedAnchor(world, anchorPos)) {
+                        throw new IllegalStateException("The companion connected but ritual conditions changed before payment");
+                    }
+                    BlockState anchor = world.getBlockState(anchorPos);
+                    if (!world.setBlockState(anchorPos,
+                            anchor.with(RespawnAnchorBlock.CHARGES, anchor.get(RespawnAnchorBlock.CHARGES) - 1), 3)) {
+                        throw new IllegalStateException("The companion connected but the anchor refused its charge update");
+                    }
+                    anchorConsumed[0] = true;
+                    if (!player.getAbilities().creativeMode) {
+                        player.getStackInHand(hand).decrement(1);
+                        consumeFromInventory(player, Items.GOLD_INGOT, GOLD_INGOTS_REQUIRED);
+                        consumeFromInventory(player, Items.BLAZE_POWDER, BLAZE_POWDER_REQUIRED);
+                        itemsConsumed[0] = true;
+                    }
+                    markAlive.run();
                     BotEventHandler.registerBot(bot);
-                } catch (Throwable ignored) {
-                }
-                try {
                     AutoFaceEntity.startAutoFace(bot);
-                } catch (Throwable ignored) {
-                }
+                    ChatUtils.sendSystemMessage(player.getCommandSource(), "\u00A7a" + alias + " returns.\u00A7r");
+                });
+        try {
+            Vec3d spawn = new Vec3d(player.getX() + 1.0, player.getY(), player.getZ() + 1.0);
+            ManualConfig.BotControlSettings ctrl = config.getEffectiveBotControl(alias, worldKey);
+            GameMode mode = ctrl != null && "creative".equalsIgnoreCase(ctrl.getGameMode())
+                    ? GameMode.CREATIVE : GameMode.SURVIVAL;
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "Preparing the ritual for " + alias + "...");
+            java.util.concurrent.CompletableFuture<Void> result;
+            if (existing != null) {
+                connectionAttempt.accept(() -> {
+                    if (!existing.teleport(world, spawn.x, spawn.y, spawn.z, java.util.Set.of(),
+                            player.getYaw(), player.getPitch(), true)) {
+                        throw new IllegalStateException("The companion could not reach the ritual site");
+                    }
+                    existing.setVelocity(Vec3d.ZERO);
+                    existing.interactionManager.changeGameMode(mode);
+                });
+                result = java.util.concurrent.CompletableFuture.completedFuture(null);
+            } else {
+                result = createFakePlayer.createFake(alias, server, spawn, player.getYaw(), player.getPitch(),
+                        world.getRegistryKey(), mode, false, connectionAttempt);
             }
-        });
-
-        ChatUtils.sendSystemMessage(player.getCommandSource(), "\u00A7a" + alias + " returns.\u00A7r");
+            result.whenComplete((ignored, error) -> {
+                ATTEMPTS.release(attempt);
+                if (error != null) reportRitualFailure(player, server, config, world, alias, error,
+                        anchorConsumed[0], itemsConsumed[0]);
+            });
+        } catch (Throwable error) {
+            ATTEMPTS.release(attempt);
+            reportRitualFailure(player, server, config, world, alias, error, anchorConsumed[0], itemsConsumed[0]);
+        }
         return ActionResult.SUCCESS;
+    }
+
+    private static boolean sameTarget(ServerPlayerEntity current, ServerPlayerEntity expected) {
+        return expected == null ? current == null || current.isRemoved() || !current.isAlive()
+                : current == expected && !current.isRemoved() && current.isAlive();
+    }
+
+    private static String ownerIdentity(ManualConfig config, String alias) {
+        ManualConfig.BotOwnership owner = config == null ? null : config.getOwner(alias);
+        return owner == null ? null : owner.ownerUuid();
+    }
+
+    private static boolean chargedAnchor(ServerWorld world, BlockPos pos) {
+        if (!world.isChunkLoaded(pos)) return false;
+        BlockState state = world.getBlockState(pos);
+        return state.isOf(net.minecraft.block.Blocks.RESPAWN_ANCHOR) && state.get(RespawnAnchorBlock.CHARGES) > 0;
+    }
+
+    private static boolean offeringPresent(ServerPlayerEntity player, Hand hand) {
+        return player.getStackInHand(hand).isOf(Items.GHAST_TEAR)
+                && (player.getAbilities().creativeMode
+                || hasItemCount(player, Items.GOLD_INGOT, GOLD_INGOTS_REQUIRED)
+                && hasItemCount(player, Items.BLAZE_POWDER, BLAZE_POWDER_REQUIRED));
+    }
+
+    private static void reportRitualFailure(ServerPlayerEntity player, MinecraftServer server, ManualConfig config,
+                                           ServerWorld world, String alias, Throwable error,
+                                           boolean anchorConsumed, boolean itemsConsumed) {
+        Frens.LOGGER.warn("Ritual for {} did not complete (anchorConsumed={}, itemsConsumed={})",
+                alias, anchorConsumed, itemsConsumed, error);
+        if (server.isOnThread() && !TaskService.isServerStopping() && !server.isStopped()
+                && Frens.CONFIG == config && server.getWorld(world.getRegistryKey()) == world
+                && server.getPlayerManager().getPlayer(player.getUuid()) == player && !player.isRemoved()) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "The ritual did not complete. "
+                    + (anchorConsumed ? "The anchor charge was used. " : "The anchor charge was kept. ")
+                    + (itemsConsumed ? "The offering was used. " : "The offering was kept. ")
+                    + "The companion may already be connected. Check the server log before retrying.");
+        }
     }
 
     private static boolean hasItemCount(ServerPlayerEntity player, Item item, int needed) {
