@@ -2671,30 +2671,38 @@ public class modCommandRegistry {
 
         int placed = 0;
         BlockPos lastPlaced = null;
-        for (int i = 0; i < count; i++) {
-            int slot = findItem(bot, placeItem);
-            if (slot == -1) {
-                break;
-            }
-            BlockPos placedPos;
-            if (placeItem == Items.CHEST && lastPlaced != null) {
-                placedPos = attemptAdjacentChest(bot, lastPlaced, slot, placeItem);
-                if (placedPos == null) {
+        try {
+            for (int i = 0; i < count; i++) {
+                int slot = findItem(bot, placeItem);
+                if (slot == -1) {
+                    break;
+                }
+                BlockPos placedPos;
+                if (placeItem == Items.CHEST && lastPlaced != null) {
+                    placedPos = attemptAdjacentChest(bot, lastPlaced, slot, placeItem);
+                    if (placedPos == null) {
+                        placedPos = attemptPlacement(bot, target, slot, placeItem);
+                    }
+                } else {
                     placedPos = attemptPlacement(bot, target, slot, placeItem);
                 }
-            } else {
-                placedPos = attemptPlacement(bot, target, slot, placeItem);
+                if (placedPos == null && placeItem == Items.CHEST) {
+                    // try adjacent from commander block if first chest failed
+                    placedPos = attemptAdjacentChest(bot, target.placePos, slot, placeItem);
+                }
+                if (placedPos == null) {
+                    ChatUtils.sendSystemMessage(context.getSource(), "I can't reach that spot.");
+                    break;
+                }
+                placed++;
+                lastPlaced = placedPos;
             }
-            if (placedPos == null && placeItem == Items.CHEST) {
-                // try adjacent from commander block if first chest failed
-                placedPos = attemptAdjacentChest(bot, target.hitPos.offset(target.face), slot, placeItem);
-            }
-            if (placedPos == null) {
-                ChatUtils.sendSystemMessage(context.getSource(), "I can't reach that spot.");
-                break;
-            }
-            placed++;
-            lastPlaced = placedPos;
+        } catch (RuntimeException e) {
+            // Never let a placement bug surface as Brigadier's generic "An unexpected error occurred".
+            LOGGER.error("Unexpected error in /bot place {}", item, e);
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    "Something went wrong placing the " + item + ", so I stopped.");
+            return placed > 0 ? 1 : 0;
         }
         if (placed > 0) {
             ChatUtils.sendSystemMessage(context.getSource(), "Placed " + placed + " " + item + (placed == 1 ? "" : "s") + ".");
@@ -5613,30 +5621,50 @@ public class modCommandRegistry {
         return new ResolvedCompanionAnchor(world, BlockPos.fromLong(posLong));
     }
 
-    private record PlacementTarget(BlockPos hitPos, Direction face, float yaw, float pitch) {}
+    /** {@code placePos} is the cell the item goes into (see {@link PlacePosPolicy#placementCell}). */
+    private record PlacementTarget(BlockPos hitPos, Direction face, float yaw, float pitch, BlockPos placePos) {}
 
     private static PlacementTarget capturePlacementTarget(ServerPlayerEntity commander) {
         if (commander == null) {
             return null;
         }
         var hit = commander.raycast(6.0D, 1.0F, false);
-        if (!(hit instanceof net.minecraft.util.hit.BlockHitResult bhr)) {
+        if (!(hit instanceof net.minecraft.util.hit.BlockHitResult bhr)
+                || hit.getType() == net.minecraft.util.hit.HitResult.Type.MISS) {
             return null;
         }
-        return new PlacementTarget(bhr.getBlockPos(), bhr.getSide(), commander.getYaw(), commander.getPitch());
+        BlockPos hitPos = bhr.getBlockPos().toImmutable();
+        // A snow layer or grass is replaced, not built on: place into the looked-at cell so the
+        // instant snow clear in attemptPlacement fires (same rule as /bot build and /bot shelter).
+        boolean hitReplaceable = commander.getEntityWorld().getBlockState(hitPos).isReplaceable();
+        BlockPos placePos = PlacePosPolicy.placementCell(hitReplaceable) == PlacePosPolicy.Cell.HIT
+                ? hitPos
+                : hitPos.offset(bhr.getSide()).toImmutable();
+        return new PlacementTarget(hitPos, bhr.getSide(), commander.getYaw(), commander.getPitch(), placePos);
+    }
+
+    /** Horizontal sidestep direction; a vertical face falls back to the bot's facing so nothing throws. */
+    private static Direction placementSidestep(Direction face, float botYaw) {
+        PlacePosPolicy.Face policyFace = face == null ? null : PlacePosPolicy.Face.valueOf(face.name());
+        return Direction.valueOf(PlacePosPolicy.sidestep(policyFace, botYaw).name());
     }
 
     private static BlockPos attemptPlacement(ServerPlayerEntity bot, PlacementTarget target, int itemSlot, net.minecraft.item.Item placeItem) {
         if (bot == null || target == null) {
             return null;
         }
-        BlockPos placePos = target.hitPos.offset(target.face);
+        BlockPos placePos = target.placePos;
         bot.setYaw(target.yaw);
         bot.setHeadYaw(target.yaw);
         bot.setPitch(Math.max(-90.0F, Math.min(90.0F, target.pitch)));
 
+        // On the server thread a walk never moves the bot (it freezes the tick instead), so only
+        // the in-reach attempt is made there; the caller then says "I can't reach that spot."
+        MinecraftServer server = bot.getCommandSource().getServer();
+        boolean onServerThread = server == null || server.isOnThread();
+        int maxTries = PlacePosPolicy.maxAttempts(onServerThread);
         int tries = 0;
-        while (tries < 10) {
+        while (tries < maxTries) {
             // Clear snow on target
             var state = bot.getEntityWorld().getBlockState(placePos);
             if (state.isOf(net.minecraft.block.Blocks.SNOW) || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)) {
@@ -5651,6 +5679,10 @@ public class modCommandRegistry {
             if (BotActions.placeBlockAt(bot, placePos, target.face, List.of(placeItem))) {
                 return placePos.toImmutable();
             }
+            tries++;
+            if (!PlacePosPolicy.mayWalk(onServerThread) || tries >= maxTries) {
+                break;
+            }
             // try moving closer and retry
             BlockPos approach = placePos.offset(target.face.getOpposite());
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -5662,15 +5694,15 @@ public class modCommandRegistry {
                     target.face.getOpposite());
             MovementService.execute(bot.getCommandSource(), bot, plan, false);
             // Nudge sideways to avoid occupying the placement spot
+            Direction side = placementSidestep(target.face, bot.getYaw());
             MovementService.MovementPlan sidestep = new MovementService.MovementPlan(
                     MovementService.Mode.DIRECT,
-                    approach.offset(target.face.rotateYClockwise()),
-                    approach.offset(target.face.rotateYClockwise()),
+                    approach.offset(side),
+                    approach.offset(side),
                     null,
                     null,
                     target.face.getOpposite());
             MovementService.execute(bot.getCommandSource(), bot, sidestep, false);
-            tries++;
         }
         return null;
     }
@@ -5702,7 +5734,8 @@ public class modCommandRegistry {
         }
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos candidate = anchor.offset(dir);
-            PlacementTarget alt = new PlacementTarget(candidate, dir.getOpposite(), bot.getYaw(), bot.getPitch());
+            PlacementTarget alt = new PlacementTarget(candidate, dir.getOpposite(), bot.getYaw(), bot.getPitch(),
+                    candidate.offset(dir.getOpposite()));
             if (bot.getEntityWorld().getBlockState(candidate).isAir()) {
                 BlockPos placed = attemptPlacement(bot, alt, slot, placeItem);
                 if (placed != null) {
