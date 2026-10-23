@@ -4,7 +4,13 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-23 (1.1.293) — next session starts here
+## Session Handoff 2026-10-23 (1.1.294) — next session starts here
+
+**State:** 1.1.294 on main and deployed to Nirn. Fixes the one 1.1.293 sandbox failure and a second bug the recheck found: after an End exit mid-task the "Task ended: changed dimension." line reaches chat (sent through the new entity), and the bot follows again (`RespawnResetPolicy.resumeFollowAfterSkill`). Sandbox-checked, replays `frens_1_1_294_end_exit_chat`, `frens_1_1_294_end_exit_follow`. Tests 3705.
+
+**New backlog candidates from the recheck:** a skill keeps running a few seconds after its bot dies and can post "Mining complete! Collected 3 out of 10" (death latches no abort for the worker thread). The End-exit line shows twice (bot line plus the skill's result as a system line). Everything under the 1.1.293 handoff below stays open (walk-in End exit limbo first).
+
+## Session Handoff 2026-10-23 (1.1.293) — superseded
 
 **State:** 1.1.293 on main and deployed to Nirn. It ships six deferred minors from the 1.1.291 review (changelog entry "Deferred minors from the 1.1.291 review ... 1.1.293"): a bot leaving the End alive keeps its follow/base targets and is not teleported again (RespawnHandler deleted, so every respawn now runs its reset once, `RespawnResetPolicy`), the mining harmless-fallback hop retries a timeout once, a refused group scene is failed and released, admins get a join notice for unreadable store files, the empty legacy preview stops suggesting an import, Carpet suggests >=1.4.193. Tests 3700.
 

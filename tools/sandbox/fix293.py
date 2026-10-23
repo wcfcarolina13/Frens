@@ -241,3 +241,32 @@ elif st == "clean":
     chat(f"/bot despawn {sys.argv[2]}", 3)
 else:
     print(__doc__)
+
+# 1.1.294 recheck (appended, uncommitted): death with a running mining task beside world spawn.
+# The usage text above also prints for this stage (the elif chain's else); harmless.
+if st == "deathtask":
+    bot = sys.argv[2]
+    # far: the bot works on a deck outside the base:spawn zone (spawn refuses mining), the player waits at
+    # world spawn, where the bot respawns, so the respawn chat is in range
+    far = "far" in sys.argv[3:]
+    if far:
+        ow_deck(X + 60, Z)  # X+30 is inside the endexit bases' zones; the 1.1.293 mine stage used X+60
+        chat(f"/{OW} tp {PLAYER} {X+63} {Y} {Z}", 4)
+        spawn(bot, OW, X + 60.5, Y, Z + 0.5)
+    else:
+        chat(f"/{OW} tp {PLAYER} 4 73 4", 4)
+        spawn(bot, OW, 2.5, 73, 2.5)
+    chat(f"/give {bot} diamond_pickaxe 1", 1)
+    m0 = mark()
+    # plain: /bot skill mining (collects stone on the deck) instead of a descent, which ends at the deck edge
+    chat(f"/bot skill mining {'' if 'plain' in sys.argv[3:] else 'descent 4 '}{bot}", 3)
+    if far:
+        chat(f"/{OW} tp {PLAYER} 4 73 4", 1)
+    print("task running:", bool(since(m0, rf"Skill 'mining' executing for bot {bot}")),
+          "finished early:", [l[:200] for l in since(m0, rf"Skill 'mining' finished for bot {bot}")])
+    m = mark()
+    chat(f"/kill {bot}", 10)
+    print("bot after:", where(bot))
+    report(m, bot, False)
+    for l in since(m, rf"Sending chat message|CHAT\]|Skill 'mining' (exit|finished)|FollowAssert")[:15]:
+        print("  c>", l[:240])

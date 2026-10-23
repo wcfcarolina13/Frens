@@ -256,3 +256,11 @@ Odd but harmless: twice Minny293 logged `Mining ... with minecraft:bread (delta=
 Zero ERROR or Exception lines in the session, two "Can't keep up" (one 3.4 s spike right after the first End exit). The player fell into the End void once during my first setup (the deck was built after the teleport); setup now forceloads and builds the End deck first. After a cross-dimension `/tp`, `External teleport detected ... clearing tasks and goals` is logged but the follow target is kept. Ender293a (still following) was carried between dimensions by `Follow dimension handoff` when the player changed dimension.
 
 State after: lock released, game closed, muted. Sandbox mods now carry frens-1.1.293. Test bots despawned. "Wall Test" changed: decks at 1500-1600,120,1000 and End 94-106,44-49,-6..6 (end stone), End dragon killed, End forceload removed.
+
+## 1.1.294 recheck
+
+- **End exit with a running task, chat line: PASS** (Ender294a, 13:28:03): `[CHAT] Ender294a: Task ended: changed dimension.` Follow did NOT resume on that run (skill saw the abort, `SkillManager` skipped the resume), fixed in eb07a576.
+- **End exit mid-task after eb07a576: PASS** (Ender294j, 13:44:29): `Skill 'mining' exit: success=false abortRequested=true reason='§eTask ended: changed dimension.'`, `[FollowAssert] task-resume bot=Ender294j mode=follow target=RotiWokeman resumed=true`, `[CHAT] Ender294j: Task ended: changed dimension.`, bot back to 2.61 blocks. Replay `frens_1_1_294_end_exit_follow.zip`.
+- **Plain End exit: PASS** (Ender294d, 13:34): one `AFTER_RESPAWN ... alive flag=true`, follow to 2.03, no "regrouped". Replay `frens_1_1_294_end_exit_chat.zip`.
+- **Death with a running task (informative):** chat shows "died while running 'mining'" prompt, "has regrouped", "Skill paused: bot died." The skill kept running 4 s after death and posted "Mining complete! Collected 3 out of 10 requested." (backlog). Script stage `fix293.py deathtask`.
+- The End-exit line shows twice (bot line plus the skill result as a system line).

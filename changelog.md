@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## End exit mid-task: the bot says why its task ended and follows again; 1.1.294 (2026-10-23)
+
+Found by the 1.1.293 sandbox check (`docs/testing/FIELD_CODEX_WAVE_SANDBOX_2026-10-23.md`, "1.1.293 check" and "1.1.294 recheck").
+
+- **"Task ended: changed dimension." now reaches chat** (00d38169). `TaskService.onBotRespawn` announced the abort through the ticket's command source, which is the old bot entity vanilla removed, and `CompanionCommunicationPolicy.canBotChatToController` refuses a removed bot first. It now announces through the new entity. Same for the death path.
+- **A bot whose skill was still running when it left the End follows again** (eb07a576). `SkillManager.runSkill` hands back the follow it suspended only when no abort was requested, so the End-exit abort dropped it (1.1.293 only passed because that run's skill had already failed on its own). `RespawnResetPolicy.resumeFollowAfterSkill` also allows the dimension-exit abort, and the resume runs on the live entity looked up by UUID.
+- **Sandbox check:** fresh bot mid mining descent through the End exit: abort line, `[CHAT] <bot>: Task ended: changed dimension.`, `[FollowAssert] task-resume ... mode=follow ... resumed=true`, bot back within 2.6 blocks. Plain End exit still keeps follow, no "regrouped". Replays `frens_1_1_294_end_exit_chat.zip`, `frens_1_1_294_end_exit_follow.zip`.
+- **Kept limits:** the line shows twice (the bot says it, and the skill's own result repeats it as a system line). A death's chat says "Skill paused: bot died." (the death flow), not the abort text. Seen in the same run: a skill keeps going a few seconds after its bot dies and can post "Mining complete" (death latches no abort for the worker), recorded for the backlog.
+- **Tests** 3700 → 3705 (`TaskServiceRespawnAnnounceWiringTest`, `RespawnResetPolicyTest`, `RespawnHandlingWiringTest`).
+- **Field checks:** none new (sandbox-checked).
+
 ## Deferred minors from the 1.1.291 review: End exit, mining hop timeout, scene drop, store notice; 1.1.293 (2026-10-23)
 
 Six small items deferred by the Fable review of the Codex wave (`.superpowers/codex-wave-backup-2026-10-22/fable-review.md`, `fable-rereview.md`). Scoped first, four implementers, one Fable batch review, one fix wave.
