@@ -516,6 +516,15 @@ public final class TaskService {
     }
 
     public static Optional<String> getCancelReason(UUID botUuid) {
+        // The worker's own cancelled ticket explains its own unwind, even after a newer ticket for
+        // this bot took the ACTIVE slot (whose empty reason would read as "nearby threat").
+        TaskTicket own = workerTicketFor(botUuid);
+        if (own != null && own.isCancelRequested()) {
+            String ownReason = own.cancelReason();
+            if (ownReason != null && !ownReason.isBlank()) {
+                return Optional.of(ownReason);
+            }
+        }
         String latched = ABORT_LATCH.get(key(botUuid));
         if (latched != null && !latched.isBlank()) {
             return Optional.of(latched);

@@ -2670,6 +2670,7 @@ public class modCommandRegistry {
         }
 
         int placed = 0;
+        boolean reachFailed = false;
         BlockPos lastPlaced = null;
         try {
             for (int i = 0; i < count; i++) {
@@ -2692,6 +2693,7 @@ public class modCommandRegistry {
                 }
                 if (placedPos == null) {
                     ChatUtils.sendSystemMessage(context.getSource(), "I can't reach that spot.");
+                    reachFailed = true;
                     break;
                 }
                 placed++;
@@ -2702,14 +2704,22 @@ public class modCommandRegistry {
             LOGGER.error("Unexpected error in /bot place {}", item, e);
             ChatUtils.sendSystemMessage(context.getSource(),
                     "Something went wrong placing the " + item + ", so I stopped.");
+            if (placed > 0) {
+                ChatUtils.sendSystemMessage(context.getSource(), placedLine(placed, item));
+            }
             return placed > 0 ? 1 : 0;
         }
         if (placed > 0) {
-            ChatUtils.sendSystemMessage(context.getSource(), "Placed " + placed + " " + item + (placed == 1 ? "" : "s") + ".");
-        } else {
+            ChatUtils.sendSystemMessage(context.getSource(), placedLine(placed, item));
+        } else if (!reachFailed) {
+            // A reach failure already said why nothing was placed; "I don't have any" would be false.
             ChatUtils.sendSystemMessage(context.getSource(), "I don't have any " + item + " to place.");
         }
         return placed > 0 ? 1 : 0;
+    }
+
+    private static String placedLine(int placed, String item) {
+        return "Placed " + placed + " " + item + (placed == 1 ? "" : "s") + ".";
     }
 
     private static int executeCook(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemFilter, String fuelSpec) {

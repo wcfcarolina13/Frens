@@ -117,5 +117,22 @@ class PlacePosPolicyTest {
         String body = method("private static int executePlaceGeneric(");
         assertTrue(body.contains("catch (RuntimeException e)"));
         assertTrue(body.contains("LOGGER.error(\"Unexpected error in /bot place {}\", item, e)"));
+        int catchAt = body.indexOf("catch (RuntimeException e)");
+        int summaryInCatch = body.indexOf("placedLine(placed, item)", catchAt);
+        int catchReturn = body.indexOf("return placed > 0 ? 1 : 0;", catchAt);
+        assertTrue(summaryInCatch > catchAt && summaryInCatch < catchReturn,
+                "an error after some placements still reports what was placed");
+    }
+
+    @Test
+    void reachFailureIsNotFollowedByTheNoItemLine() throws IOException {
+        String body = method("private static int executePlaceGeneric(");
+        int reach = body.indexOf("\"I can't reach that spot.\"");
+        assertTrue(reach >= 0);
+        assertTrue(body.indexOf("reachFailed = true;", reach) > reach);
+        int noItem = body.indexOf("\"I don't have any \"");
+        assertTrue(noItem > 0);
+        assertTrue(body.lastIndexOf("!reachFailed", noItem) > reach,
+                "the no-item line must be gated on the reach failure");
     }
 }

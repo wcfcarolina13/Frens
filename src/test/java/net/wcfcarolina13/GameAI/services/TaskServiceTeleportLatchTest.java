@@ -145,6 +145,17 @@ class TaskServiceTeleportLatchTest {
     }
 
     @Test
+    void cancelledWorkerKeepsItsReasonAfterANewTicketStarts() {
+        UUID id = UUID.randomUUID();
+        workerThatDied(id);
+        // A new task for the same bot starts while the old worker is still unwinding.
+        TaskService.TaskTicket next = TaskService.beginSkill("woodcut", null, id).orElseThrow();
+        assertTrue(TaskService.isAbortRequested(id));
+        assertEquals(Optional.of(RespawnResetPolicy.DEATH_PAUSE_ABORT), TaskService.getCancelReason(id));
+        assertFalse(next.isCancelRequested());
+    }
+
+    @Test
     void attachingAnotherThreadDoesNotSetTheCallersTicket() {
         UUID id = UUID.randomUUID();
         TaskService.TaskTicket ticket = TaskService.beginSkill("mining", null, id).orElseThrow();
