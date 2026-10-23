@@ -1670,6 +1670,11 @@ public final class BotIdleHobbiesService {
 
         if (!canStartFallbackWoodcut(world, bot)) return false;
 
+        // In-flight guard: the skill only claims the task slot once the worker runs it, so without
+        // this every tick until then submitted another woodcut (10 in one second in the 1.1.291
+        // sweep) and each refused duplicate counted as a failure. The finish handler re-arms both.
+        NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + WOODEN_FALLBACK_COOLDOWN_TICKS);
+        NEXT_WOODEN_FALLBACK_TICK.put(bot.getUuid(), nowTick + WOODEN_FALLBACK_COOLDOWN_TICKS);
         LAST_HOBBY.put(bot.getUuid(), "woodcut");
         startAmbientSkill(server, bot, "woodcut");
         LOGGER.info("Idle resource woodcut: {} needs tools but has no wood — starting woodcut",
