@@ -440,17 +440,27 @@ public class AutoFaceEntity {
     }
 
 
-    public static void handleBotRespawn(ServerPlayerEntity bot) {
+    /**
+     * Restarts the auto-face loop on the new entity vanilla made for {@code bot} ({@code alive}: it
+     * left the End rather than died). The running task is aborted either way: its skill holds the old
+     * entity. {@link net.wcfcarolina13.GameAI.services.RespawnResetPolicy} picks the message and
+     * whether the death path's pause runs.
+     */
+    public static void handleBotRespawn(ServerPlayerEntity bot, boolean alive) {
+        net.wcfcarolina13.GameAI.services.RespawnResetPolicy.Plan plan =
+                net.wcfcarolina13.GameAI.services.RespawnResetPolicy.plan(alive);
         // Ensure complete cleanup before restart
-        TaskService.onBotRespawn(bot);
+        TaskService.onBotRespawn(bot, plan.taskAbortMessage());
         stopAutoFace(bot);
         isWorldTickListenerActive = true;
 
         // Wait briefly to ensure cleanup is complete
-        try {
-            Thread.sleep(100);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        if (plan.sleepBeforeRestart()) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
 
         startAutoFace(bot);

@@ -698,11 +698,12 @@ public final class TaskService {
         server.execute(() -> ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), message));
     }
 
-    public static void onBotRespawn(ServerPlayerEntity bot) {
+    /** Aborts the bot's task on respawn; {@code reason} comes from {@link RespawnResetPolicy}. */
+    public static void onBotRespawn(ServerPlayerEntity bot, String reason) {
         if (bot == null) {
             return;
         }
-        forceAbort(bot.getUuid(), "§cCurrent task aborted due to respawn.");
+        forceAbort(bot.getUuid(), reason);
     }
 
     private static void abortTicket(TaskTicket ticket, String reason) {

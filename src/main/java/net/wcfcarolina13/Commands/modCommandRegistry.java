@@ -46,7 +46,6 @@ import net.wcfcarolina13.ChatUtils.BotDialogueSounds;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.Entity.LookController;
-import net.wcfcarolina13.Entity.RespawnHandler;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
@@ -2153,9 +2152,6 @@ public class modCommandRegistry {
 
         Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
 
-        DebugToggleService.debug(LOGGER, "Registering respawn listener....");
-
-        RespawnHandler.registerRespawnListener(bot);
         BotEventHandler.registerBot(bot);
         if (owner != null) {
             Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());

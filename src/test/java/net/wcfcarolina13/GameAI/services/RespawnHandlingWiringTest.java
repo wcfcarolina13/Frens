@@ -52,11 +52,53 @@ class RespawnHandlingWiringTest {
         assertTrue(ensure.contains("srv.send(new ServerTask((int) checkTick, () ->"));
         assertTrue(ensure.contains("srv.getPlayerManager().getPlayer(botUuid)"));
         assertTrue(ensure.contains("if (currentBot == null) currentBot = bot;"));
-        assertTrue(ensure.contains("onBotRespawn(currentBot)"));
+        assertTrue(ensure.contains("onBotRespawn(currentBot, false)"));
+    }
+
+    @Test
+    void respawnResetStepsAreGatedByThePolicy() throws IOException {
+        String reset = method("onBotRespawn");
+        assertTrue(reset.contains("RespawnResetPolicy.plan(alive)"));
+        assertTrue(reset.indexOf("registerBot(bot)") < reset.indexOf("if (plan.clearLeash()"));
+        assertTrue(reset.contains("RideSyncService.clearBotState(bot.getUuid())"));
+        String targets = block(reset, "if (plan.clearTargets())");
+        assertTrue(targets.contains("setBaseTarget(bot, null)") && targets.contains("setFollowTarget(bot, null)"));
+        assertTrue(reset.contains("plan.relocate() ? moveToRespawnPoint(bot, srv) : null"));
+        String mode = block(reset, "if (plan.resetMode())");
+        assertTrue(mode.contains("setMode(bot, Mode.IDLE)"));
+        assertTrue(block(reset, "if (plan.regroupChat())").contains("has regrouped and is ready to re-engage."));
+        assertTrue(block(reset, "if (plan.lateAbortMessage() != null)").contains("TaskService.forceAbort("));
+        // Dead flags and the tracker are cleared on both paths, outside every plan gate.
+        assertTrue(reset.contains("setDead(false)"));
+        assertFalse(source().contains("\"§cTask aborted due to bot respawn.\""));
+    }
+
+    @Test
+    void respawnListenerPassesAliveAndGatesTheSoulNote() throws IOException {
+        String frens = flatten(Path.of("src/main/java/net/wcfcarolina13/Frens.java"));
+        assertTrue(frens.contains("AutoFaceEntity.handleBotRespawn(newPlayer, alive)"));
+        assertTrue(frens.contains("BotEventHandler.onBotRespawn(newPlayer, alive)"));
+        String soul = block(frens, "if (net.wcfcarolina13.GameAI.services.RespawnResetPolicy.plan(alive).noteSoulRespawn())");
+        assertTrue(soul.contains("SoulEventObserver.onBotRespawn(newPlayer)"));
+
+        String autoFace = flatten(Path.of("src/main/java/net/wcfcarolina13/Entity/AutoFaceEntity.java"));
+        String restart = block(autoFace, "public static void handleBotRespawn(ServerPlayerEntity bot, boolean alive)");
+        assertTrue(restart.contains("TaskService.onBotRespawn(bot, plan.taskAbortMessage())"));
+        assertTrue(block(restart, "if (plan.sleepBeforeRestart())").contains("Thread.sleep(100)"));
+        assertTrue(restart.indexOf("stopAutoFace(bot)") < restart.indexOf("startAutoFace(bot)"));
+    }
+
+    @Test
+    void theNameMatchedPerBotRespawnListenerIsGone() {
+        assertFalse(Files.exists(Path.of("src/main/java/net/wcfcarolina13/Entity/RespawnHandler.java")));
     }
 
     private static String source() throws IOException {
-        return Files.readString(Path.of("src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java"))
+        return flatten(Path.of("src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java"));
+    }
+
+    private static String flatten(Path path) throws IOException {
+        return Files.readString(path)
                 .replaceAll("(?s)/\\*.*?\\*/", "")
                 .replaceAll("(?m)//.*$", "")
                 .replaceAll("\\s+", " ");

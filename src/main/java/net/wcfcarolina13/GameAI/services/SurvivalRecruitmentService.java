@@ -20,7 +20,6 @@ import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
-import net.wcfcarolina13.Entity.RespawnHandler;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.network.OpenRecruitmentDialoguePayload;
@@ -1151,10 +1150,6 @@ public final class SurvivalRecruitmentService {
                     bot.teleport(targetWorld, spawn.x, spawn.y, spawn.z, java.util.Set.of(), bot.getYaw(), bot.getPitch(), true);
                     bot.setVelocity(Vec3d.ZERO);
                 }
-            } catch (Throwable ignored) {
-            }
-            try {
-                RespawnHandler.registerRespawnListener(bot);
             } catch (Throwable ignored) {
             }
             try {

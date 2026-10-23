@@ -857,12 +857,20 @@ public class BotEventHandler {
 
 
 
-    public static void onBotRespawn(ServerPlayerEntity bot) {
+    /**
+     * Resets a bot after vanilla respawned it as a new entity. {@code alive} is vanilla's flag: false
+     * after a death, true when a living bot leaves the End. {@link
+     * net.wcfcarolina13.GameAI.services.RespawnResetPolicy} decides which steps run.
+     */
+    public static void onBotRespawn(ServerPlayerEntity bot, boolean alive) {
+        net.wcfcarolina13.GameAI.services.RespawnResetPolicy.Plan plan =
+                net.wcfcarolina13.GameAI.services.RespawnResetPolicy.plan(alive);
         registerBot(bot);
+        // Ride sync state names the vehicle and pending boat/cart positions of the old entity's world.
         net.wcfcarolina13.GameAI.services.RideSyncService.clearBotState(bot.getUuid());
-        // Death drops every lead, so the saved leash target (kept by clearBotState for rejoin) and the
-        // saved held-lead record are stale.
-        if (net.wcfcarolina13.GameAI.services.LeashTargetPolicy.shouldClear(
+        // Death and a dimension change both drop every lead, so the saved leash target (kept by
+        // clearBotState for rejoin) and the saved held-lead record are stale.
+        if (plan.clearLeash() && net.wcfcarolina13.GameAI.services.LeashTargetPolicy.shouldClear(
                 net.wcfcarolina13.GameAI.services.LeashTargetPolicy.Event.DIED, false)) {
             if (net.wcfcarolina13.GameAI.services.RideSyncService.getLeashTarget(bot.getUuid()) != null) {
                 net.wcfcarolina13.GameAI.services.RideSyncService.clearLeashTarget(bot.getUuid());
@@ -875,10 +883,62 @@ public class BotEventHandler {
         BotCombatCalloutService.resetCombatState(bot.getUuid());
         // Clear stale directed-mode targets from previous life so hobbies aren't
         // blocked by leftover follow-or-base-intent after respawn.
-        setBaseTarget(bot, null);
-        setFollowTarget(bot, null);
+        if (plan.clearTargets()) {
+            setBaseTarget(bot, null);
+            setFollowTarget(bot, null);
+        }
 
         MinecraftServer srv = bot.getCommandSource().getServer();
+        RespawnDestination destination = plan.relocate() ? moveToRespawnPoint(bot, srv) : null;
+
+        bot.setInvulnerable(false); // ensure no stale invulnerability from a previous respawn
+        bot.timeUntilRegen = 0;     // clear vanilla damage-immunity cooldown
+        bot.hurtTime = 0;           // clear vanilla hurt animation timer
+        bot.deathTime = 0;          // clear death animation counter
+        // Clear LivingEntity.dead and ServerPlayNetworkHandler.dead.  Without this,
+        // ServerPlayerEntity.isInvulnerableTo() treats the bot as invulnerable for the
+        // rest of the session via canInteractWithGame(), blocking all damage after the
+        // first death.  Fake players reuse the same entity across "respawns" so both
+        // death flags must be reset manually.
+        ((net.wcfcarolina13.mixin.LivingEntityAccessor) bot).setDead(false);
+        if (bot.networkHandler != null) {
+            ((net.wcfcarolina13.mixin.ServerPlayNetworkHandlerAccessor) (Object) bot.networkHandler).setDead(false);
+        }
+        if (srv != null) {
+            RESPAWN_HANDLING.recordHandled(bot.getUuid(), srv.getTicks());
+        }
+
+        if (destination != null) {
+            BotStuckService.setLastSafePosition(bot.getUuid(), destination.target());
+        }
+        if (plan.lateAbortMessage() != null) {
+            TaskService.forceAbort(bot.getUuid(), plan.lateAbortMessage());
+        }
+        if (plan.resetMode()) {
+            setMode(bot, Mode.IDLE);
+            setAssistAllies(bot, true);
+        }
+        if (destination != null && destination.world() != null) {
+            rememberSpawn(destination.world(), destination.target(), bot.getYaw(), bot.getPitch());
+        }
+
+        if (plan.regroupChat()) {
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
+                    bot.getName().getString() + " has regrouped and is ready to re-engage.");
+        }
+
+        rescueFromBurial(bot);
+    }
+
+    /** Where {@link #moveToRespawnPoint} put the bot; {@code world} may be null when no server was found. */
+    private record RespawnDestination(ServerWorld world, Vec3d target) {
+    }
+
+    /**
+     * Death-path relocation: resolves the respawn checkpoint chain (bed, recruitment anchor, BotSpawn,
+     * failsafe, world spawn, current position), moves the bot there and stops it.
+     */
+    private static RespawnDestination moveToRespawnPoint(ServerPlayerEntity bot, MinecraftServer srv) {
         ServerWorld botWorld = bot.getCommandSource().getWorld();
         ServerWorld destinationWorld = botWorld;
         Vec3d target = null;
@@ -1083,35 +1143,7 @@ public class BotEventHandler {
         }
 
         bot.setVelocity(Vec3d.ZERO);
-        bot.setInvulnerable(false); // ensure no stale invulnerability from a previous respawn
-        bot.timeUntilRegen = 0;     // clear vanilla damage-immunity cooldown
-        bot.hurtTime = 0;           // clear vanilla hurt animation timer
-        bot.deathTime = 0;          // clear death animation counter
-        // Clear LivingEntity.dead and ServerPlayNetworkHandler.dead.  Without this,
-        // ServerPlayerEntity.isInvulnerableTo() treats the bot as invulnerable for the
-        // rest of the session via canInteractWithGame(), blocking all damage after the
-        // first death.  Fake players reuse the same entity across "respawns" so both
-        // death flags must be reset manually.
-        ((net.wcfcarolina13.mixin.LivingEntityAccessor) bot).setDead(false);
-        if (bot.networkHandler != null) {
-            ((net.wcfcarolina13.mixin.ServerPlayNetworkHandlerAccessor) (Object) bot.networkHandler).setDead(false);
-        }
-        if (srv != null) {
-            RESPAWN_HANDLING.recordHandled(bot.getUuid(), srv.getTicks());
-        }
-
-        BotStuckService.setLastSafePosition(bot.getUuid(), target);
-        TaskService.forceAbort(bot.getUuid(), "§cTask aborted due to bot respawn.");
-        setMode(bot, Mode.IDLE);
-        setAssistAllies(bot, true);
-        if (destinationWorld != null) {
-            rememberSpawn(destinationWorld, target, bot.getYaw(), bot.getPitch());
-        }
-
-        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
-                bot.getName().getString() + " has regrouped and is ready to re-engage.");
-
-        rescueFromBurial(bot);
+        return new RespawnDestination(destinationWorld, target);
     }
 
     public static void ensureRespawnHandled(ServerPlayerEntity bot) {
@@ -1142,7 +1174,7 @@ public class BotEventHandler {
             if (currentBot.isDead()) {
                 currentBot.setHealth(currentBot.getMaxHealth());
             }
-            onBotRespawn(currentBot);
+            onBotRespawn(currentBot, false); // the fallback only runs after a death
         }));
     }
 

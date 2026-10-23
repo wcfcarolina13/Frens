@@ -1295,9 +1295,11 @@ public class Frens implements ModInitializer {
                 System.out.println("Bot has respawned. Updating state...");
                 BotEventHandler.botSpawnCount++;
                 LOGGER.info("AFTER_RESPAWN fired for bot {} (alive flag={})", newPlayer.getName().getString(), alive);
-                AutoFaceEntity.handleBotRespawn(newPlayer);
-                BotEventHandler.onBotRespawn(newPlayer);
-                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onBotRespawn(newPlayer);
+                AutoFaceEntity.handleBotRespawn(newPlayer, alive);
+                BotEventHandler.onBotRespawn(newPlayer, alive);
+                if (net.wcfcarolina13.GameAI.services.RespawnResetPolicy.plan(alive).noteSoulRespawn()) {
+                    net.wcfcarolina13.GameAI.souls.SoulEventObserver.onBotRespawn(newPlayer);
+                }
             }
             BotPersistenceService.onBotRespawn(oldPlayer, newPlayer, alive);
             BotEventHandler.ensureBotPresence(newPlayer.getCommandSource().getServer());
