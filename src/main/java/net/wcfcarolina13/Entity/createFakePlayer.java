@@ -121,7 +121,8 @@ public class createFakePlayer extends ServerPlayerEntity {
             CompletableFuture<Void> spawned = net.wcfcarolina13.GameAI.services.DeferredSpawnPolicy.connectAfter(
                     server,
                     fetchGameProfile(gameProfile.name())
-                            .exceptionally(e -> Optional.empty()), // lookup failed: spawn with the local profile
+                            .orTimeout(PROFILE_LOOKUP_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+                            .exceptionally(e -> Optional.empty()), // lookup failed or stalled: spawn with the local profile
                     server::execute,
                     () -> !TaskService.isServerStopping() && !server.isStopped()
                             && (Frens.serverInstance == null || Frens.serverInstance == server),
@@ -166,12 +167,18 @@ public class createFakePlayer extends ServerPlayerEntity {
     }
 
 
+    // A stalled Mojang lookup must not hold a resurrection attempt slot until shutdown.
+    private static final int PROFILE_LOOKUP_SOCKET_TIMEOUT_MS = 5_000;
+    private static final long PROFILE_LOOKUP_TIMEOUT_SECONDS = 10;
+
     private static CompletableFuture<Optional<GameProfile>> fetchGameProfile(final String name) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 URL url = new URL("https://api.mojang.com/users/profiles/minecraft/" + name);
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("GET");
+                connection.setConnectTimeout(PROFILE_LOOKUP_SOCKET_TIMEOUT_MS);
+                connection.setReadTimeout(PROFILE_LOOKUP_SOCKET_TIMEOUT_MS);
 
                 if (connection.getResponseCode() == 200) {
                     LOGGER.info("Found player {} on mojang's server", name);
