@@ -31,7 +31,8 @@ class AiSetupActionPolicyTest {
 
     @Test
     void serverWideActionsNeedOperatorOrHost() {
-        for (Action a : List.of(Action.SOULS_ON, Action.SOULS_OFF, Action.SELECT_MODEL, Action.SELECT_VOICE_ENGINE)) {
+        for (Action a : List.of(Action.SOULS_ON, Action.SOULS_OFF, Action.SELECT_MODEL, Action.SELECT_VOICE_ENGINE,
+                Action.SET_NEW_BOT_SOUL)) {
             assertTrue(a.changesServerSettings());
             assertEquals(Verdict.ALLOW, AiSetupActionPolicy.gate(a, true, false, false));
             // Owning a bot never grants server-wide changes.
@@ -47,6 +48,28 @@ class AiSetupActionPolicyTest {
         assertEquals(Verdict.DENY_NO_SUCH_BOT, AiSetupActionPolicy.gate(Action.ENABLE_BOT, true, false, false));
         // An operator still needs a real registered bot (a real player is never "enabled").
         assertEquals(Verdict.DENY_NO_SUCH_BOT, AiSetupActionPolicy.gate(Action.ENABLE_BOT, true, false, true));
+    }
+
+    @Test
+    void newBotSoulActionParsesAndTakesOnlyYesOrNo() {
+        assertEquals(Action.SET_NEW_BOT_SOUL, Action.parse("SET_NEW_BOT_SOUL").orElseThrow());
+        assertTrue("SET_NEW_BOT_SOUL".length() <= 32, "fits the action payload's 32-char codec");
+        assertEquals(true, AiSetupActionPolicy.parseNewBotSoulArg("yes").orElseThrow());
+        assertEquals(false, AiSetupActionPolicy.parseNewBotSoulArg("no").orElseThrow());
+        assertTrue(AiSetupActionPolicy.parseNewBotSoulArg("YES").isEmpty());
+        assertTrue(AiSetupActionPolicy.parseNewBotSoulArg("").isEmpty());
+        assertTrue(AiSetupActionPolicy.parseNewBotSoulArg(null).isEmpty());
+        assertEquals(true, AiSetupActionPolicy.parseNewBotSoulArg(AiSetupActionPolicy.newBotSoulArg(true)).orElseThrow());
+        assertEquals(false, AiSetupActionPolicy.parseNewBotSoulArg(AiSetupActionPolicy.newBotSoulArg(false)).orElseThrow());
+    }
+
+    @Test
+    void newBotSoulMessagesArePlainText() {
+        for (boolean soul : new boolean[] {true, false}) {
+            String msg = AiSetupActionPolicy.newBotSoulMessage(soul);
+            assertFalse(msg.isBlank());
+            assertFalse(msg.contains("—") || msg.contains(";"), msg);
+        }
     }
 
     @Test

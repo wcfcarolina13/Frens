@@ -191,6 +191,22 @@ public class AiSetupChecklistScreen extends Screen {
             if (this.client != null) this.client.setScreen(new SoulVoiceEngineScreen(this));
         });
 
+        // Step 4 has no step button of its own: its slot holds the new-bot soul question for an
+        // operator or the host, once Ollama and the model are done (and after it is answered).
+        AiSetupChecklistPolicy.NewBotSoul newBotSoul = checklist.newBotSoul();
+        if (newBotSoul != AiSetupChecklistPolicy.NewBotSoul.HIDDEN) {
+            String label = UiFitPolicy.pickLabel(AiSetupChecklistPolicy.newBotSoulLabels(newBotSoul),
+                    btnW() - 8, this.textRenderer::getWidth);
+            boolean next = AiSetupChecklistPolicy.newBotSoulNextAnswer(newBotSoul);
+            ButtonWidget newBots = ButtonWidget.builder(Text.literal(label),
+                            b -> AiSetupNetworkManager.Client.setNewBotSoul(next))
+                    .dimensions(right - btnW(), stepY(StepId.BOTS) + 3, btnW(), 18)
+                    .build();
+            newBots.active = available;
+            newBots.setTooltip(Tooltip.of(Text.literal(AiSetupChecklistPolicy.newBotSoulTooltip(newBotSoul))));
+            addDrawableChild(newBots);
+        }
+
         // One Enable button per listed bot, under step 4.
         List<AiSetupChecklistPolicy.BotRow> rows = checklist.bots();
         int rowY = stepY(StepId.BOTS) + rowHeight();
@@ -291,7 +307,7 @@ public class AiSetupChecklistScreen extends Screen {
             if (step.id() == StepId.MODEL) {
                 double ram = status != null && status.ollama() != null ? status.ollama().hostRamGb() : -1;
                 context.drawTextWithShadow(this.textRenderer,
-                        elide(AiSetupChecklistPolicy.ramGuidance(ram), w - PAD * 2 - 12),
+                        elide(AiSetupChecklistPolicy.ramGuidanceShort(ram), w - PAD * 2 - 12),
                         cx + PAD + 12, y + rowHeight(), 0xFF8A8A8A);
             }
         }
@@ -326,13 +342,7 @@ public class AiSetupChecklistScreen extends Screen {
     }
 
     private String elide(String text, int maxWidth) {
-        if (text == null) {
-            return "";
-        }
-        if (this.textRenderer.getWidth(text) <= maxWidth) {
-            return text;
-        }
-        return this.textRenderer.trimToWidth(text, Math.max(0, maxWidth - this.textRenderer.getWidth("…"))) + "…";
+        return UiFitPolicy.elide(text == null ? "" : text, maxWidth, this.textRenderer::getWidth);
     }
 
     @Override

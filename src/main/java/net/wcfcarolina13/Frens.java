@@ -1028,6 +1028,12 @@ public class Frens implements ModInitializer {
                 // This avoids Thread.sleep() issues and ensures proper timing
                 scheduleSpawnEscapeCheck(server, player);
             }
+
+            // AI setup checklist's new-bot soul default (1.1.296): a bot with no soul state yet
+            // gets a soul when the answer is yes and Soul Chat is on. No network probe here.
+            if (player instanceof net.wcfcarolina13.Entity.createFakePlayer) {
+                net.wcfcarolina13.network.AiSetupNetworkManager.applyNewBotSoulDefault(server, player);
+            }
         });
 
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {

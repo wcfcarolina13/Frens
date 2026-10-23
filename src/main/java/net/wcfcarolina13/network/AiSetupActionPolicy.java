@@ -19,7 +19,9 @@ public final class AiSetupActionPolicy {
 
     /** Client-requested setup actions. Wire names are the enum names. */
     public enum Action {
-        SOULS_ON, SOULS_OFF, ENABLE_BOT, SELECT_MODEL, SELECT_VOICE_ENGINE;
+        SOULS_ON, SOULS_OFF, ENABLE_BOT, SELECT_MODEL, SELECT_VOICE_ENGINE,
+        /** The new-bot soul default; arg {@link #NEW_BOT_SOUL_YES} or {@link #NEW_BOT_SOUL_NO}. */
+        SET_NEW_BOT_SOUL;
 
         public static Optional<Action> parse(String raw) {
             if (raw == null) {
@@ -69,6 +71,33 @@ public final class AiSetupActionPolicy {
             case DENY_NOT_OWNER -> "Only the bot's owner, an operator or the host can enable AI chat for it.";
             case ALLOW -> "";
         };
+    }
+
+    // ── New-bot soul default ────────────────────────────────────────────────
+
+    public static final String NEW_BOT_SOUL_YES = "yes";
+    public static final String NEW_BOT_SOUL_NO = "no";
+
+    /** SET_NEW_BOT_SOUL's arg: "yes" or "no" exactly; anything else is empty (rejected). */
+    public static Optional<Boolean> parseNewBotSoulArg(String arg) {
+        if (NEW_BOT_SOUL_YES.equals(arg)) {
+            return Optional.of(true);
+        }
+        if (NEW_BOT_SOUL_NO.equals(arg)) {
+            return Optional.of(false);
+        }
+        return Optional.empty();
+    }
+
+    public static String newBotSoulArg(boolean soul) {
+        return soul ? NEW_BOT_SOUL_YES : NEW_BOT_SOUL_NO;
+    }
+
+    /** Chat line after the new-bot default changed. */
+    public static String newBotSoulMessage(boolean soul) {
+        return soul
+                ? "New companions will get a soul when they first join while Soul Chat is on."
+                : "New companions won't get a soul. You can still enable each one.";
     }
 
     // ── Model tags ──────────────────────────────────────────────────────────

@@ -131,6 +131,9 @@ public class ManualConfig {
     // Default-off.
     // Non-secret fields only — no API keys belong here.
     private boolean soulsEnabled = false;
+    // AI setup checklist answer (1.1.296): give a newly joining bot (no soul.json yet) a soul.
+    // null = not asked yet; Gson omits nulls, so an older settings file reads as "not asked".
+    private Boolean soulNewBotDefault = null;
     private String soulProvider = "ollama";
     private String soulModel = "";
     private int soulRequestTimeoutSeconds = 60;
@@ -834,6 +837,10 @@ public class ManualConfig {
 
     public boolean isSoulsEnabled() { return soulsEnabled; }
     public void setSoulsEnabled(boolean soulsEnabled) { this.soulsEnabled = soulsEnabled; }
+
+    /** New-bot soul default from the AI setup checklist: true/false, or null when not asked yet. */
+    public Boolean getSoulNewBotDefault() { return soulNewBotDefault; }
+    public void setSoulNewBotDefault(Boolean v) { this.soulNewBotDefault = v; }
 
     public boolean isSoulPartyEnabled() { return soulPartyEnabled; }
     public void setSoulPartyEnabled(boolean v) { this.soulPartyEnabled = v; }

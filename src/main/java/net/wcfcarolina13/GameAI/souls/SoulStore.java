@@ -171,6 +171,25 @@ public final class SoulStore {
         });
     }
 
+    /**
+     * Binds {@code botId} to {@code profileId} and activates it, but only when the bot has no
+     * soul.json yet (never enabled and never switched off). Decided on the single writer thread,
+     * so it cannot race a concurrent enable or disable for the same bot. Empty when a soul.json
+     * already existed and nothing was written.
+     */
+    public CompletableFuture<Optional<SoulTypes.SoulState>> bindIfNew(UUID botId, String profileId) {
+        return submit(() -> {
+            if (Files.exists(soulJsonFile(botId))) {
+                return Optional.<SoulTypes.SoulState>empty();
+            }
+            SoulTypes.SoulState fresh = loadState(botId);
+            SoulTypes.SoulState updated = new SoulTypes.SoulState(
+                    fresh.schemaVersion(), botId, profileId, true, fresh.conversations());
+            saveState(updated);
+            return Optional.of(updated);
+        });
+    }
+
     public CompletableFuture<Boolean> isActive(UUID botId) {
         return submit(() -> loadState(botId).active());
     }

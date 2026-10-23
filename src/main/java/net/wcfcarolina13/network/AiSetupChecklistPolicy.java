@@ -38,6 +38,15 @@ public final class AiSetupChecklistPolicy {
     public record Step(StepId id, State state, boolean buttonEnabled, boolean needsOperator, String detail) {
     }
 
+    /**
+     * The new-bot soul question on step 4's button slot (Bradley 2026-10-23). HIDDEN for a viewer
+     * who can't change server settings, and until Ollama and the model are done. ASK: not answered
+     * yet. SOUL / NONE: the answer, still shown so it can be changed.
+     */
+    public enum NewBotSoul { HIDDEN, ASK, SOUL, NONE }
+
+    public static final String NEW_BOT_SOUL_QUESTION = "Give new companions a soul when Ollama is ready?";
+
     /** One bot row under step 4. */
     public record BotRow(String name, String uuid, State state, boolean enableButton) {
     }
@@ -47,7 +56,8 @@ public final class AiSetupChecklistPolicy {
      * (multiplayer, viewer is not the integrated host) and are labelled so. {@code testBotName}
      * is the bot "Say hi" addresses, or "" when no bot is enabled.
      */
-    public record Checklist(List<Step> steps, List<BotRow> bots, String testBotName, boolean onServerMachine) {
+    public record Checklist(List<Step> steps, List<BotRow> bots, String testBotName, boolean onServerMachine,
+                            NewBotSoul newBotSoul) {
         public Step step(StepId id) {
             for (Step s : steps) {
                 if (s.id() == id) {
@@ -64,7 +74,7 @@ public final class AiSetupChecklistPolicy {
             for (StepId id : StepId.values()) {
                 steps.add(new Step(id, State.UNKNOWN, false, false, "Waiting for the server…"));
             }
-            return new Checklist(steps, List.of(), "", false);
+            return new Checklist(steps, List.of(), "", false, NewBotSoul.HIDDEN);
         }
         boolean canEdit = status.viewer().canEditServer();
         boolean onServerMachine = !status.viewer().isIntegratedHost();
@@ -152,7 +162,47 @@ public final class AiSetupChecklistPolicy {
         steps.add(new Step(StepId.VOICE, voice.enabled() ? State.DONE : State.OPTIONAL, canEdit, !canEdit,
                 voiceDetail));
 
-        return new Checklist(steps, rows, testBot, onServerMachine);
+        NewBotSoul newBotSoul = newBotSoul(canEdit, runtime.newBotSoulDefault(), ollamaState, modelState);
+        return new Checklist(steps, rows, testBot, onServerMachine, newBotSoul);
+    }
+
+    /**
+     * Whether and how step 4 shows the new-bot soul question: only to an operator or the host,
+     * once Ollama and the model are done, and always after it was answered so it can be changed.
+     */
+    public static NewBotSoul newBotSoul(boolean canEdit, Boolean answer, State ollama, State model) {
+        if (!canEdit) {
+            return NewBotSoul.HIDDEN;
+        }
+        if (answer != null) {
+            return answer ? NewBotSoul.SOUL : NewBotSoul.NONE;
+        }
+        return ollama == State.DONE && model == State.DONE ? NewBotSoul.ASK : NewBotSoul.HIDDEN;
+    }
+
+    /** Button labels for {@code choice}, longest first, for {@code UiFitPolicy.pickLabel}. */
+    public static List<String> newBotSoulLabels(NewBotSoul choice) {
+        return switch (choice) {
+            case ASK -> List.of("New bots: Ask", "New: Ask", "Ask");
+            case SOUL -> List.of("New bots: Soul", "New: Soul", "Soul");
+            case NONE -> List.of("New bots: None", "New: None", "None");
+            case HIDDEN -> List.of("");
+        };
+    }
+
+    /** Tooltip for the new-bot soul button: the question, the current answer, what a click does. */
+    public static String newBotSoulTooltip(NewBotSoul choice) {
+        return switch (choice) {
+            case ASK -> NEW_BOT_SOUL_QUESTION + " Click for yes, click again for no.";
+            case SOUL -> NEW_BOT_SOUL_QUESTION + " Yes: a new companion gets a soul on first join. Click for no.";
+            case NONE -> NEW_BOT_SOUL_QUESTION + " No: enable each companion yourself. Click for yes.";
+            case HIDDEN -> "";
+        };
+    }
+
+    /** The answer a click sends: unanswered or "no" becomes yes, "yes" becomes no. */
+    public static boolean newBotSoulNextAnswer(NewBotSoul choice) {
+        return choice != NewBotSoul.SOUL;
     }
 
     /**
@@ -205,7 +255,18 @@ public final class AiSetupChecklistPolicy {
         return botName + ", can you hear me?";
     }
 
-    /** Model-size RAM guidance shown under step 2, with the host's RAM when known. */
+    /**
+     * The one-line RAM hint under step 2: the same numbers as {@link #ramGuidance}, short enough
+     * for the narrowest panel (about 250 px). The full text stays in the Choose model tooltip.
+     */
+    public static String ramGuidanceShort(double hostRamGb) {
+        String base = "1B/3B/8B need about 4/6/12 GB.";
+        return hostRamGb > 0
+                ? String.format(Locale.ROOT, "Host: %.0f GB RAM. %s", hostRamGb, base)
+                : "RAM: " + base;
+    }
+
+    /** Model-size RAM guidance (Choose model tooltip), with the host's RAM when known. */
     public static String ramGuidance(double hostRamGb) {
         String base = "1B ≈4 GB RAM, 3B ≈6 GB, 8B ≈12 GB (plus Minecraft's own memory)";
         return hostRamGb > 0

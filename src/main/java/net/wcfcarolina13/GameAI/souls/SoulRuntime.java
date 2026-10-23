@@ -1502,6 +1502,22 @@ public final class SoulRuntime {
         return store.bindProfile(botId, profileId);
     }
 
+    /**
+     * Gives a newly joined bot a soul: binds {@code profileId} and activates it only when the bot
+     * has no soul state yet ({@link SoulStore#bindIfNew}). Completes true when it was bound.
+     */
+    public CompletableFuture<Boolean> enableIfNew(UUID botId, String profileId) {
+        Objects.requireNonNull(botId, "botId");
+        Objects.requireNonNull(profileId, "profileId");
+        try {
+            SoulProfileRegistry.require(profileId);
+        } catch (RuntimeException unknownProfile) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException(
+                    "Unknown soul profile id: " + profileId, unknownProfile));
+        }
+        return store.bindIfNew(botId, profileId).thenApply(Optional::isPresent);
+    }
+
     public CompletableFuture<SoulTypes.SoulState> setActive(UUID botId, boolean active) {
         Objects.requireNonNull(botId, "botId");
         if (!active) {

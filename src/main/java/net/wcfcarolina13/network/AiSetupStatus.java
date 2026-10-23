@@ -46,12 +46,21 @@ public record AiSetupStatus(boolean full,
      * The live soul runtime. {@code running} false means no runtime is installed (server
      * stopping). {@code ready} is {@code pipelineAvailable()}: switch on, settings valid, index
      * loaded. {@code providerHealthy} is null when unknown (non-full view, or not probed).
+     * {@code newBotSoulDefault} is the checklist's "give new companions a soul" answer, null when
+     * not asked yet or in a non-full view.
      */
     public record Runtime(boolean running, boolean soulsEnabled, boolean ready,
-                          String model, String validationError, Boolean providerHealthy) {
+                          String model, String validationError, Boolean providerHealthy,
+                          Boolean newBotSoulDefault) {
         public Runtime {
             model = model == null ? "" : model;
             validationError = validationError == null ? "" : validationError;
+        }
+
+        /** Without a new-bot answer (not asked, or not visible to this viewer). */
+        public Runtime(boolean running, boolean soulsEnabled, boolean ready,
+                       String model, String validationError, Boolean providerHealthy) {
+            this(running, soulsEnabled, ready, model, validationError, providerHealthy, null);
         }
     }
 
@@ -137,6 +146,9 @@ public record AiSetupStatus(boolean full,
             if (runtime.providerHealthy() != null) {
                 r.put("providerHealthy", runtime.providerHealthy());
             }
+            if (runtime.newBotSoulDefault() != null) {
+                r.put("newBotSoul", runtime.newBotSoulDefault());
+            }
         }
         ArrayNode b = root.putArray("bots");
         int count = 0;
@@ -188,10 +200,12 @@ public record AiSetupStatus(boolean full,
             }
             JsonNode r = root.path("runtime");
             JsonNode health = r.get("providerHealthy");
+            JsonNode newBotSoul = full ? r.get("newBotSoul") : null;
             Runtime runtime = new Runtime(r.path("running").asBoolean(false),
                     r.path("soulsEnabled").asBoolean(false), r.path("ready").asBoolean(false),
                     r.path("model").asText(""), r.path("validationError").asText(""),
-                    health != null && health.isBoolean() ? health.asBoolean() : null);
+                    health != null && health.isBoolean() ? health.asBoolean() : null,
+                    newBotSoul != null && newBotSoul.isBoolean() ? newBotSoul.asBoolean() : null);
             List<Bot> bots = new ArrayList<>();
             for (JsonNode node : root.path("bots")) {
                 if (bots.size() >= MAX_BOTS) break;

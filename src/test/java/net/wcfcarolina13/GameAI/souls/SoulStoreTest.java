@@ -17,6 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -122,6 +123,42 @@ class SoulStoreTest {
         assertEquals("", result.profileId());
         assertFalse(Files.exists(worldRoot.resolve("frens")),
                 "deactivating a never-persisted bot must not create frens/ on disk");
+    }
+
+    @Test
+    void bindIfNewBindsAndActivatesABotWithNoState() throws Exception {
+        UUID bot = UUID.randomUUID();
+
+        Optional<SoulTypes.SoulState> bound = store.bindIfNew(bot, "frens:jake").get(2, SECONDS);
+
+        assertTrue(bound.isPresent());
+        assertEquals("frens:jake", bound.get().profileId());
+        assertTrue(bound.get().active());
+        assertTrue(store.state(bot).get(2, SECONDS).active());
+    }
+
+    @Test
+    void bindIfNewNeverReEnablesABotSomeoneSwitchedOff() throws Exception {
+        UUID bot = UUID.randomUUID();
+        store.bindProfile(bot, "frens:bob").get(2, SECONDS);
+        store.setActive(bot, false).get(2, SECONDS);
+
+        Optional<SoulTypes.SoulState> bound = store.bindIfNew(bot, "frens:jake").get(2, SECONDS);
+
+        assertTrue(bound.isEmpty());
+        SoulTypes.SoulState state = store.state(bot).get(2, SECONDS);
+        assertFalse(state.active());
+        assertEquals("frens:bob", state.profileId());
+    }
+
+    @Test
+    void bindIfNewLeavesAnAlreadyEnabledBotAlone() throws Exception {
+        UUID bot = UUID.randomUUID();
+        store.bindProfile(bot, "frens:bob").get(2, SECONDS);
+        store.setActive(bot, true).get(2, SECONDS);
+
+        assertTrue(store.bindIfNew(bot, "frens:jake").get(2, SECONDS).isEmpty());
+        assertEquals("frens:bob", store.state(bot).get(2, SECONDS).profileId());
     }
 
     @Test

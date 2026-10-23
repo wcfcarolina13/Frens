@@ -19,6 +19,9 @@ class AiSetupActionSequencerTest {
         assertEquals(AiSetupNetworkManager.ActionSequencer.kindOf(Action.SOULS_ON, ""),
                 AiSetupNetworkManager.ActionSequencer.kindOf(Action.SOULS_OFF, ""), "on and off are one switch");
         assertEquals("MODEL", AiSetupNetworkManager.ActionSequencer.kindOf(Action.SELECT_MODEL, "llama3.2:3b"));
+        assertEquals("NEW_BOT_SOUL", AiSetupNetworkManager.ActionSequencer.kindOf(Action.SET_NEW_BOT_SOUL, "yes"));
+        assertEquals(AiSetupNetworkManager.ActionSequencer.kindOf(Action.SET_NEW_BOT_SOUL, "yes"),
+                AiSetupNetworkManager.ActionSequencer.kindOf(Action.SET_NEW_BOT_SOUL, "no"), "yes and no are one setting");
         assertEquals("MODEL", AiSetupNetworkManager.ActionSequencer.kindOf(Action.SELECT_MODEL, "qwen2.5:7b"));
         assertNotEquals(AiSetupNetworkManager.ActionSequencer.kindOf(Action.ENABLE_BOT, BOB),
                 AiSetupNetworkManager.ActionSequencer.kindOf(Action.ENABLE_BOT, AMY), "per bot");

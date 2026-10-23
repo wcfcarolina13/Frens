@@ -20,6 +20,7 @@ import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.BotAccessPolicy;
 import net.wcfcarolina13.GameAI.services.BotRegistry;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
+import net.wcfcarolina13.GameAI.souls.NewBotSoulPolicy;
 import net.wcfcarolina13.GameAI.souls.OllamaModelInstaller;
 import net.wcfcarolina13.GameAI.souls.SoulProfileRegistry;
 import net.wcfcarolina13.GameAI.souls.SoulRuntime;
@@ -291,7 +292,7 @@ public final class AiSetupNetworkManager {
         AiSetupStatus.Runtime r = base.runtime();
         return new AiSetupStatus(true, ollama,
                 new AiSetupStatus.Runtime(r.running(), r.soulsEnabled(), r.ready(), r.model(),
-                        r.validationError(), healthy),
+                        r.validationError(), healthy, r.newBotSoulDefault()),
                 base.bots(), base.voice(), base.viewer());
     }
 
@@ -306,7 +307,8 @@ public final class AiSetupNetworkManager {
         String model = config != null && config.getSoulModel() != null ? config.getSoulModel().trim() : "";
         AiSetupStatus.Runtime runtimeState = new AiSetupStatus.Runtime(runtime != null, soulsEnabled,
                 runtime != null && runtime.pipelineAvailable(), model,
-                runtime != null ? runtime.safeValidationError() : "", null);
+                runtime != null ? runtime.safeValidationError() : "", null,
+                canEdit && config != null ? config.getSoulNewBotDefault() : null);
 
         UUID repliedBot = SoulRuntime.dmFollowUp(viewerId).map(open -> open.botId()).orElse(null);
         List<AiSetupStatus.Bot> bots = new ArrayList<>();
@@ -450,6 +452,20 @@ public final class AiSetupNetworkManager {
                     return msg;
                 });
             }
+            case SET_NEW_BOT_SOUL -> {
+                Optional<Boolean> soul = AiSetupActionPolicy.parseNewBotSoulArg(arg);
+                if (soul.isEmpty()) {
+                    LOGGER.debug("[ai-setup] bad new-bot soul answer '{}' from {}", BotAccessPolicy.logSafe(arg), name);
+                    return;
+                }
+                // Server-only setting (not in SharedConfig) read at bot join: no runtime reload
+                // and no config broadcast needed.
+                config.setSoulNewBotDefault(soul.get());
+                config.save();
+                LOGGER.info("[ai-setup] {} set new-bot soul default {}", name, soul.get());
+                reply(server, playerId, AiSetupActionPolicy.newBotSoulMessage(soul.get()));
+                pushStatusTo(server, playerId);
+            }
             case ENABLE_BOT -> enableBot(server, ticket, bot);
         }
     }
@@ -483,6 +499,7 @@ public final class AiSetupNetworkManager {
                 case SOULS_ON, SOULS_OFF -> "SOULS";
                 case SELECT_MODEL -> "MODEL";
                 case SELECT_VOICE_ENGINE -> "VOICE_ENGINE";
+                case SET_NEW_BOT_SOUL -> "NEW_BOT_SOUL";
                 case ENABLE_BOT -> "ENABLE_BOT:" + (arg == null ? "" : arg.trim().toLowerCase(java.util.Locale.ROOT));
             };
         }
@@ -686,6 +703,40 @@ public final class AiSetupNetworkManager {
                 });
     }
 
+    /**
+     * Server thread, from {@code ServerPlayConnectionEvents.JOIN} for a Frens bot: applies the
+     * checklist's new-bot soul default. No network probe here. The bot gets the same persona as
+     * ENABLE_BOT (name-matched, else Jake), and only when it has no soul state yet, so a bot
+     * someone switched off stays off ({@link NewBotSoulPolicy}, {@link SoulRuntime#enableIfNew}).
+     */
+    public static void applyNewBotSoulDefault(MinecraftServer server, ServerPlayerEntity bot) {
+        if (server == null || !(bot instanceof createFakePlayer) || bot.isRemoved()) {
+            return;
+        }
+        ManualConfig config = Frens.CONFIG;
+        SoulRuntime runtime = SoulRuntime.current().orElse(null);
+        if (config == null || runtime == null) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        // cachedState is only a hint that skips a writer task for known bots; bindIfNew re-checks
+        // the file on the store's writer thread.
+        if (!NewBotSoulPolicy.shouldEnable(config.getSoulNewBotDefault(), runtime.cachedState(botId).isPresent(),
+                runtime.isMasterEnabled())) {
+            return;
+        }
+        String botName = bot.getName().getString();
+        String jake = SoulProfileRegistry.profileIdForBotName("jake").orElse("frens:jake");
+        String profileId = SoulProfileRegistry.profileIdForBotName(botName).orElse(jake);
+        runtime.enableIfNew(botId, profileId).whenComplete((bound, err) -> server.execute(() -> {
+            if (err != null) {
+                LOGGER.warn("[ai-setup] new-bot soul default failed for {}: {}", botName, err.toString());
+            } else if (Boolean.TRUE.equals(bound)) {
+                LOGGER.info("[ai-setup] new bot {} got a soul as {} (new-bot default)", botName, profileId);
+            }
+        }));
+    }
+
     private static UUID parseUuid(String raw) {
         if (raw == null || raw.isBlank() || raw.length() > 36) {
             return null;
@@ -792,6 +843,12 @@ public final class AiSetupNetworkManager {
 
         public static boolean enableBot(String botUuid) {
             return sendAction(AiSetupActionPolicy.Action.ENABLE_BOT, botUuid);
+        }
+
+        /** SET_NEW_BOT_SOUL: op/host only; whether newly joining bots get a soul. */
+        public static boolean setNewBotSoul(boolean soul) {
+            return sendAction(AiSetupActionPolicy.Action.SET_NEW_BOT_SOUL,
+                    AiSetupActionPolicy.newBotSoulArg(soul));
         }
 
         /** Last status received on this connection, or null. */

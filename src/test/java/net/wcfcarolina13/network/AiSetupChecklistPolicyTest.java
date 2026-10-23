@@ -188,6 +188,88 @@ class AiSetupChecklistPolicyTest {
                 AiSetupChecklistPolicy.ramGuidance(-1));
     }
 
+    @Test
+    void ramHintShortFitsTheNarrowestPanelWithTheSameNumbers() {
+        assertEquals("Host: 32 GB RAM. 1B/3B/8B need about 4/6/12 GB.", AiSetupChecklistPolicy.ramGuidanceShort(32.0));
+        assertEquals("RAM: 1B/3B/8B need about 4/6/12 GB.", AiSetupChecklistPolicy.ramGuidanceShort(-1));
+        // Same facts as the full tooltip text: 1B 4 GB, 3B 6 GB, 8B 12 GB.
+        String full = AiSetupChecklistPolicy.ramGuidance(-1);
+        assertTrue(full.contains("1B ≈4 GB") && full.contains("3B ≈6 GB") && full.contains("8B ≈12 GB"), full);
+        // Vanilla font advances: space 4, '.' and ':' 2, the rest at most 6. The line has ~276 px at
+        // the 320-wide window and ~298 px at 342, so it must fit 276 with a three-digit RAM figure.
+        assertTrue(fontWidth(AiSetupChecklistPolicy.ramGuidanceShort(128.0)) <= 276,
+                AiSetupChecklistPolicy.ramGuidanceShort(128.0));
+    }
+
+    private static int fontWidth(String text) {
+        int w = 0;
+        for (char c : text.toCharArray()) {
+            w += c == ' ' ? 4 : (c == '.' || c == ':' ? 2 : 6);
+        }
+        return w;
+    }
+
+    // ── New-bot soul question (step 4's button slot) ────────────────────────
+
+    private static AiSetupStatus withNewBotAnswer(AiSetupStatus.Ollama ollama, String model, Boolean answer,
+                                                  boolean canEdit) {
+        return new AiSetupStatus(true, ollama,
+                new AiSetupStatus.Runtime(true, true, true, model, "", true, answer),
+                List.of(bot("Bob", BOB_ID, false, true, true, false)),
+                new AiSetupStatus.Voice(false, true, "piper", true, false),
+                new AiSetupStatus.Viewer(canEdit, canEdit));
+    }
+
+    @Test
+    void newBotQuestionWaitsForOllamaAndTheModel() {
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.HIDDEN, AiSetupChecklistPolicy.evaluate(
+                withNewBotAnswer(ollama(false), "llama3.2:3b", null, true)).newBotSoul());
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.HIDDEN, AiSetupChecklistPolicy.evaluate(
+                withNewBotAnswer(ollama(true), "llama3.2:3b", null, true)).newBotSoul(), "model not downloaded");
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.ASK, AiSetupChecklistPolicy.evaluate(
+                withNewBotAnswer(ollama(true, "llama3.2:3b"), "llama3.2:3b", null, true)).newBotSoul());
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.HIDDEN, AiSetupChecklistPolicy.evaluate(null).newBotSoul());
+    }
+
+    @Test
+    void newBotQuestionIsOnlyForOperatorOrHost() {
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.HIDDEN, AiSetupChecklistPolicy.evaluate(
+                withNewBotAnswer(ollama(true, "llama3.2:3b"), "llama3.2:3b", null, false)).newBotSoul());
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.HIDDEN, AiSetupChecklistPolicy.evaluate(
+                withNewBotAnswer(ollama(true, "llama3.2:3b"), "llama3.2:3b", true, false)).newBotSoul());
+        // The redacted view a regular player gets never carries the answer.
+        AiSetupStatus full = withNewBotAnswer(ollama(true, "llama3.2:3b"), "llama3.2:3b", true, false);
+        String json = full.redactedForPlayer().toJson();
+        assertFalse(json.contains("newBotSoul"), json);
+        assertEquals(null, AiSetupStatus.fromJson(json).runtime().newBotSoulDefault());
+    }
+
+    @Test
+    void answeredQuestionStaysReachableToChangeIt() {
+        // Ollama stopped after answering: still shown so the answer can be changed.
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.SOUL, AiSetupChecklistPolicy.evaluate(
+                withNewBotAnswer(ollama(false), "", true, true)).newBotSoul());
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.NONE, AiSetupChecklistPolicy.evaluate(
+                withNewBotAnswer(ollama(true, "llama3.2:3b"), "llama3.2:3b", false, true)).newBotSoul());
+        assertTrue(AiSetupChecklistPolicy.newBotSoulNextAnswer(AiSetupChecklistPolicy.NewBotSoul.ASK));
+        assertFalse(AiSetupChecklistPolicy.newBotSoulNextAnswer(AiSetupChecklistPolicy.NewBotSoul.SOUL));
+        assertTrue(AiSetupChecklistPolicy.newBotSoulNextAnswer(AiSetupChecklistPolicy.NewBotSoul.NONE));
+    }
+
+    @Test
+    void newBotLabelsFitTheButtonAndTheTooltipAsksTheQuestion() {
+        for (AiSetupChecklistPolicy.NewBotSoul choice : List.of(AiSetupChecklistPolicy.NewBotSoul.ASK,
+                AiSetupChecklistPolicy.NewBotSoul.SOUL, AiSetupChecklistPolicy.NewBotSoul.NONE)) {
+            List<String> labels = AiSetupChecklistPolicy.newBotSoulLabels(choice);
+            // Narrowest button: min(104, 304 / 3) = 101 px, 8 px inner margin.
+            assertTrue(fontWidth(labels.get(1)) <= 93, labels.get(1));
+            String tip = AiSetupChecklistPolicy.newBotSoulTooltip(choice);
+            assertTrue(tip.startsWith(AiSetupChecklistPolicy.NEW_BOT_SOUL_QUESTION), tip);
+            assertFalse(tip.contains("—") || tip.contains(";"), tip);
+        }
+        assertEquals("Give new companions a soul when Ollama is ready?", AiSetupChecklistPolicy.NEW_BOT_SOUL_QUESTION);
+    }
+
     // ── Status JSON (the wire format) ───────────────────────────────────────
 
     @Test
@@ -195,6 +277,16 @@ class AiSetupChecklistPolicyTest {
         AiSetupStatus s = hostStatus(ollama(true, "llama3.2:3b", "qwen2.5:7b"), true, true, "llama3.2:3b",
                 List.of(bot("Bob", BOB_ID, true, true, false, true)), true);
         assertEquals(s, AiSetupStatus.fromJson(s.toJson()));
+    }
+
+    @Test
+    void newBotAnswerRoundTripsInTheFullView() {
+        for (Boolean answer : new Boolean[] {null, true, false}) {
+            AiSetupStatus s = withNewBotAnswer(ollama(true, "llama3.2:3b"), "llama3.2:3b", answer, true);
+            AiSetupStatus back = AiSetupStatus.fromJson(s.toJson());
+            assertEquals(s, back);
+            assertEquals(answer, back.runtime().newBotSoulDefault());
+        }
     }
 
     @Test
