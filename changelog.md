@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Bradley's decisions on four open questions (2026-10-23, no build)
+
+Decision cards, recommendation taken on all four.
+- **Modrinth:** publish 1.1.295 after its sandbox check. Notes refreshed for 1.1.231 through 1.1.295, Bradley OKs the exact text and uploads. Cost if wrong: a few more days without a public update.
+- **Soul memory:** keep relations and PlayerMemory side by side. They never disagreed in the sweeps. Item closed.
+- **Chest asks while crafting:** one combined ask per craft, one approval for the set (replaces the one-request-per-bot block from 1.1.221). Medium build, not yet scheduled. Cost if wrong: a bigger ask than wanted.
+- **Voice lines with only placeholder sounds:** text only, placeholders removed (into 1.1.295). Cost if wrong: those few moments are silent.
+
 ## End exit mid-task: the bot says why its task ended and follows again; 1.1.294 (2026-10-23)
 
 Found by the 1.1.293 sandbox check (`docs/testing/FIELD_CODEX_WAVE_SANDBOX_2026-10-23.md`, "1.1.293 check" and "1.1.294 recheck").
