@@ -16,6 +16,9 @@ class FakePlayerRespawnWiringTest {
         assertTrue(mixin.contains("@Mixin(PlayerManager.class)"));
         assertTrue(mixin.contains("respawnPlayer(Lnet/minecraft/server/network/ServerPlayerEntity;ZLnet/minecraft/entity/Entity$RemovalReason;)Lnet/minecraft/server/network/ServerPlayerEntity;"));
         assertTrue(mixin.contains("value = \"NEW\""));
+        // Carpet @Redirects the same NEW, so Frens must wrap it rather than redirect it.
+        assertTrue(mixin.contains("@WrapOperation("));
+        assertFalse(mixin.contains("@Redirect"));
         assertTrue(mixin.contains("(Lnet/minecraft/server/MinecraftServer;Lnet/minecraft/server/world/ServerWorld;Lcom/mojang/authlib/GameProfile;Lnet/minecraft/network/packet/c2s/common/SyncedClientOptions;)Lnet/minecraft/server/network/ServerPlayerEntity;"));
         assertTrue(mixin.contains("require = 1"));
         assertTrue(mixin.contains("allow = 1"));
@@ -26,7 +29,9 @@ class FakePlayerRespawnWiringTest {
         String mixin = mixin();
         assertTrue(mixin.contains("oldPlayer instanceof createFakePlayer fake"));
         assertTrue(mixin.contains("return fake.createRespawnReplacement(server, world, profile, options);"));
-        assertTrue(mixin.contains("return new ServerPlayerEntity(server, world, profile, options);"));
+        assertTrue(mixin.contains("@Local(argsOnly = true) ServerPlayerEntity oldPlayer"));
+        assertTrue(mixin.contains("return original.call(server, world, profile, options);"));
+        assertFalse(mixin.contains("new ServerPlayerEntity("));
         assertFalse(mixin.contains("BotRegistry"));
         assertFalse(mixin.contains("copyFrom("));
         assertFalse(mixin.contains("onPlayerConnect("));
