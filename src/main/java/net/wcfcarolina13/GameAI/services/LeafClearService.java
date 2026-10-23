@@ -65,8 +65,15 @@ public final class LeafClearService {
             return false;
         }
         BlockPos front = start.offset(toward);
-        for (int height : FollowLeafCellPolicy.heights(hasRaisedSupport(world, front))) {
+        boolean raisedSupport = hasRaisedSupport(world, front);
+        for (int height : FollowLeafCellPolicy.heights(raisedSupport)) {
             if (isLeafBlock(world, front.up(height))) {
+                return true;
+            }
+        }
+        // A step up needs a jump: a leaf over the bot's own head blocks it even with the front clear.
+        for (int height : FollowLeafCellPolicy.ownColumnHeights(raisedSupport)) {
+            if (isLeafBlock(world, start.up(height))) {
                 return true;
             }
         }
@@ -240,6 +247,11 @@ public final class LeafClearService {
         // Prefer only the blocks that plausibly collide with the bot's body/head in the travel direction.
         // Avoid scanning high canopy blocks (which caused unnecessary leaf breaking).
         List<BlockPos> candidates = new ArrayList<>();
+        // On a step up the leaf over the bot's own head is what stops the jump: try it first.
+        boolean stepUp = world != null && hasRaisedSupport(world, start.offset(toward));
+        for (int height : FollowLeafCellPolicy.ownColumnHeights(stepUp)) {
+            candidates.add(start.up(height));
+        }
         for (int distance = 1; distance <= 2; distance++) {
             BlockPos column = start.offset(toward, distance);
             for (int height : FollowLeafCellPolicy.heights(world != null && hasRaisedSupport(world, column))) {
@@ -248,7 +260,9 @@ public final class LeafClearService {
         }
         // If we're already wedged into leaves, try the body/head blocks too.
         candidates.add(start.up());
-        candidates.add(start.up(2));
+        if (!candidates.contains(start.up(2))) {
+            candidates.add(start.up(2));
+        }
         return candidates;
     }
 
