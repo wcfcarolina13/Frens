@@ -4,7 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-23 (1.1.292) — next session starts here
+## Session Handoff 2026-10-23 (1.1.293) — next session starts here
+
+**State:** 1.1.293 on main and deployed to Nirn. It ships six deferred minors from the 1.1.291 review (changelog entry "Deferred minors from the 1.1.291 review ... 1.1.293"): a bot leaving the End alive keeps its follow/base targets and is not teleported again (RespawnHandler deleted, so every respawn now runs its reset once, `RespawnResetPolicy`), the mining harmless-fallback hop retries a timeout once, a refused group scene is failed and released, admins get a join notice for unreadable store files, the empty legacy preview stops suggesting an import, Carpet suggests >=1.4.193. Tests 3700.
+
+**Sandbox check:** pending (sandbox lock held by the 6bt-6cb sweep session when this was released). End exit recipe: `/execute in minecraft:the_end run tp <bot> 100 50 0`, end_portal block at its feet, then `/tp <bot> @s`; grep `AFTER_RESPAWN fired .* alive flag=true`.
+
+**Deferred (with reasons):** a bot that walks into the End exit portal itself detaches and waits in limbo until teleported (pre-existing, vanilla credits path, scope against Carpet's EntityPlayerMPFake; javap the 1.21.11 yarn jar for the method name first). `MiningTool.switchToTool` has the same timeout-as-false pattern (milder: falls back). 100 ms server-thread sleep on the death path (`AutoFaceEntity.handleBotRespawn`). An End exit still ends the running skill (it holds the old entity), no automatic re-run. From the 1.1.291 list, still open: furnace walk-back after lost reach, ritual crash journal, empty bucket after a refused adoption, 0600 store file mode.
+
+**Pending:** field Phase 6cc on Nirn, guided LAN-guest check, field phases 6bt-6cb not sandbox-checked.
+
+## Session Handoff 2026-10-23 (1.1.292) — superseded
 
 **State:** 1.1.292 on main and deployed to Nirn. It fixes the one failure from the 1.1.291 sandbox sweep: the idle resource woodcut started in a burst (up to 10 per second) and the refused duplicates pushed its backoff to the cap. Fixed by arming the in-flight cooldowns before the submit, sandbox-checked (`frens_1_1_292_idle_woodcut_once.zip`).
 
