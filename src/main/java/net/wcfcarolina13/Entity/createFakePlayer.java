@@ -350,8 +350,7 @@ public class createFakePlayer extends ServerPlayerEntity {
 
         ServerPlayerEntity entity = super.teleportTo(target);
         if (notInAnyWorld) {
-            ClientStatusC2SPacket p = new ClientStatusC2SPacket(ClientStatusC2SPacket.Mode.PERFORM_RESPAWN);
-            networkHandler.onClientStatus(p);
+            requestRespawnFromLimbo();
         }
 
         // If above branch was taken, *this* has been removed and replaced, the new instance has been set
@@ -360,6 +359,26 @@ public class createFakePlayer extends ServerPlayerEntity {
             networkHandler.player.onTeleportationDone();
         }
         return networkHandler.player;
+    }
+
+    /**
+     * Walking into the End exit portal before credits were seen makes vanilla EndPortalBlock call this
+     * directly (not teleportTo): it removes the player, sets notInAnyWorld and sends GAME_WON, then waits
+     * for the client's PERFORM_RESPAWN. The fake connection never sends one, so answer it here or the bot
+     * stays in limbo. Server thread (entity tick, block collision).
+     */
+    @Override
+    public void detachForDimensionChange() {
+        super.detachForDimensionChange();
+        if (notInAnyWorld) {
+            requestRespawnFromLimbo();
+        }
+    }
+
+    /** Stands in for the client's PERFORM_RESPAWN after the credits screen. Server thread only. */
+    private void requestRespawnFromLimbo() {
+        ClientStatusC2SPacket p = new ClientStatusC2SPacket(ClientStatusC2SPacket.Mode.PERFORM_RESPAWN);
+        networkHandler.onClientStatus(p);
     }
 
     private void handleRealTeleportSideEffects() {
