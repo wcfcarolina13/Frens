@@ -62,12 +62,22 @@ public final class AuthorizedBotDispatch {
     }
 
     /**
-     * {@link #run(ServerPlayerEntity, String)} plus a WARN-only check that the parse bound
-     * {@code resolvedBotName} in a bot slot ({@link BotActionPolicy#botSlotRefusal}). A mismatch
-     * logs {@code [bot-access] bot-slot mismatch} and the command still runs (1.1.232).
+     * Returned by {@link #run(ServerPlayerEntity, String, String, String)} when the parse did not
+     * bind the resolved bot in a bot slot, or the check itself failed. Nothing ran.
+     */
+    public static final int REFUSED_BOT_SLOT = -1;
+
+    /**
+     * {@link #run(ServerPlayerEntity, String)} plus a fail-closed check that the parse bound
+     * {@code resolvedBotName} in a bot slot ({@link BotActionPolicy#botSlotVerdict} over
+     * {@link BotActionPolicy#botSlotRefusal}). A mismatch, or a check that throws, logs
+     * {@code [bot-access] refused granted dispatch ... bot-slot mismatch} at WARN and the command
+     * does not run (1.1.296; WARN-only from 1.1.232).
      *
      * @param resolvedBotName the server-resolved bot name, or null for the untargeted form (skipped)
      * @param actionName      the UI action, for the log line only (may be null)
+     * @return 1 when handed to the command manager, 0 for the refusals of the two-argument form,
+     *         {@link #REFUSED_BOT_SLOT} when the bot-slot check refused
      */
     public static int run(ServerPlayerEntity player, String command, String resolvedBotName, String actionName) {
         if (player == null || command == null || command.isBlank()) {
@@ -107,18 +117,14 @@ public final class AuthorizedBotDispatch {
                         logName(player), refusal.get(), command);
                 return 0;
             }
-            if (resolvedBotName != null) {
-                // Diagnostic only: a failure here must never abort the dispatch.
-                try {
-                    Optional<String> mismatch = BotActionPolicy.botSlotRefusal(
-                            boundArguments(parse, command), BotActionPolicy.BOT_SLOT_ARGS, resolvedBotName);
-                    if (mismatch.isPresent()) {
-                        LOGGER.warn("[bot-access] bot-slot mismatch action={} bot={} reason={} cmd={}",
-                                actionName, resolvedBotName, mismatch.get(), command);
-                    }
-                } catch (RuntimeException e) {
-                    LOGGER.debug("[bot-access] bot-slot check skipped for action={}: {}", actionName, e.toString());
-                }
+            // Fail closed: a mismatch or a check that throws refuses the dispatch.
+            BotActionPolicy.BotSlotVerdict verdict = BotActionPolicy.botSlotVerdict(resolvedBotName,
+                    () -> BotActionPolicy.botSlotRefusal(
+                            boundArguments(parse, command), BotActionPolicy.BOT_SLOT_ARGS, resolvedBotName));
+            if (verdict.refuse()) {
+                LOGGER.warn("[bot-access] refused granted dispatch for {}: bot-slot mismatch action={} bot={} reason={} cmd={}",
+                        logName(player), actionName, resolvedBotName, verdict.reason(), command);
+                return REFUSED_BOT_SLOT;
             }
             manager.execute(parse, command);
             return 1;

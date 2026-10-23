@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -24,6 +25,11 @@ import java.util.regex.Pattern;
  * string slot), {@code leash release <bot>}, {@code retrieve <bot> me}, {@code guard <bot> <radius>}, {@code patrol <bot> <radius>}, {@code compass home <bot> <name>},
  * {@code compass travel <bot> [name]}. Slots typed {@code EntityArgumentType.player()} (return,
  * guard, patrol, craft, cook) need a name of at most 16 chars, quoted when it has other chars.
+ *
+ * <p>A fixed slot can lose to a literal: a bot named {@code stop} makes FOLLOW build
+ * {@code follow stop}, which parses as the untargeted FOLLOW_STOP. {@code AuthorizedBotDispatch}
+ * refuses any granted command whose parse did not bind the resolved bot in a
+ * {@link #BOT_SLOT_ARGS} slot ({@link #botSlotVerdict}).
  */
 public final class BotActionPolicy {
 
@@ -642,7 +648,7 @@ public final class BotActionPolicy {
         return Optional.empty();
     }
 
-    // ── Bot-slot check (pure part of AuthorizedBotDispatch, WARN-only) ─────
+    // ── Bot-slot check (pure part of AuthorizedBotDispatch, refuses since 1.1.296) ─
 
     /**
      * Argument names that bind the bot in the grammar of every {@link Action}'s target node:
@@ -650,7 +656,10 @@ public final class BotActionPolicy {
      * follow, follow toggle, follow-distance), {@code target} (stop, resume, standdown, sleep,
      * follow stop, leash, retrieve, fish forget, the toggles, hobby), {@code alias} (open) and
      * {@code bot_name} (compass home/travel, spawn). Not {@code player} (follow's target player)
-     * and not {@code name} (a compass label or hobby name).
+     * and not {@code name} (a compass label or hobby name). Audited against the command tree in
+     * 1.1.296: every targeted {@link Action} binds its bot in one of these, or in a greedy
+     * {@link #BOT_SLOT_SKIP_ARGS} form. A bot named like a grammar literal ({@code follow stop})
+     * parses with no bot slot bound, and the dispatch is refused.
      */
     public static final Set<String> BOT_SLOT_ARGS = Set.of("bot", "bots", "target", "alias", "bot_name");
 
@@ -663,7 +672,8 @@ public final class BotActionPolicy {
 
     /**
      * Why the parsed command does not bind {@code resolvedName} in a bot slot, or empty when it
-     * does (or the check does not apply). Codes: {@code NO_BOT_SLOT} (no bot-slot argument was
+     * does (or the check does not apply). A present code makes {@link #botSlotVerdict} refuse the
+     * dispatch (1.1.296; WARN-only from 1.1.232). Codes: {@code NO_BOT_SLOT} (no bot-slot argument was
      * bound), {@code BOT_SLOT_OTHER_NAME:<arg>} (a bot slot holds another name), each followed by
      * {@code ;IN:<arg>} when a non-bot argument holds the resolved name (the 1.1.231 CRAFT bug).
      * A non-bot argument equal to the name is only reported when the bot slot is wrong, so
@@ -698,6 +708,42 @@ public final class BotActionPolicy {
         }
         String code = otherName == null ? "NO_BOT_SLOT" : "BOT_SLOT_OTHER_NAME:" + otherName;
         return Optional.of(slotHolder == null ? code : code + ";IN:" + slotHolder);
+    }
+
+    /**
+     * The bot-slot gate's decision. {@code refuse} true means the command must not run;
+     * {@code reason} is a log code: {@code SKIPPED_UNTARGETED}, {@code BOUND} (bot slot holds the
+     * resolved bot, or a greedy skill form the skill parser targets itself), a
+     * {@link #botSlotRefusal} code, or {@code CHECK_FAILED:<cause>}.
+     */
+    public record BotSlotVerdict(boolean refuse, String reason) {
+        public static final BotSlotVerdict SKIPPED_UNTARGETED = new BotSlotVerdict(false, "SKIPPED_UNTARGETED");
+        public static final BotSlotVerdict BOUND = new BotSlotVerdict(false, "BOUND");
+    }
+
+    /**
+     * Fail-closed bot-slot gate for a granted dispatch. A null or blank {@code resolvedName} (the
+     * untargeted form) skips without calling {@code check}. Otherwise {@code check} (normally
+     * {@link #botSlotRefusal} over the parse's bound arguments) decides: empty runs, a code
+     * refuses, and a check that throws or returns null refuses too, so a broken check can never
+     * let a command reach a bot the server did not resolve.
+     */
+    public static BotSlotVerdict botSlotVerdict(String resolvedName, Supplier<Optional<String>> check) {
+        if (resolvedName == null || resolvedName.isBlank()) return BotSlotVerdict.SKIPPED_UNTARGETED;
+        Optional<String> result;
+        try {
+            result = check == null ? null : check.get();
+        } catch (RuntimeException e) {
+            return new BotSlotVerdict(true, "CHECK_FAILED:" + e.getClass().getSimpleName());
+        }
+        if (result == null) return new BotSlotVerdict(true, "CHECK_FAILED:NO_RESULT");
+        return result.map(code -> new BotSlotVerdict(true, code)).orElse(BotSlotVerdict.BOUND);
+    }
+
+    /** What the player is told when the bot-slot gate refused a button for {@code botName}. */
+    public static String botSlotRefusalMessage(String botName) {
+        String name = botName == null || botName.isBlank() ? "your bot" : botName;
+        return "That button did not reach " + name + ", so it was not run.";
     }
 
     // ── Throttle ────────────────────────────────────────────────────────────

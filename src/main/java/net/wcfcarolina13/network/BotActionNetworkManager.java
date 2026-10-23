@@ -270,12 +270,18 @@ public final class BotActionNetworkManager {
     }
 
     /**
-     * Runs under the grant; a refusal (parse error, unread input, nested dispatch) is told to the
-     * player. {@code botName} null (untargeted form) skips the WARN-only bot-slot check.
+     * Runs under the grant; a refusal (parse error, unread input, nested dispatch, a parse that
+     * did not bind {@code botName} in its bot slot) is told to the player. {@code botName} null
+     * (untargeted form) skips the bot-slot check.
      */
     private static boolean runOrTell(ServerPlayerEntity player, String command, String botName, String actionName) {
-        if (AuthorizedBotDispatch.run(player, command, botName, actionName) > 0) {
+        int result = AuthorizedBotDispatch.run(player, command, botName, actionName);
+        if (result > 0) {
             return true;
+        }
+        if (result == AuthorizedBotDispatch.REFUSED_BOT_SLOT) {
+            tell(player, BotActionPolicy.botSlotRefusalMessage(botName));
+            return false;
         }
         tell(player, "That button could not run. Check the server log.");
         return false;

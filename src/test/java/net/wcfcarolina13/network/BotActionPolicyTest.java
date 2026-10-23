@@ -531,7 +531,7 @@ class BotActionPolicyTest {
         assertTrue(t.shouldNotify(10_000L));
     }
 
-    // ── Bot-slot check (WARN-only in 1.1.232) ───────────────────────────────
+    // ── Bot-slot check (WARN-only in 1.1.232, refuses since 1.1.296) ────────
 
     private static Map<String, String> bound(String... kv) {
         Map<String, String> m = new LinkedHashMap<>();
@@ -584,5 +584,105 @@ class BotActionPolicyTest {
         assertFalse(BotActionPolicy.BOT_SLOT_ARGS.contains("player"));
         assertFalse(BotActionPolicy.BOT_SLOT_ARGS.contains("name"));
         assertFalse(BotActionPolicy.BOT_SLOT_ARGS.contains("material"));
+    }
+    private static BotActionPolicy.BotSlotVerdict verdict(Map<String, String> bound, String resolved) {
+        return BotActionPolicy.botSlotVerdict(resolved, () -> slot(bound, resolved));
+    }
+
+    @Test
+    void verdictRunsWhenTheBotSlotHoldsTheResolvedBot() {
+        BotActionPolicy.BotSlotVerdict v = verdict(bound("target", "Bob"), "Bob");
+        assertFalse(v.refuse());
+        assertEquals("BOUND", v.reason());
+    }
+
+    @Test
+    void verdictRefusesAMismatch() {
+        BotActionPolicy.BotSlotVerdict v = verdict(bound("target", "Jake"), "Bob");
+        assertTrue(v.refuse());
+        assertEquals("BOT_SLOT_OTHER_NAME:target", v.reason());
+        assertTrue(verdict(bound("item", "oak_planks", "material", "Bob"), "Bob").refuse());
+    }
+
+    @Test
+    void followStopKeywordBotIsRefused() {
+        // An admin spawns a bot called "stop". FOLLOW builds "follow stop", which Brigadier parses
+        // as the literal FOLLOW_STOP with nothing bound, acting on the player's last bot.
+        assertEquals("follow stop", ok(FOLLOW, "stop"));
+        BotActionPolicy.BotSlotVerdict v = verdict(bound(), "stop");
+        assertTrue(v.refuse());
+        assertEquals("NO_BOT_SLOT", v.reason());
+        // "follow toggle" and "leash release" lose to their literals the same way.
+        assertEquals("follow toggle", ok(FOLLOW, "toggle"));
+        assertEquals("leash release", ok(LEASH, "release"));
+        assertTrue(verdict(bound(), "toggle").refuse());
+    }
+
+    @Test
+    void verdictFailsClosedWhenTheCheckThrows() {
+        BotActionPolicy.BotSlotVerdict v = BotActionPolicy.botSlotVerdict("Bob", () -> {
+            throw new IllegalStateException("range out of bounds");
+        });
+        assertTrue(v.refuse());
+        assertEquals("CHECK_FAILED:IllegalStateException", v.reason());
+        assertTrue(BotActionPolicy.botSlotVerdict("Bob", () -> null).refuse());
+        assertTrue(BotActionPolicy.botSlotVerdict("Bob", null).refuse());
+    }
+
+    @Test
+    void verdictSkipsTheUntargetedFormWithoutRunningTheCheck() {
+        boolean[] called = {false};
+        for (String name : new String[] {null, "", " "}) {
+            BotActionPolicy.BotSlotVerdict v = BotActionPolicy.botSlotVerdict(name, () -> {
+                called[0] = true;
+                throw new IllegalStateException("must not run");
+            });
+            assertFalse(v.refuse());
+            assertEquals("SKIPPED_UNTARGETED", v.reason());
+        }
+        assertFalse(called[0]);
+    }
+
+    @Test
+    void verdictRunsGreedySkillForms() {
+        assertFalse(verdict(bound("skill_name", "woodcut", "arguments", "3 Bob"), "Bob").refuse());
+        assertFalse(verdict(bound("options", "patch W1 Bob"), "Bob").refuse());
+    }
+
+    @Test
+    void everyTargetedActionBindsItsBotInABotSlot() {
+        // The slot each built command binds the bot in, per the /bot command tree (1.1.296 audit).
+        Map<Action, String> slotFor = new LinkedHashMap<>();
+        slotFor.put(OPEN, "alias");
+        for (Action a : List.of(STOP, RESUME, STAND_DOWN, SLEEP, FOLLOW_STOP, FISH_FORGET, LEASH, RETRIEVE, TOGGLE, HOBBY_SET)) {
+            slotFor.put(a, "target");
+        }
+        for (Action a : List.of(COME, GO_TO_LOOK, FOLLOW, FOLLOW_TOGGLE, FOLLOW_DISTANCE)) {
+            slotFor.put(a, "bots");
+        }
+        for (Action a : List.of(RETURN_HOME, GUARD, PATROL, CRAFT, COOK, COMPANION)) {
+            slotFor.put(a, "bot");
+        }
+        for (Action a : List.of(COMPASS_HOME, COMPASS_TRAVEL, SPAWN)) {
+            slotFor.put(a, "bot_name");
+        }
+        for (Map.Entry<Action, String> e : slotFor.entrySet()) {
+            assertTrue(BotActionPolicy.BOT_SLOT_ARGS.contains(e.getValue()), e.getKey() + " -> " + e.getValue());
+            assertFalse(verdict(bound(e.getValue(), "Bob"), "Bob").refuse(), e.getKey().name());
+        }
+        // The rest carry the bot in a greedy skill/fortify argument, which the gate skips.
+        EnumSet<Action> greedy = EnumSet.of(SKILL, SKILL_WOODCUT, SKILL_FISH, SKILL_WOOL, SKILL_STRIPMINE,
+                SKILL_ASCENT, SKILL_DESCENT, SKILL_FARM, SKILL_SHELTER, SKILL_BUILD, SKILL_HUNT, FORTIFY);
+        EnumSet<Action> covered = EnumSet.copyOf(slotFor.keySet());
+        covered.addAll(greedy);
+        assertEquals(EnumSet.allOf(Action.class), covered, "every Action is classified");
+    }
+
+    @Test
+    void botSlotRefusalMessageIsPlain() {
+        String msg = BotActionPolicy.botSlotRefusalMessage("Bob");
+        assertEquals("That button did not reach Bob, so it was not run.", msg);
+        assertFalse(msg.contains(";") || msg.contains("\u2014"));
+        assertEquals("That button did not reach your bot, so it was not run.", BotActionPolicy.botSlotRefusalMessage(null));
     }
 }
