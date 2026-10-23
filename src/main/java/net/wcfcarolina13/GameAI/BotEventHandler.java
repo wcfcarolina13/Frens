@@ -45,6 +45,7 @@ import net.wcfcarolina13.GameAI.services.ElytraFlightService;
 import net.wcfcarolina13.GameAI.services.TreeStuckEscapeService;
 import net.wcfcarolina13.GameAI.services.BotLifecycleService;
 import net.wcfcarolina13.GameAI.services.BotRegistry;
+import net.wcfcarolina13.GameAI.services.RespawnHandlingTracker;
 import net.wcfcarolina13.GameAI.services.BotCommandStateService;
 import net.wcfcarolina13.GameAI.services.DropSweepService;
 import net.wcfcarolina13.GameAI.services.GuardPatrolService;
@@ -280,7 +281,7 @@ public class BotEventHandler {
         RETURNING_BASE,
         TRAVELING
     }
-    private static long lastRespawnHandledTick = -1;
+    private static final RespawnHandlingTracker RESPAWN_HANDLING = new RespawnHandlingTracker();
 
     private static BotCommandStateService.State stateFor(ServerPlayerEntity bot) {
         return BotCommandStateService.stateFor(bot);
@@ -732,6 +733,8 @@ public class BotEventHandler {
         BotRegistry.unregister(uuid);
         net.wcfcarolina13.GameAI.services.DurabilityFallbackService.clearCooldowns(uuid);
         net.wcfcarolina13.PlayerUtils.CombatInventoryManager.forgetBot(uuid);
+        net.wcfcarolina13.PlayerUtils.ToolSelector.forgetBot(uuid);
+        RESPAWN_HANDLING.forget(uuid);
         BotPersistenceService.removeBot(bot);
         clearState(bot);
         LAST_JOIN_ENCLOSURE_CHECK_TICK.remove(uuid);
@@ -1094,7 +1097,7 @@ public class BotEventHandler {
             ((net.wcfcarolina13.mixin.ServerPlayNetworkHandlerAccessor) (Object) bot.networkHandler).setDead(false);
         }
         if (srv != null) {
-            lastRespawnHandledTick = srv.getTicks();
+            RESPAWN_HANDLING.recordHandled(bot.getUuid(), srv.getTicks());
         }
 
         BotStuckService.setLastSafePosition(bot.getUuid(), target);
@@ -1120,16 +1123,21 @@ public class BotEventHandler {
             return;
         }
 
+        UUID botUuid = bot.getUuid();
+        Object lifecycle = RESPAWN_HANDLING.captureLifecycle(botUuid);
         long checkTick = srv.getTicks() + 5;
         srv.send(new ServerTask((int) checkTick, () -> {
-            long ticksSince = lastRespawnHandledTick < 0 ? Long.MAX_VALUE : checkTick - lastRespawnHandledTick;
-            if (ticksSince <= 5) {
-                return; // recent respawn already handled
+            if (BotEventHandler.server != srv || !BotRegistry.isRegistered(botUuid)
+                    || !RESPAWN_HANDLING.isCurrent(botUuid, lifecycle)) {
+                return;
+            }
+            if (RESPAWN_HANDLING.handledWithin(botUuid, checkTick, 5)) {
+                return; // recent respawn already handled for this bot
             }
 
             LOGGER.warn("AFTER_RESPAWN did not fire for bot {}; forcing respawn routine", bot.getName().getString());
             // Resolve the current entity — the captured 'bot' may be stale (old entity from death event)
-            ServerPlayerEntity currentBot = srv.getPlayerManager().getPlayer(bot.getUuid());
+            ServerPlayerEntity currentBot = srv.getPlayerManager().getPlayer(botUuid);
             if (currentBot == null) currentBot = bot;
             if (currentBot.isDead()) {
                 currentBot.setHealth(currentBot.getMaxHealth());
@@ -1152,7 +1160,8 @@ public class BotEventHandler {
             }
         }
 
-        // Diagnostic: log damage-immunity state for 200 ticks after respawn
+        // Diagnostic: log damage-immunity state for 200 ticks after this bot's respawn
+        long lastRespawnHandledTick = RESPAWN_HANDLING.lastHandledTick(bot.getUuid());
         long ticksSinceRespawn = lastRespawnHandledTick > 0 ? server.getTicks() - lastRespawnHandledTick : -1;
         if (ticksSinceRespawn >= 0 && ticksSinceRespawn <= 200 && ticksSinceRespawn % 20 == 0) {
             LOGGER.info("[respawn-diag] {} tick+{}: invulnerable={} timeUntilRegen={} hurtTime={} hp={} alive={} removed={}",
@@ -5396,8 +5405,8 @@ public class BotEventHandler {
         if (botId == null) {
             return false;
         }
-        long last = FOLLOW_BACKOFF_LOG_TICK.getOrDefault(botId, Long.MIN_VALUE);
-        if ((nowTick - last) < FOLLOW_BACKOFF_LOG_COOLDOWN_TICKS) {
+        Long last = FOLLOW_BACKOFF_LOG_TICK.get(botId);
+        if (!net.wcfcarolina13.GameAI.services.DiagnosticCooldownPolicy.canLog(last, nowTick, FOLLOW_BACKOFF_LOG_COOLDOWN_TICKS)) {
             return false;
         }
         FOLLOW_BACKOFF_LOG_TICK.put(botId, nowTick);
@@ -7518,6 +7527,7 @@ public class BotEventHandler {
 	            bot = null;
 	            BotLifecycleService.clear();
 	            BotRegistry.clear();
+	            net.wcfcarolina13.PlayerUtils.ToolSelector.resetSession();
 		            BotCommandStateService.clearAll();
 		            BotRescueService.reset();
 		            BotStuckService.resetAll();
@@ -7541,7 +7551,7 @@ public class BotEventHandler {
 
             botSpawnCount = 0;
 
-		            lastRespawnHandledTick = -1;
+		            RESPAWN_HANDLING.reset();
 		            
 		            LOGGER.info("BotEventHandler static state reset successfully.");
 		        }

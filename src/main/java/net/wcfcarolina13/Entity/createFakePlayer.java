@@ -63,6 +63,12 @@ public class createFakePlayer extends ServerPlayerEntity {
 
     }
 
+    /** Vanilla owns the state copy and connection handoff after constructing this replacement. */
+    public createFakePlayer createRespawnReplacement(MinecraftServer server, ServerWorld world,
+                                                     GameProfile profile, SyncedClientOptions options) {
+        return new createFakePlayer(server, world, profile, options, isAShadow);
+    }
+
     /**
      * Spawns a fake player. The returned future completes on the server thread once the bot has
      * connected. Offline/integrated servers spawn synchronously, so the future is already done on
@@ -70,7 +76,13 @@ public class createFakePlayer extends ServerPlayerEntity {
      * the bot appears a little later and the future completes then.
      */
     public static CompletableFuture<Void> createFake(String username, MinecraftServer server, Vec3d pos, double yaw, double pitch, RegistryKey<World> dimensionId, GameMode gamemode, boolean flying) {
+        return createFake(username, server, pos, yaw, pitch, dimensionId, gamemode, flying, Runnable::run);
+    }
 
+    /** Runs admission, connection and any success commit together on the connection's server thread. */
+    public static CompletableFuture<Void> createFake(String username, MinecraftServer server, Vec3d pos, double yaw, double pitch, RegistryKey<World> dimensionId, GameMode gamemode, boolean flying,
+                                                      java.util.function.Consumer<Runnable> connectionAttempt) {
+        Objects.requireNonNull(connectionAttempt, "connectionAttempt");
         ServerWorld worldIn = server.getWorld(dimensionId);
         boolean useMojangAuth = server.isDedicated() && server.isOnlineMode();
         GameProfileResolver resolver = server.getApiServices().profileResolver();
@@ -106,26 +118,24 @@ public class createFakePlayer extends ServerPlayerEntity {
         if (useMojangAuth) {
 
             GameProfile finalGP = gameProfile;
-            CompletableFuture<Void> spawned = new CompletableFuture<>();
-            fetchGameProfile(gameProfile.name())
-                    .exceptionally(e -> Optional.empty()) // lookup failed: spawn with the local profile
-                    .thenAccept(p -> {
-                        GameProfile current = p.orElse(finalGP);
-                        // The fetch completes on a pool thread; connecting a player must happen on the server thread.
-                        server.execute(() -> {
-                            try {
-                                spawnFake(server, worldIn, current, pos, yaw, pitch, gamemode, flying, dimensionId);
-                                spawned.complete(null);
-                            } catch (Throwable t) {
-                                LOGGER.error("Deferred spawn of {} failed", current.name(), t);
-                                spawned.completeExceptionally(t);
-                            }
-                        });
-                    });
+            CompletableFuture<Void> spawned = net.wcfcarolina13.GameAI.services.DeferredSpawnPolicy.connectAfter(
+                    server,
+                    fetchGameProfile(gameProfile.name())
+                            .exceptionally(e -> Optional.empty()), // lookup failed: spawn with the local profile
+                    server::execute,
+                    () -> !TaskService.isServerStopping() && !server.isStopped()
+                            && (Frens.serverInstance == null || Frens.serverInstance == server),
+                    p -> connectionAttempt.accept(() -> spawnFake(server, worldIn, p.orElse(finalGP), pos, yaw, pitch, gamemode, flying, dimensionId)));
+            spawned.whenComplete((ignored, error) -> {
+                if (error != null && !(error instanceof java.util.concurrent.CancellationException)) {
+                    LOGGER.error("Deferred spawn of {} failed", username, error);
+                }
+            });
             return spawned;
         }
 
-        spawnFake(server, worldIn, gameProfile, pos, yaw, pitch, gamemode, flying, dimensionId);
+        GameProfile localProfile = gameProfile;
+        connectionAttempt.accept(() -> spawnFake(server, worldIn, localProfile, pos, yaw, pitch, gamemode, flying, dimensionId));
         return CompletableFuture.completedFuture(null);
 
     }

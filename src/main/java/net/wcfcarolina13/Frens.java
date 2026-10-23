@@ -151,7 +151,7 @@ public class Frens implements ModInitializer {
         if (sender == null || bot == null || serverInstance == null) {
             return false;
         }
-        boolean host = serverInstance.isHost(new PlayerConfigEntry(sender.getGameProfile()));
+        boolean host = net.wcfcarolina13.network.BotAccessGate.isHost(serverInstance, sender);
         boolean allowed = net.wcfcarolina13.GameAI.llm.LegacyChatAccessPolicy.isAuthorized(
                 host,
                 isOperator(sender),
@@ -198,7 +198,7 @@ public class Frens implements ModInitializer {
         // Frens button and key sends /bot. A dedicated server's isHost is always false.
         MinecraftServer server = source.getServer();
         boolean host = !operator && server != null
-                && server.isHost(new PlayerConfigEntry(player.getGameProfile()));
+                && net.wcfcarolina13.network.BotAccessGate.isHost(server, player);
         return net.wcfcarolina13.GameAI.services.HostPermissionPolicy.allowsBotCommands(false, operator, host);
     }
 
@@ -710,32 +710,30 @@ public class Frens implements ModInitializer {
             if (senderUuid == null) {
                 return;
             }
-            context.server().execute(() -> {
-                if (Frens.CONFIG == null) {
-                    return;
+            if (Frens.CONFIG == null) {
+                return;
+            }
+            boolean current = Frens.CONFIG.getPreserveExpensiveGear(senderUuid);
+            PlayerPreferenceGate.Admission admission = PREFERENCE_GATE.admit(
+                    senderUuid, "preserveExpensiveGear", current, payload.enabled(), System.currentTimeMillis());
+            if (admission.decision() == PlayerPreferenceGate.Decision.RATE_LIMITED) {
+                // Too soon after the last accepted change: resync the client's optimistic
+                // toggle — at most once per player+preference per 500 ms.
+                if (PREFERENCE_GATE.resyncDue(senderUuid, "preserveExpensiveGear", System.currentTimeMillis())) {
+                    net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerPreserveStatePayload(current));
                 }
-                boolean current = Frens.CONFIG.getPreserveExpensiveGear(senderUuid);
-                PlayerPreferenceGate.Admission admission = PREFERENCE_GATE.admit(
-                        senderUuid, "preserveExpensiveGear", current, payload.enabled(), System.currentTimeMillis());
-                if (admission.decision() == PlayerPreferenceGate.Decision.RATE_LIMITED) {
-                    // Too soon after the last accepted change: resync the client's optimistic
-                    // toggle — at most once per player+preference per 500 ms.
-                    if (PREFERENCE_GATE.resyncDue(senderUuid, "preserveExpensiveGear", System.currentTimeMillis())) {
-                        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerPreserveStatePayload(current));
-                    }
-                    return;
-                }
-                if (!admission.accepted()) {
-                    return;
-                }
-                // Saved by the coalesced flush on the server tick (and at SERVER_STOPPING).
-                Frens.CONFIG.setPreserveExpensiveGear(senderUuid, payload.enabled());
-                // Only a real OFF → ON flip clears stale cooldowns for the player's bots, so the
-                // next selection call gets a fresh fallback attempt.
-                if (admission.risingEdge()) {
-                    net.wcfcarolina13.GameAI.services.DurabilityFallbackService.clearCooldownsForOwner(senderUuid);
-                }
-            });
+                return;
+            }
+            if (!admission.accepted()) {
+                return;
+            }
+            // Saved by the coalesced flush on the server tick (and at SERVER_STOPPING).
+            Frens.CONFIG.setPreserveExpensiveGear(senderUuid, payload.enabled());
+            // Only a real OFF → ON flip clears stale cooldowns for the player's bots, so the
+            // next selection call gets a fresh fallback attempt.
+            if (admission.risingEdge()) {
+                net.wcfcarolina13.GameAI.services.DurabilityFallbackService.clearCooldownsForOwner(senderUuid);
+            }
         });
 
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(RequestPlayerPreservePayload.ID, (payload, context) -> {
@@ -760,24 +758,22 @@ public class Frens implements ModInitializer {
             if (sender == null) return;
             java.util.UUID senderUuid = sender.getUuid();
             if (senderUuid == null) return;
-            context.server().execute(() -> {
-                if (Frens.CONFIG == null) {
-                    return;
+            if (Frens.CONFIG == null) {
+                return;
+            }
+            boolean current = Frens.CONFIG.getAutoAcceptPreciousFoods(senderUuid);
+            PlayerPreferenceGate.Admission admission = PREFERENCE_GATE.admit(
+                    senderUuid, "autoAcceptPreciousFoods", current, payload.enabled(), System.currentTimeMillis());
+            if (admission.decision() == PlayerPreferenceGate.Decision.RATE_LIMITED) {
+                if (PREFERENCE_GATE.resyncDue(senderUuid, "autoAcceptPreciousFoods", System.currentTimeMillis())) {
+                    net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerAutoAcceptPreciousStatePayload(current));
                 }
-                boolean current = Frens.CONFIG.getAutoAcceptPreciousFoods(senderUuid);
-                PlayerPreferenceGate.Admission admission = PREFERENCE_GATE.admit(
-                        senderUuid, "autoAcceptPreciousFoods", current, payload.enabled(), System.currentTimeMillis());
-                if (admission.decision() == PlayerPreferenceGate.Decision.RATE_LIMITED) {
-                    if (PREFERENCE_GATE.resyncDue(senderUuid, "autoAcceptPreciousFoods", System.currentTimeMillis())) {
-                        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(sender, new PlayerAutoAcceptPreciousStatePayload(current));
-                    }
-                    return;
-                }
-                if (admission.accepted()) {
-                    // Saved by the coalesced flush on the server tick (and at SERVER_STOPPING).
-                    Frens.CONFIG.setAutoAcceptPreciousFoods(senderUuid, payload.enabled());
-                }
-            });
+                return;
+            }
+            if (admission.accepted()) {
+                // Saved by the coalesced flush on the server tick (and at SERVER_STOPPING).
+                Frens.CONFIG.setAutoAcceptPreciousFoods(senderUuid, payload.enabled());
+            }
         });
 
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(RequestPlayerAutoAcceptPreciousPayload.ID, (payload, context) -> {
@@ -894,6 +890,7 @@ public class Frens implements ModInitializer {
             AI_CHAT_OFF_HINTED.clear();
             net.wcfcarolina13.GameAI.skills.impl.WoodcutSkill.clearProtectionNudges();
             net.wcfcarolina13.GameAI.services.TaskService.markServerStopping();
+            net.wcfcarolina13.GameAI.services.DeferredSpawnPolicy.cancelPending(server);
             // Persist any player-preference change still waiting for the coalesced tick flush.
             if (PREFERENCE_GATE.drainForShutdown() && CONFIG != null) {
                 CONFIG.save();
@@ -1149,9 +1146,9 @@ public class Frens implements ModInitializer {
                                 // Only log warning once every 3 seconds to prevent flooding
                                 UUID botUuid = serverPlayer.getUuid();
                                 long now = server.getTicks();
-                                long lastWarning = LAST_IN_WALL_WARNING_TICK.getOrDefault(botUuid, Long.MIN_VALUE);
+                                Long lastWarning = LAST_IN_WALL_WARNING_TICK.get(botUuid);
                                 
-                                if (now - lastWarning >= IN_WALL_WARNING_COOLDOWN_TICKS) {
+                                if (net.wcfcarolina13.GameAI.services.DiagnosticCooldownPolicy.canLog(lastWarning, now, IN_WALL_WARNING_COOLDOWN_TICKS)) {
                                     LOGGER.warn("Bot {} taking IN_WALL damage - attempting immediate escape",
                                             serverPlayer.getName().getString());
                                     LAST_IN_WALL_WARNING_TICK.put(botUuid, now);
