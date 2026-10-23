@@ -19,11 +19,13 @@ import net.minecraft.registry.tag.EnchantmentTags;
 import net.minecraft.screen.EnchantmentScreenHandler;
 import net.minecraft.screen.ScreenHandlerContext;
 import net.minecraft.screen.ScreenHandlerType;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.stat.Stats;
-import net.minecraft.util.Util;
+import net.wcfcarolina13.GameAI.services.BotAccessPolicy;
+import net.wcfcarolina13.network.BotAccessGate;
 import net.minecraft.util.math.random.Random;
 
 /**
@@ -114,6 +116,27 @@ public class BotEnchantmentScreenHandler extends EnchantmentScreenHandler {
         };
     }
 
+    @Override
+    public boolean canUse(PlayerEntity player) {
+        if (bot == null) {
+            return super.canUse(player);
+        }
+        return player instanceof ServerPlayerEntity viewer
+                && !bot.isRemoved()
+                && BotAccessPolicy.allowed(BotAccessGate.decide(viewer, bot))
+                && viewer.getEntityWorld() == bot.getEntityWorld()
+                && viewer.squaredDistanceTo(bot) <= 64.0 * 64.0
+                && super.canUse(player);
+    }
+
+    @Override
+    public void onSlotClick(int slotIndex, int button, SlotActionType actionType, PlayerEntity player) {
+        if (bot != null && !canUse(player)) {
+            return;
+        }
+        super.onSlotClick(slotIndex, button, actionType, player);
+    }
+
     /**
      * Full reimplementation — vanilla captures the {@code player} param in a lambda
      * and uses it for XP checks, stat credits, and re-seeding. We substitute {@link #bot}.
@@ -130,6 +153,10 @@ public class BotEnchantmentScreenHandler extends EnchantmentScreenHandler {
         if (bot == null) {
             return this.enchantmentPower[id] > 0
                     && !this.slots.get(0).getStack().isEmpty();
+        }
+
+        if (!canUse(player)) {
+            return false;
         }
 
         ItemStack itemStack = this.slots.get(0).getStack();

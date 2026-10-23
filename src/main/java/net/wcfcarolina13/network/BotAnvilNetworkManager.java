@@ -8,6 +8,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Commands.modCommandRegistry;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.EntityUtil;
@@ -48,6 +49,12 @@ public final class BotAnvilNetworkManager {
 
         ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botAlias);
         if (bot == null || !(bot instanceof createFakePlayer)) {
+            return;
+        }
+
+        if (!BotAccessGate.permits(player, bot, "anvil-open")) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(),
+                    "§cYou don't have permission to open this bot's anvil.§r");
             return;
         }
 

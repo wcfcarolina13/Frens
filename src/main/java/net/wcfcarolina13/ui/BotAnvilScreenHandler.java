@@ -7,6 +7,8 @@ import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.ScreenHandlerContext;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.wcfcarolina13.GameAI.services.BotAccessPolicy;
+import net.wcfcarolina13.network.BotAccessGate;
 
 /**
  * Anvil screen handler that operates on a <b>bot's</b> inventory and XP
@@ -49,12 +51,23 @@ public class BotAnvilScreenHandler extends AnvilScreenHandler {
         return net.wcfcarolina13.Frens.BOT_ANVIL_HANDLER;
     }
 
+    @Override
+    public boolean canUse(PlayerEntity player) {
+        if (bot == null) return super.canUse(player);
+        if (!(player instanceof ServerPlayerEntity serverPlayer) || bot.isRemoved()) return false;
+        return BotAccessPolicy.allowed(BotAccessGate.decide(serverPlayer, bot))
+                && player.getEntityWorld() == bot.getEntityWorld()
+                && player.squaredDistanceTo(bot) <= 64.0 * 64.0
+                && super.canUse(player);
+    }
+
     /**
      * Diagnostic: log every slot interaction reaching the server-side handler so we can
      * see whether the output click ever arrives (and what action type).
      */
     @Override
     public void onSlotClick(int slotIndex, int button, net.minecraft.screen.slot.SlotActionType actionType, PlayerEntity player) {
+        if (bot != null && !canUse(player)) return;
         if (bot != null) {
             String slotDesc = "(invalid)";
             if (slotIndex >= 0 && slotIndex < this.slots.size()) {
@@ -77,6 +90,7 @@ public class BotAnvilScreenHandler extends AnvilScreenHandler {
             // Client side — let the click through, server validates
             return this.getLevelCost() > 0;
         }
+        if (!canUse(player)) return false;
         int cost = this.getLevelCost();
         boolean enoughXp = bot.experienceLevel >= cost;
         boolean valid = cost > 0;

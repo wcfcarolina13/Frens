@@ -52,6 +52,11 @@ public final class BotEnchantNetworkManager {
             return;
         }
 
+        if (!BotAccessGate.permits(player, bot, "enchant-open")) {
+            player.sendMessage(Text.literal("Only this bot's owner, an operator or the host can enchant its items."), false);
+            return;
+        }
+
         // Validate same world and reasonable distance (64 blocks, matching inventory access).
         if (player.getEntityWorld() != bot.getEntityWorld()
                 || player.squaredDistanceTo(bot) > 64.0 * 64.0) {
