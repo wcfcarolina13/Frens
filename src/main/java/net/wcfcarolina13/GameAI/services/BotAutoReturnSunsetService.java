@@ -17,6 +17,7 @@ import net.wcfcarolina13.GameAI.services.BotCommandStateService;
 import net.wcfcarolina13.GameAI.services.TravelMountHandler;
 import net.wcfcarolina13.network.NavigationRequestPayload;
 import net.wcfcarolina13.PathFinding.PathFinder;
+import net.wcfcarolina13.PathFinding.unified.PlanStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,8 +49,6 @@ public final class BotAutoReturnSunsetService {
     private static final long NO_PROGRESS_FAILOVER_TICKS = 320L;
     private static final long ROUTE_REPLAN_INTERVAL_TICKS = 40L;
     private static final double SEGMENT_REFRESH_REACH_SQ = 6.0D * 6.0D;
-    private static final double MAX_SEGMENT_PROGRESS = 24.0D;
-    private static final double MIN_SEGMENT_PROGRESS = 8.0D;
     /** At most one INFO "Sunset segment" line per session per ~10 s unless the finder changes. */
     private static final long SEGMENT_LOG_INFO_INTERVAL_TICKS = 200L;
     private static final double COMMANDER_FALLBACK_RANGE_SQ = 48.0D * 48.0D;
@@ -102,6 +101,8 @@ public final class BotAutoReturnSunsetService {
         private String lastSegmentLogFinder;
         /** Server tick of the last INFO "Sunset segment" line. */
         private long lastSegmentLogTick;
+        /** The last segment refresh found no route: gate the next probe on nextRouteServerTick. */
+        private boolean lastRefreshFailed;
     }
 
     private static final AtomicInteger AUTO_THREAD_ID = new AtomicInteger(0);
@@ -534,6 +535,7 @@ public final class BotAutoReturnSunsetService {
         session.lastProgressDistSq = bot.getBlockPos().getSquaredDistance(anchor.pos());
         session.nextRouteServerTick = 0L;
         session.routeFailures = 0;
+        session.lastRefreshFailed = false;
         session.tacticalShelterTriggered = false;
         session.localReassessUntilTick = 0L;
         ACTIVE_SESSIONS.put(bot.getUuid(), session);
@@ -662,12 +664,16 @@ public final class BotAutoReturnSunsetService {
 
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
         BlockPos currentGoal = state != null ? state.followFixedGoal : null;
-        boolean needSegmentRefresh = currentGoal == null
-                || bot.getBlockPos().getSquaredDistance(currentGoal) <= SEGMENT_REFRESH_REACH_SQ
-                || serverTick >= session.nextRouteServerTick;
+        boolean needSegmentRefresh = SunsetSegmentPolicy.shouldReprobe(
+                currentGoal != null,
+                currentGoal != null && bot.getBlockPos().getSquaredDistance(currentGoal) <= SEGMENT_REFRESH_REACH_SQ,
+                serverTick,
+                session.nextRouteServerTick,
+                session.lastRefreshFailed);
         if (needSegmentRefresh) {
             boolean routed = refreshTravelSegment(bot, world, session);
             session.nextRouteServerTick = serverTick + ROUTE_REPLAN_INTERVAL_TICKS;
+            session.lastRefreshFailed = !routed;
             if (!routed) {
                 session.routeFailures++;
                 if (!session.fallbackEngaged && session.selfSufficient && session.routeFailures >= 2) {
@@ -716,6 +722,7 @@ public final class BotAutoReturnSunsetService {
         session.lastProgressDistSq = bot.getBlockPos().getSquaredDistance(session.activeAnchor);
         session.nextRouteServerTick = 0L;
         session.routeFailures = 0;
+        session.lastRefreshFailed = false;
         session.tacticalShelterTriggered = false;
         session.localReassessUntilTick = 0L;
 
@@ -863,9 +870,11 @@ public final class BotAutoReturnSunsetService {
         BlockPos nextGoal = anchor;
         if (manhattan > 60) {
             // Server thread: the bot's own finder, bounded by the 200 ms budget in every branch.
+            long probeStartNs = System.nanoTime();
             PathFinder.PlanResult probe = PathFinder.probePlan(botPos, anchor, world, bot.getUuid(), 200L);
-            nextGoal = chooseSegmentGoal(botPos, anchor, probe.nodes());
-            logSegment(bot, world, session, probe, nextGoal);
+            long probeMs = (System.nanoTime() - probeStartNs) / 1_000_000L;
+            nextGoal = chooseSegmentGoal(botPos, anchor, probe);
+            logSegment(bot, world, session, probe, nextGoal, probeMs, manhattan);
             if (nextGoal == null) {
                 return false;
             }
@@ -897,53 +906,51 @@ public final class BotAutoReturnSunsetService {
      * next goal moves on most 2 s refreshes while the bot walks, so it is not a trigger.
      */
     private static void logSegment(ServerPlayerEntity bot, ServerWorld world, SunsetSession session,
-                                   PathFinder.PlanResult probe, BlockPos nextGoal) {
+                                   PathFinder.PlanResult probe, BlockPos nextGoal, long probeMs, int manhattan) {
         String finder = probe.finder().label();
         String next = nextGoal != null ? nextGoal.toShortString() : "none";
+        String status = probe.plan() != null ? probe.plan().status().name() : "-";
         String name = bot.getName().getString();
         long tick = world.getServer() != null ? world.getServer().getTicks() : 0L;
         boolean info = session.lastSegmentLogFinder == null
                 || !session.lastSegmentLogFinder.equals(finder)
                 || tick - session.lastSegmentLogTick >= SEGMENT_LOG_INFO_INTERVAL_TICKS;
         if (!info) {
-            LOGGER.debug("Sunset segment for {} finder={} pathLen={} next={}", name, finder, probe.nodes().size(), next);
+            LOGGER.debug("Sunset segment for {} finder={} status={} reason={} pathLen={} ms={} manhattan={} next={}",
+                    name, finder, status, probe.reason(), probe.nodes().size(), probeMs, manhattan, next);
             return;
         }
         session.lastSegmentLogFinder = finder;
         session.lastSegmentLogTick = tick;
-        LOGGER.info("Sunset segment for {} finder={} pathLen={} next={}", name, finder, probe.nodes().size(), next);
+        LOGGER.info("Sunset segment for {} finder={} status={} reason={} pathLen={} ms={} manhattan={} next={}",
+                name, finder, status, probe.reason(), probe.nodes().size(), probeMs, manhattan, next);
     }
 
-    private static BlockPos chooseSegmentGoal(BlockPos start, BlockPos anchor, List<PathFinder.PathNode> path) {
-        if (start == null || anchor == null || path == null || path.isEmpty()) {
+    /** Adapts the probe to {@link SunsetSegmentPolicy#chooseSegmentGoal}; null when no node qualifies. */
+    private static BlockPos chooseSegmentGoal(BlockPos start, BlockPos anchor, PathFinder.PlanResult probe) {
+        if (start == null || anchor == null || probe == null || probe.nodes().isEmpty()) {
             return null;
         }
-        BlockPos best = null;
-        double accumulated = 0.0D;
-        BlockPos prev = start;
-        for (PathFinder.PathNode node : path) {
-            if (node == null || node.pos == null) {
-                continue;
-            }
-            BlockPos current = node.pos.toImmutable();
-            if (current.equals(start)) {
-                continue;
-            }
-            accumulated += Math.sqrt(prev.getSquaredDistance(current));
-            best = current;
-            prev = current;
-            if (accumulated >= MAX_SEGMENT_PROGRESS) {
-                break;
+        List<BlockPos> positions = new java.util.ArrayList<>(probe.nodes().size());
+        for (PathFinder.PathNode node : probe.nodes()) {
+            if (node != null && node.pos != null) {
+                positions.add(node.pos.toImmutable());
             }
         }
-        if (best == null || best.equals(start)) {
-            return null;
+        int n = positions.size();
+        int[] xs = new int[n];
+        int[] ys = new int[n];
+        int[] zs = new int[n];
+        for (int i = 0; i < n; i++) {
+            BlockPos p = positions.get(i);
+            xs[i] = p.getX();
+            ys[i] = p.getY();
+            zs[i] = p.getZ();
         }
-        double progress = Math.sqrt(start.getSquaredDistance(best));
-        if (progress < MIN_SEGMENT_PROGRESS && !best.equals(anchor)) {
-            return null;
-        }
-        return best;
+        PlanStatus status = probe.plan() != null ? probe.plan().status() : null;
+        int idx = SunsetSegmentPolicy.chooseSegmentGoal(start.getX(), start.getY(), start.getZ(),
+                anchor.getX(), anchor.getY(), anchor.getZ(), xs, ys, zs, status);
+        return idx >= 0 ? positions.get(idx) : null;
     }
 
     private static SunsetAnchor resolvePrimaryHomeAnchor(ServerPlayerEntity bot, ServerWorld world) {
