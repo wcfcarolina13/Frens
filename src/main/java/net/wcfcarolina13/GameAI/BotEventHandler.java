@@ -703,9 +703,25 @@ public class BotEventHandler {
                         return;
                     }
                     double movedSq = candidate.squaredDistanceTo(spawnPos);
-                    if (movedSq < 4.0) { // hasn't moved more than 2 blocks
-                        // At night, stay sheltered — don't break free into danger
-                        if (!sw.isDay() && !sw.isThundering()) {
+                    boolean movedAway = movedSq >= 4.0; // moved 2 blocks or more since joining
+                    // A house that is not a registered base (a village house, a player's room):
+                    // the bot respawned at home, not trapped. Break-free there mines the wall or
+                    // the roof, and a JOIN_ENCLOSED shelter mines upward at dawn. The scan runs
+                    // only when every cheaper gate above has let the check through.
+                    boolean insidePlayerBuilt = !movedAway
+                            && net.wcfcarolina13.GameAI.services.PlayerBuiltStructureScanner
+                                    .isInsidePlayerBuilt(sw, candidate.getBlockPos());
+                    // nearBase, atSurface and commanderNear returned above, so they are false here.
+                    net.wcfcarolina13.GameAI.services.JoinEnclosurePolicy.Decision joinDecision =
+                            net.wcfcarolina13.GameAI.services.JoinEnclosurePolicy.decide(
+                                    false, false, false, movedAway, insidePlayerBuilt,
+                                    sw.isDay() || sw.isThundering());
+                    switch (joinDecision) {
+                        case SKIP_PLAYER_BUILT -> LOGGER.info(
+                                "Bot {} join enclosure suppressed: inside player-built structure",
+                                candidate.getName().getString());
+                        case SHELTER -> {
+                            // At night, stay sheltered — don't break free into danger
                             LOGGER.info("Bot {} enclosed on join but nighttime — staying sheltered until dawn",
                                     candidate.getName().getString());
                             if (!BotFleeService.setShelterFromJoin(candidate)) {
@@ -713,10 +729,14 @@ public class BotEventHandler {
                                         candidate.getName().getString());
                                 BotFleeService.forceBreakFree(candidate);
                             }
-                        } else {
+                        }
+                        case BREAK_FREE -> {
                             LOGGER.info("Bot {} trapped on join — hasn't moved ({} blocks) and no sky. Launching break-free.",
                                     candidate.getName().getString(), String.format("%.1f", Math.sqrt(movedSq)));
                             BotFleeService.forceBreakFree(candidate);
+                        }
+                        default -> {
+                            // moved away: nothing to do
                         }
                     }
                 }));

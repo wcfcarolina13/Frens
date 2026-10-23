@@ -3307,9 +3307,14 @@ public final class BotFleeService {
         }
         if (!posCheck.openSky() && !posCheck.nearSurface()) {
             boolean commanderHere = isCommanderNearby(bot, server);
-            if (commanderHere || nearBase) {
+            // A house that is not a registered base also holds the bot (scanned only when the
+            // commander and base exemptions do not already apply).
+            boolean insidePlayerBuilt = !commanderHere && !nearBase
+                    && PlayerBuiltStructureScanner.isInsidePlayerBuilt(world, bot.getBlockPos());
+            if (JoinEnclosurePolicy.lingerStaysAtNonFunctionalPosition(commanderHere, nearBase, insidePlayerBuilt)) {
                 LOGGER.info("Bot {} linger: non-functional position but {} — staying put",
-                        name, commanderHere ? "commander nearby" : "near base");
+                        name, commanderHere ? "commander nearby"
+                                : nearBase ? "near base" : "inside player-built structure");
             } else {
                 LOGGER.info("Bot {} linger: bypassed — stuck at non-functional position (openSky=false nearSurface=false)", name);
                 return false;
