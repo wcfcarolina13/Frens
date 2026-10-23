@@ -4,7 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-23 (1.1.294) — next session starts here
+## Session Handoff 2026-10-23 (1.1.295) — next session starts here
+
+**State:** 1.1.295 on main and deployed to Nirn. It is the next public Modrinth release (Bradley 2026-10-23), pending the fresh-install part 2 check and Bradley's OK on the release notes. Ships: a following bot gets up a leafy step (sweep F1), `/bot place` onto snow in one command with no tick freeze or error (F2), a bot that walks into the End exit portal comes back by itself, a dead bot's task stops (no "Mining complete" after death), "Task ended: changed dimension." once, the 39 placeholder-only voice lines are text only, and a client crash on `/bot spawn` (ConcurrentModificationException in the alias maps) is fixed. Sandbox-checked, `docs/testing/FIELD_1_1_295_SANDBOX_2026-10-23.md`, replays `frens_1_1_295_*`. Tests 3745.
+
+**Field checks pending:** Phase 6cd (one item: a text-only line seen in play). Phase 6cc on Nirn. The guided LAN-guest check.
+
+**Deferred (with reasons):** a second End exit by the same bot takes the plain teleport path (`seenCredits` true): follow is cleared and the task ends with "External teleport detected." (pre-existing, now on every bot's second End trip; fix with a reset on the cross-dimension `teleportTo` path). `AFTER_RESPAWN` does not fire for real deaths or `/kill` (the fallback runs; worth knowing why). `/bot place` from a distance needs a worker hop. A live text-only line was not seen in the sandbox. 6bz1 (fortify or shelter onto snow) not run: the `sheltertest.py seal` setup did not trigger a shelter (Wally's commander is another bot). Review minors: weird-portal edge flag re-rolls each tick while text is off, `TaskService.resetAll` clears the worker ticket only on its own thread, `attemptAdjacentChest` places into its own anchor cell.
+
+**Needs Bradley:** OK on the exact Modrinth notes text (draft in Phase 4 of this session); OK to delete the throwaway fresh-install Prism instance afterwards.
+
+## Session Handoff 2026-10-23 (1.1.294) — superseded
 
 **State:** 1.1.294 on main and deployed to Nirn. Fixes the one 1.1.293 sandbox failure and a second bug the recheck found: after an End exit mid-task the "Task ended: changed dimension." line reaches chat (sent through the new entity), and the bot follows again (`RespawnResetPolicy.resumeFollowAfterSkill`). Sandbox-checked, replays `frens_1_1_294_end_exit_chat`, `frens_1_1_294_end_exit_follow`. Tests 3705.
 
@@ -827,7 +837,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 ### Souls, dialogue and audio
 - [x] "Audio for \"Hey, incoming!\"." (also listed in untracked `AUDIO_NEEDED.md`; 1.1.261 handoff, 2026-10-17) → covered by "Ruled 2026-10-23 (Bradley): text only" (placeholder voice lines) below (triage 2026-10-23)
 - [x] "Extend the punctuation guard to the JSON resources." (1.1.261 handoff, 2026-10-17) — ✅ 1.1.283 003fd626
-- [ ] **P1 (S)** Ruled 2026-10-23 (Bradley): text only. Lines with only silent placeholder sounds show as chat text, voice skips them, placeholders removed (going into 1.1.295). Was: (uncertain) "#10 audio regeneration (needs Bradley's triage)" = "The missing `snow_golem_ammo` and other voice clips." (1.1.239 `ef4ea499` added empty-sound stubs only; 1.1.239 handoff, 2026-10-14; 1.1.223 handoff, 2026-09-25) (with the 1.1.295 session)
+- [x] ✅ 1.1.295 **P1 (S)** Ruled 2026-10-23 (Bradley): text only. Lines with only silent placeholder sounds show as chat text, voice skips them, placeholders removed (going into 1.1.295). Was: (uncertain) "#10 audio regeneration (needs Bradley's triage)" = "The missing `snow_golem_ammo` and other voice clips." (1.1.239 `ef4ea499` added empty-sound stubs only; 1.1.239 handoff, 2026-10-14; 1.1.223 handoff, 2026-09-25) (with the 1.1.295 session)
 - [ ] **P3 (M)** "Later: scene smoothing step 2 (scene boundaries in history)" (1.1.223 handoff, 2026-09-25)
 - [ ] **P3 (L)** "self-directed goals (proposer-only)." (1.1.223 handoff, 2026-09-25)
 - [x] "The Pocket installer's pre-wait EOF read, which can hang." (1.1.223 handoff, 2026-09-25) — ✅ 1.1.279 911b1243 (unit-tested; not run in the sandbox)
