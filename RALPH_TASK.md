@@ -4,7 +4,21 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-22 (remaining source-confirmed bug wave verified) — next session starts here
+## Session Handoff 2026-10-23 (1.1.291) — next session starts here
+
+**State:** 1.1.291 on main and deployed to Nirn (1.21.11). It ships the Codex wave below (every "shipped in 1.1.291" handoff) after a Fable review, one fix wave, a scoped Fable re-review and a sandbox check with Carpet 1.4.194 installed. Changelog entry "Codex reliability, access and save-isolation wave, reviewed and hardened; 1.1.291" has the details, rulings and kept limits. Reviews: `.superpowers/codex-wave-backup-2026-10-22/fable-review.md` and `fable-rereview.md` (untracked).
+
+**Fixed on top of Codex:** End-exit respawn hook is a MixinExtras `@WrapOperation` (Carpet redirects the same NEW; two redirects crash at class load, and Nirn runs Carpet). Seven fingerprinted stores adopt legacy level-name data at SERVER_STARTED (`LegacyRegistryRecoveryPolicy.adoptLegacy`, claims plus brand-new declines, no empty buckets). `/bot legacy-state registry import <store> "<fp>" from "<key>"` for moved instances. Malformed store files go to `.bad-<stamp>` (`UnreadableStoreFile.quarantineIfCorrupt`), read errors leave the file alone. Mojang profile lookup times out (10 s).
+
+**Field checks pending:** Phase 6cc (Nirn first start adopts its store data, full mod list starts clean). Guided: LAN guest is not the host (needs a second account). Earlier pending phases unchanged.
+
+**Deferred minors (with reasons, from the review):** no in-game notice for a quarantined file (log WARN only, low frequency). A refused-adoption save's first runtime write still creates an empty bucket, so `from` import must run right after load. End exit runs the death-respawn reset (`RespawnHandler.registerRespawnListener` ignores `alive`, pre-existing). `MiningTool` treats a 2 s `switchToHarmlessFallback` timeout as no safe tool. `SmeltingService` does not walk back after losing furnace reach. `GroupScenePlayback.enqueue` drops silently when a scene is active and the pending entry leaks. `fabric.mod.json` suggests Carpet 1.4.188 (1.21.11 release is 1.4.193+). Hunt-config preview suggests import with 0 records. Fingerprint is a hash of the absolute save path (moved instance: use `from`).
+
+**Kept limits from Codex:** ritual has no crash journal (crash or post-connect refusal can leave a bot before payment). UUID match does not authenticate a spoofed identical UUID. Codex's own open triage list in the next handoff stays valid.
+
+**Next:** Nirn field Phase 6cc on Bradley's next play. Then the deferred minors above, cheapest first (Carpet version string, preview text, enqueue boolean, MiningTool timeout).
+
+## Session Handoff 2026-10-22 (remaining source-confirmed bug wave verified) — shipped in 1.1.291
 
 **Current state:** ONLY checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **97 pending source/handoff files:94 Java, one mixin resource and two root handoffs.** Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. The user resumed after a usage interruption; all in-flight phases were reread, completed and frozen before central verification. No implementation remains in progress. This is source-complete work for the confirmed defects below, not a claim that every historical field report or feature in the backlog is resolved.
 
@@ -109,7 +123,7 @@ An additional source audit found HuntConfigService still sharing depopulation/zo
 
 **Handoff paths:** only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md` and `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md`; no `docs/` edits. All edits remain on disk, uncommitted.
 
-## Session Handoff 2026-10-22 (failed-route cache races fixed) — previous unreleased phase
+## Session Handoff 2026-10-22 (failed-route cache races fixed) — shipped in 1.1.291
 
 **Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **69 pending source/handoff files: 67 Java plus handoff/changelog.** Prior cumulative manifests below plus the two newly pending Java paths here cover current work. Preserve every earlier edit and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. One bounded fix complete; no implementation remains in progress.
 
@@ -128,7 +142,7 @@ An additional source audit found HuntConfigService still sharing depopulation/zo
 
 **Hardest review / limits:** verify renewal is preserved when an expiry read or skip log observes an older entry; verify clear during remaining-time lookup neither throws nor resurrects cache state. Perfectionist concern: deterministic fixture uses reflection to replace private inner maps and needs updating if storage shape changes; it exercises legal competing-operation orderings rather than a Minecraft lifecycle simulation. Pragmatic scope: atomic map operations fix the demonstrated races without introducing a scheduler or service lock. No claim that the historical field stuck symptoms came from these races. Preserve all previous field checks, save-migration and async-spawn/recruitment limits below.
 
-## Session Handoff 2026-10-22 (five source-confirmed fixes verified) — previous unreleased phase
+## Session Handoff 2026-10-22 (five source-confirmed fixes verified) — shipped in 1.1.291
 
 **Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **67 pending source/handoff files: 65 Java plus handoff/changelog.** This wave adds eight newly pending Java paths; SurvivalRecruitmentService was already pending. Prior cumulative manifests plus paths below cover current work. Preserve every earlier edit and unrelated `.superpowers/` / `logs/*.gz`. User requested five fixes; all five below are implemented and centrally verified. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. No implementation remains in progress.
 
@@ -176,7 +190,7 @@ An additional source audit found HuntConfigService still sharing depopulation/zo
 
 **Triage, not silently fixed:** unified NO_PATH already returns failure (blind legacy fallback report is not established for default path); sunset short-probe semantics and underground farm recovery need deliberate policy/field scope. Save-key collisions are real but migration needs durable per-save decisions/provenance; do not blindly move legacy state into a fresh save or hide old history. Craft largest-stack/server-thread walking and Pocket wait-timeout headlines already have fixes; only the residual bundle prompt and remote-furnace mutation were changed here. Five actual source defects fixed does not certify an exact remaining unique bug count from the143 broad checklist lines.
 
-## Session Handoff 2026-10-22 (recruitment post-spawn retries really wait) — previous unreleased phase
+## Session Handoff 2026-10-22 (recruitment post-spawn retries really wait) — shipped in 1.1.291
 
 **Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **59 pending source/handoff files: 57 Java plus handoff/changelog.** Prior cumulative manifests below plus the newly pending SurvivalRecruitmentService path here cover current work. Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. This bounded task is finished; no implementation remains in progress.
 
@@ -194,7 +208,7 @@ An additional source audit found HuntConfigService still sharing depopulation/zo
 
 **Hardest review / field checks:** dedicated online-mode recruitment with a profile lookup taking a few seconds: checks should be separated by about one second and registration/meeting-site setup should run once the bot arrives. Stop/switch worlds between retries: no stale setup on the old server. Offline synchronous spawn still gets the initial delayed setup. A lookup slower than the retained roughly eight-second budget can still finish after failure is reported; recruitment ownership/state is still persisted before verified arrival. This task does not redesign that transaction, add owner-transfer/setup identity guards, or change resurrection handling. Perfectionist concern: timing and slow-profile success remain field-unverified; pragmatic scope: reuse the existing lifecycle-safe scheduler without changing the setup transaction or adding duplicated infrastructure. Preserve all earlier limits and field checks below.
 
-## Session Handoff 2026-10-22 (sleep dialogue and co-sleep retry really wait) — previous unreleased phase
+## Session Handoff 2026-10-22 (sleep dialogue and co-sleep retry really wait) — shipped in 1.1.291
 
 **Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **58 pending source/handoff files: 56 Java plus handoff/changelog.** Prior cumulative manifests below plus the two newly pending paths here cover current work. Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. This bounded task is finished; no implementation remains in progress.
 
@@ -215,7 +229,7 @@ An additional source audit found HuntConfigService still sharing depopulation/zo
 
 **Scope triage:** the old misleading-inventory-denial backlog claim is not a demonstrated current ownership bypass: both `/bot open` branches already check access and explicitly report permission refusal before calling BotInventoryAccess. It was left untouched; no broad inventory refactor or full-state update changes were made.
 
-## Session Handoff 2026-10-21 (deferred online spawns reject stale server callbacks) — previous unreleased phase
+## Session Handoff 2026-10-21 (deferred online spawns reject stale server callbacks) — shipped in 1.1.291
 
 **Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **56 pending source/handoff files: 54 Java plus handoff/changelog.** The prior cumulative manifests below plus the three newly pending Java paths here cover the changes. Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. This bounded task is finished; no implementation remains in progress.
 
@@ -237,7 +251,7 @@ An additional source audit found HuntConfigService still sharing depopulation/zo
 
 **Separate follow-up discovered, untouched:** `CompanionResurrectionService` consumes ritual resources/anchor and updates alive state before asynchronous `createFake` completes, and ignores the future. Correct failure handling needs a deliberate reservation/refund and persisted-state design, not merely deleting historical death records (retrieval needs those). Do not call this fixed by the lifecycle guard.
 
-## Session Handoff 2026-10-21 (respawn replies recheck authority through queued spawning) — previous unreleased phase
+## Session Handoff 2026-10-21 (respawn replies recheck authority through queued spawning) — shipped in 1.1.291
 
 **Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **53 pending files: 51 Java files plus handoff/changelog.** Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. The complete prior manifest below plus the three newly pending paths in this task covers current work. No staging, commits, version bump, game/PrismLauncher access, artifact packaging, deployment or publication. Nothing remains in progress.
 
@@ -262,7 +276,7 @@ Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/a
 
 **Limits and reviewer focus:** ownership transfer does not automatically forward an old prompt to its new owner; the request is retained for existing authorized Bot Controls/spawn paths. Owner-level typed SPAWN support remains its separate backlog item. A positive command result means accepted command, not verified asynchronous entity join. Hardest checks: transfer before reply and between reply/queued dispatch; disconnected sender; replaced/cleared Pending before dispatch; admin/host still authorized on their own route; two dead bots sharing one controller; spawn refusal/error preserving the current request. Run those in a future authorized game check, and normal Java 21 Gradle build before release. Preserve every previous field check below.
 
-## Session Handoff 2026-10-21 (resume answers recheck current bot access) — previous unreleased phase
+## Session Handoff 2026-10-21 (resume answers recheck current bot access) — shipped in 1.1.291
 
 **State:** same original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **50 pending files: 48 Java files plus handoff/changelog.** This phase adds two paths to the complete 48-file manifest in the previous handoff below. All earlier edits and unrelated `.superpowers/` / `logs/*.gz` remain preserved. No staging, commits, version bump, game/PrismLauncher access, artifact packaging, deployment or publication.
 
@@ -279,7 +293,7 @@ Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/a
 
 **Review/field checks:** hardest edge is refusing a stale responder without deleting the current owner's resumable job or a replacement prompt. Pause a job at death, transfer ownership, then answer yes/no as former owner: visible refusal, no resume/stand-down, saved job retained. Verify the current owner can manually resume it, an authorized op/host can still answer, and later unrelated yes/no messages are not captured by the retired route. An unavailable bot also refuses while retaining the job; retry through manual resume when it returns. Preserve all prior field checks below. Before release run the normal Java 21 Gradle build with normal access; no release work was authorized here. Nothing remains in progress.
 
-## Session Handoff 2026-10-21 (second reliability wave verified; preference dispatch fixed) — previous unreleased wave
+## Session Handoff 2026-10-21 (second reliability wave verified; preference dispatch fixed) — shipped in 1.1.291
 
 **Current state:** checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **48 pending files: 46 Java sources/tests plus this handoff and changelog.** Preserve all earlier work and unrelated `.superpowers/` / `logs/*.gz`. The app folder is not this repository. The usage interruption left playback tests unfinished; Bradley reset usage and requested continuation plus a new task. That work is now verified, with no task left in progress. No staging, commits, version bump, PrismLauncher/game access, deployment, or publication.
 
@@ -348,7 +362,7 @@ Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/a
 - `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/network/BotEnchantAccessTest.java`
 - `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/network/PlayerPreferenceReceiverWiringTest.java`
 
-## Session Handoff 2026-10-21 (unreleased reliability and access wave) — previous unreleased wave
+## Session Handoff 2026-10-21 (unreleased reliability and access wave) — shipped in 1.1.291
 
 **Current state:** checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. Twenty-seven source/test/handoff files are pending across nine bounded phases. Preserve all prior beehive, movement, and relations-supplier edits described below, plus existing untracked `.superpowers/` and `logs/*.gz`. Bradley authorized continuing bounded tasks until near the five-hour usage limit and updating handoffs. No staging, commits, version bump, PrismLauncher/game access, deployment, or publication. Use the explicit original checkout; the app folder is not the repository.
 
@@ -398,7 +412,7 @@ Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/a
 - `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/network/BotAnvilAccessTest.java`
 - `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/network/BotEnchantAccessTest.java`
 
-## Session Handoff 2026-10-21 (unreleased relations supplier, movement and beehive fixes) — previous unreleased phase
+## Session Handoff 2026-10-21 (unreleased relations supplier, movement and beehive fixes) — shipped in 1.1.291
 
 **Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`; version remains `1.1.290-release+1.21.11`. Ten source/test/handoff files are pending across three phases. All are uncommitted, unversioned and undeployed. The app's `/Users/roti/Documents/ChatGPT/Minecraft` folder is not this repository; use the explicit checkout, with scoped write access when required. Preserve prior movement/beehive edits and existing untracked `.superpowers/` / `logs/*.gz`. No commits, PrismLauncher/game access, publication, or deployment were authorized by the repeated "another task" requests.
 
@@ -410,7 +424,7 @@ Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/a
 
 **Next:** review the combined ten-file diff and run `JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home ./gradlew build` when normal build access is available. In a future authorized game check, toggle relations off/on during an existing runtime and confirm later banter evaluations follow the new value without rebuilding the director; off should omit relation anchors and on should allow them. Keep all earlier movement timeout/stop-cleanup, beehive contention/unknown-chunk and finding-59 two-bot checks pending. No version bump, packaged JAR, commit or deployment was performed this session.
 
-## Session Handoff 2026-10-21 (unreleased movement dispatch and beehive fixes) — previous unreleased phase
+## Session Handoff 2026-10-21 (unreleased movement dispatch and beehive fixes) — shipped in 1.1.291
 
 **Current checkout:** `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12` (1.1.290). Both the prior beehive fix and this movement fix are uncommitted. `mod_version` remains `1.1.290-release+1.21.11`; no packaged JAR, deployment, or publication this session. The app now opens `/Users/roti/Documents/ChatGPT/Minecraft`, which is not this repository: use the explicit original checkout as working directory. Repository writes/verification there required approved scoped escalation after the app folder changed. Do not move/copy the source into the app folder. No-commit/no-PrismLauncher restrictions remain in force. Existing untracked `.superpowers/` and `logs/*.gz` are untouched.
 
@@ -436,7 +450,7 @@ Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/a
 
 **Next:** review the combined eight-file diff and perform normal build/release work only when authorized. Worker-side cleanup LOS ranking and the documented movement-snap >750 ms fallback remain deferred. The no-cancel dispatch deferral in the historical 1.1.289 handoff is addressed in source by this unreleased phase.
 
-## Session Handoff 2026-10-21 (unreleased beehive lock fix) — previous unreleased phase
+## Session Handoff 2026-10-21 (unreleased beehive lock fix) — shipped in 1.1.291
 
 **State:** worktree `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12` (1.1.290). The five-file fix below is uncommitted and unversioned; `mod_version` stays `1.1.290-release+1.21.11`. No JAR was packaged or deployed this session. Earlier fixes from this chat are already in history; do not redo them. Existing untracked `.superpowers/` and `logs/*.gz` were left alone.
 

@@ -436,3 +436,11 @@ From the 1.1.272 release (2026-10-19):
   - Bradley does: Options > Controls > Frens > "Open Spells" = `[` (Nirn keeps "Not Bound" from its saved options; new installs get `[`). Press `[` while looking at a bot: its Spells tab opens. Then, with the second player, let one of their bots (Auto Respawn off) die and try the Questing-off resurrection ritual from your account.
   - Pass when: the Spells tab opens on your bot, and the ritual never revives the other player's bot for you (unless you are op or host).
   - Prep: needs a decision too: should 1.1.273 bind `[` once on existing installs, or leave it to Reset Keys?
+
+From the 1.1.291 release (2026-10-23):
+
+- [ ] **Phase 6cc: a LAN guest is not treated as the host (1.1.291)** (joins Block C)
+  - Bradley does: open Nirn to LAN, join from a second account, and from the guest try a host-only action (Bot Controls AI setup save, or `/bot legacy-state`).
+  - Claude watches for: a permission refusal for the guest and none for the host.
+  - Pass when: the guest is refused and the host still has every host action.
+  - Prep: host authority now compares the host profile UUID instead of the name. Needs a second Minecraft account, so the sandbox cannot do it.
