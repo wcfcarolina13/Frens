@@ -47,6 +47,7 @@ import net.wcfcarolina13.GameAI.services.MountPersistenceService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.PlayerUtils.BlockDistanceLimitedSearch;
+import net.wcfcarolina13.PlayerUtils.InventoryIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -162,15 +163,12 @@ public final class SoulSnapshotBuilder {
         Map<String, Integer> itemCounts = new LinkedHashMap<>();
         List<ItemStack> mainStacks = bot.getInventory().getMainStacks();
         int inventorySlots = mainStacks.size();
-        int foodItems = 0;
+        int foodItems = InventoryIterator.count(bot, stack -> stack.get(DataComponentTypes.FOOD) != null);
         for (ItemStack stack : mainStacks) {
             if (stack.isEmpty()) {
                 continue;
             }
             occupiedSlots++;
-            if (stack.get(DataComponentTypes.FOOD) != null) {
-                foodItems += stack.getCount();
-            }
             carried.add(extractItemFacts(stack, 0));
             itemCounts.merge(Registries.ITEM.getId(stack.getItem()).getPath(),
                     stack.getCount(), Integer::sum);

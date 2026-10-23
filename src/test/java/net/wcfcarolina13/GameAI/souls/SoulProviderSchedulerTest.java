@@ -34,6 +34,34 @@ class SoulProviderSchedulerTest {
                 Duration.ofSeconds(60), 220);
     }
 
+    @Test
+    void botCancellationFindsActiveAndQueuedPartyRostersWithoutCancellingOtherOwners() {
+        try (SoulGenerationScheduler scheduler = new SoulGenerationScheduler(2, 8)) {
+            UUID deadBot = UUID.randomUUID();
+            SoulTypes.ConversationKey affected = SoulGroupTypes.partyKey(UUID.randomUUID());
+            SoulTypes.ConversationKey queuedParty = SoulGroupTypes.partyKey(UUID.randomUUID());
+            SoulTypes.ConversationKey unrelated = SoulGroupTypes.partyKey(UUID.randomUUID());
+            java.util.Set<UUID> roster = new java.util.HashSet<>(java.util.Set.of(deadBot));
+            AtomicBoolean activeCancelled = new AtomicBoolean();
+            AtomicBoolean otherCancelled = new AtomicBoolean();
+            AtomicBoolean queuedStarted = new AtomicBoolean();
+            scheduler.submit(affected, 0L, roster,
+                    () -> new SoulModelProvider.Call(new CompletableFuture<>(), () -> activeCancelled.set(true)));
+            scheduler.submit(unrelated, 0L, java.util.Set.of(UUID.randomUUID()),
+                    () -> new SoulModelProvider.Call(new CompletableFuture<>(), () -> otherCancelled.set(true)));
+            CompletableFuture<SoulTypes.ProviderResult> queued = scheduler.submit(queuedParty, 0L, roster, () -> {
+                queuedStarted.set(true);
+                return new SoulModelProvider.Call(new CompletableFuture<>(), () -> { });
+            });
+            roster.clear();
+            assertEquals(2, scheduler.cancelForBot(deadBot));
+            assertTrue(activeCancelled.get());
+            assertFalse(otherCancelled.get());
+            assertFalse(queuedStarted.get());
+            assertEquals(SoulTypes.FailureCode.CANCELLED, queued.join().failureCode());
+        }
+    }
+
     // === Own coverage: cancelForPlayer — the player-disconnect cancellation surface ===
 
     @Test

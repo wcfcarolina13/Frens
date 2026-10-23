@@ -131,4 +131,126 @@ class GroupScenePlaybackTest {
         assertTrue(GroupScenePlayback.synthSettled(false, 10_000, 21_000, 10_000));
         assertEquals(false, GroupScenePlayback.synthSettled(false, 10_000, 15_000, 10_000));
     }
+
+    @Test
+    void deathCancelsEveryMatchingRosterAndLeavesUnrelatedScenesAlone() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger finished = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger delivered = new java.util.concurrent.atomic.AtomicInteger();
+        GroupScenePlayback playback = cancellationPlayback(finished, delivered);
+        UUID bot = UUID.randomUUID();
+        var first = cancellationScene(UUID.randomUUID(), bot);
+        var second = cancellationScene(UUID.randomUUID(), bot);
+        var unrelated = cancellationScene(UUID.randomUUID(), UUID.randomUUID());
+        playback.enqueue(first);
+        playback.enqueue(second);
+        playback.enqueue(unrelated);
+        playback.cancelForBot(bot);
+        assertTrue((boolean) field(state(playback, first.turn().ownerId()), "cancelled").get(state(playback, first.turn().ownerId())));
+        assertTrue((boolean) field(state(playback, second.turn().ownerId()), "cancelled").get(state(playback, second.turn().ownerId())));
+        Object other = state(playback, unrelated.turn().ownerId());
+        assertFalse((boolean) field(other, "cancelled").get(other));
+        playback.cancelOwner(unrelated.turn().ownerId());
+        playback.tick();
+        assertEquals(3, finished.get());
+        assertEquals(3, delivered.get());
+        assertEquals(0, playback.activeSceneCount());
+    }
+
+    @Test
+    void pendingVoiceIsDiscardedAndCancellationFinishesExactlyOnceWithoutWorldAccess() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger finished = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger delivered = new java.util.concurrent.atomic.AtomicInteger();
+        GroupScenePlayback playback = cancellationPlayback(finished, delivered);
+        UUID bot = UUID.randomUUID();
+        var scene = cancellationScene(UUID.randomUUID(), bot);
+        playback.enqueue(scene);
+        Object pending = state(playback, scene.turn().ownerId());
+        var synth = new java.util.concurrent.CompletableFuture<Optional<SoulVoiceService.SynthesizedLine>>();
+        field(pending, "synth").set(pending, synth);
+        net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService.noteSpeech(scene.turn().ownerId(),
+                net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy.Source.SOUL_SCENE_PENDING);
+        assertFalse(net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService.isFloorOpen(scene.turn().ownerId(),
+                net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy.Source.SCRIPTED_AMBIENT));
+        playback.cancelForBot(bot);
+        playback.cancelForBot(bot);
+        assertTrue(synth.isCancelled());
+        playback.tick();
+        assertFalse(synth.complete(Optional.empty()));
+        playback.tick();
+        assertEquals(1, finished.get());
+        assertEquals(1, delivered.get());
+        assertEquals(0, playback.activeSceneCount());
+        assertTrue(net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorService.isFloorOpen(scene.turn().ownerId(),
+                net.wcfcarolina13.GameAI.services.dialogue.SpeechFloorPolicy.Source.SCRIPTED_AMBIENT));
+    }
+
+    @Test
+    void staleFinishCannotRemoveFreshSceneAfterSameBotReturns() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger finished = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger delivered = new java.util.concurrent.atomic.AtomicInteger();
+        GroupScenePlayback playback = cancellationPlayback(finished, delivered);
+        UUID bot = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+        playback.enqueue(cancellationScene(owner, bot));
+        Object old = state(playback, owner);
+        playback.cancelForBot(bot);
+        playback.tick();
+        playback.enqueue(cancellationScene(owner, bot));
+        var finish = GroupScenePlayback.class.getDeclaredMethod("finish", old.getClass(), String.class);
+        finish.setAccessible(true);
+        finish.invoke(playback, old, "stale");
+        assertEquals(1, playback.activeSceneCount());
+        assertEquals(1, finished.get());
+        assertFalse((boolean) field(state(playback, owner), "cancelled").get(state(playback, owner)));
+        playback.cancelAll();
+        playback.tick();
+        assertEquals(2, finished.get());
+        assertEquals(2, delivered.get());
+    }
+
+    private static GroupScenePlayback cancellationPlayback(java.util.concurrent.atomic.AtomicInteger finished,
+                                                           java.util.concurrent.atomic.AtomicInteger delivered) {
+        return new GroupScenePlayback(null, () -> { throw new AssertionError("cancelled scene requested voice"); },
+                (player, correlation, bot, mode, rate, chunks, group, segment) -> {
+                    throw new AssertionError("cancelled scene sent audio");
+                }, new GroupScenePlayback.LineCommitter() {
+                    @Override public void commitLine(SoulTypes.TurnToken token, int participant, String text, UUID privateTo) {
+                        throw new AssertionError("cancelled scene committed speech");
+                    }
+                    @Override public void sceneFinished(SoulTypes.TurnToken token, int count, int total) {
+                        finished.incrementAndGet();
+                    }
+                    @Override public void sceneDelivered(SoulGroupTypes.GroupSceneTurn turn, int count, int speaker,
+                                                        List<SoulGroupTypes.SceneLine> lines, UUID privateTo) {
+                        assertEquals(0, count);
+                        delivered.incrementAndGet();
+                    }
+                });
+    }
+
+    private static GroupScenePlayback.PlayableScene cancellationScene(UUID owner, UUID botId) {
+        SoulTypes.BotSnapshot bot = new SoulTypes.BotSnapshot(botId, "Jake", "overworld", "plains",
+                0, 64, 0, true, "dusk", "clear", 20f, 20f, 18, 4, "", 4, 36,
+                List.of(), "content", "FOLLOW", "", "", "", "Bradley", true, 0, true, Optional.empty());
+        var grounding = new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                Optional.empty(), java.time.Instant.EPOCH);
+        var turn = new SoulGroupTypes.GroupSceneTurn(owner, "Bradley",
+                List.of(new SoulGroupTypes.SceneParticipant(botId, "frens:jake", "Jake", grounding)),
+                "Hello", java.time.Instant.EPOCH, UUID.randomUUID());
+        return new GroupScenePlayback.PlayableScene(turn,
+                new SoulTypes.TurnToken(turn.key(), turn.routingId(), 0L, 1L),
+                List.of(new SoulGroupTypes.SceneLine(0, "Hello.")));
+    }
+
+    private static Object state(GroupScenePlayback playback, UUID owner) throws Exception {
+        var scenes = field(playback, "scenes");
+        return ((java.util.Map<?, ?>) scenes.get(playback)).get(owner);
+    }
+
+    private static java.lang.reflect.Field field(Object instance, String name) throws Exception {
+        var field = instance.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field;
+    }
+
 }

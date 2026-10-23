@@ -241,8 +241,9 @@ final class SoulNoveltyPolicy {
     }
 
     /**
-     * A bot's ring of the last {@link #RING_SIZE} normalised delivered lines, oldest evicted
-     * first. Held per bot in a concurrent map by the caller; scenes for different owners complete
+     * A bot's ring of the last {@link #RING_SIZE} distinct normalised delivered lines, oldest
+     * evicted first. Repeating a line refreshes its position without displacing other history.
+     * Held per bot in a concurrent map by the caller; scenes for different owners complete
      * on different worker threads, so every access here is synchronized. Never persisted — a
      * restart legitimately resets what "recently" means.
      */
@@ -253,6 +254,7 @@ final class SoulNoveltyPolicy {
             if (normalised == null || normalised.isEmpty()) {
                 return;
             }
+            recent.remove(normalised);
             while (recent.size() >= RING_SIZE) {
                 recent.removeFirst();
             }

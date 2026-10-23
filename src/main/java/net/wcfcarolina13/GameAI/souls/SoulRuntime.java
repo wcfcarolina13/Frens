@@ -312,6 +312,10 @@ public final class SoulRuntime {
                         ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
                         return cfg != null && cfg.isSoulBanterActiveEnabled();
                     },
+                    () -> {
+                        ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
+                        return cfg != null && cfg.isSoulRelationsEnabled();
+                    },
                     ambientTextOpen, ambientVoiceOpen,
                     srv -> net.wcfcarolina13.GameAI.BotEventHandler.getRegisteredBots(srv),
                     // "Working" = a skill ticket is open, or the bot is actively following a player.
@@ -1043,11 +1047,21 @@ public final class SoulRuntime {
      */
     private void applySideChannel(SoulGroupTypes.GroupSceneTurn turn,
                                   SoulSideChannelOps.SideEffects effects) {
+        applySideChannel(turn, effects, () -> true);
+    }
+
+    private void applySideChannel(SoulGroupTypes.GroupSceneTurn turn,
+                                  SoulSideChannelOps.SideEffects effects,
+                                  java.util.function.BooleanSupplier current) {
         MinecraftServer srv = server;
         if (srv == null || effects == null || turn == null) {
             return;
         }
-        srv.execute(() -> applySideChannelOnServer(turn, effects));
+        srv.execute(() -> {
+            if (current.getAsBoolean()) {
+                applySideChannelOnServer(turn, effects);
+            }
+        });
     }
 
     private void applySideChannelOnServer(SoulGroupTypes.GroupSceneTurn turn,
@@ -1228,7 +1242,19 @@ public final class SoulRuntime {
                     ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
                     return cfg != null && cfg.isSoulStructuredOutputEnabled();
                 },
-                this::applySideChannel);
+                new SoulGroupConversationService.SideChannelSink() {
+                    @Override
+                    public void apply(SoulGroupTypes.GroupSceneTurn turn, SoulSideChannelOps.SideEffects effects) {
+                        applySideChannel(turn, effects);
+                    }
+
+                    @Override
+                    public void applyIfCurrent(SoulGroupTypes.GroupSceneTurn turn,
+                                               SoulSideChannelOps.SideEffects effects,
+                                               java.util.function.BooleanSupplier current) {
+                        applySideChannel(turn, effects, current);
+                    }
+                });
         // Live supplier like the banter switch above: /bot soul digest on|off takes effect on the
         // next day rollover with no pipeline reload. Absent config = on (the field default).
         SoulMemoryDigestService digest = new SoulMemoryDigestService(
@@ -1344,6 +1370,9 @@ public final class SoulRuntime {
     private void closePipeline(Pipeline pipeline, SoulVoiceService retainedVoice) {
         if (pipeline == null) {
             return;
+        }
+        if (pipeline.groupService() != null) {
+            pipeline.groupService().close();
         }
         try {
             pipeline.scheduler().close();
@@ -1601,6 +1630,7 @@ public final class SoulRuntime {
      */
     public void cancelBot(UUID botId) {
         Objects.requireNonNull(botId, "botId");
+        cancelBotGenerations(botId);
         if (!isMasterEnabled() && cachedState(botId).isEmpty()) {
             return;
         }
@@ -1618,7 +1648,18 @@ public final class SoulRuntime {
      */
     public void cancelBotGenerations(UUID botId) {
         Objects.requireNonNull(botId, "botId");
-        int cancelled = pipelineRef.get().scheduler().cancelForBot(botId);
+        int cancelled;
+        synchronized (lifecycleLock) {
+            Pipeline pipeline = pipelineRef.get();
+            if (pipeline.groupService() != null) {
+                pipeline.groupService().cancelForBot(botId);
+            }
+            cancelled = pipeline.scheduler().cancelForBot(botId);
+        }
+        GroupScenePlayback playback = scenePlayback;
+        if (playback != null) {
+            playback.cancelForBot(botId);
+        }
         if (cancelled > 0) {
             LOGGER.info("[souls] cancelBotGenerations bot={} cancelledGenerations={}", botId, cancelled);
         }

@@ -126,6 +126,43 @@ class SoulGroupConversationServiceTest {
     }
 
     @Test
+    void deathDuringFailureAppendSuppressesLateFailureStatus() throws Exception {
+        assertFailureAppendRevoked(() -> service.cancelForBot(JAKE_ID));
+    }
+
+    @Test
+    void pipelineCloseDuringFailureAppendSuppressesLateFailureStatus() throws Exception {
+        assertFailureAppendRevoked(() -> service.close());
+    }
+
+    private void assertFailureAppendRevoked(Runnable revoke) throws Exception {
+        provider.clear();
+        CompletableFuture<SoulTypes.ProviderResult> failure = new CompletableFuture<>();
+        provider.enqueue(failure);
+        CompletableFuture<SoulGroupConversationService.Submission> submitted = service.submit(turn);
+        assertTrue(provider.started.await(2, SECONDS));
+
+        CompletableFuture<Void> writerBlocked = new CompletableFuture<>();
+        CompletableFuture<Void> releaseWriter = new CompletableFuture<>();
+        storeExecutor.submit(() -> {
+            writerBlocked.complete(null);
+            releaseWriter.join();
+        });
+        writerBlocked.get(2, SECONDS);
+        try {
+            failure.complete(new SoulTypes.ProviderResult(false, "", SoulTypes.FailureCode.TIMEOUT,
+                    "test", "test-model", 5L, null, null, null));
+            revoke.run();
+            assertEquals(SoulGroupConversationService.Submission.FAILED, submitted.get(2, SECONDS));
+        } finally {
+            releaseWriter.complete(null);
+        }
+        storeExecutor.submit(() -> { }).get(2, SECONDS);
+        assertTrue(status.messages.isEmpty(), "revoked scenes cannot send an obsolete failure status");
+        assertTrue(player.enqueued.isEmpty());
+    }
+
+    @Test
     void unparseableResponseFailsMalformed() throws Exception {
         provider.clear();
         provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(
@@ -417,6 +454,125 @@ class SoulGroupConversationServiceTest {
         assertEquals("Sara", applied.get(0).stanceDeltas().get(0).peerName());
     }
 
+    private SoulGroupConversationService lifecycleService(SoulGroupPromptAssembler prompts,
+                                                         SoulGroupConversationService.SideChannelSink sink) {
+        SoulSettings settings = new SoulSettings(true, true, "", "ollama", "test-model",
+                URI.create("http://127.0.0.1:11434"), Duration.ofSeconds(60), 8);
+        return new SoulGroupConversationService(partyStore, prompts, scheduler, provider,
+                new SoulGroupResponseValidator(), settings, player, status, () -> false, () -> true, sink);
+    }
+
+    private static SoulTypes.ProviderResult sceneSuccess() {
+        return new SoulTypes.ProviderResult(true, SIDE_CHANNEL_SCENE, null, "test", "test-model",
+                5L, null, null, null);
+    }
+
+    @Test
+    void deathBeforeHeardTokenPreventsProviderDispatch() throws Exception {
+        CompletableFuture<Void> release = new CompletableFuture<>();
+        storeExecutor.submit(() -> { release.join(); });
+        CompletableFuture<SoulGroupConversationService.Submission> submitted = service.submit(turn);
+        try {
+            service.cancelForBot(JAKE_ID);
+            assertEquals(SoulGroupConversationService.Submission.FAILED, submitted.get(2, SECONDS));
+        } finally {
+            release.complete(null);
+        }
+        storeExecutor.submit(() -> { }).get(2, SECONDS);
+        assertTrue(provider.requests.isEmpty());
+        assertTrue(player.enqueued.isEmpty());
+    }
+
+    @Test
+    void deathDuringPromptAssemblyDoesNotRegisterAProviderCall() throws Exception {
+        service = lifecycleService(new SoulGroupPromptAssembler(id -> {
+            service.cancelForBot(JAKE_ID);
+            return Optional.empty();
+        }), (scene, effects) -> { });
+        assertEquals(SoulGroupConversationService.Submission.FAILED, service.submit(turn).get(2, SECONDS));
+        storeExecutor.submit(() -> { }).get(2, SECONDS);
+        assertTrue(provider.requests.isEmpty());
+        assertTrue(player.enqueued.isEmpty());
+    }
+
+    @Test
+    void ignoredProviderCancellationCannotEnqueueOrApplyEffectsAndRespawnCanStartFresh() throws Exception {
+        List<SoulSideChannelOps.SideEffects> applied = new CopyOnWriteArrayList<>();
+        service = lifecycleService(new SoulGroupPromptAssembler(), (scene, effects) -> applied.add(effects));
+        provider.clear();
+        provider.ignoreCancellation = true;
+        CompletableFuture<SoulTypes.ProviderResult> late = new CompletableFuture<>();
+        provider.enqueue(late);
+        provider.enqueue(CompletableFuture.completedFuture(sceneSuccess()));
+        CompletableFuture<SoulGroupConversationService.Submission> submitted = service.submit(turn);
+        assertTrue(provider.started.await(2, SECONDS));
+        service.cancelForBot(JAKE_ID);
+        scheduler.cancelForBot(JAKE_ID);
+        assertEquals(SoulGroupConversationService.Submission.FAILED, submitted.get(2, SECONDS));
+        late.complete(sceneSuccess());
+        assertTrue(player.enqueued.isEmpty());
+        assertTrue(applied.isEmpty());
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED,
+                service.submit(sceneTurn("we returned")).get(2, SECONDS));
+        assertEquals(1, player.enqueued.size());
+        assertEquals(1, applied.size());
+    }
+
+    @Test
+    void unrelatedBotDeathDoesNotRevokeTheRoster() throws Exception {
+        provider.clear();
+        CompletableFuture<SoulTypes.ProviderResult> reply = new CompletableFuture<>();
+        provider.enqueue(reply);
+        CompletableFuture<SoulGroupConversationService.Submission> submitted = service.submit(turn);
+        assertTrue(provider.started.await(2, SECONDS));
+        service.cancelForBot(UUID.randomUUID());
+        reply.complete(sceneSuccess());
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, submitted.get(2, SECONDS));
+    }
+
+    @Test
+    void queuedServerSideEffectsRemainRevocableAfterPlaybackCleanup() throws Exception {
+        List<Runnable> serverTasks = new CopyOnWriteArrayList<>();
+        List<SoulSideChannelOps.SideEffects> applied = new CopyOnWriteArrayList<>();
+        service = lifecycleService(new SoulGroupPromptAssembler(), new SoulGroupConversationService.SideChannelSink() {
+            @Override public void apply(SoulGroupTypes.GroupSceneTurn scene, SoulSideChannelOps.SideEffects effects) {
+                throw new AssertionError("production must preserve the validity gate across the hop");
+            }
+            @Override public void applyIfCurrent(SoulGroupTypes.GroupSceneTurn scene,
+                                                SoulSideChannelOps.SideEffects effects,
+                                                java.util.function.BooleanSupplier current) {
+                serverTasks.add(() -> {
+                    if (current.getAsBoolean()) applied.add(effects);
+                });
+            }
+        });
+        provider.clear();
+        provider.enqueue(CompletableFuture.completedFuture(sceneSuccess()));
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, service.submit(turn).get(2, SECONDS));
+        assertEquals(1, serverTasks.size());
+        GroupScenePlayback.PlayableScene scene = player.enqueued.get(0);
+        service.sceneFinished(scene.token(), 0, scene.lines().size());
+        service.cancelForBot(JAKE_ID);
+        serverTasks.forEach(Runnable::run);
+        assertTrue(applied.isEmpty());
+    }
+
+    @Test
+    void closingReplacedPipelineRejectsLateProviderResult() throws Exception {
+        provider.clear();
+        provider.ignoreCancellation = true;
+        CompletableFuture<SoulTypes.ProviderResult> late = new CompletableFuture<>();
+        provider.enqueue(late);
+        CompletableFuture<SoulGroupConversationService.Submission> submitted = service.submit(turn);
+        assertTrue(provider.started.await(2, SECONDS));
+        service.close();
+        late.complete(sceneSuccess());
+        assertEquals(SoulGroupConversationService.Submission.FAILED, submitted.get(2, SECONDS));
+        assertTrue(player.enqueued.isEmpty());
+        assertEquals(SoulGroupConversationService.Submission.FAILED,
+                service.submit(sceneTurn("old pipeline")).get(2, SECONDS));
+    }
+
     private static final class FakeScenePlayer implements SoulGroupConversationService.ScenePlayer {
         final List<GroupScenePlayback.PlayableScene> enqueued = new CopyOnWriteArrayList<>();
         volatile boolean active;
@@ -440,7 +596,9 @@ class SoulGroupConversationServiceTest {
 
     private static final class FakeProvider implements SoulModelProvider {
         private final Deque<CompletableFuture<SoulTypes.ProviderResult>> results = new ArrayDeque<>();
-        private final List<SoulTypes.ProviderRequest> requests = new ArrayList<>();
+        private final List<SoulTypes.ProviderRequest> requests = new CopyOnWriteArrayList<>();
+        final java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        boolean ignoreCancellation;
 
         void enqueue(CompletableFuture<SoulTypes.ProviderResult> result) {
             results.addLast(result);
@@ -456,7 +614,10 @@ class SoulGroupConversationServiceTest {
         public Call generate(SoulTypes.ProviderRequest request) {
             requests.add(request);
             CompletableFuture<SoulTypes.ProviderResult> result = results.removeFirst();
-            return new Call(result, () -> result.cancel(false));
+            started.countDown();
+            return new Call(result, () -> {
+                if (!ignoreCancellation) result.cancel(false);
+            });
         }
 
         @Override public CompletableFuture<Boolean> health() {

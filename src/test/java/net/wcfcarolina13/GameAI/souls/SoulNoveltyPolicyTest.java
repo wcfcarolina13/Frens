@@ -105,6 +105,57 @@ class SoulNoveltyPolicyTest {
     }
 
     @Test
+    void repeatedLineAtCapacityKeepsOtherDistinctHistoryAndMovesToNewest() {
+        SoulNoveltyPolicy.Ring ring = new SoulNoveltyPolicy.Ring();
+        for (int i = 0; i < SoulNoveltyPolicy.RING_SIZE; i++) {
+            ring.remember(norm("line number " + i));
+        }
+        String repeated = ring.snapshot().get(SoulNoveltyPolicy.RING_SIZE / 2);
+        List<String> expected = new java.util.ArrayList<>(ring.snapshot());
+        expected.remove(repeated);
+        expected.add(repeated);
+
+        for (int i = 0; i < SoulNoveltyPolicy.RING_SIZE * 2; i++) {
+            ring.remember(repeated);
+        }
+
+        assertEquals(expected, ring.snapshot(), "repeated floor rescues must not evict distinct history");
+        assertEquals(SoulNoveltyPolicy.RING_SIZE, ring.size());
+        assertEquals(Optional.of(SoulNoveltyPolicy.REASON_EXACT),
+                SoulNoveltyPolicy.rejectReason(repeated, ring.snapshot()));
+    }
+
+    @Test
+    void repeatedOldestLineRefreshesRecencyBeforeTheNextDistinctEviction() {
+        SoulNoveltyPolicy.Ring ring = new SoulNoveltyPolicy.Ring();
+        for (int i = 0; i < SoulNoveltyPolicy.RING_SIZE; i++) {
+            ring.remember(norm("line number " + i));
+        }
+        String first = ring.snapshot().get(0);
+        String second = ring.snapshot().get(1);
+        ring.remember(first);
+        ring.remember(norm("one newly delivered line"));
+
+        assertEquals(SoulNoveltyPolicy.RING_SIZE, ring.size());
+        assertTrue(ring.snapshot().contains(first));
+        assertFalse(ring.snapshot().contains(second), "the refreshed first line is no longer oldest");
+    }
+
+    @Test
+    void nullAndEmptyLinesDoNotChangeHistoryOrRecency() {
+        SoulNoveltyPolicy.Ring ring = new SoulNoveltyPolicy.Ring();
+        ring.remember(norm("Aye, right."));
+        ring.remember(norm("Keep the fire lit."));
+        List<String> before = ring.snapshot();
+
+        ring.remember(null);
+        ring.remember("");
+
+        assertEquals(before, ring.snapshot());
+        assertEquals(2, ring.size());
+    }
+
+    @Test
     void sameLineTwiceInOneSceneDropsTheSecond() {
         List<SoulNoveltyPolicy.Verdict> verdicts = SoulNoveltyPolicy.filter(
                 List.of("Storm's coming.", "Storm's coming."),

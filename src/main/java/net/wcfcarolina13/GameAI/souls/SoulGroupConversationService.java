@@ -50,6 +50,13 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
      */
     public interface SideChannelSink {
         void apply(SoulGroupTypes.GroupSceneTurn turn, SoulSideChannelOps.SideEffects effects);
+
+        default void applyIfCurrent(SoulGroupTypes.GroupSceneTurn turn,
+                                    SoulSideChannelOps.SideEffects effects, BooleanSupplier current) {
+            if (current.getAsBoolean()) {
+                apply(turn, effects);
+            }
+        }
     }
 
     /** Deterministic owner-notice boundary — production forwards to the DM delivery's status path. */
@@ -79,6 +86,52 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
     private final BooleanSupplier structuredEnabled;
     /** Where accepted side-channel effects go; the default drops them. */
     private final SideChannelSink sideChannel;
+    private final Object sceneLock = new Object();
+    private final Map<UUID, Long> botRevisions = new java.util.HashMap<>();
+    private final Map<UUID, PendingScene> pendingScenes = new java.util.HashMap<>();
+    private boolean closed;
+
+    private record PendingScene(Map<UUID, Long> revisions,
+                                CompletableFuture<Submission> outcome) { }
+
+    /** Revokes scenes even while their HEARD token or history read is still pending. */
+    public void cancelForBot(UUID botId) {
+        Objects.requireNonNull(botId, "botId");
+        List<CompletableFuture<Submission>> cancelled = new ArrayList<>();
+        synchronized (sceneLock) {
+            botRevisions.merge(botId, 1L, Long::sum);
+            for (PendingScene pending : pendingScenes.values()) {
+                if (pending.revisions().containsKey(botId)) {
+                    cancelled.add(pending.outcome());
+                }
+            }
+        }
+        cancelled.forEach(future -> future.complete(Submission.FAILED));
+    }
+
+    public void close() {
+        List<CompletableFuture<Submission>> cancelled;
+        synchronized (sceneLock) {
+            closed = true;
+            cancelled = pendingScenes.values().stream().map(PendingScene::outcome).toList();
+            pendingScenes.clear();
+        }
+        cancelled.forEach(future -> future.complete(Submission.FAILED));
+    }
+
+    private boolean isCurrent(PendingScene pending) {
+        synchronized (sceneLock) {
+            return pending != null && !closed && pending.revisions().entrySet().stream()
+                    .allMatch(entry -> botRevisions.getOrDefault(entry.getKey(), 0L).equals(entry.getValue()));
+        }
+    }
+
+    private boolean isCurrent(SoulGroupTypes.GroupSceneTurn turn, CompletableFuture<Submission> outcome) {
+        synchronized (sceneLock) {
+            PendingScene pending = pendingScenes.get(turn.routingId());
+            return pending != null && pending.outcome() == outcome && isCurrent(pending);
+        }
+    }
 
     /** Legacy 8-arg form: novelty rejection disabled (behaviour identical to pre-1.1.211). */
     public SoulGroupConversationService(SoulStore partyStore, SoulGroupPromptAssembler prompts,
@@ -138,6 +191,26 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             return outcome;
         }
 
+        PendingScene pending;
+        synchronized (sceneLock) {
+            if (closed) {
+                outcome.complete(Submission.FAILED);
+                return outcome;
+            }
+            Map<UUID, Long> revisions = new java.util.HashMap<>();
+            for (SoulGroupTypes.SceneParticipant participant : turn.roster()) {
+                revisions.put(participant.botId(), botRevisions.getOrDefault(participant.botId(), 0L));
+            }
+            pending = new PendingScene(Map.copyOf(revisions), outcome);
+            pendingScenes.put(correlationId, pending);
+        }
+        outcome.whenComplete((result, error) -> {
+            if (error != null || result == Submission.FAILED) {
+                synchronized (sceneLock) {
+                    pendingScenes.remove(correlationId, pending);
+                }
+            }
+        });
         long submitStartNanos = System.nanoTime();
         // BANTER and WORK: a synthetic narrator seed must never replay as a player utterance. A
         // LOCAL turn carries a real thing the player said in earshot, so it takes the ordinary
@@ -148,6 +221,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         partyStore.beginHeardTurn(turn.key(), correlationId, taggedMessage, turn.acceptedAt(),
                 turn.roster().stream().map(SoulGroupTypes.SceneParticipant::botId).toList())
                 .whenComplete((token, tokenError) -> {
+                    if (!isCurrent(turn, outcome)) {
+                        outcome.complete(Submission.FAILED);
+                        return;
+                    }
                     if (tokenError != null) {
                         LOGGER.info("[souls] scene correlationId={} owner={} kind={} outcome=no-token error={}",
                                 correlationId, turn.ownerId(), turn.kind(),
@@ -174,6 +251,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         partyStore.recentBefore(token, SoulGroupPromptAssembler.MAX_HISTORY_TURNS,
                         SoulGroupPromptAssembler.MAX_HISTORY_CHARS)
                 .whenComplete((history, historyError) -> {
+                    if (!isCurrent(turn, outcome)) {
+                        outcome.complete(Submission.FAILED);
+                        return;
+                    }
                     if (historyError != null) {
                         failTurn(turn, token, correlationId, SoulTypes.FailureCode.INTERNAL,
                                 "", "", null, outcome);
@@ -208,7 +289,13 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         }
         UUID privateSeedOwner = privacy.owner();
         int queueDepthAtSubmit = scheduler.queueDepth();
-        scheduler.submit(turn.key(), token.epoch(), () -> provider.generate(assembled.request()))
+        scheduler.submit(turn.key(), token.epoch(),
+                        turn.roster().stream().map(SoulGroupTypes.SceneParticipant::botId)
+                                .collect(java.util.stream.Collectors.toSet()),
+                        () -> isCurrent(turn, outcome) ? provider.generate(assembled.request())
+                                : new SoulModelProvider.Call(CompletableFuture.completedFuture(
+                                        new SoulTypes.ProviderResult(false, "", SoulTypes.FailureCode.CANCELLED,
+                                                "", "", 0L, null, null, null)), () -> { }))
                 .whenComplete((result, providerError) -> handleProviderResult(turn, token, correlationId,
                         privateSeedOwner, result, providerError, queueDepthAtSubmit, submitStartNanos, outcome));
     }
@@ -218,6 +305,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
                                        SoulTypes.ProviderResult result,
                                        Throwable providerError, int queueDepthAtSubmit,
                                        long submitStartNanos, CompletableFuture<Submission> outcome) {
+        if (!isCurrent(turn, outcome)) {
+            outcome.complete(Submission.FAILED);
+            return;
+        }
         if (providerError != null) {
             failTurn(turn, token, correlationId, SoulTypes.FailureCode.INTERNAL, "", "", null, outcome);
             return;
@@ -254,20 +345,28 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             return;
         }
 
-        // Finding 3: novelty can drop the line between two lines of one speaker; merge them
-        // again so the same voice never plays twice in a row. Solo scenes keep their breaks.
-        List<SoulGroupTypes.SceneLine> lines = SoulGroupResponseValidator.mergeSpeakerRuns(
-                applyNovelty(turn, parse.lines()), rosterNames.size() <= 1);
-        applySideChannel(turn, correlationId, privateSeedOwner, rosterNames, parse.sideChannelRaw());
+        boolean handedOff;
+        synchronized (sceneLock) {
+            handedOff = isCurrent(turn, outcome);
+            if (handedOff) {
+                PendingScene pending = pendingScenes.get(correlationId);
+                // Finding 3: novelty can drop the line between two lines of one speaker; merge them
+                // again so the same voice never plays twice in a row. Solo scenes keep their breaks.
+                List<SoulGroupTypes.SceneLine> lines = SoulGroupResponseValidator.mergeSpeakerRuns(
+                        applyNovelty(turn, parse.lines()), rosterNames.size() <= 1);
+                applySideChannel(turn, correlationId, privateSeedOwner, rosterNames, parse.sideChannelRaw(),
+                        () -> isCurrent(pending));
 
-        sceneResults.put(correlationId, result);
-        player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines, privateSeedOwner));
-        LOGGER.info("[souls] scene correlationId={} owner={} kind={} rosterSize={} lines={} queueDepth={} "
-                        + "provider={} model={} providerMs={} totalMs={} privateSeed={} outcome=scene-started",
-                correlationId, turn.ownerId(), turn.kind(), turn.roster().size(), lines.size(),
-                queueDepthAtSubmit, result.provider(), result.model(), result.elapsedMillis(),
-                elapsedMs(submitStartNanos), privateSeedOwner != null);
-        outcome.complete(Submission.SCENE_STARTED);
+                sceneResults.put(correlationId, result);
+                player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines, privateSeedOwner));
+                LOGGER.info("[souls] scene correlationId={} owner={} kind={} rosterSize={} lines={} queueDepth={} "
+                                + "provider={} model={} providerMs={} totalMs={} privateSeed={} outcome=scene-started",
+                        correlationId, turn.ownerId(), turn.kind(), turn.roster().size(), lines.size(),
+                        queueDepthAtSubmit, result.provider(), result.model(), result.elapsedMillis(),
+                        elapsedMs(submitStartNanos), privateSeedOwner != null);
+            }
+        }
+        outcome.complete(handedOff ? Submission.SCENE_STARTED : Submission.FAILED);
     }
 
     /**
@@ -284,7 +383,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
      */
     private void applySideChannel(SoulGroupTypes.GroupSceneTurn turn, UUID correlationId,
                                   UUID privateSeedOwner, List<String> rosterNames,
-                                  java.util.Optional<String> raw) {
+                                  java.util.Optional<String> raw, BooleanSupplier current) {
         if (raw.isEmpty()) {
             return; // no sentinel — never an error, never logged
         }
@@ -311,7 +410,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         }
         int stanceSeen = effects.stanceDeltas().size() + effects.droppedStance();
         int factsSeen = effects.facts().size() + effects.droppedFacts();
-        sideChannel.apply(turn, effects);
+        sideChannel.applyIfCurrent(turn, effects, current);
         LOGGER.info("[souls] side-channel correlationId={} stance={}/{} facts={}/{} dropped={}",
                 correlationId, effects.stanceDeltas().size(), stanceSeen,
                 effects.facts().size(), factsSeen,
@@ -392,6 +491,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
     private void failTurn(SoulGroupTypes.GroupSceneTurn turn, SoulTypes.TurnToken token,
                            UUID correlationId, SoulTypes.FailureCode code, String providerId,
                            String model, Long elapsedMillis, CompletableFuture<Submission> outcome) {
+        if (!isCurrent(turn, outcome)) {
+            outcome.complete(Submission.FAILED);
+            return;
+        }
         String statusText = statusFor(code);
         boolean tokenAlreadyStale =
                 code == SoulTypes.FailureCode.CANCELLED || code == SoulTypes.FailureCode.STALE_EPOCH;
@@ -405,6 +508,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         }
         partyStore.appendFailure(token, code, providerId, model, elapsedMillis)
                 .whenComplete((v, appendError) -> {
+                    if (!isCurrent(turn, outcome)) {
+                        outcome.complete(Submission.FAILED);
+                        return;
+                    }
                     statusUnlessAmbient(turn, statusText);
                     logFailure(correlationId, turn, code, providerId, model);
                     outcome.complete(Submission.FAILED);
@@ -491,6 +598,9 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
     @Override
     public void sceneFinished(SoulTypes.TurnToken token, int deliveredLines, int totalLines) {
         sceneResults.remove(token.correlationId());
+        synchronized (sceneLock) {
+            pendingScenes.remove(token.correlationId());
+        }
         LOGGER.info("[souls] scene correlationId={} outcome=playback-finished delivered={}/{}",
                 token.correlationId(), deliveredLines, totalLines);
     }

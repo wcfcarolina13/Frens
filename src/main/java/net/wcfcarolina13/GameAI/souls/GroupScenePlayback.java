@@ -113,7 +113,7 @@ public final class GroupScenePlayback {
         int lastDeliveredParticipant = -1;
         final List<SoulGroupTypes.SceneLine> deliveredLines = new ArrayList<>();
         long notBeforeMs;
-        CompletableFuture<Optional<SoulVoiceService.SynthesizedLine>> synth;
+        volatile CompletableFuture<Optional<SoulVoiceService.SynthesizedLine>> synth;
         long synthStartedMs;
         volatile boolean cancelled;
 
@@ -185,17 +185,36 @@ public final class GroupScenePlayback {
         return scenes.size();
     }
 
-    /** Marks the owner's scene cancelled; remaining lines are aborted on the next tick. */
+    /** Marks the owner's scene cancelled; finish callbacks run on the next server tick. */
     public void cancelOwner(UUID ownerId) {
         SceneState state = scenes.get(ownerId);
         if (state != null) {
-            state.cancelled = true;
+            cancel(state);
+        }
+    }
+
+    /** Independent of the current generation pipeline: playing scenes retain their own roster. */
+    public void cancelForBot(UUID botId) {
+        Objects.requireNonNull(botId, "botId");
+        for (SceneState state : scenes.values()) {
+            if (state.scene.turn().roster().stream().anyMatch(participant -> botId.equals(participant.botId()))) {
+                cancel(state);
+            }
         }
     }
 
     public void cancelAll() {
         for (SceneState state : scenes.values()) {
-            state.cancelled = true;
+            cancel(state);
+        }
+    }
+
+    private static void cancel(SceneState state) {
+        state.cancelled = true;
+        CompletableFuture<?> synth = state.synth;
+        if (synth != null) {
+            // Discard this result without interrupting the shared voice worker or client audio.
+            synth.cancel(false);
         }
     }
 
@@ -211,6 +230,10 @@ public final class GroupScenePlayback {
     }
 
     private void advance(SceneState state, long now) {
+        if (state.cancelled) {
+            finish(state, "cancelled");
+            return;
+        }
         PlayableScene scene = state.scene;
         List<SoulGroupTypes.SceneLine> lines = scene.lines();
         boolean ambientKind = scene.turn().kind().isAmbient();
@@ -334,7 +357,11 @@ public final class GroupScenePlayback {
     }
 
     private void finish(SceneState state, String outcome) {
-        scenes.remove(state.scene.turn().ownerId());
+        if (!scenes.remove(state.scene.turn().ownerId(), state)) {
+            return;
+        }
+        cancel(state);
+        state.synth = null;
         // The single finish site is also the one place the post-scene quiet period is armed:
         // scene occupancy clears here, and without this the audience is immediately fair game for
         // the next scene and for every scripted ambient pool.

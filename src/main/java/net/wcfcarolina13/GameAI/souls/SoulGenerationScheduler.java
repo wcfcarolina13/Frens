@@ -11,7 +11,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Predicate;
+import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 
 /**
@@ -31,12 +31,12 @@ import java.util.function.Supplier;
  */
 public final class SoulGenerationScheduler implements AutoCloseable {
 
-    private record QueuedJob(SoulTypes.ConversationKey key, long epoch,
+    private record QueuedJob(SoulTypes.ConversationKey key, long epoch, Set<UUID> participants,
                               Supplier<SoulModelProvider.Call> callSupplier,
                               CompletableFuture<SoulTypes.ProviderResult> future) {
     }
 
-    private record ActiveJob(SoulTypes.ConversationKey key, long epoch,
+    private record ActiveJob(SoulTypes.ConversationKey key, long epoch, Set<UUID> participants,
                               SoulModelProvider.Call call,
                               CompletableFuture<SoulTypes.ProviderResult> future) {
     }
@@ -72,8 +72,16 @@ public final class SoulGenerationScheduler implements AutoCloseable {
      */
     public CompletableFuture<SoulTypes.ProviderResult> submit(
             SoulTypes.ConversationKey key, long epoch, Supplier<SoulModelProvider.Call> callSupplier) {
+        return submit(key, epoch, Set.of(), callSupplier);
+    }
+
+    /** Party jobs name their roster because their conversation key identifies the owner. */
+    public CompletableFuture<SoulTypes.ProviderResult> submit(
+            SoulTypes.ConversationKey key, long epoch, Set<UUID> participants,
+            Supplier<SoulModelProvider.Call> callSupplier) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(callSupplier, "callSupplier");
+        Set<UUID> roster = Set.copyOf(participants);
 
         CompletableFuture<SoulTypes.ProviderResult> future = new CompletableFuture<>();
         boolean rejectClosed = false;
@@ -84,7 +92,7 @@ public final class SoulGenerationScheduler implements AutoCloseable {
             } else if (queue.size() >= queueCapacity) {
                 overloaded = true;
             } else {
-                queue.addLast(new QueuedJob(key, epoch, callSupplier, future));
+                queue.addLast(new QueuedJob(key, epoch, roster, callSupplier, future));
             }
         }
 
@@ -166,20 +174,19 @@ public final class SoulGenerationScheduler implements AutoCloseable {
      */
     public int cancelForPlayer(UUID playerId) {
         Objects.requireNonNull(playerId, "playerId");
-        return cancelMatching(key -> playerId.equals(key.playerId()));
+        return cancelMatching((key, participants) -> playerId.equals(key.playerId()));
     }
 
     /**
      * Death-time cancellation for a bot: same contract as {@link #cancelForPlayer}, but matches
-     * conversations whose {@link SoulTypes.ConversationKey#botId()} is {@code botId}, so no
-     * reply the bot was generating before it died is delivered after its respawn.
+     * direct conversations by bot id and party conversations by their captured roster.
      */
     public int cancelForBot(UUID botId) {
         Objects.requireNonNull(botId, "botId");
-        return cancelMatching(key -> botId.equals(key.botId()));
+        return cancelMatching((key, participants) -> botId.equals(key.botId()) || participants.contains(botId));
     }
 
-    private int cancelMatching(Predicate<SoulTypes.ConversationKey> matches) {
+    private int cancelMatching(BiPredicate<SoulTypes.ConversationKey, Set<UUID>> matches) {
         List<SoulModelProvider.Call> callsToCancel = new ArrayList<>();
         List<CompletableFuture<SoulTypes.ProviderResult>> queuedFutures = new ArrayList<>();
         synchronized (lock) {
@@ -187,14 +194,14 @@ public final class SoulGenerationScheduler implements AutoCloseable {
                 return 0;
             }
             for (ActiveJob active : activeCalls.values()) {
-                if (matches.test(active.key())) {
+                if (matches.test(active.key(), active.participants())) {
                     callsToCancel.add(active.call());
                 }
             }
             Iterator<QueuedJob> it = queue.iterator();
             while (it.hasNext()) {
                 QueuedJob job = it.next();
-                if (matches.test(job.key())) {
+                if (matches.test(job.key(), job.participants())) {
                     it.remove();
                     queuedFutures.add(job.future());
                 }
@@ -266,7 +273,7 @@ public final class SoulGenerationScheduler implements AutoCloseable {
                     started.add(new StartedJob(job, null));
                     continue;
                 }
-                ActiveJob activeJob = new ActiveJob(job.key(), job.epoch(), call, job.future());
+                ActiveJob activeJob = new ActiveJob(job.key(), job.epoch(), job.participants(), call, job.future());
                 activeCalls.put(job.key(), activeJob);
                 started.add(new StartedJob(job, activeJob));
             }

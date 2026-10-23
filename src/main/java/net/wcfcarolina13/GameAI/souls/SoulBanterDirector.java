@@ -61,6 +61,7 @@ public final class SoulBanterDirector {
     private final SoulRuntime runtime;
     private final MinecraftServer server;
     private final BooleanSupplier banterEnabled;
+    private final BooleanSupplier relationsEnabled;
     private final BooleanSupplier ambientTextOpen;
     private final BooleanSupplier ambientVoiceOpen;
     private final Function<MinecraftServer, List<ServerPlayerEntity>> botsProvider;
@@ -107,6 +108,7 @@ public final class SoulBanterDirector {
 
     public SoulBanterDirector(SoulRuntime runtime, MinecraftServer server,
                                BooleanSupplier banterEnabled, BooleanSupplier activeEnabled,
+                               BooleanSupplier relationsEnabled,
                                BooleanSupplier ambientTextOpen, BooleanSupplier ambientVoiceOpen,
                                Function<MinecraftServer, List<ServerPlayerEntity>> botsProvider,
                                Predicate<ServerPlayerEntity> workingProbe,
@@ -116,6 +118,7 @@ public final class SoulBanterDirector {
         this.server = Objects.requireNonNull(server, "server");
         this.banterEnabled = Objects.requireNonNull(banterEnabled, "banterEnabled");
         this.activeEnabled = Objects.requireNonNull(activeEnabled, "activeEnabled");
+        this.relationsEnabled = Objects.requireNonNull(relationsEnabled, "relationsEnabled");
         this.ambientTextOpen = Objects.requireNonNull(ambientTextOpen, "ambientTextOpen");
         this.ambientVoiceOpen = Objects.requireNonNull(ambientVoiceOpen, "ambientVoiceOpen");
         this.botsProvider = Objects.requireNonNull(botsProvider, "botsProvider");
@@ -351,7 +354,7 @@ public final class SoulBanterDirector {
             withheldPrivate += SoulMemoryDigestOps.withheldFor(minds.get(i), player.getUuid(), audience);
             // Phase 3b relation anchors: a typed belief this bot holds, off cooldown. Gated on
             // soulRelationsEnabled (live read) so the default-off build seeds exactly as before.
-            if (relationsEnabled()) {
+            if (relationsEnabled.getAsBoolean()) {
                 mindAnchors.addAll(SoulRelationOps.anchors(minds.get(i), roster.get(i).displayName(),
                         currentDay, random));
             }
@@ -642,12 +645,6 @@ public final class SoulBanterDirector {
      * group scenes get a closing player-addressed line about one time in three. Deterministic
      * Frens logic — the model never decides WHETHER the player is addressed.
      */
-    /** Live read of {@code soulRelationsEnabled}; absent config means off. */
-    private static boolean relationsEnabled() {
-        net.wcfcarolina13.FilingSystem.ManualConfig cfg = net.wcfcarolina13.Frens.CONFIG;
-        return cfg != null && cfg.isSoulRelationsEnabled();
-    }
-
     static boolean decideAddressPlayer(int rosterSize, RandomGenerator random) {
         return rosterSize == 1 || random.nextInt(3) == 0;
     }
