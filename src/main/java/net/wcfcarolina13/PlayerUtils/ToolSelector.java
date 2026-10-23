@@ -29,6 +29,18 @@ public class ToolSelector {
     private static final java.util.Map<java.util.UUID, Long> LAST_BUNDLE_REACH_TICK =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** Drops the bundle-reach cooldown stamp for a bot that is no longer tracked. */
+    public static void forgetBot(java.util.UUID botUuid) {
+        if (botUuid != null) {
+            LAST_BUNDLE_REACH_TICK.remove(botUuid);
+        }
+    }
+
+    /** Clears world-tick cooldowns when the server session ends. */
+    public static void resetSession() {
+        LAST_BUNDLE_REACH_TICK.clear();
+    }
+
     /**
      * @param allowBundleReach when true and a tool sitting inside a bundle mines the block strictly
      *                         faster than every direct-slot tool (and beats bare hands), it is pulled
@@ -192,39 +204,21 @@ public class ToolSelector {
 
     /**
      * Runs {@code task} on the server thread (fast path when already there) and blocks for the result.
-     * Same shape as {@code ToolProvisionService.callOnServer} / {@code FurnaceOffloadService}.
+     * Uses the shared cancellable server hop; a timed-out queued mutation cannot start later.
      */
     private static <T> T callOnServer(ServerPlayerEntity bot, java.util.function.Supplier<T> task, T fallback) {
-        var server = bot == null ? null : bot.getEntityWorld().getServer();
-        if (server == null || task == null) {
+        if (bot == null || task == null) {
             return fallback;
         }
-        if (server.isOnThread()) {
+        return BotActions.callOnServerThread(bot, () -> {
             try {
-                return task.get();
+                T result = task.get();
+                return result == null ? fallback : result;
             } catch (Throwable t) {
-                LOGGER.debug("Tool select: on-thread step failed: {}", t.toString());
+                LOGGER.debug("Tool select step failed: {}", t.toString());
                 return fallback;
             }
-        }
-        java.util.concurrent.CompletableFuture<T> future = new java.util.concurrent.CompletableFuture<>();
-        server.execute(() -> {
-            try {
-                future.complete(task.get());
-            } catch (Throwable t) {
-                future.complete(fallback);
-            }
-        });
-        try {
-            T result = future.get(2, java.util.concurrent.TimeUnit.SECONDS);
-            return result == null ? fallback : result;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return fallback;
-        } catch (Exception e) {
-            LOGGER.debug("Tool select: server-thread hop failed: {}", e.toString());
-            return fallback;
-        }
+        }, 2_000L, fallback);
     }
 
     /**

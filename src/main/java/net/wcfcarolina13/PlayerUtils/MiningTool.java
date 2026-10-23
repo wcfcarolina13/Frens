@@ -194,8 +194,9 @@ public class MiningTool {
                         targetBlockPos,
                         bestTool.isEmpty() ? "empty-hand" : bestTool.getItem().toString(),
                         bot.getAbilities().creativeMode);
-                if (!switchToTool(bot, bestTool)) {
-                    switchToHarmlessFallback(bot, blockState);
+                if (!switchToTool(bot, bestTool) && !switchToHarmlessFallback(bot, blockState)) {
+                    miningResult.complete("⚠️ Cannot mine: could not equip a safe tool or empty hand.");
+                    return miningResult;
                 }
             } else {
                 ItemStack held = bot.getMainHandStack();
@@ -203,12 +204,18 @@ public class MiningTool {
                     LOGGER.info("Mining {} refusing to preserve held weapon {}; switching to harmless fallback",
                             targetBlockPos,
                             held.getItem());
-                    switchToHarmlessFallback(bot, blockState);
+                    if (!switchToHarmlessFallback(bot, blockState)) {
+                        miningResult.complete("⚠️ Cannot mine: could not equip a safe tool or empty hand.");
+                        return miningResult;
+                    }
                     held = bot.getMainHandStack();
                 } else if (wastesDrop(held, blockState)) {
                     LOGGER.info("Mining {} refusing to preserve held shears on leaves; switching to harmless fallback",
                             targetBlockPos);
-                    switchToHarmlessFallback(bot, blockState);
+                    if (!switchToHarmlessFallback(bot, blockState)) {
+                        miningResult.complete("⚠️ Cannot mine: could not equip a safe tool or empty hand.");
+                        return miningResult;
+                    }
                     held = bot.getMainHandStack();
                 }
                 LOGGER.debug("Preparing to mine {} with preserved held item={} (creative={})",
@@ -339,8 +346,9 @@ public class MiningTool {
                                     repolled.isEmpty() ? "empty-hand" : repolled.getItem().toString(),
                                     targetBlockPos);
                             boolean swapped = switchToTool(bot, repolled);
-                            if (!swapped) {
-                                switchToHarmlessFallback(bot, currentState);
+                            if (!swapped && !switchToHarmlessFallback(bot, currentState)) {
+                                miningResult.complete("⚠️ Cannot mine: could not equip a safe tool or empty hand.");
+                                return;
                             }
                             lastRepollSwap.set(bot.getMainHandStack().copy());
                             // Recalculate required ticks from the new tool; only a faster tool
@@ -525,7 +533,7 @@ public class MiningTool {
                 }
                 if (slot < 9) {
                     BotActions.selectHotbarSlot(bot, slot);
-                    return Boolean.TRUE;
+                    return ToolSelector.slotStillMatches(expected, bot.getMainHandStack());
                 }
                 int target = findEmptyHotbarSlot(inv);
                 if (target == -1) {
@@ -533,7 +541,7 @@ public class MiningTool {
                 }
                 swapStacks(inv, slot, target);
                 BotActions.selectHotbarSlot(bot, target);
-                return Boolean.TRUE;
+                return ToolSelector.slotStillMatches(expected, bot.getMainHandStack());
             }, Boolean.FALSE);
             if (Boolean.TRUE.equals(ok)) {
                 return true;
@@ -563,49 +571,32 @@ public class MiningTool {
 
     /**
      * Runs {@code task} on the server thread (fast path when already there) and blocks for the result.
-     * Mirrors {@code ToolProvisionService.callOnServer}; inventory mutations are server-thread only.
+     * Uses the shared cancellable server hop; a timed-out queued mutation cannot start later.
      */
     private static <T> T callOnServer(ServerPlayerEntity bot, java.util.function.Supplier<T> task, T fallback) {
-        var server = bot == null ? null : bot.getEntityWorld().getServer();
-        if (server == null || task == null) {
+        if (bot == null || task == null) {
             return fallback;
         }
-        if (server.isOnThread()) {
+        return BotActions.callOnServerThread(bot, () -> {
             try {
-                return task.get();
+                T result = task.get();
+                return result == null ? fallback : result;
             } catch (Throwable t) {
-                LOGGER.debug("Tool switch: on-thread step failed: {}", t.toString());
+                LOGGER.debug("Tool switch step failed: {}", t.toString());
                 return fallback;
             }
-        }
-        java.util.concurrent.CompletableFuture<T> future = new java.util.concurrent.CompletableFuture<>();
-        server.execute(() -> {
-            try {
-                future.complete(task.get());
-            } catch (Throwable t) {
-                future.complete(fallback);
-            }
-        });
-        try {
-            T result = future.get(2, java.util.concurrent.TimeUnit.SECONDS);
-            return result == null ? fallback : result;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return fallback;
-        } catch (Exception e) {
-            LOGGER.debug("Tool switch: server-thread hop failed: {}", e.toString());
-            return fallback;
-        }
+        }, 2_000L, fallback);
     }
 
-    private static void switchToHarmlessFallback(ServerPlayerEntity bot, BlockState target) {
+    private static boolean switchToHarmlessFallback(ServerPlayerEntity bot, BlockState target) {
         if (bot == null) {
-            return;
+            return false;
         }
-        // Scans and mutates inventory in one pass — must be a single server-thread unit.
-        callOnServer(bot, () -> {
+        // Scans, selects and verifies the held fallback in one server-thread unit.
+        return callOnServer(bot, () -> {
             switchToHarmlessFallbackOnThread(bot, target);
-            return Boolean.TRUE;
+            ItemStack held = bot.getMainHandStack();
+            return held.isEmpty() || (isNonWeaponMiningFallback(held) && !wastesDrop(held, target));
         }, Boolean.FALSE);
     }
 
