@@ -5,6 +5,7 @@ import net.minecraft.registry.Registry;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.util.Identifier;
 import net.wcfcarolina13.Frens;
+import net.wcfcarolina13.GameAI.services.dialogue.TextOnlyLinePolicy;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -1008,9 +1009,18 @@ public final class BotDialogueSounds {
      * Call this from the mod initializer.
      */
     public static void registerAll() {
+        int registered = 0;
+        int textOnly = 0;
         for (Map.Entry<String, SoundEvent> entry : SOUND_EVENTS.entrySet()) {
+            // Text-only lines have no sounds.json entry; registering them would log "Missing sound".
+            // Their constants stay as line identities and are never played (BotDialoguePlayer).
+            if (TextOnlyLinePolicy.isTextOnly(entry.getKey())) {
+                textOnly++;
+                continue;
+            }
             Registry.register(Registries.SOUND_EVENT, entry.getValue().id(), entry.getValue());
+            registered++;
         }
-        Frens.LOGGER.info("Registered {} bot dialogue sound events", SOUND_EVENTS.size());
+        Frens.LOGGER.info("Registered {} bot dialogue sound events ({} text-only lines skipped)", registered, textOnly);
     }
 }

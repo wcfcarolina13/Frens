@@ -3535,11 +3535,6 @@
       }
     ]
   },
-  "bot.line.mount_banged_up": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.mount_my_horse_hurt": {
     "category": "voice",
     "sounds": [
@@ -4080,11 +4075,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.eating_progress": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
   },
   "bot.line.eating_done": {
     "category": "voice",
@@ -5951,11 +5941,6 @@
       }
     ]
   },
-  "bot.line.ambient_blame_terrain": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.ambient_my_job": {
     "category": "voice",
     "sounds": [
@@ -6121,11 +6106,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.boat_kraken": {
-    "category": "voice",
-    "replace": false,
-    "sounds": []
   },
   "bot.line.boat_shipwreck_speedrun": {
     "category": "voice",
@@ -6535,11 +6515,6 @@
       }
     ]
   },
-  "bot.line.meme_creeper_hate_sound": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.meme_herobrine_leaving": {
     "category": "voice",
     "sounds": [
@@ -6820,11 +6795,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.post_explosion_less_boom": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
   },
   "bot.line.precipice_back_up": {
     "category": "voice",
@@ -7553,11 +7523,6 @@
       }
     ]
   },
-  "bot.line.topic_jungle_memory": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.topic_desert_first": {
     "category": "voice",
     "sounds": [
@@ -7676,11 +7641,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.topic_snow_memory": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
   },
   "bot.line.topic_village_first": {
     "category": "voice",
@@ -7903,11 +7863,6 @@
       }
     ]
   },
-  "bot.line.topic_enchanting_memory": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.topic_ruined_portal_first": {
     "category": "voice",
     "sounds": [
@@ -7925,11 +7880,6 @@
       }
     ]
   },
-  "bot.line.topic_ruined_portal_ask_1": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.topic_ruined_portal_ask_2": {
     "category": "voice",
     "sounds": [
@@ -7946,11 +7896,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.topic_ruined_portal_memory": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
   },
   "bot.line.topic_nether_fortress_first": {
     "category": "voice",
@@ -8105,11 +8050,6 @@
       }
     ]
   },
-  "bot.line.topic_stronghold_ask_1": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.topic_stronghold_ask_2": {
     "category": "voice",
     "sounds": [
@@ -8126,11 +8066,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.topic_stronghold_memory": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
   },
   "bot.line.topic_ancient_city_first": {
     "category": "voice",
@@ -8604,26 +8539,6 @@
       }
     ]
   },
-  "bot.line.topic_horse_first_1": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
-  "bot.line.topic_horse_first_2": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
-  "bot.line.topic_horse_ask_1": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
-  "bot.line.topic_horse_ask_2": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.topic_horse_memory": {
     "category": "voice",
     "sounds": [
@@ -8794,11 +8709,6 @@
       }
     ]
   },
-  "bot.line.topic_strider_first_2": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.topic_strider_ask_1": {
     "category": "voice",
     "sounds": [
@@ -8832,11 +8742,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.topic_strider_memory": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
   },
   "bot.line.topic_minecart_first": {
     "category": "voice",
@@ -9073,11 +8978,6 @@
       }
     ]
   },
-  "bot.line.portal_nether_overworld_2": {
-    "category": "voice",
-    "replace": false,
-    "sounds": []
-  },
   "bot.line.portal_end_overworld_1": {
     "category": "voice",
     "sounds": [
@@ -9103,26 +9003,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.weird_portal_end_in_nether_1": {
-    "category": "voice",
-    "replace": false,
-    "sounds": []
-  },
-  "bot.line.weird_portal_end_in_nether_2": {
-    "category": "voice",
-    "replace": false,
-    "sounds": []
-  },
-  "bot.line.weird_portal_nether_in_end_1": {
-    "category": "voice",
-    "replace": false,
-    "sounds": []
-  },
-  "bot.line.weird_portal_nether_in_end_2": {
-    "category": "voice",
-    "replace": false,
-    "sounds": []
   },
   "bot.line.care_player_hurt_1": {
     "category": "voice",
@@ -9174,11 +9054,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.care_player_hungry_1": {
-    "category": "voice",
-    "replace": false,
-    "sounds": []
   },
   "bot.line.care_player_hungry_2": {
     "category": "voice",
@@ -9438,11 +9313,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.stop_adios": {
-    "category": "voice",
-    "replace": false,
-    "sounds": []
   },
   "bot.line.stop_ill_wait_here": {
     "category": "voice",
@@ -10352,10 +10222,6 @@
       }
     ]
   },
-  "bot.line.sniffer_cutest_thing": {
-    "category": "voice",
-    "sounds": []
-  },
   "bot.line.zombified_piglin_porkchop": {
     "category": "voice",
     "sounds": [
@@ -10455,18 +10321,6 @@
       }
     ]
   },
-  "bot.line.panda_aggressive": {
-    "category": "voice",
-    "sounds": []
-  },
-  "bot.line.panda_playful": {
-    "category": "voice",
-    "sounds": []
-  },
-  "bot.line.panda_weak": {
-    "category": "voice",
-    "sounds": []
-  },
   "bot.line.cute_animal_keep_it": {
     "category": "voice",
     "sounds": [
@@ -10484,14 +10338,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.cute_animal_want_one": {
-    "category": "voice",
-    "sounds": []
-  },
-  "bot.line.cute_animal_so_cute": {
-    "category": "voice",
-    "sounds": []
   },
   "bot.line.guardian_staring_right": {
     "category": "voice",
@@ -10519,10 +10365,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.guardian_beam_hurt": {
-    "category": "voice",
-    "sounds": []
   },
   "bot.line.elder_guardian_boss": {
     "category": "voice",
@@ -10568,10 +10410,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.redstone_machine_tech": {
-    "category": "voice",
-    "sounds": []
   },
   "bot.line.redstone_machine_hell_and_back": {
     "category": "voice",
@@ -10672,11 +10510,6 @@
       }
     ]
   },
-  "bot.line.iron_golem_daisy_earned": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.leaf_litter_fuel_run": {
     "category": "voice",
     "sounds": [
@@ -10757,11 +10590,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.snow_golem_ammo": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
   },
   "bot.line.snow_golem_friend": {
     "category": "voice",
@@ -10880,16 +10708,6 @@
       }
     ]
   },
-  "bot.line.snowball_escalate_on_now": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
-  "bot.line.snowball_escalate_in_for_it": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
-  },
   "bot.line.snowball_probe_heads_up": {
     "category": "voice",
     "sounds": [
@@ -10898,11 +10716,6 @@
         "weight": 1
       }
     ]
-  },
-  "bot.line.snowball_probe_incoming": {
-    "category": "voice",
-    "sounds": [],
-    "replace": false
   },
   "bot.line.snowball_taunt_all_you_got": {
     "category": "voice",

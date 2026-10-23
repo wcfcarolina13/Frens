@@ -12,6 +12,7 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService;
+import net.wcfcarolina13.GameAI.services.dialogue.TextOnlyLinePolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1022,7 +1023,7 @@ public final class BotDialoguePlayer {
 
     private static PlayResult playSoundInternal(ServerPlayerEntity bot, SoundEvent sound, boolean showSubtitle,
                                                 VoiceLineCategory voiceCategory) {
-        if (bot == null || sound == null) {
+        if (bot == null || sound == null || isTextOnly(sound)) {
             return PlayResult.FAILED;
         }
 
@@ -1099,6 +1100,12 @@ public final class BotDialoguePlayer {
             return PlayResult.FAILED;
         }
 
+        // Text-only line (no clip): FAILED before the voice slot is taken, so callers' chat or
+        // overhead fallback runs and the 2.5 s voice gap is not spent on silence.
+        if (isTextOnly(sound)) {
+            return PlayResult.FAILED;
+        }
+
         if (!isGlobalVoicedDialogueEnabled()) {
             return PlayResult.DISABLED;
         }
@@ -1113,6 +1120,16 @@ public final class BotDialoguePlayer {
         return playSoundInternal(bot, sound, true, category);
     }
     
+    /** True for a line with no clip (silent placeholder removed): it is delivered as text only. */
+    public static boolean isTextOnly(SoundEvent sound) {
+        return sound != null && sound.id() != null && TextOnlyLinePolicy.isTextOnly(sound.id().getPath());
+    }
+
+    /** The subtitle (overhead) text for a line's sound event, or null when it has none. */
+    public static String subtitleFor(SoundEvent sound) {
+        return sound == null ? null : SUBTITLE_MAP.get(sound);
+    }
+
     /**
      * Show a subtitle to nearby players via action bar.
      * Only shows subtitles for sounds that have mapped text (like ambient chatter).
@@ -1145,7 +1162,7 @@ public final class BotDialoguePlayer {
      * @return true if the sound was played
      */
     public static boolean forcePlaySound(ServerPlayerEntity bot, SoundEvent sound) {
-        if (bot == null || sound == null) {
+        if (bot == null || sound == null || isTextOnly(sound)) {
             return false;
         }
         return playSound(bot, sound, null);

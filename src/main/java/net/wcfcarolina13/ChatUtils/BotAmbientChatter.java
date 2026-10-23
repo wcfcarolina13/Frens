@@ -1340,6 +1340,24 @@ public final class BotAmbientChatter {
         if (!SpeechFloorService.isFloorOpen(audience, SpeechFloorPolicy.Source.SCRIPTED_AMBIENT)) {
             return false;
         }
+        if (BotDialoguePlayer.isTextOnly(sound)) {
+            // No clip (text-only line): show its text overhead the way a played line's subtitle
+            // shows, independent of the voice toggles. The pool keeps the entry, so no array
+            // empties out. Nothing shown (text off) means nothing reached the player.
+            String text = DialogueTextMapper.textForSound(sound);
+            if (text == null) {
+                text = BotDialoguePlayer.subtitleFor(sound);
+            }
+            if (text == null) {
+                return false;
+            }
+            boolean shown = CompanionOverheadDialogueService
+                    .showOverheadLine(bot, text, 3_000, 48.0, "ambient", null).textShown();
+            if (shown) {
+                SpeechFloorService.noteSpeech(audience, SpeechFloorPolicy.Source.SCRIPTED_AMBIENT);
+            }
+            return shown;
+        }
         boolean played = BotDialoguePlayer.playSoundForBot(bot, sound, VoiceLineCategory.AMBIENT_CHATTER);
         if (played) {
             SpeechFloorService.noteSpeech(audience, SpeechFloorPolicy.Source.SCRIPTED_AMBIENT);

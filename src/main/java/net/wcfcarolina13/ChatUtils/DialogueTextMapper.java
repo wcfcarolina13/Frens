@@ -1,6 +1,7 @@
 package net.wcfcarolina13.ChatUtils;
 
 import net.minecraft.sound.SoundEvent;
+import net.wcfcarolina13.GameAI.services.dialogue.TextOnlyLinePolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,6 +46,17 @@ public final class DialogueTextMapper {
      * @return The matching SoundEvent, or null if no match found
      */
     public static SoundEvent lookup(String text) {
+        SoundEvent sound = lookupMapped(text);
+        // Text-only lines (silent placeholder, no clip) report no mapping, so every caller takes
+        // its existing no-sound path: no voice attempt, and the chat fallback runs.
+        if (sound != null && TextOnlyLinePolicy.isTextOnly(sound.id().getPath())) {
+            LOGGER.debug("Text-only line, no voice: {}", sound.id());
+            return null;
+        }
+        return sound;
+    }
+
+    private static SoundEvent lookupMapped(String text) {
         if (text == null || text.isBlank()) {
             return null;
         }
