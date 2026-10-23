@@ -12,7 +12,9 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 **Deferred (with reasons):** a second End exit by the same bot takes the plain teleport path (`seenCredits` true): follow is cleared and the task ends with "External teleport detected." (pre-existing, now on every bot's second End trip; fix with a reset on the cross-dimension `teleportTo` path). `AFTER_RESPAWN` does not fire for real deaths or `/kill` (the fallback runs; worth knowing why). `/bot place` from a distance needs a worker hop. A live text-only line was not seen in the sandbox. 6bz1 (fortify or shelter onto snow) not run: the `sheltertest.py seal` setup did not trigger a shelter (Wally's commander is another bot). Review minors: weird-portal edge flag re-rolls each tick while text is off, `TaskService.resetAll` clears the worker ticket only on its own thread, `attemptAdjacentChest` places into its own anchor cell.
 
-**Needs Bradley:** OK on the exact Modrinth notes text (draft in Phase 4 of this session); OK to delete the throwaway fresh-install Prism instance afterwards.
+**Modrinth:** fresh-install part 2 passed on 1.1.295 (no high-severity finding, `docs/testing/FRESH_INSTALL_1.1.226.md` part 2; throwaway instance deleted with Bradley's OK). Bradley OKed the notes text as written on 2026-10-23 (`.superpowers/sdd/modrinth/MODRINTH_NOTES_1.1.295_DRAFT.md`, copy on his Desktop) and uploads it himself.
+
+**From the fresh install, for the backlog:** Voice Engine screen clips each engine's download size under its Install button at GUI scale 4 (medium). First-run roster says "Restore" for the default Jake. Checklist RAM hint and model screen header cut with an ellipsis. Vanilla's tutorial toast covers the top right of Frens screens.
 
 ## Session Handoff 2026-10-23 (1.1.294) — superseded
 

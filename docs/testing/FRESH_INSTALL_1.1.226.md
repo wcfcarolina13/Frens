@@ -32,3 +32,34 @@ Setup: new Prism instance `frens-fresh` (Fabric loader 0.19.3, Fabric API 0.141.
 ## Not tested
 
 Part 2 (Ollama on, Guide → AI setup checklist, model pick, Soul Chat, test reply, voice). Next fresh-install run should cover it.
+
+# Part 2: AI setup on a fresh install, Frens 1.1.295 (2026-10-23)
+
+Setup: new throwaway Prism instance `frens-fresh-295` (Fabric loader 0.19.3, Fabric API 0.141.6, `frens-1.1.295-release+1.21.11.jar` md5 `e32f022f8002b58395341d8950e6c1f4`, plus the hardened MCP fork jar so Claude could drive it), no Carpet, no Flashback, empty config, muted. Ollama 0.35.1 already installed and running on this Mac (llama3.1:8b and llama3.2:3b present). New singleplayer world with the defaults: Survival, Normal, **Allow Commands OFF**. Claude played through the MCP fork, approved by Bradley 2026-10-23 (including the in-game model download). Screenshots and log copy: session scratch `fresh/`. Not on Nirn, not in the mcp-sandbox world.
+
+## Passes
+
+- Clean startup: 0 ERROR lines, `Registered 692 bot dialogue sound events (39 text-only lines skipped)`, no `Missing sound` (part 1 finding 15 is gone).
+- First join: `Auto-spawn deferred until the first real player joins`, the line "Frens is in Admin mode: open the roster with [-] to bring in a companion.", and the Companions roster opens by itself. Ticking Jake and Spawn Selected spawned him with commands off (part 1 finding 1 is gone).
+- Guide (`]`) has an **AI setup** button. The checklist shows six steps with a state and one button each, and found Ollama ("Ollama 0.35.1 is running").
+- **Choose model** lists Llama 3.1 8B, 3.2 3B (both "installed") and 3.2 1B ("1.3 GB download"), with RAM and free disk. **Download** pulled `llama3.2:1b` through Ollama with a live progress bar ("pulling 74701a8c35f6 0.9 GB / 1.2 GB") in about 2 minutes, then selected it on its own ("Selected ✔").
+- **Turn on** (Soul Chat is now ON for this world), **Enable** for Jake ("Jake is now speaking as Jake."), **Say hi** puts "Jake, can you hear me?" in the chat box. Sent with Enter, Jake answered 2 s later: "The silence is... tolerable." (`[souls] ollama usage model=llama3.2:1b promptTokens=806 evalTokens=8 loadMs=1567`).
+- After the reply all five required steps show a green tick ("Your companion answered.").
+
+## Findings
+
+| # | Finding | Evidence | Severity |
+|---|---|---|---|
+| 1 | **Voice Engine screen clips each engine's description** under its Install button ("Not set up on this mach", "One-time ~1 GB in", "One-time ~80 MB do"), so the size of the download is cut off. | screenshot `11_voice.png` (window 1708x960, GUI scale 4) | 🟡 Medium |
+| 2 | The first-run roster says "Choose Companions to Restore ... Tick one or more saved bots" and lists Jake, the built-in default, on an install that never had a bot. | `01_companions.png` | ⚪ Minor |
+| 3 | Lines cut with "…": the checklist's RAM hint ("plus Minecraft's …") and the model screen's "models download from registry.o…". | `04_ai_setup.png`, `05_models.png` | ⚪ Minor |
+| 4 | Vanilla's movement tutorial toast sits over the top right of the Frens screens (checklist title, model screen header) for a new player. | `04_ai_setup.png` | ⚪ Minor |
+| 5 | Jake spawned inside the leaves of the tree the player stood under. | `02_after_spawn.png` | ⚪ Minor |
+
+No high-severity finding.
+
+## Not tested
+
+- Voice install (Piper, Pocket): both download programs from the internet, outside the approval for this run, and need ears.
+- "Get Ollama" on a machine without Ollama, and an Ollama that is installed but not running.
+- Play beyond the first reply (part 1 covered survival play on 1.1.226).
