@@ -5,6 +5,7 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.souls.SoulRuntime;
@@ -258,13 +259,23 @@ public class SoulVoiceEngineScreen extends Screen {
                     cy + popupHeight() - 39, 0xFFB0B0B0);
         }
 
+        int textW = SoulSetupScreenPolicy.engineTextWidth(popupW(), PAD, BTN_W);
         for (int i = 0; i < rows.size(); i++) {
             EngineRow row = rows.get(i);
             int y = cy + rowsTop() + i * ROW_H;
             int titleColor = row.supported() ? 0xFFEFEFEF : 0xFF707070;
             int blurbColor = row.supported() ? 0xFFB0B0B0 : 0xFF707070;
-            context.drawTextWithShadow(this.textRenderer, row.title(), cx + PAD, y + 2, titleColor);
-            context.drawTextWithShadow(this.textRenderer, row.blurb(), cx + PAD, y + 14, blurbColor);
+            context.drawTextWithShadow(this.textRenderer,
+                    UiFitPolicy.elide(row.title(), textW, this.textRenderer::getWidth), cx + PAD, y + 2, titleColor);
+            // Wrapped so it stops before the button. The leading colour code is dropped (it would
+            // only reach the first line); blurbColor already gives every line the same grey.
+            String blurb = Formatting.strip(row.blurb());
+            int lineY = y + 14;
+            for (String line : UiFitPolicy.wrap(blurb, textW, this.textRenderer::getWidth,
+                    SoulSetupScreenPolicy.ENGINE_BLURB_MAX_LINES)) {
+                context.drawTextWithShadow(this.textRenderer, line, cx + PAD, lineY, blurbColor);
+                lineY += 10;
+            }
         }
 
         super.render(context, mouseX, mouseY, delta);

@@ -246,14 +246,11 @@ public class SoulModelManagerScreen extends Screen {
             y += 11;
             String ram = s.totalRamBytes() > 0 ? gb(s.totalRamBytes()) : "unknown";
             String disk = s.freeDiskBytes() > 0 ? gb(s.freeDiskBytes()) + " free" : "unknown";
-            context.drawTextWithShadow(this.textRenderer,
-                    fitLine("System: " + ram + " RAM  ·  disk " + disk
-                            + "  ·  models download from registry.ollama.ai", textW()),
-                    cx + PAD, y, COL_DIM);
-            y += 14;
-            context.drawTextWithShadow(this.textRenderer,
-                    fitLine("New requests use your selection. The first reply may take longer.", textW()),
-                    cx + PAD, y, COL_DIM);
+            // Three short lines (cy+35, +46, +57) so none is cut at the 326 px popup; rows start at cy+72.
+            for (String line : SoulSetupScreenPolicy.modelHeaderLines(ram, disk)) {
+                context.drawTextWithShadow(this.textRenderer, fitLine(line, textW()), cx + PAD, y, COL_DIM);
+                y += 11;
+            }
 
             int rowY = cy + 72;
             for (OllamaModelInstaller.KnownModel m : OllamaModelInstaller.KNOWN_MODELS) {

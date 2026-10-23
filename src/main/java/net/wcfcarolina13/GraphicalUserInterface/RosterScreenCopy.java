@@ -10,6 +10,11 @@ public final class RosterScreenCopy {
     public enum State {
         /** At least one saved companion can be restored. */
         HAS_RESTORABLE,
+        /**
+         * The list only offers names nothing has saved yet (the default recruit, e.g. Jake, on a
+         * fresh install). Not called saved or restorable.
+         */
+        FIRST_COMPANION,
         /** No saved companions at all. */
         NONE_SAVED,
         /** Companions are saved, and every one of them is already in the world. */
@@ -29,7 +34,19 @@ public final class RosterScreenCopy {
      * @param otherWorldsCount companions saved in other worlds that the roster can bring in
      */
     public static State state(int restorableCount, boolean allSavedPresent, int otherWorldsCount) {
+        return state(restorableCount, allSavedPresent, otherWorldsCount, restorableCount);
+    }
+
+    /**
+     * @param savedCount how many of the listed companions have a saved record. The roster also
+     *                   lists the default recruit before anything is saved, so a list of only
+     *                   unsaved names is a first meeting, not a restore.
+     */
+    public static State state(int restorableCount, boolean allSavedPresent, int otherWorldsCount, int savedCount) {
         if (restorableCount > 0) {
+            if (savedCount <= 0) {
+                return State.FIRST_COMPANION;
+            }
             return State.HAS_RESTORABLE;
         }
         if (allSavedPresent) {
@@ -38,9 +55,27 @@ public final class RosterScreenCopy {
         return otherWorldsCount > 0 ? State.NONE_HERE : State.NONE_SAVED;
     }
 
+    /**
+     * How many listed names have a saved record. {@code savedLower} holds aliases normalized with
+     * {@link RosterPresencePolicy#normalize}. Null inputs count as empty.
+     */
+    public static int savedCount(java.util.List<String> listed, java.util.Set<String> savedLower) {
+        if (listed == null || savedLower == null) {
+            return 0;
+        }
+        int n = 0;
+        for (String alias : listed) {
+            if (alias != null && savedLower.contains(RosterPresencePolicy.normalize(alias))) {
+                n++;
+            }
+        }
+        return n;
+    }
+
     public static String title(State state) {
         return switch (state) {
             case HAS_RESTORABLE -> "Choose Companions to Restore";
+            case FIRST_COMPANION -> "Meet Your First Companion";
             case NONE_SAVED -> "Welcome. No saved companions yet.";
             case ALL_PRESENT -> "All your companions are already here";
             case NONE_HERE -> "No companions in this world yet.";
@@ -48,8 +83,17 @@ public final class RosterScreenCopy {
     }
 
     public static String subtitle(State state) {
+        return subtitle(state, null);
+    }
+
+    /**
+     * @param firstName the listed name for {@link State#FIRST_COMPANION}, or null for a generic line
+     */
+    public static String subtitle(State state, String firstName) {
         return switch (state) {
             case HAS_RESTORABLE -> "Tick one or more saved bots, then click Spawn Selected.";
+            case FIRST_COMPANION -> "Tick " + (firstName == null || firstName.isBlank() ? "a name" : firstName.trim())
+                    + ", then click Spawn Selected, or name your own below.";
             case NONE_SAVED -> "Pick a name below to spawn your first bot.";
             case ALL_PRESENT -> "To add another, type a new name below and click Create.";
             case NONE_HERE -> "Create one below, or open Other worlds to bring one in.";
@@ -57,12 +101,12 @@ public final class RosterScreenCopy {
     }
 
     /**
-     * Placeholder shown where the list would be. Empty for {@link State#HAS_RESTORABLE}. Never
+     * Placeholder shown where the list would be. Empty when the list has rows. Never
      * repeats the title, which is drawn just above it.
      */
     public static String emptyListLine(State state) {
         return switch (state) {
-            case HAS_RESTORABLE -> "";
+            case HAS_RESTORABLE, FIRST_COMPANION -> "";
             case NONE_SAVED -> "(Your bots will be listed here.)";
             case ALL_PRESENT -> "(Everyone you saved is already in this world.)";
             case NONE_HERE -> "(Your saved companions are in other worlds.)";

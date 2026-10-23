@@ -77,11 +77,22 @@ public class BotRestoreScreen extends Screen {
      *                        this world is already in it
      */
     public BotRestoreScreen(Screen parent, List<String> aliases, List<String> otherWorlds, boolean allSavedPresent) {
+        this(parent, aliases, otherWorlds, allSavedPresent, aliases == null ? 0 : aliases.size());
+    }
+
+    /**
+     * @param savedCount how many of {@code aliases} have a saved record. 0 means the list only
+     *                   holds the default recruit, so the header greets a first companion
+     *                   instead of offering a restore.
+     */
+    public BotRestoreScreen(Screen parent, List<String> aliases, List<String> otherWorlds, boolean allSavedPresent,
+                            int savedCount) {
         super(Text.literal("Companions"));
         this.parent = parent;
         this.aliases = aliases == null ? List.of() : List.copyOf(aliases);
         this.otherWorlds = otherWorlds == null ? List.of() : List.copyOf(otherWorlds);
-        this.copyState = RosterScreenCopy.state(this.aliases.size(), allSavedPresent, this.otherWorlds.size());
+        this.copyState = RosterScreenCopy.state(this.aliases.size(), allSavedPresent, this.otherWorlds.size(),
+                savedCount);
     }
 
     /** The bot rows currently listed: this world's, or other worlds' while that list is open. */
@@ -94,7 +105,8 @@ public class BotRestoreScreen extends Screen {
     }
 
     private String subtitleText() {
-        return showingOtherWorlds ? RosterScreenCopy.otherWorldsSubtitle() : RosterScreenCopy.subtitle(copyState);
+        return showingOtherWorlds ? RosterScreenCopy.otherWorldsSubtitle() : RosterScreenCopy.subtitle(copyState,
+                aliases.isEmpty() ? null : aliases.get(0));
     }
 
     /** One place for every y/x the roster uses, so init, render and clicks agree. */

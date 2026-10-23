@@ -96,4 +96,53 @@ class RosterScreenCopyTest {
         assertFalse(hint.contains("\u2014"), hint);
         assertFalse(hint.contains(";"), hint);
     }
+
+    @Test
+    void defaultRecruitAloneIsAFirstMeetingNotARestore() {
+        assertEquals(RosterScreenCopy.State.FIRST_COMPANION, RosterScreenCopy.state(1, false, 0, 0));
+        assertEquals(RosterScreenCopy.State.FIRST_COMPANION, RosterScreenCopy.state(1, false, 2, 0));
+        assertEquals(RosterScreenCopy.State.HAS_RESTORABLE, RosterScreenCopy.state(2, false, 0, 1));
+        // The old overloads keep treating every listed name as saved.
+        assertEquals(RosterScreenCopy.State.HAS_RESTORABLE, RosterScreenCopy.state(1, false, 0));
+        // Empty lists are unchanged by the saved count.
+        assertEquals(RosterScreenCopy.State.NONE_SAVED, RosterScreenCopy.state(0, false, 0, 0));
+        assertEquals(RosterScreenCopy.State.ALL_PRESENT, RosterScreenCopy.state(0, true, 0, 0));
+    }
+
+    @Test
+    void firstCompanionCopyNeverCallsTheBotSavedOrRestorable() {
+        RosterScreenCopy.State s = RosterScreenCopy.State.FIRST_COMPANION;
+        assertEquals("Meet Your First Companion", RosterScreenCopy.title(s));
+        assertEquals("Tick Jake, then click Spawn Selected, or name your own below.",
+                RosterScreenCopy.subtitle(s, "Jake"));
+        assertEquals("Tick a name, then click Spawn Selected, or name your own below.",
+                RosterScreenCopy.subtitle(s, null));
+        for (String text : new String[]{RosterScreenCopy.title(s), RosterScreenCopy.subtitle(s, "Jake")}) {
+            String lower = text.toLowerCase();
+            assertFalse(lower.contains("saved"), text);
+            assertFalse(lower.contains("restor"), text);
+            assertFalse(text.contains("—"), text);
+            assertFalse(text.contains(";"), text);
+        }
+        assertEquals("", RosterScreenCopy.emptyListLine(s));
+    }
+
+    @Test
+    void firstCompanionCopyFitsTheNarrowRoster() {
+        // Panel 304 wide at the 320 floor, text inside 8 px padding; subtitle may wrap to 2 lines.
+        java.util.function.ToIntFunction<String> w = t -> t.length() * 6;
+        RosterScreenCopy.State s = RosterScreenCopy.State.FIRST_COMPANION;
+        assertTrue(w.applyAsInt(RosterScreenCopy.title(s)) <= 288);
+        java.util.List<String> lines = UiFitPolicy.wrap(RosterScreenCopy.subtitle(s, "Jake"), 288, w, 2);
+        assertFalse(lines.get(lines.size() - 1).endsWith(UiFitPolicy.ELLIPSIS), lines.toString());
+    }
+
+    @Test
+    void savedCountMatchesNamesCaseInsensitively() {
+        assertEquals(0, RosterScreenCopy.savedCount(java.util.List.of("Jake"), java.util.Set.of()));
+        assertEquals(1, RosterScreenCopy.savedCount(java.util.List.of("Jake", "Bob"), java.util.Set.of("bob")));
+        assertEquals(2, RosterScreenCopy.savedCount(java.util.List.of(" JAKE ", "Bob"), java.util.Set.of("jake", "bob")));
+        assertEquals(0, RosterScreenCopy.savedCount(null, java.util.Set.of("jake")));
+        assertEquals(0, RosterScreenCopy.savedCount(java.util.List.of("Jake"), null));
+    }
 }

@@ -78,4 +78,61 @@ class SoulSetupScreenPolicyTest {
         assertFalse(SoulSetupScreenPolicy.modelButton(SoulSetupScreenPolicy.Mode.LOCAL,
                 false, true, true).enabled());
     }
+
+    // Voice Engine popup: PAD 8, button 130 wide at the right edge, rows 50 tall, blurb from y+14.
+    private static final int PAD = 8, BTN_W = 130, ROW_H = 50, BLURB_TOP = 14, LINE_STEP = 10, LINE_H = 9;
+
+    @Test
+    void engineTextStopsBeforeTheButtonAtEveryPopupWidth() {
+        assertEquals(248, SoulSetupScreenPolicy.engineTextWidth(400, PAD, BTN_W));
+        assertEquals(174, SoulSetupScreenPolicy.engineTextWidth(326, PAD, BTN_W));
+        assertEquals(152, SoulSetupScreenPolicy.engineTextWidth(304, PAD, BTN_W));
+        for (int popupW : new int[] {304, 326, 400}) {
+            int textRight = PAD + SoulSetupScreenPolicy.engineTextWidth(popupW, PAD, BTN_W);
+            int buttonLeft = popupW - PAD - BTN_W;
+            assertTrue(textRight < buttonLeft, "text reaches the button at popup width " + popupW);
+        }
+        assertEquals(1, SoulSetupScreenPolicy.engineTextWidth(100, PAD, BTN_W));
+    }
+
+    @Test
+    void engineBlurbsWrapInsideTheirRow() {
+        // Worst-case 6 px per character (the default font's widest common advance).
+        java.util.function.ToIntFunction<String> w = t -> t.length() * 6;
+        String[] blurbs = {
+                "Best quality. Uses the GPU. Not set up on this machine.",
+                "macOS only. Qwen3-TTS server runs on Apple silicon.",
+                "Kyutai, 100M params, 21 presets. One-time ~1 GB install.",
+                "Fast, CPU-only, frees the GPU. One-time ~80 MB download.",
+        };
+        int lastLineBottom = BLURB_TOP + (SoulSetupScreenPolicy.ENGINE_BLURB_MAX_LINES - 1) * LINE_STEP + LINE_H;
+        assertTrue(lastLineBottom <= ROW_H, "third blurb line spills into the next row");
+        for (int popupW : new int[] {304, 326, 400}) {
+            int textW = SoulSetupScreenPolicy.engineTextWidth(popupW, PAD, BTN_W);
+            for (String blurb : blurbs) {
+                var lines = UiFitPolicy.wrap(blurb, textW, w, SoulSetupScreenPolicy.ENGINE_BLURB_MAX_LINES);
+                assertTrue(lines.size() <= SoulSetupScreenPolicy.ENGINE_BLURB_MAX_LINES);
+                assertFalse(lines.get(lines.size() - 1).endsWith(UiFitPolicy.ELLIPSIS),
+                        "blurb cut at popup width " + popupW + ": " + blurb);
+                for (String line : lines) {
+                    assertTrue(w.applyAsInt(line) <= textW, "line too wide: " + line);
+                }
+            }
+        }
+    }
+
+    @Test
+    void modelHeaderLinesFitTheNarrowestPopup() {
+        // Worst-case 6 px per character against the text width at the 320 floor (304 - 16).
+        java.util.function.ToIntFunction<String> w = t -> t.length() * 6;
+        var lines = SoulSetupScreenPolicy.modelHeaderLines("128.0 GB", "1024.0 GB free");
+        assertEquals(3, lines.size());
+        assertTrue(lines.get(0).startsWith("System: 128.0 GB RAM"));
+        assertFalse(lines.get(0).contains("registry"), "the registry note has its own line");
+        assertEquals("Models download from registry.ollama.ai.", lines.get(1));
+        for (String line : lines) {
+            assertTrue(w.applyAsInt(line) <= 288, "cut at the narrow popup: " + line);
+            assertFalse(line.contains("—") || line.contains(";"), line);
+        }
+    }
 }

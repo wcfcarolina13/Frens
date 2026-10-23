@@ -28,6 +28,30 @@ public final class SoulSetupScreenPolicy {
         };
     }
 
+    /** Most lines an engine row's blurb may take: y+14, +24, +34 ends at y+43, inside the 50 px row. */
+    public static final int ENGINE_BLURB_MAX_LINES = 3;
+    /** Clear space kept between a row's text and its button. */
+    public static final int ENGINE_TEXT_BUTTON_GAP = 6;
+
+    /**
+     * Width an engine row's title and blurb may use so they stop before the row's button
+     * (which sits at the popup's right edge, inside {@code pad}). Never below 1.
+     */
+    public static int engineTextWidth(int popupWidth, int pad, int buttonWidth) {
+        return Math.max(1, popupWidth - pad * 2 - buttonWidth - ENGINE_TEXT_BUTTON_GAP);
+    }
+
+    /**
+     * The Model screen's header under the Ollama line: system figures, where models come from,
+     * and the switch note, each short enough for the 326 px popup (scale 5 in a 342 px window).
+     */
+    public static java.util.List<String> modelHeaderLines(String ram, String disk) {
+        return java.util.List.of(
+                "System: " + ram + " RAM  ·  disk " + disk,
+                "Models download from registry.ollama.ai.",
+                "First reply after a switch may be slow.");
+    }
+
     public static ModelButton modelButton(Mode mode, boolean installed, boolean selected, boolean downloading) {
         ModelLabel label = !installed ? ModelLabel.DOWNLOAD : selected ? ModelLabel.SELECTED : ModelLabel.USE;
         boolean enabled = !downloading && !(installed && selected)

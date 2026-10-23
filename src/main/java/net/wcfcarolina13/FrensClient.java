@@ -1349,6 +1349,29 @@ public class FrensClient implements ClientModInitializer {
         drawTopTip(context, TopTipLane.LEFT, java.util.List.of(line1, line2), TopTipStyle.bordered());
     }
 
+    /**
+     * Lower-cased aliases with a record in the config (the sources of
+     * {@link #getKnownRestorableBotAliases()} minus the default recruit name, which is listed
+     * before anything is saved).
+     */
+    private static java.util.Set<String> savedBotAliasesLower() {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        if (Frens.CONFIG == null) {
+            return out;
+        }
+        java.util.List<String> all = new java.util.ArrayList<>();
+        all.addAll(Frens.CONFIG.getBotGameProfile().keySet());
+        all.addAll(Frens.CONFIG.getBotOwnership().keySet());
+        all.addAll(Frens.CONFIG.getAllBotAliases());
+        all.addAll(Frens.CONFIG.getBotQuestMemory().keySet());
+        for (String alias : all) {
+            if (alias != null && !alias.isBlank()) {
+                out.add(net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.normalize(alias));
+            }
+        }
+        return out;
+    }
+
     public static java.util.List<String> getKnownRestorableBotAliases() {
         java.util.LinkedHashSet<String> aliasSet = new java.util.LinkedHashSet<>();
         if (Frens.CONFIG != null) {
@@ -1507,7 +1530,9 @@ public class FrensClient implements ClientModInitializer {
         java.util.List<String> otherWorlds = net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
                 scope.otherWorlds(), presentOrEmpty);
         boolean allSavedPresent = !scope.thisWorld().isEmpty() && restorable.isEmpty();
-        return new BotRestoreScreen(parent, restorable, otherWorlds, allSavedPresent);
+        int savedCount = net.wcfcarolina13.GraphicalUserInterface.RosterScreenCopy.savedCount(
+                restorable, savedBotAliasesLower());
+        return new BotRestoreScreen(parent, restorable, otherWorlds, allSavedPresent, savedCount);
     }
 
     /** Lower-cased aliases with a per-world record here, and with one in any world. */
