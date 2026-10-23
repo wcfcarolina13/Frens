@@ -19,6 +19,7 @@ import net.wcfcarolina13.GameAI.services.CraftingHistoryService;
 import net.wcfcarolina13.GameAI.services.HuntHistoryService;
 import net.wcfcarolina13.GameAI.services.HuntConfigService;
 import net.wcfcarolina13.GameAI.services.MappedVillageService;
+import net.wcfcarolina13.GameAI.services.UnreadableStoreFile;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,6 +49,10 @@ public final class LegacyWorldStateCommand {
             var player = handler.player;
             if (player instanceof createFakePlayer || BotEventHandler.isRegisteredBot(player)
                     || !Frens.isServerAdmin(player.getCommandSource())) return;
+            // Store files that could not be read this game session (moved aside or left in place).
+            for (String line : UnreadableStoreFile.adminNotices()) {
+                player.sendMessage(Text.literal(line), false);
+            }
             var pending = BotWorldStateService.pendingLegacyAliases(server);
             if (!pending.isEmpty()) {
                 player.sendMessage(Text.literal("Frens kept " + pending.size()
@@ -111,12 +116,9 @@ public final class LegacyWorldStateCommand {
             for (String entry : preview.entries()) {
                 source.sendFeedback(() -> Text.literal(entry), false);
             }
-            source.sendFeedback(() -> Text.literal(preview.adoptedHere()
-                    ? "This save adopted these records when it loaded. Legacy original retained."
-                    : preview.targetExists()
-                    ? "This save already has this registry. It will not be overwritten. Legacy original retained."
-                    : "If these records belong to this save and dimension, copy them with /bot legacy-state registry import "
-                            + store + " " + quote(fingerprint) + ". Originals remain unchanged."), false);
+            String closing = LegacyRegistryRecoveryPolicy.previewClosingLine(preview.adoptedHere(),
+                    preview.targetExists(), preview.records(), store, quote(fingerprint));
+            source.sendFeedback(() -> Text.literal(closing), false);
             if (!preview.siblings().isEmpty()) {
                 source.sendFeedback(() -> Text.literal("Other saves named " + quote(BotWorldStateService.currentLevelName(source.getServer()))
                         + " in this dimension (a moved or copied instance has a new fingerprint):"), false);

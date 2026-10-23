@@ -8,6 +8,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Moves a store file that could not be parsed out of the way, so the store can start empty and
@@ -22,7 +25,56 @@ public final class UnreadableStoreFile {
     /** Suffixes tried after the plain timestamp before giving up. */
     static final int MAX_SUFFIX = 99;
 
+    /**
+     * One store file that could not be read.
+     *
+     * @param backupName file name of the {@code .bad-} copy, or {@code null} when the file was left
+     *                   in place and the store refuses to save
+     */
+    public record Problem(String label, String backupName) {}
+
+    /**
+     * Problems seen this game session, for the admin join notice. Stores load once per game
+     * process (their {@code loaded} flags are never reset), so the list is not cleared at server
+     * start: a store that refused to save keeps refusing across world reloads.
+     */
+    private static final CopyOnWriteArrayList<Problem> PROBLEMS = new CopyOnWriteArrayList<>();
+
     private UnreadableStoreFile() {}
+
+    /** Admin lines for every store file that could not be read this session. */
+    public static List<String> adminNotices() {
+        return formatNotices(PROBLEMS);
+    }
+
+    /** Plain admin lines for {@code problems}, one per problem, in order. */
+    public static List<String> formatNotices(List<Problem> problems) {
+        List<String> lines = new ArrayList<>();
+        if (problems == null) return lines;
+        for (Problem problem : problems) {
+            if (problem == null) continue;
+            String label = problem.label() == null || problem.label().isBlank() ? "store" : problem.label();
+            lines.add(problem.backupName() != null
+                    ? "Frens could not read the " + label + " file. It was moved to " + problem.backupName()
+                            + " and starts empty this session."
+                    : "Frens could not read the " + label + " file. It was left in place and changes will not be saved this session.");
+        }
+        return lines;
+    }
+
+    static List<Problem> problems() {
+        return List.copyOf(PROBLEMS);
+    }
+
+    static void clearProblems() {
+        PROBLEMS.clear();
+    }
+
+    private static void record(String label, Path backup) {
+        Path name = backup == null ? null : backup.getFileName();
+        Problem problem = new Problem(label, name == null ? null : name.toString());
+        PROBLEMS.addIfAbsent(problem);
+    }
 
     /**
      * Quarantines {@code file} only when {@code failure} says its contents are malformed. A read
@@ -35,6 +87,7 @@ public final class UnreadableStoreFile {
                 logger.warn("Could not read the {} file ({}). It was left in place and changes to the {} will not be saved this session.",
                         label, failure == null ? "unknown error" : failure.getMessage(), label);
             }
+            record(label, null);
             return null;
         }
         return quarantine(file, now, logger, label);
@@ -77,6 +130,7 @@ public final class UnreadableStoreFile {
                     logger.warn("Could not read the {} file. It was moved to {} and the {} starts empty this session.",
                             label, backup, label);
                 }
+                record(label, backup);
                 return backup;
             } catch (FileAlreadyExistsException taken) {
                 // try the next suffix
@@ -85,6 +139,7 @@ public final class UnreadableStoreFile {
                     logger.warn("Could not read the {} file and could not move it aside ({}). Changes to the {} will not be saved this session.",
                             label, e.getMessage(), label);
                 }
+                record(label, null);
                 return null;
             }
         }
@@ -92,6 +147,7 @@ public final class UnreadableStoreFile {
             logger.warn("Could not read the {} file and found no free backup name. Changes to the {} will not be saved this session.",
                     label, label);
         }
+        record(label, null);
         return null;
     }
 }

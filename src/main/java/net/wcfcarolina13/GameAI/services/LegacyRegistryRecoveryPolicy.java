@@ -191,6 +191,22 @@ public final class LegacyRegistryRecoveryPolicy {
         }
     }
 
+    /**
+     * The closing line of {@code /bot legacy-state registry preview}. An import is suggested only
+     * when there is something to import: no adoption here, no registry of this save's own, and at
+     * least one legacy record.
+     *
+     * @param quotedFingerprint this save's fingerprint, already quoted for the command line
+     */
+    public static String previewClosingLine(boolean adoptedHere, boolean targetExists, int records,
+                                            String store, String quotedFingerprint) {
+        if (adoptedHere) return "This save adopted these records when it loaded. Legacy original retained.";
+        if (targetExists) return "This save already has this registry. It will not be overwritten. Legacy original retained.";
+        if (records <= 0) return "No legacy records for this store in this dimension. Nothing to import.";
+        return "If these records belong to this save and dimension, copy them with /bot legacy-state registry import "
+                + store + " " + quotedFingerprint + ". Originals remain unchanged.";
+    }
+
     private static boolean invalidTarget(String sourceKey, String targetKey, String fingerprint) {
         return !usableFingerprint(fingerprint) || targetKey == null || targetKey.equals(sourceKey)
                 || !targetKey.startsWith(fingerprint + ":");

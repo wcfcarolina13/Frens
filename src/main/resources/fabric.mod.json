@@ -39,7 +39,7 @@
 		"ai-player": "*"
 	},
 	"suggests": {
-		"carpet": "1.4.188",
+		"carpet": ">=1.4.193",
 		"owo-lib": "0.12.16+1.21"
 	}
 

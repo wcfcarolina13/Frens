@@ -228,4 +228,19 @@ class LegacyRegistryRecoveryPolicyTest {
         assertSame(original, worlds.get(legacyKey));
     }
 
+    @Test
+    void previewClosingLineSuggestsAnImportOnlyWhenThereAreRecords() {
+        String quoted = "\"fp\"";
+        assertEquals("No legacy records for this store in this dimension. Nothing to import.",
+                LegacyRegistryRecoveryPolicy.previewClosingLine(false, false, 0, "furnaces", quoted));
+        assertEquals("If these records belong to this save and dimension, copy them with /bot legacy-state registry import "
+                        + "furnaces \"fp\". Originals remain unchanged.",
+                LegacyRegistryRecoveryPolicy.previewClosingLine(false, false, 3, "furnaces", quoted));
+        assertTrue(LegacyRegistryRecoveryPolicy.previewClosingLine(true, false, 0, "hunt", quoted)
+                .startsWith("This save adopted these records"));
+        assertTrue(LegacyRegistryRecoveryPolicy.previewClosingLine(false, true, 0, "hunt", quoted)
+                .startsWith("This save already has this registry"));
+        assertTrue(LegacyRegistryRecoveryPolicy.previewClosingLine(true, true, 5, "hunt", quoted)
+                .startsWith("This save adopted these records"));
+    }
 }

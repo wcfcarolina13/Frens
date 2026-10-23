@@ -1,5 +1,7 @@
 package net.wcfcarolina13.GameAI.services;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,6 +17,12 @@ class UnreadableStoreFileTest {
 
     @TempDir
     Path dir;
+
+    @BeforeEach
+    @AfterEach
+    void clearSessionProblems() {
+        UnreadableStoreFile.clearProblems();
+    }
 
     @Test
     void movesTheFileToATimestampedBackupWithItsContent() throws Exception {
@@ -85,5 +93,54 @@ class UnreadableStoreFileTest {
         assertFalse(Files.exists(file));
         assertTrue(UnreadableStoreFile.isCorruptContent(new com.google.gson.JsonSyntaxException("bad")));
         assertTrue(UnreadableStoreFile.isCorruptContent(new IllegalStateException("Expected BEGIN_OBJECT")));
+    }
+    @Test
+    void aQuarantineIsRecordedWithTheBackupFileNameOnly() throws Exception {
+        Path file = dir.resolve("bot_furnace_registry.json");
+        Files.writeString(file, "{ broken");
+        UnreadableStoreFile.quarantine(file, NOW, null, "furnace registry");
+        assertEquals(java.util.List.of(new UnreadableStoreFile.Problem("furnace registry",
+                "bot_furnace_registry.json.bad-20261022-090507")), UnreadableStoreFile.problems());
+        assertEquals(java.util.List.of("Frens could not read the furnace registry file. It was moved to "
+                        + "bot_furnace_registry.json.bad-20261022-090507 and starts empty this session."),
+                UnreadableStoreFile.adminNotices());
+    }
+
+    @Test
+    void aReadErrorIsRecordedAsLeftInPlaceOnce() throws Exception {
+        Path file = dir.resolve("hunt_config.json");
+        Files.writeString(file, "{}");
+        UnreadableStoreFile.quarantineIfCorrupt(file, new java.io.IOException("locked"), NOW, null, "hunt config");
+        UnreadableStoreFile.quarantineIfCorrupt(file, new java.io.IOException("locked"), NOW, null, "hunt config");
+        assertEquals(java.util.List.of("Frens could not read the hunt config file. It was left in place and "
+                + "changes will not be saved this session."), UnreadableStoreFile.adminNotices());
+    }
+
+    @Test
+    void aFailedMoveIsRecordedAsLeftInPlace() {
+        UnreadableStoreFile.quarantine(dir.resolve("missing.json"), NOW, null, "mapped villages");
+        assertEquals(java.util.List.of(new UnreadableStoreFile.Problem("mapped villages", null)),
+                UnreadableStoreFile.problems());
+    }
+
+    @Test
+    void nothingIsRecordedWithoutAProblem() {
+        UnreadableStoreFile.quarantine(null, NOW, null, "store");
+        assertTrue(UnreadableStoreFile.adminNotices().isEmpty());
+    }
+
+    @Test
+    void noticeTextIsPlainAndToleratesMissingLabels() {
+        var lines = UnreadableStoreFile.formatNotices(java.util.Arrays.asList(
+                new UnreadableStoreFile.Problem("beehive registry", "bot_beehive_registry.json.bad-20261023-101500"),
+                null,
+                new UnreadableStoreFile.Problem(null, null)));
+        assertEquals(java.util.List.of(
+                "Frens could not read the beehive registry file. It was moved to bot_beehive_registry.json.bad-20261023-101500 and starts empty this session.",
+                "Frens could not read the store file. It was left in place and changes will not be saved this session."), lines);
+        for (String line : lines) {
+            assertFalse(line.contains("\u2014") || line.contains(";"), line);
+        }
+        assertTrue(UnreadableStoreFile.formatNotices(null).isEmpty());
     }
 }
