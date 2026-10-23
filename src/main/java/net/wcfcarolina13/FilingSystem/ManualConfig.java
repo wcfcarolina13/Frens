@@ -15,6 +15,7 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -53,15 +54,20 @@ public class ManualConfig {
 
     // --- Configuration fields (same as before) ---
     private String ollamaBaseUrl = System.getProperty("frens.ollamaHost", System.getProperty("aiplayer.ollamaHost", "http://127.0.0.1:11434"));
-    private Map<String, String> botGameProfile = new HashMap<>();
-    private Map<String, BotOwnership> botOwnership = new HashMap<>();
+    // botGameProfile, botOwnership, botQuestMemory, botSpawnPointsByWorld and botControlsByWorld are
+    // ConcurrentHashMaps: the client render thread iterates their keys every tick
+    // (FrensClient.getKnownRestorableBotAliases, getAllBotAliases) while the integrated
+    // server thread adds a new bot's entries on /bot spawn. A HashMap threw
+    // ConcurrentModificationException there (1.1.295 sandbox). Null keys and values are dropped.
+    private Map<String, String> botGameProfile = new ConcurrentHashMap<>();
+    private Map<String, BotOwnership> botOwnership = new ConcurrentHashMap<>();
     private Map<String, Boolean> playerPreserveExpensiveGear = new HashMap<>();
     private Map<String, Boolean> playerAutoAcceptPreciousFoods = new HashMap<>();
     // Old global bot spawns (alias → spawn). Read only by migrateLegacyToPerWorld, then set to
     // null so the key leaves settings.json5 (Gson skips nulls).
     private Map<String, BotSpawn> botSpawnPoints = null;
     // Per-world bot spawn points: alias → worldKey → BotSpawn.
-    private Map<String, Map<String, BotSpawn>> botSpawnPointsByWorld = new HashMap<>();
+    private Map<String, Map<String, BotSpawn>> botSpawnPointsByWorld = new ConcurrentHashMap<>();
     private boolean textDialogueEnabled = true;
     private boolean voicedDialogueEnabled = true;
     // Muted voiced-dialogue categories (VoiceLineCategory ids). Empty = nothing muted.
@@ -106,9 +112,9 @@ public class ManualConfig {
     // to null so the key leaves settings.json5 (Gson skips nulls).
     private Map<String, BotControlSettings> botControls = null;
     // Per-world bot control settings: alias → worldKey → BotControlSettings.
-    private Map<String, Map<String, BotControlSettings>> botControlsByWorld = new HashMap<>();
+    private Map<String, Map<String, BotControlSettings>> botControlsByWorld = new ConcurrentHashMap<>();
     // Seed-agnostic, bot-persistent quest continuity (non-power progression).
-    private Map<String, BotQuestMemory> botQuestMemory = new HashMap<>();
+    private Map<String, BotQuestMemory> botQuestMemory = new ConcurrentHashMap<>();
 
     // === Survival recruitment mode ("find a village, then recruit") ===
     // When enabled, bots do not auto-spawn / restore until the world has been "recruited".
@@ -299,7 +305,7 @@ public class ManualConfig {
             Type type = new TypeToken<ManualConfig>(){}.getType();
             ManualConfig loadedConfig = gson.fromJson(reader, type);
             if (loadedConfig.botQuestMemory == null) {
-                loadedConfig.botQuestMemory = new HashMap<>();
+                loadedConfig.botQuestMemory = new ConcurrentHashMap<>();
             }
             if (loadedConfig.botSkinSelections == null) {
                 loadedConfig.botSkinSelections = new HashMap<>();
@@ -357,13 +363,13 @@ public class ManualConfig {
 
     public Map<String, String> getBotGameProfile() {
         if (botGameProfile == null) {
-            botGameProfile = new HashMap<>();
+            botGameProfile = new ConcurrentHashMap<>();
         }
         return botGameProfile;
     }
 
     public void setBotGameProfile(Map<String, String> botGameProfile) {
-        this.botGameProfile = normalizeAliasMap(botGameProfile);
+        this.botGameProfile = concurrentCopy(normalizeAliasMap(botGameProfile));
     }
 
     public String getBotProfileUuid(String alias) {
@@ -461,17 +467,17 @@ public class ManualConfig {
 
     public Map<String, BotOwnership> getBotOwnership() {
         if (botOwnership == null) {
-            botOwnership = new HashMap<>();
+            botOwnership = new ConcurrentHashMap<>();
         }
         return botOwnership;
     }
 
     public void setBotOwnership(Map<String, BotOwnership> botOwnership) {
-        this.botOwnership = normalizeAliasMap(botOwnership);
+        this.botOwnership = concurrentCopy(normalizeAliasMap(botOwnership));
     }
 
     public void setOwner(String alias, BotOwnership owner) {
-        if (alias == null || alias.isBlank()) {
+        if (alias == null || alias.isBlank() || owner == null) {
             return;
         }
         putAliasValue(getBotOwnership(), alias, owner);
@@ -523,7 +529,7 @@ public class ManualConfig {
 
     public Map<String, Map<String, BotSpawn>> getBotSpawnPointsByWorld() {
         if (botSpawnPointsByWorld == null) {
-            botSpawnPointsByWorld = new HashMap<>();
+            botSpawnPointsByWorld = new ConcurrentHashMap<>();
         }
         return botSpawnPointsByWorld;
     }
@@ -557,7 +563,7 @@ public class ManualConfig {
 
     public Map<String, Map<String, BotControlSettings>> getBotControlsByWorld() {
         if (botControlsByWorld == null) {
-            botControlsByWorld = new HashMap<>();
+            botControlsByWorld = new ConcurrentHashMap<>();
         }
         return botControlsByWorld;
     }
@@ -938,7 +944,7 @@ public class ManualConfig {
 
     public Map<String, BotQuestMemory> getBotQuestMemory() {
         if (botQuestMemory == null) {
-            botQuestMemory = new HashMap<>();
+            botQuestMemory = new ConcurrentHashMap<>();
         }
         return botQuestMemory;
     }
@@ -1029,10 +1035,27 @@ public class ManualConfig {
     }
 
     private void normalizeAliasBackedMaps() {
-        botGameProfile = normalizeAliasMap(botGameProfile);
-        botOwnership = normalizeAliasMap(botOwnership);
-        botQuestMemory = normalizeAliasMap(botQuestMemory);
+        botGameProfile = concurrentCopy(normalizeAliasMap(botGameProfile));
+        botOwnership = concurrentCopy(normalizeAliasMap(botOwnership));
+        botQuestMemory = concurrentCopy(normalizeAliasMap(botQuestMemory));
         botSkinSelections = normalizeAliasMap(botSkinSelections);
+        // Gson loads these as its own LinkedTreeMap; re-wrap so other threads can iterate them.
+        botSpawnPointsByWorld = concurrentCopy(botSpawnPointsByWorld);
+        botControlsByWorld = concurrentCopy(botControlsByWorld);
+    }
+
+    /** A ConcurrentHashMap copy of {@code source}, dropping null keys and values (it allows neither). */
+    static <K, V> Map<K, V> concurrentCopy(Map<K, V> source) {
+        Map<K, V> out = new ConcurrentHashMap<>();
+        if (source == null) {
+            return out;
+        }
+        for (Map.Entry<K, V> entry : source.entrySet()) {
+            if (entry.getKey() != null && entry.getValue() != null) {
+                out.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return out;
     }
 
     private static String normalizeAlias(String alias) {

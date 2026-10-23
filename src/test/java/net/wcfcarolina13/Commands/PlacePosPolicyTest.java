@@ -113,6 +113,18 @@ class PlacePosPolicyTest {
     }
 
     @Test
+    void instantSnowClearIsGatedOnReachAndLineOfSight() throws IOException {
+        String body = method("private static BlockPos attemptPlacement(");
+        int snow = body.indexOf("Blocks.SNOW_BLOCK");
+        int gate = body.indexOf("BlockInteractionService.canInteract(bot, placePos)");
+        int breakAt = body.indexOf("breakBlock(placePos, false)");
+        assertTrue(snow >= 0 && gate > snow, "the snow check must carry the reach + line-of-sight gate");
+        assertTrue(breakAt > gate, "the clear must come after the reach + line-of-sight gate");
+        assertTrue(breakAt < body.indexOf("BotActions.placeBlockAt("),
+                "the gated clear still runs before the in-reach placement");
+    }
+
+    @Test
     void placeCommandCatchesUnexpectedErrors() throws IOException {
         String body = method("private static int executePlaceGeneric(");
         assertTrue(body.contains("catch (RuntimeException e)"));

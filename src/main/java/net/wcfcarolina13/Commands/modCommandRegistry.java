@@ -5675,9 +5675,12 @@ public class modCommandRegistry {
         int maxTries = PlacePosPolicy.maxAttempts(onServerThread);
         int tries = 0;
         while (tries < maxTries) {
-            // Clear snow on target
+            // Clear snow on target, only when the bot could break it by hand: in survival reach with
+            // line of sight (the soft-block break rule). Out of reach the snow stays and the
+            // caller says "I can't reach that spot." (1.1.295 sandbox: a remote clear, nothing placed).
             var state = bot.getEntityWorld().getBlockState(placePos);
-            if (state.isOf(net.minecraft.block.Blocks.SNOW) || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)) {
+            if ((state.isOf(net.minecraft.block.Blocks.SNOW) || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK))
+                    && net.wcfcarolina13.GameAI.services.BlockInteractionService.canInteract(bot, placePos)) {
                 if (bot.getEntityWorld() instanceof ServerWorld sw) {
                     var auth = net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService
                             .authorizeBlockMutation(bot, sw, placePos);
