@@ -688,7 +688,7 @@ public final class FortificationPersistenceService {
                 } catch (Exception e) {
                     LOGGER.warn("Failed to load fortification data: {}", e.getMessage());
                     DATA = new RootData();
-                    Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "fortifications");
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "fortifications");
                     loadFailed = backup == null;
                 }
             }

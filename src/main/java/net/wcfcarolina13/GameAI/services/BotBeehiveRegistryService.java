@@ -118,7 +118,7 @@ public final class BotBeehiveRegistryService {
                 } catch (Exception e) {
                     LOGGER.warn("Failed to load beehive registry: {}", e.getMessage());
                     DATA = new RootData();
-                    Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "beehive registry");
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "beehive registry");
                     loadFailed = backup == null;
                 }
             }

@@ -60,4 +60,30 @@ class UnreadableStoreFileTest {
         assertNull(UnreadableStoreFile.quarantine(file, NOW, null, "store"));
         assertEquals("bad", Files.readString(file));
     }
+
+    @Test
+    void aReadErrorLeavesAPossiblyValidFileInPlace() throws Exception {
+        Path file = dir.resolve("furnaces.json");
+        Files.writeString(file, "{\"worlds\":{}}");
+        assertNull(UnreadableStoreFile.quarantineIfCorrupt(file, new java.io.IOException("locked"), NOW, null, "furnaces"));
+        assertNull(UnreadableStoreFile.quarantineIfCorrupt(file,
+                new com.google.gson.JsonIOException(new java.io.IOException("blip")), NOW, null, "furnaces"));
+        assertEquals("{\"worlds\":{}}", Files.readString(file));
+    }
+
+    @Test
+    void realGsonParseFailuresAreQuarantined() throws Exception {
+        Path file = dir.resolve("villages.json");
+        Files.writeString(file, "{ \"worlds\": ");
+        Exception failure = assertThrows(Exception.class, () -> {
+            try (java.io.Reader reader = Files.newBufferedReader(file)) {
+                new com.google.gson.Gson().fromJson(reader, java.util.Map.class);
+            }
+        });
+        Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, failure, NOW, null, "villages");
+        assertNotNull(backup, "truncated JSON is corrupt content: " + failure);
+        assertFalse(Files.exists(file));
+        assertTrue(UnreadableStoreFile.isCorruptContent(new com.google.gson.JsonSyntaxException("bad")));
+        assertTrue(UnreadableStoreFile.isCorruptContent(new IllegalStateException("Expected BEGIN_OBJECT")));
+    }
 }

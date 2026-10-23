@@ -290,7 +290,7 @@ public final class MappedVillageService {
                 } catch (Exception e) {
                     LOGGER.warn("Failed to load mapped villages: {}", e.getMessage());
                     DATA = new RootData();
-                    Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "mapped villages");
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "mapped villages");
                     loadFailed = backup == null;
                 }
             }

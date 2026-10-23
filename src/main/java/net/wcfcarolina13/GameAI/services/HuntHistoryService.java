@@ -84,7 +84,7 @@ public final class HuntHistoryService {
                 } catch (Exception e) {
                     LOGGER.warn("Failed to load hunt history: {}", e.getMessage());
                     DATA = new RootData();
-                    Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "hunt history");
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "hunt history");
                     loadFailed = backup == null;
                 }
             }

@@ -108,7 +108,7 @@ public final class BotFurnaceRegistryService {
                 } catch (Exception e) {
                     LOGGER.warn("Failed to load furnace registry: {}", e.getMessage());
                     DATA = new RootData();
-                    Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "furnace registry");
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "furnace registry");
                     loadFailed = backup == null;
                 }
             }

@@ -137,7 +137,7 @@ public final class HuntConfigService {
                 } catch (Exception e) {
                     LOGGER.warn("Failed to load hunt config: {}", e.getMessage());
                     DATA = new RootData();
-                    Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "hunt config");
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "hunt config");
                     loadFailed = backup == null;
                 }
             }

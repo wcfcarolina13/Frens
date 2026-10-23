@@ -93,7 +93,7 @@ public final class BotWorldStateService {
                 }
             } catch (Exception e) {
                 LOGGER.warn("Failed to load bot world state: {}", e.getMessage());
-                Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "bot world state");
+                Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "bot world state");
                 loadFailed = backup == null;
                 if (!loadFailed) {
                     // The parse may have filled part of the map before it failed.

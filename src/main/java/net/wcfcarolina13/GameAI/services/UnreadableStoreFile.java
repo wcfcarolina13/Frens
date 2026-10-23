@@ -25,6 +25,40 @@ public final class UnreadableStoreFile {
     private UnreadableStoreFile() {}
 
     /**
+     * Quarantines {@code file} only when {@code failure} says its contents are malformed. A read
+     * error (locked file, permission blip) leaves a possibly valid file in place and returns
+     * {@code null}, so the caller keeps refusing to save rather than replacing it with an empty store.
+     */
+    public static Path quarantineIfCorrupt(Path file, Throwable failure, LocalDateTime now, Logger logger, String label) {
+        if (!isCorruptContent(failure)) {
+            if (logger != null) {
+                logger.warn("Could not read the {} file ({}). It was left in place and changes to the {} will not be saved this session.",
+                        label, failure == null ? "unknown error" : failure.getMessage(), label);
+            }
+            return null;
+        }
+        return quarantine(file, now, logger, label);
+    }
+
+    /** True when the outermost recognised cause is a parse error rather than an I/O error. */
+    static boolean isCorruptContent(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof com.google.gson.JsonIOException || t instanceof IOException
+                    && !(t instanceof com.google.gson.stream.MalformedJsonException)) {
+                return false;
+            }
+            if (t instanceof com.google.gson.JsonSyntaxException
+                    || t instanceof com.google.gson.stream.MalformedJsonException
+                    || t instanceof IllegalStateException
+                    || t instanceof NumberFormatException) {
+                return true;
+            }
+            if (t.getCause() == t) break;
+        }
+        return false;
+    }
+
+    /**
      * Renames {@code file} to a free {@code .bad-<timestamp>} sibling.
      *
      * @return the backup path, or {@code null} when the file could not be moved (the caller must

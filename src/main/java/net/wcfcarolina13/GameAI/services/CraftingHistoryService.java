@@ -87,7 +87,7 @@ public final class CraftingHistoryService {
                 } catch (Exception e) {
                     LOGGER.warn("Failed to load crafting history: {}", e.getMessage());
                     DATA = new RootData();
-                    Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "crafting history");
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "crafting history");
                     loadFailed = backup == null;
                 }
             }

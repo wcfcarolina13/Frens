@@ -47,7 +47,7 @@ class LegacyStoreAdoptionWiringTest {
             assertTrue(src.contains("Map<String, String> legacyWorldClaims"), store);
             assertTrue(src.contains("java.util.Set<String> legacyDeclined"), store);
             assertTrue(src.contains("public static LegacyRegistryRecoveryPolicy.Result importFromSibling("), store);
-            assertTrue(src.contains("UnreadableStoreFile.quarantine(file, "), store);
+            assertTrue(src.contains("UnreadableStoreFile.quarantineIfCorrupt(file, e, "), store);
             assertTrue(src.contains("loadFailed = backup == null;"), store);
             assertFalse(src.contains("loadFailed = true;"), store + " must not drop every write after a parse failure");
         }
@@ -56,7 +56,7 @@ class LegacyStoreAdoptionWiringTest {
     @Test
     void worldStateQuarantinesAndClearsThePartialParse() throws Exception {
         String src = source("GameAI/services/BotWorldStateService.java");
-        int quarantine = src.indexOf("UnreadableStoreFile.quarantine(file, ");
+        int quarantine = src.indexOf("UnreadableStoreFile.quarantineIfCorrupt(file, e, ");
         assertTrue(quarantine > 0);
         assertTrue(src.indexOf("STATE.clear();", quarantine) > quarantine);
         assertFalse(src.contains("loadFailed = true;"));
