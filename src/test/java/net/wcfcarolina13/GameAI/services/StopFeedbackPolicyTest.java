@@ -73,4 +73,40 @@ class StopFeedbackPolicyTest {
         assertFalse(StopFeedbackPolicy.isCreeperBackoff("creeper-fuse"));
         assertFalse(StopFeedbackPolicy.isCreeperBackoff(null));
     }
+
+    @Test
+    void skillEchoIsSuppressedForTheDimensionExitAbort() {
+        String reason = RespawnResetPolicy.DIMENSION_TASK_ABORT;
+        assertFalse(StopFeedbackPolicy.shouldEchoSkillResult(reason));
+        assertFalse(StopFeedbackPolicy.shouldEchoSkillResult(reason + "§r "));
+        assertFalse(StopFeedbackPolicy.shouldEchoSkillResult("Task ended: changed dimension."));
+        assertTrue(StopFeedbackPolicy.isDimensionExit(reason));
+        assertFalse(StopFeedbackPolicy.isDimensionExit(RespawnResetPolicy.DEATH_TASK_ABORT));
+        assertFalse(StopFeedbackPolicy.isDimensionExit(null));
+    }
+
+    @Test
+    void skillEchoIsSuppressedForTheDeathPause() {
+        String reason = RespawnResetPolicy.DEATH_PAUSE_ABORT;
+        assertFalse(StopFeedbackPolicy.shouldEchoSkillResult(reason));
+        assertFalse(StopFeedbackPolicy.shouldEchoSkillResult("Skill paused: bot died. "));
+        assertTrue(StopFeedbackPolicy.isDeathPause(reason));
+        assertFalse(StopFeedbackPolicy.isDeathPause("Skill 'woodcut' paused due to nearby threat."));
+        assertFalse(StopFeedbackPolicy.isDeathPause(null));
+    }
+
+    @Test
+    void otherRespawnAndSkillResultsStillEcho() {
+        assertTrue(StopFeedbackPolicy.shouldEchoSkillResult(RespawnResetPolicy.DEATH_TASK_ABORT));
+        assertTrue(StopFeedbackPolicy.shouldEchoSkillResult(RespawnResetPolicy.DEATH_LATE_ABORT));
+        assertTrue(StopFeedbackPolicy.shouldEchoSkillResult("Mining complete! Collected 3 out of 10 requested."));
+    }
+
+    @Test
+    void deathPauseKeepsPausedWording() {
+        // The death prompt offers to resume the job, so the reason stays a pause, not a stop.
+        String lower = RespawnResetPolicy.DEATH_PAUSE_ABORT.toLowerCase(Locale.ROOT);
+        assertTrue(lower.contains("paused"));
+        assertFalse(lower.contains("stop"));
+    }
 }

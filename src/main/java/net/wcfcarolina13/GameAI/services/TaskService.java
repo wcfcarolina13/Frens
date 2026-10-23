@@ -189,6 +189,13 @@ public final class TaskService {
     private static final Map<UUID, TaskTicket> ACTIVE = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> IN_ASCENT_MODE = new ConcurrentHashMap<>();
     private static final Map<UUID, String> ABORT_LATCH = new ConcurrentHashMap<>();
+    /**
+     * The ticket the current worker thread runs, set when a worker attaches itself. The per-bot latch
+     * can be cleared by an unrelated event (the teleport detector's compare-and-clear after a death
+     * respawn), and abortTicket drops the cancelled ticket from ACTIVE, so without this the worker's
+     * own cancelled ticket was no longer visible to its abort checks. Cleared by {@link #complete}.
+     */
+    private static final ThreadLocal<TaskTicket> WORKER_TICKET = new ThreadLocal<>();
 
     private static UUID key(UUID botUuid) {
         return botUuid != null ? botUuid : GLOBAL_KEY;
@@ -465,6 +472,15 @@ public final class TaskService {
             return;
         }
         ticket.attachExecutingThread(thread);
+        if (thread == Thread.currentThread()) {
+            WORKER_TICKET.set(ticket);
+        }
+    }
+
+    /** The current thread's own ticket for this bot, or null. Matches by slot, not {@code matches()}. */
+    private static TaskTicket workerTicketFor(UUID botUuid) {
+        TaskTicket own = WORKER_TICKET.get();
+        return own != null && key(own.botUuid()).equals(key(botUuid)) ? own : null;
     }
 
     public static boolean requestPause(UUID botUuid, String reason) {
@@ -492,7 +508,11 @@ public final class TaskService {
             return true;
         }
         TaskTicket ticket = ACTIVE.get(key(botUuid));
-        return ticket != null && ticket.isCancelRequested();
+        if (ticket != null && ticket.isCancelRequested()) {
+            return true;
+        }
+        TaskTicket own = workerTicketFor(botUuid);
+        return own != null && own.isCancelRequested();
     }
 
     public static Optional<String> getCancelReason(UUID botUuid) {
@@ -501,6 +521,9 @@ public final class TaskService {
             return Optional.of(latched);
         }
         TaskTicket ticket = ACTIVE.get(key(botUuid));
+        if (ticket == null) {
+            ticket = workerTicketFor(botUuid);
+        }
         if (ticket == null) {
             return Optional.empty();
         }
@@ -511,6 +534,9 @@ public final class TaskService {
     public static void complete(TaskTicket ticket, boolean success) {
         if (ticket == null) {
             return;
+        }
+        if (WORKER_TICKET.get() == ticket) {
+            WORKER_TICKET.remove();
         }
         State finalState = success ? State.COMPLETED : State.ABORTED;
         if (ticket.isCancelRequested()) {
@@ -764,6 +790,7 @@ public final class TaskService {
         ACTIVE.clear();
         IN_ASCENT_MODE.clear();
         ABORT_LATCH.clear();
+        WORKER_TICKET.remove();
     }
 
     public static void markServerStopping() {

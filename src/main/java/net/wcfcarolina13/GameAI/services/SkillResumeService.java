@@ -156,7 +156,7 @@ public final class SkillResumeService {
         Object expectedResponderKey = responderKey(pending.source());
         PENDING_BY_RESPONDER.put((Object) expectedResponderKey, pending);
 
-        TaskService.forceAbort(bot.getUuid(), "§cSkill paused: bot died.");
+        TaskService.forceAbort(bot.getUuid(), RespawnResetPolicy.DEATH_PAUSE_ABORT);
 
         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
                 "I died. Should I continue with the last job? (yes/no)");

@@ -26,6 +26,11 @@ public final class RespawnResetPolicy {
      * "stop" text as a manual stop.
      */
     public static final String DIMENSION_TASK_ABORT = "§eTask ended: changed dimension.";
+    /**
+     * The abort {@code SkillResumeService.handleDeath} latches when a bot dies mid-skill. "Paused":
+     * the death prompt offers to resume the job.
+     */
+    public static final String DEATH_PAUSE_ABORT = "§cSkill paused: bot died.";
 
     public enum Cause {
         /** The bot died and is respawning. */

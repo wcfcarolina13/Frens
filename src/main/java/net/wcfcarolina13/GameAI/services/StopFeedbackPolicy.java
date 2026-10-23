@@ -6,7 +6,10 @@ package net.wcfcarolina13.GameAI.services;
  * <p>One stop used to produce four chat lines. The only line that survives is the per-command
  * summary ("Jake has stopped."). The task abort is silent and carries {@link #MANUAL_STOP_REASON},
  * and the {@code /bot skill} worker does not echo a result whose message is that reason. The same
- * echo is skipped for {@link CreeperEvasionPolicy#ABORT_REASON}, which the bot already said aloud.
+ * echo is skipped for {@link CreeperEvasionPolicy#ABORT_REASON}, which the bot already said aloud,
+ * for {@link RespawnResetPolicy#DIMENSION_TASK_ABORT}, which the bot says when it leaves the End
+ * mid-task, and for {@link RespawnResetPolicy#DEATH_PAUSE_ABORT}, whose death prompt already tells
+ * the issuer the bot died.
  *
  * <p>The reason text matters beyond chat: {@code SoulEventObserver.sanitizeReasonCategory} buckets
  * abort reasons by substring, checking "respawn", "stopping", "preempt", "threat" and "danger"
@@ -30,7 +33,22 @@ public final class StopFeedbackPolicy {
 
     /** Whether the {@code /bot skill} worker should echo a finished skill's message to the issuer. */
     public static boolean shouldEchoSkillResult(String resultMessage) {
-        return !isManualStop(resultMessage) && !isCreeperBackoff(resultMessage);
+        return !isManualStop(resultMessage) && !isCreeperBackoff(resultMessage)
+                && !isDimensionExit(resultMessage) && !isDeathPause(resultMessage);
+    }
+
+    /** True when the reason (legacy {@code §} codes ignored) is the End-exit abort the bot already said. */
+    public static boolean isDimensionExit(String reason) {
+        return reason != null && plain(RespawnResetPolicy.DIMENSION_TASK_ABORT).equals(plain(reason));
+    }
+
+    /** True when the reason (legacy {@code §} codes ignored) is the death pause; the death prompt covers it. */
+    public static boolean isDeathPause(String reason) {
+        return reason != null && plain(RespawnResetPolicy.DEATH_PAUSE_ABORT).equals(plain(reason));
+    }
+
+    private static String plain(String text) {
+        return text.replaceAll("§.", "").strip();
     }
 
     /**
