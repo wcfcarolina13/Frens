@@ -349,6 +349,54 @@ public final class WorldStoreKeyPolicy {
                 || adoption == Adoption.ADOPT_LEGACY;
     }
 
+    /**
+     * Whether {@code key} is another fingerprinted bucket of a save with this level name in this
+     * dimension ({@code level#hash:dimension}, hash hex or {@code unknown}), other than
+     * {@code targetKey}. A moved instance gets a new fingerprint, so its old data sits in such a
+     * sibling; only an administrator's explicit import may copy it.
+     */
+    public static boolean isSiblingKey(String key, String levelName, String dimensionId, String targetKey) {
+        if (key == null || key.equals(targetKey)) {
+            return false;
+        }
+        String prefix = levelNameOrDefault(levelName) + "#";
+        String suffix = ":" + dimensionOrUnknown(dimensionId);
+        if (!key.startsWith(prefix) || !key.endsWith(suffix) || key.length() <= prefix.length() + suffix.length()) {
+            return false;
+        }
+        String hash = key.substring(prefix.length(), key.length() - suffix.length());
+        return hash.equals(UNKNOWN_PATH_HASH) || hash.matches("[0-9a-fA-F]+");
+    }
+
+    /** Every sibling of {@code targetKey} among {@code keys} (see {@link #isSiblingKey}), sorted. */
+    public static java.util.List<String> siblingKeys(Collection<String> keys, String levelName,
+                                                     String dimensionId, String targetKey) {
+        if (keys == null) {
+            return java.util.List.of();
+        }
+        return keys.stream().filter(k -> isSiblingKey(k, levelName, dimensionId, targetKey)).sorted().toList();
+    }
+
+    /**
+     * The dimension of a legacy (level-name keyed) store key for this raw level name, or null when
+     * {@code key} is not one. Legacy keys are {@code rawLevel + separator + dimension} with the raw,
+     * untrimmed level name ({@code "unknown"} when missing); a dimension id holds exactly one
+     * {@code ':'} and no {@code '#'}, which keeps fingerprinted keys and longer level names out.
+     */
+    public static String legacyKeyDimension(String key, String rawLevelName, char separator) {
+        String prefix = (rawLevelName != null ? rawLevelName : "unknown") + separator;
+        if (key == null || !key.startsWith(prefix)) {
+            return null;
+        }
+        String dimension = key.substring(prefix.length());
+        int colon = dimension.indexOf(':');
+        if (colon <= 0 || colon == dimension.length() - 1 || dimension.indexOf(':', colon + 1) >= 0
+                || dimension.indexOf('#') >= 0) {
+            return null;
+        }
+        return dimension;
+    }
+
     private static String dimensionOrUnknown(String dimensionId) {
         return dimensionId != null ? dimensionId : "unknown";
     }

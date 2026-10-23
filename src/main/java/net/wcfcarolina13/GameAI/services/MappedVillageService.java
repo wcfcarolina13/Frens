@@ -100,6 +100,10 @@ public final class MappedVillageService {
 
     private static final class RootData {
         Map<String, WorldData> worlds = new HashMap<>();
+        /** Legacy (level-name) key -> fingerprint of the save that adopted it at load. */
+        Map<String, String> legacyWorldClaims = new HashMap<>();
+        /** Fingerprinted keys of brand-new saves that declined the legacy bucket, so the decline sticks. */
+        java.util.Set<String> legacyDeclined = new java.util.HashSet<>();
     }
 
     private static final class WorldData {
@@ -284,9 +288,10 @@ public final class MappedVillageService {
                         DATA = parsed;
                     }
                 } catch (Exception e) {
-                    loadFailed = true;
                     LOGGER.warn("Failed to load mapped villages: {}", e.getMessage());
                     DATA = new RootData();
+                    Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "mapped villages");
+                    loadFailed = backup == null;
                 }
             }
             loaded = true;
@@ -316,7 +321,8 @@ public final class MappedVillageService {
                 }
             }
             return new LegacyRegistryRecoveryPolicy.Preview(legacyKey, targetKey, count,
-                    DATA.worlds.containsKey(targetKey), List.copyOf(entries));
+                    DATA.worlds.containsKey(targetKey), List.copyOf(entries),
+                    siblingSummaries(server, world, targetKey), adoptedHere(server, legacyKey));
         }
     }
 
@@ -330,17 +336,8 @@ public final class MappedVillageService {
             try {
                 var copy = LegacyRegistryRecoveryPolicy.copyLegacy(DATA.worlds,
                         FortificationPersistenceService.legacyServerWorldKey(server, world), targetKey,
-                        BotWorldStateService.currentWorldKey(server), confirmation, legacy -> {
-                            WorldData copied = GSON.fromJson(GSON.toJson(legacy), WorldData.class);
-                            if (copied != null && copied.villages != null) {
-                                for (MappedVillage record : copied.villages.values()) {
-                                    if (record == null) continue;
-                                    record.worldKey = targetKey;
-                                    record.dimension = world.getRegistryKey().getValue().toString();
-                                }
-                            }
-                            return copied;
-                        });
+                        BotWorldStateService.currentWorldKey(server), confirmation,
+                        legacy -> copyFor(legacy, targetKey, dimensionId(world)));
                 if (copy.result() == LegacyRegistryRecoveryPolicy.Result.IMPORTED && !flush()) {
                     LegacyRegistryRecoveryPolicy.rollback(DATA.worlds, targetKey, copy.imported());
                     return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
@@ -351,6 +348,123 @@ public final class MappedVillageService {
                 return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
             }
         }
+    }
+
+    /**
+     * Deep copy of one bucket for {@code targetKey}, used by manual import and load-time adoption:
+     * only the copy's embedded world key and dimension change, the legacy or source bucket is never touched.
+     */
+    private static WorldData copyFor(WorldData legacy, String targetKey, String dimension) {
+        WorldData copied = GSON.fromJson(GSON.toJson(legacy), WorldData.class);
+        if (copied != null && copied.villages != null) {
+            for (MappedVillage record : copied.villages.values()) {
+                if (record == null) continue;
+                record.worldKey = targetKey;
+                record.dimension = dimension;
+            }
+        }
+        return copied;
+    }
+
+    /**
+     * Once per server start (Frens SERVER_STARTED): an existing save adopts this level name's
+     * legacy buckets, every dimension, into its own fingerprinted ones (see
+     * {@link LegacyRegistryRecoveryPolicy#adoptLegacy}). A brand-new save records a decline, a
+     * bucket another save claimed is left alone, an own bucket always wins. No empty bucket is written.
+     */
+    public static void adoptLegacyWorldData(MinecraftServer server) {
+        if (server == null) return;
+        ensureLoaded();
+        String fingerprint = BotWorldStateService.currentWorldKey(server);
+        long gameTime = BotWorldStateService.overworldGameTime(server);
+        synchronized (LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Legacy mapped villages not adopted: its file could not be read.");
+                return;
+            }
+            ensureRootMaps();
+            try {
+                var adoption = LegacyRegistryRecoveryPolicy.adoptLegacy(DATA.worlds, DATA.legacyWorldClaims,
+                        DATA.legacyDeclined, rawLevelName(server), ':', fingerprint, gameTime,
+                        MappedVillageService::copyFor);
+                LegacyRegistryRecoveryPolicy.log(LOGGER, "mapped villages", fingerprint, adoption);
+                if (adoption.changed() && !flush()) {
+                    LegacyRegistryRecoveryPolicy.undo(adoption, DATA.worlds, DATA.legacyWorldClaims, DATA.legacyDeclined);
+                    LOGGER.warn("Legacy mapped villages adoption was not saved and was undone. It is tried again next start.");
+                }
+            } catch (Exception e) {
+                LOGGER.warn("Legacy mapped villages adoption failed: {}", e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Explicit copy from another fingerprinted bucket of this level name and dimension (a moved
+     * instance): absent target only, deep copy, source kept, rolled back when the save fails.
+     */
+    public static LegacyRegistryRecoveryPolicy.Result importFromSibling(ServerWorld world, String confirmation,
+                                                                        String sourceKey) {
+        ensureLoaded();
+        MinecraftServer server = world.getServer();
+        String targetKey = FortificationPersistenceService.serverWorldKey(server, world);
+        String dimension = dimensionId(world);
+        synchronized (LOCK) {
+            if (loadFailed) return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            ensureRootMaps();
+            try {
+                var copy = LegacyRegistryRecoveryPolicy.copyFromSibling(DATA.worlds, sourceKey,
+                        BotWorldStateService.currentLevelName(server), dimension, targetKey,
+                        BotWorldStateService.currentWorldKey(server), confirmation,
+                        source -> copyFor(source, targetKey, dimension));
+                if (copy.result() == LegacyRegistryRecoveryPolicy.Result.IMPORTED && !flush()) {
+                    LegacyRegistryRecoveryPolicy.rollback(DATA.worlds, targetKey, copy.imported());
+                    return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+                }
+                return copy.result();
+            } catch (Exception e) {
+                LOGGER.warn("mapped villages import from '{}' failed: {}", sourceKey, e.getMessage());
+                return LegacyRegistryRecoveryPolicy.Result.SAVE_FAILED;
+            }
+        }
+    }
+
+    private static List<String> siblingSummaries(MinecraftServer server, ServerWorld world, String targetKey) {
+        List<String> out = new ArrayList<>();
+        if (DATA.worlds == null) return out;
+        for (String key : WorldStoreKeyPolicy.siblingKeys(DATA.worlds.keySet(),
+                BotWorldStateService.currentLevelName(server), dimensionId(world), targetKey)) {
+            out.add(key + " records=" + recordCount(DATA.worlds.get(key)));
+        }
+        return List.copyOf(out);
+    }
+
+    private static boolean adoptedHere(MinecraftServer server, String legacyKey) {
+        return DATA.legacyWorldClaims != null
+                && BotWorldStateService.currentWorldKey(server).equals(DATA.legacyWorldClaims.get(legacyKey));
+    }
+
+    private static int recordCount(WorldData data) {
+        if (data == null || data.villages == null) return 0;
+        int count = 0;
+        for (MappedVillage record : data.villages.values()) if (record != null) count++;
+        return count;
+    }
+
+    private static void ensureRootMaps() {
+        if (DATA.worlds == null) DATA.worlds = new HashMap<>();
+        if (DATA.legacyWorldClaims == null) DATA.legacyWorldClaims = new HashMap<>();
+        if (DATA.legacyDeclined == null) DATA.legacyDeclined = new java.util.HashSet<>();
+    }
+
+    /** Raw level name, as the legacy keys were written ("unknown" when missing). */
+    private static String rawLevelName(MinecraftServer server) {
+        return server != null && server.getSaveProperties() != null
+                ? server.getSaveProperties().getLevelName() : "unknown";
+    }
+
+    private static String dimensionId(ServerWorld world) {
+        return world != null && world.getRegistryKey() != null
+                ? world.getRegistryKey().getValue().toString() : "unknown";
     }
 
     private static Path stateFile() {

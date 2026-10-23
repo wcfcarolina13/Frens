@@ -832,6 +832,16 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.adoptLegacyState(server);
             // 1.1.274: the bot chest registry is per save too (it was level-name keyed).
             net.wcfcarolina13.GameAI.services.BotChestRegistryService.adoptLegacyWorldData(server);
+            // The seven stores moved to save-fingerprint keys after 1.1.290 adopt their level-name
+            // buckets here too, before any runtime write could create an empty bucket that blocks it.
+            // A brand-new save declines (recorded), a #unknown fingerprint adopts nothing.
+            net.wcfcarolina13.GameAI.services.BotFurnaceRegistryService.adoptLegacyWorldData(server);
+            net.wcfcarolina13.GameAI.services.BotBeehiveRegistryService.adoptLegacyWorldData(server);
+            net.wcfcarolina13.GameAI.services.CraftingHistoryService.adoptLegacyWorldData(server);
+            net.wcfcarolina13.GameAI.services.HuntHistoryService.adoptLegacyWorldData(server);
+            net.wcfcarolina13.GameAI.services.HuntConfigService.adoptLegacyWorldData(server);
+            net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService.adoptLegacyWorldData(server);
+            net.wcfcarolina13.GameAI.services.MappedVillageService.adoptLegacyWorldData(server);
 
             // Seed the server-owned "Spawn" base on first start of each world. Idempotent per
             // world — if an admin deletes it later, the sticky flag keeps us from recreating it.

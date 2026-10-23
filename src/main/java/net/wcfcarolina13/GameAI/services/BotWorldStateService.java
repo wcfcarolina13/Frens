@@ -92,8 +92,13 @@ public final class BotWorldStateService {
                     }
                 }
             } catch (Exception e) {
-                loadFailed = true;
                 LOGGER.warn("Failed to load bot world state: {}", e.getMessage());
+                Path backup = UnreadableStoreFile.quarantine(file, java.time.LocalDateTime.now(), LOGGER, "bot world state");
+                loadFailed = backup == null;
+                if (!loadFailed) {
+                    // The parse may have filled part of the map before it failed.
+                    STATE.clear();
+                }
             }
         }
         loaded = true;
@@ -237,6 +242,11 @@ public final class BotWorldStateService {
      */
     public static String currentWorldKey(MinecraftServer server) {
         return worldKey(server);
+    }
+
+    /** Overworld game time (not time of day), 0 when unknown: the brand-new-world check for store adoption. */
+    public static long overworldGameTime(MinecraftServer server) {
+        return server == null ? 0L : WorldZoneStore.overworldGameTime(server);
     }
 
     /** Trimmed level name ("default" when unknown): display only, never a store key. */

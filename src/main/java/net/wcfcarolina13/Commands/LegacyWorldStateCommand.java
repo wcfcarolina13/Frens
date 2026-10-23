@@ -57,7 +57,8 @@ public final class LegacyWorldStateCommand {
             for (var world : server.getWorlds()) {
                 for (String store : new String[]{"furnaces", "beehives", "crafting", "hunt", "fortifications", "villages", "hunt-config"}) {
                     var registry = registryPreview(store, world);
-                    if (registry.records() > 0) {
+                    // Adopted at load by this save: the retained original needs no reminder.
+                    if (registry.records() > 0 && !registry.adoptedHere()) {
                         player.sendMessage(Text.literal("Frens retained " + registry.records() + " original legacy " + store
                                 + " record(s) for " + world.getRegistryKey().getValue()
                                 + (registry.targetExists() ? ". This save already has its own registry, which will not be overwritten."
@@ -77,7 +78,10 @@ public final class LegacyWorldStateCommand {
                 .then(CommandManager.literal("import")
                         .then(CommandManager.argument("store", StringArgumentType.word())
                                 .then(CommandManager.argument("fingerprint", StringArgumentType.string())
-                                        .executes(context -> registry(context, true)))));
+                                        .executes(context -> registry(context, true))
+                                        .then(CommandManager.literal("from")
+                                                .then(CommandManager.argument("source", StringArgumentType.string())
+                                                        .executes(context -> registry(context, true)))))));
     }
 
     private static int registry(CommandContext<ServerCommandSource> context, boolean importing) {
@@ -107,14 +111,26 @@ public final class LegacyWorldStateCommand {
             for (String entry : preview.entries()) {
                 source.sendFeedback(() -> Text.literal(entry), false);
             }
-            source.sendFeedback(() -> Text.literal(preview.targetExists()
+            source.sendFeedback(() -> Text.literal(preview.adoptedHere()
+                    ? "This save adopted these records when it loaded. Legacy original retained."
+                    : preview.targetExists()
                     ? "This save already has this registry. It will not be overwritten. Legacy original retained."
                     : "If these records belong to this save and dimension, copy them with /bot legacy-state registry import "
                             + store + " " + quote(fingerprint) + ". Originals remain unchanged."), false);
+            if (!preview.siblings().isEmpty()) {
+                source.sendFeedback(() -> Text.literal("Other saves named " + quote(BotWorldStateService.currentLevelName(source.getServer()))
+                        + " in this dimension (a moved or copied instance has a new fingerprint):"), false);
+                for (String sibling : preview.siblings()) {
+                    source.sendFeedback(() -> Text.literal(sibling), false);
+                }
+                source.sendFeedback(() -> Text.literal("To copy one into this save while it has no registry of its own, use /bot legacy-state registry import "
+                        + store + " " + quote(fingerprint) + " from \"<key>\". The source is kept."), false);
+            }
             return preview.records();
         }
         String confirmation = StringArgumentType.getString(context, "fingerprint");
-        var result = switch (store) {
+        String sourceKey = hasArgument(context, "source") ? StringArgumentType.getString(context, "source") : null;
+        var result = sourceKey != null ? importFromSibling(store, world, confirmation, sourceKey) : switch (store) {
             case "furnaces" -> BotFurnaceRegistryService.importLegacy(world, confirmation);
             case "beehives" -> BotBeehiveRegistryService.importLegacy(world, confirmation);
             case "crafting" -> CraftingHistoryService.importLegacy(world, confirmation);
@@ -124,11 +140,14 @@ public final class LegacyWorldStateCommand {
             default -> MappedVillageService.importLegacy(world, confirmation);
         };
         String message = switch (result) {
-            case IMPORTED -> "Copied " + store + " into " + quote(preview.targetKey()) + ". Legacy originals preserved.";
+            case IMPORTED -> "Copied " + store + " into " + quote(preview.targetKey())
+                    + (sourceKey != null ? " from " + quote(sourceKey) + ". Source preserved." : ". Legacy originals preserved.");
             case TARGET_EXISTS -> "This save already has this registry. Nothing overwritten.";
-            case NO_LEGACY -> "No matching legacy registry exists for this dimension.";
+            case NO_LEGACY -> sourceKey != null ? "No registry exists under that source key."
+                    : "No matching legacy registry exists for this dimension.";
             case WRONG_CONFIRMATION -> "Save confirmation did not match. Preview the registry again.";
             case INVALID_TARGET -> "Cannot resolve a safe save fingerprint. Nothing imported.";
+            case INVALID_SOURCE -> "That source is not another save with this name in this dimension. Preview the registry to list them.";
             case SAVE_FAILED -> "Registry recovery was not saved. Nothing imported. Original file retained. Check the server log.";
         };
         if (result == LegacyRegistryRecoveryPolicy.Result.IMPORTED) {
@@ -137,6 +156,28 @@ public final class LegacyWorldStateCommand {
         }
         source.sendError(Text.literal(message));
         return 0;
+    }
+
+    private static LegacyRegistryRecoveryPolicy.Result importFromSibling(String store, ServerWorld world,
+                                                                         String confirmation, String sourceKey) {
+        return switch (store) {
+            case "furnaces" -> BotFurnaceRegistryService.importFromSibling(world, confirmation, sourceKey);
+            case "beehives" -> BotBeehiveRegistryService.importFromSibling(world, confirmation, sourceKey);
+            case "crafting" -> CraftingHistoryService.importFromSibling(world, confirmation, sourceKey);
+            case "hunt" -> HuntHistoryService.importFromSibling(world, confirmation, sourceKey);
+            case "hunt-config" -> HuntConfigService.importFromSibling(world, confirmation, sourceKey);
+            case "fortifications" -> FortificationPersistenceService.importFromSibling(world, confirmation, sourceKey);
+            default -> MappedVillageService.importFromSibling(world, confirmation, sourceKey);
+        };
+    }
+
+    private static boolean hasArgument(CommandContext<ServerCommandSource> context, String name) {
+        try {
+            StringArgumentType.getString(context, name);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private static LegacyRegistryRecoveryPolicy.Preview registryPreview(String store, ServerWorld world) {
