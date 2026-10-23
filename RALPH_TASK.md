@@ -4,7 +4,463 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-20 (1.1.290) — next session starts here
+## Session Handoff 2026-10-22 (remaining source-confirmed bug wave verified) — next session starts here
+
+**Current state:** ONLY checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **97 pending source/handoff files:94 Java, one mixin resource and two root handoffs.** Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. The user resumed after a usage interruption; all in-flight phases were reread, completed and frozen before central verification. No implementation remains in progress. This is source-complete work for the confirmed defects below, not a claim that every historical field report or feature in the backlog is resolved.
+
+**Verification:** Java21 `javac --release 21 -proc:none` compiled **all94 pending Java files** against cached named Minecraft/Fabric dependencies and existing classes. Full direct JUnit **3652/3652 passed, zero failures/skips/aborts**, including PocketVoice loopback tests;53 tests more than prior3599. First whole-suite run was3651pass/1fail: PlayerTextPunctuationGuardTest rejected semicolons in new recovery/ritual messages. Those two production files were reread, messages corrected, recompiled and the whole suite rerun successfully. Byte Buddy agent/experimental flag, test resources and build-local tmp were used. No Gradle/remap build was attempted in this wave; normal Java21 Gradle build is still required before release. Independent reviews found no blockers in host/End, ritual, histories, structures and hunting settings. `git diff --check` passed. Task-owned scratch directories under `build/verify-remaining*`, `build/verify-worldstate-lock/` and `build/verify-hunt-config/` removed after recording results. No live Minecraft result is claimed.
+
+**Exact per-item changes, causes and limits:** shared paths appear under each relevant item. Earlier cumulative manifests below cover prior pending work. Each implementation phase stayed within five edited files; shared-command edits were sequenced.
+
+### 1. Pending online spawn shutdown
+
+A queued profile completion could leave its returned spawn future pending after shutdown discarded the server queue. DeferredSpawnPolicy now tracks futures by server identity, removes terminal entries and drains cancellation after TaskService closes admission. Guards remain before dispatch and inside the server hop. Seven new cases, final policy16/16. The profile HTTP request itself is not interrupted.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/DeferredSpawnPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/DeferredSpawnPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Entity/createFakePlayer.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Frens.java`
+
+### 2. End-return fake-player identity
+
+Vanilla PlayerManager.respawnPlayer constructs a plain ServerPlayerEntity. One exact constructor redirect now creates a createFakePlayer replacement preserving isAShadow for fake players, and preserves vanilla construction for real players. Vanilla still owns inventory/state copying and connection handoff. Four wiring tests. Cached Minecraft1.21.11 PlayerManager was actually transformed with Mixin0.8.7: one target constructor replaced, other field/method/constructor operations retained, ASM BasicVerifier passed. The isolated harness used a signature stub for the fake-player factory; central compilation below checks the actual factory. Full-mod-list compatibility and End gameplay remain unrun.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/mixin/PlayerManagerRespawnMixin.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/resources/frens.mixins.json`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/FakePlayerRespawnWiringTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Entity/createFakePlayer.java`
+
+### 3. Resurrection connection and payment ordering
+
+The old ritual could consume the offering/anchor and mark alive before an asynchronous connection succeeded. Exact server/alias attempt tokens now reject duplicates and release on all terminal paths. Guarded connection runs admission, actual connection and commit in the same server-thread callback. Both guard points check current server/config/world/player/authority/death or quest eligibility and live offering/loaded charged anchor. Existing-bot teleport checks its result. Anchor mutation must succeed before item debit. Failure reports what was retained/used and warns if a bot may already be connected. Twelve pure/wiring cases. Death history and bot inventory storage remain intact. A process crash or a post-connect refusal can leave a live bot before payment. No persistent transaction journal or unsafe rollback/refund is claimed.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/CompanionResurrectionService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/RitualAttemptPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/RitualAttemptPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Entity/createFakePlayer.java`
+
+### 4. Name-only integrated-host authority
+
+Cached vanilla bytecode showed IntegratedServer.isHost compares names. Shared BotAccessGate now checks the player belongs to the captured server and matches its host profile UUID through a pure policy. Dedicated/null/mismatched-context paths deny host authority. All production raw vanilla isHost calls were replaced; operator branches remain. Four new cases, HostPermissionPolicy9/9. This fixes different-UUID name matches. It does not authenticate a spoofed identical UUID on an unauthenticated server.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/HostPermissionPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/HostPermissionPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/network/BotAccessGate.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Frens.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/network/AiSetupNetworkManager.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/network/configNetworkManager.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/network/ChestRegistryNetworkManager.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/NavigationArtifactService.java`
+
+### 5. Ambiguous saved positions and concurrent publication
+
+Ordinary position reads/clears use only the current save fingerprint and never move/delete the bare-level-name source. Explicit confirmed absent-only recovery copies the immutable BotState. A shared class monitor serializes all mutable state/read/publication paths, including disconnect saves; failed recovery conditionally removes only its own inserted value. Stateless fingerprint utilities remain lock-free to avoid inversion with registry locks. Atomic temporary-file replacement and an unreadable-original write guard protect persistence. Nine pure cases, including two rollback regressions. Actual BotState has x/y/z/yaw/pitch only, no dimension field was invented.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotWorldStateService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/LegacyWorldStateRecoveryPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/LegacyWorldStateRecoveryPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Commands/LegacyWorldStateCommand.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java`
+
+### 6. Furnace/beehive registries and crafting/hunt history isolation
+
+These stores still used level-name keys, leaking state between same-named saves. Ordinary access now uses save fingerprint plus dimension; read-only lookups do not install empty destinations that block recovery. Legacy furnace/beehive slash keys and history colon keys remain untouched. Explicit recovery deep-copies whole payloads under the store lock, refuses existing destinations and rolls back failed writes. Temporary-file replacement and unreadable-file guards apply. Earlier beehive lock and unloaded-chunk retention fixes remain. Shared registry policy has11 tests after structure fixtures. Chest registry was already fingerprinted with live-position migration checks and was not rewritten.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotFurnaceRegistryService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotBeehiveRegistryService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/CraftingHistoryService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/HuntHistoryService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/LegacyRegistryRecoveryPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/LegacyRegistryRecoveryPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Commands/LegacyWorldStateCommand.java`
+
+### 7. Fortification and mapped-village isolation with complete recovery
+
+The shared canonical world-key producer now fingerprints both stores and existing consumers. Recovery deep-copies complete WorldData payloads and rewrites only copied embedded fortification.worldKey and village.worldKey/dimension. This matters because subsequent fortification save uses the embedded key. Ownership, allowlists, schema, progress, hull, terrain and moat data remain. Eager normalization of every legacy entry was removed; normal current-save load/list repairs only requested current records. Same guarded atomic persistence and absent-only recovery apply. Two preservation fixtures plus two source-wiring cases cover adapters. Fixtures use JSON copies and source assertions, not actual typed-service copy invocation; source review found no field omission. Full in-game progress recovery remains unrun.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/construction/FortificationPersistenceService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/MappedVillageService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/LegacyRegistryRecoveryPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/LegacyStructureRecoveryWiringTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Commands/LegacyWorldStateCommand.java`
+
+### 8. Hunting settings isolation and defensive snapshots
+
+An additional source audit found HuntConfigService still sharing depopulation/zone/target settings by raw level name. UI and hunt probes also created persistent empty destinations. Reads now use fingerprint keys and return detached defaults/copies without claiming a destination. Explicit writes create state and copy caller-owned settings/lists. All actual getConfig callers were checked and only read snapshots. Legacy hunt-config recovery preserves originals and uses the same confirmed absent-only deep copy and guarded atomic writes. Four pure data-copy tests. Service/command behavior in a real server remains unrun.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/HuntConfigService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/HuntConfigCopyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Commands/LegacyWorldStateCommand.java`
+
+**Recovery interface and preservation contract:** `/bot legacy-state` lists pending legacy positions. `/bot legacy-state preview <alias>` displays the source, coordinates and quoted confirmation command. `/bot legacy-state import <alias> "<current-save-fingerprint>"` copies a position without spawning or moving a companion. For the current dimension use `/bot legacy-state registry preview <store>` then `/bot legacy-state registry import <store> "<current-save-fingerprint>"`. Stores: `furnaces`, `beehives`, `crafting`, `hunt`, `fortifications`, `villages`, `hunt-config`. Server admin/host authority is checked at command admission and execution. Preview reports file, source/target key, dimension, count, up to20 examples and existing-target status. Unknown fingerprints, wrong confirmation, existing destinations and failed persistence visibly refuse. Imports never merge or overwrite a current bucket and always retain the legacy original. Admin login notices expose retained records, even where a registry destination already exists. These informational notices can repeat after recovery because originals remain. If ordinary gameplay already created a destination, recovery deliberately refuses and retains both datasets for review.
+
+**What remains / next session:**
+
+- Normal Java21 Gradle/remap build and explicitly authorized field checks: online spawn during shutdown; End exit with actual mod list; owner/op ritual with delayed lookup, changed offerings/anchor, duplicate requests and refused connection; different-UUID host-name match; two same-named saves with independent records, preview/import/refusal and full structure progress/ownership. No automatic deployment or game access.
+- Ritual crash atomicity is not solved by a persistent journal. Post-connect refusal can leave a connected bot. Failures disclose retained/used resources. UUID matching is not authentication of identical spoofed IDs.
+- Source triage found no small current defect in duplicate sunset chat: one exact emitter, same-base episode guard, accepted return has no second emitter; overhead voice subtitle is separate. Keep open pending actual delivery logs. Default unified NO_PATH already returns failure; legacy blind-fallback headline is not established for that path.
+- Follow Y/stair/canopy loops, scaffold descent/pillar reports, shelter breakfree and non-suffocating underground farm recovery need current field evidence or deliberate navigation/mining policy. Do not remove collision/soil/safety gates based on old headings. Door architecture still requires discussion. Sunset short-probe semantics and surface-staging performance likewise need measured/current scope. `soilFail` ratios alone do not prove base-selection failure.
+- Multiplayer roster payload is a larger deferred feature: server-owned roster response, authorization/filtering, and loading/unknown UI are missing; OpenRosterPayload only opens the screen. Typed owner commands/SPAWN, slot refusal, supplies WaitMode/need bundling and other feature/design items remain separately scoped.
+- Inventory deny text is not established: both command open branches check ownership first. HEARD privacy is not established: DIRECT-channel digest visibility is private independently, party speech is intentionally shared and private/owner/party filters remain. Existing craft-largest-drop, craft-server-walk and Pocket timeout headlines already have fixes.
+- LearningModeService level-name/sanitized folders can mix historical session lists/latest reports across saves; only recording/list/report paths use them. No live restore/cache path or ordinary overwrite was found. Keep as separate artifact-provenance follow-up, do not silently move old folders. Historical "server is full" has no demonstrated causal connection to these store collisions and is not marked fixed.
+- Original199/200/201/219/222 were already verified complete in committed history in this checkout; this wave does not redo them. Preserve server-side wall authorization and refusal, loaded-half-only chest behavior and queued ask/withdrawal task tickets.
+
+**Hardest review:** complete structure copy and embedded rekeying; legacy isolation without hidden empty destination creation; position serialization/rollback without lock inversion; ritual connect-to-payment ordering and all failure paths; runtime Mixin coexistence. Perfectionist concern: Minecraft-facing integration and process-crash transactions remain unverified or incomplete, and structure tests combine representative JSON fixtures with source wiring. Pragmatic scope: preserve every original, refuse ambiguous/overwriting recovery visibly, use current destination state as authority, and keep changes bounded instead of introducing a new persistence/transaction framework. No exact unique remaining bug count is asserted from broad checklist lines.
+
+**Handoff paths:** only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md` and `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md`; no `docs/` edits. All edits remain on disk, uncommitted.
+
+## Session Handoff 2026-10-22 (failed-route cache races fixed) — previous unreleased phase
+
+**Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **69 pending source/handoff files: 67 Java plus handoff/changelog.** Prior cumulative manifests below plus the two newly pending Java paths here cover current work. Preserve every earlier edit and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. One bounded fix complete; no implementation remains in progress.
+
+**Actual cause:** MovementService worker paths query/log FAILED_ROUTES while lifecycle cleanup can clear its maps. `remainingMs` first called isFailed, then re-read the outer bot map without a null check; clearing between those operations caused a reproducible NullPointerException. Stale expiry reads unconditionally removed a route/sidestep even after another operation renewed it. Read-then-put refresh/log operations could also overwrite each other's new TTL or throttle timestamp. ConcurrentHashMap protected individual calls, not these sequences.
+
+**Changed paths (one four-file phase):**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/FailedRoutePolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/FailedRoutePolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md`
+
+**Fix:** remaining-time lookup uses one captured per-bot map/entry snapshot. Route/sidestep expiry uses conditional removal of only the observed value. Route refresh and log claims use per-key atomic compute/computeIfPresent, retaining both current TTL and throttle state. Detached maps after a concurrent clear remain detached; readers do not recreate them. No global lock, pathfinder/escape selection change, TTL or log-interval change. A racing read may return its pre-clear snapshot, consistent with reading before clear; a later lookup sees zero.
+
+**Verification:** five deterministic Minecraft-free interleaving tests reproduce all five defects against unchanged production source: **9 passed / 5 failed**, including the null-pointer. The fixture injects a competing operation at a map access, avoiding flaky sleeps/thread scheduling. Final route policy **14/14**; route/terrain/movement-abort focus **44/44**. Java21 `javac --release 21 -proc:none` compiled **all67 pending Java files**. Full direct JUnit **3599/3599 passed, zero failures/skips/aborts**, including voice loopback tests; five more than prior3594. Cached Byte Buddy agent, experimental flag, test resources and build-local temp used. Source/diff review and `git diff --check` passed. Scratch under `build/verify-route-cache/` removed after verification. No Gradle/remap or live-game result; normal Java21 Gradle build remains required before release.
+
+**Hardest review / limits:** verify renewal is preserved when an expiry read or skip log observes an older entry; verify clear during remaining-time lookup neither throws nor resurrects cache state. Perfectionist concern: deterministic fixture uses reflection to replace private inner maps and needs updating if storage shape changes; it exercises legal competing-operation orderings rather than a Minecraft lifecycle simulation. Pragmatic scope: atomic map operations fix the demonstrated races without introducing a scheduler or service lock. No claim that the historical field stuck symptoms came from these races. Preserve all previous field checks, save-migration and async-spawn/recruitment limits below.
+
+## Session Handoff 2026-10-22 (five source-confirmed fixes verified) — previous unreleased phase
+
+**Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **67 pending source/handoff files: 65 Java plus handoff/changelog.** This wave adds eight newly pending Java paths; SurvivalRecruitmentService was already pending. Prior cumulative manifests plus paths below cover current work. Preserve every earlier edit and unrelated `.superpowers/` / `logs/*.gz`. User requested five fixes; all five below are implemented and centrally verified. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. No implementation remains in progress.
+
+**Five bounded phases and exact changed paths:**
+
+**1. Farm assessment**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/skills/impl/FarmSkill.java`
+
+**2. Diagonal wall rescue**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotRescueService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/WallClipNudgePolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/WallClipNudgePolicyTest.java`
+
+**3. Recruitment authorization**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/SurvivalRecruitmentService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/RecruitmentAccessPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/RecruitmentAccessPolicyTest.java`
+
+**4. Bundle food facts**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/souls/SoulSnapshotBuilder.java`
+
+**5. Furnace interaction**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/SmeltingService.java`
+
+**1 cause/fix:** new-site assessment precedes tree clearing. Its target Y used walkable terrain but its second slope loop treated a trunk within target+4 as the surface and rejected flat forest as cut-too-deep. Only that assessment loop now uses walkable feet Y minus one, reusing the water sample. Cut/fill/water thresholds and missing-surface refusal remain; tree-inclusive findSurfaceY used by actual clearing is unchanged. Existing helper has a 32-block scan limit/heightmap fallback, so very tall canopies remain a limitation.
+
+**2 cause/fix:** edge/spawn clip scans enumerated four cardinal columns, missing a diagonal wall overlapped by the body. Pure WallClipNudgePolicy lists only overlapping neighboring columns and bounded movements away. Both paths check translated whole-body space plus prior feet/head hazard checks before one <=0.4-block nudge. Review caught that a normalized diagonal alone still clips at center(.99,.99); axial alternatives and a regression now cover every extreme corner. No Y/mining/support changes. Seven new tests (six numerical geometry, one wiring): first red3pass/3fail, then green6; extreme regression red6pass/1fail then final7/7. Scratch reflection runner used JUnit assertions; central verification used full JUnit.
+
+**3 cause/fix:** confirmation trusted a client alias and reused/teleported that bot before ensureOwner, which deliberately does not overwrite an existing owner. A forged alias could target another companion, and a legitimate configured alias could already belong to another player. Server-side service admission now uses the server-selected alias, checks requested alias against it and checks recorded ownership before consuming the handshake or mutating/spawning. Empty legacy requests still use the server alias; case/whitespace variants work. Malformed owner UUID fails closed. Visible refusal preserves the grant. Delayed setup rechecks the original recruiter's recorded ownership before lookup/mutation; transfer/release stops setup and tells the online recruiter. This is reached from the server network handler; UI gates are not relied on. Seven new pure cases and two wiring regressions; before service wiring7pass/2fail, final9/9. Earlier real-delay change preserved. This does not undo an already-started async createFake or redesign early recruited-state persistence/same-owner reset generations.
+
+**4 cause/fix:** snapshot item facts included bundled food but foodItems counted only direct main slots, causing the same prompt to say 'no food at all'. Food count now uses existing InventoryIterator.count across carried/bundled stacks (including offhand), preserving the prior FOOD predicate. Main-slot occupancy and item digest are unchanged. Existing iterator tests cover bundle traversal/count reduction; no gratuitous new helper/test.
+
+**5 cause/fix:** synchronous cooking's server poll and final evacuation could transfer output/refuel an old furnace after the live bot left its dimension/reach. Initial load had coordinate reach but no world match. All three callbacks now require same world and existing bounded interaction checks before item/fuel/output mutation. Poll refusal cancels its future and breaks rather than producing a new false-success result; furnace contents stay put. The interaction helper raycasts and may open a door, but does not walk/sleep/wait on the server thread. Existing unrelated gone/error result semantics are unchanged. No new helper/source-mirror tests.
+
+**Verification:** Java21 `javac --release 21 -proc:none` compiled **all65 pending Java files**. Focused recruitment/geometry/iterator/station/cooking/farm policy tests **96/96**. Full direct JUnit **3594/3594 passed, zero failures/skips/aborts**, including voice loopback tests;16 tests more than prior3578. Cached dependencies, Byte Buddy agent, experimental flag, test resources and build-local tmp used. Independent read-only review found no blockers in recruitment and farm/geometry; controller reviewed all diffs, including furnace guard ordering/cancellation. `git diff --check` passed. All scratch from `build/verify-five-central/` and `build/verify-five-diagonal/` removed after success. No Gradle/remap or live-game result; normal Java21 Gradle build remains required before release. Tests for farm sampling, snapshot production wiring and furnace relocation are indirect existing coverage plus source review, not live simulation.
+
+**Handoff edits:** only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md` and `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md` after verification. Code phases touched1/3/3/1/1 files; no broad refactor or shared output builds. Preserve all prior limits and field checks below.
+
+**Hardest review / field checks:** flat wooded farm versus genuinely high dirt/deep hollows; all diagonal head/feet clips and extreme corners without pushing into opposing collision or hazards; forged recruitment alias, already-owned configured alias, malformed owner and ownership transfer before delayed setup; bundle-only/offhand food prompt; portal/teleport/walk out of furnace reach while cooking, verifying both inventories stay unchanged by refused transfers. Perfectionist concern: Minecraft-facing paths need field verification, and existing early spawn persistence plus lookup budget remain. Pragmatic scope: reuse established samplers/iterators/scheduler/interaction checks and keep protections instead of adding new frameworks.
+
+**Triage, not silently fixed:** unified NO_PATH already returns failure (blind legacy fallback report is not established for default path); sunset short-probe semantics and underground farm recovery need deliberate policy/field scope. Save-key collisions are real but migration needs durable per-save decisions/provenance; do not blindly move legacy state into a fresh save or hide old history. Craft largest-stack/server-thread walking and Pocket wait-timeout headlines already have fixes; only the residual bundle prompt and remote-furnace mutation were changed here. Five actual source defects fixed does not certify an exact remaining unique bug count from the143 broad checklist lines.
+
+## Session Handoff 2026-10-22 (recruitment post-spawn retries really wait) — previous unreleased phase
+
+**Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **59 pending source/handoff files: 57 Java plus handoff/changelog.** Prior cumulative manifests below plus the newly pending SurvivalRecruitmentService path here cover current work. Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. This bounded task is finished; no implementation remains in progress.
+
+**Actual cause:** `schedulePostSpawnSetup` used `server.send(new ServerTask(runAt, ...))` with a future creation tick for its intended initial one-tick check / subsequent one-second retries. ServerTask creation time is not a deadline (cached 1.21.11 MinecraftServer bytecode, confirmed in the preceding phase). All eight retries could execute back-to-back while an online-mode profile lookup was still pending, report failure and miss setup when the entity finally appeared.
+
+**Changed files (one three-file phase):**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/SurvivalRecruitmentService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md`
+
+**Minimal fix:** replace only the scheduling wrapper with existing `TaskService.runOnServerAfterTicks(server, delay, ...)`. Initial check is roughly 50ms later; eight possible retries are roughly one second apart. The helper already checks shutdown/current-server identity before dispatch and on the server thread before executing. A direct comparison with HEAD verified the entire service is otherwise byte-for-byte identical: retry budget, live target lookup, real-player refusal, setup mutations and success/failure notifications remain intact. No new policy/helper/test class was needed for this wrapper replacement.
+
+**Verification:** Java 21 `javac --release 21 -proc:none` compiled **all 57 pending Java files**. Existing focused spawn/result/delay checks **18/18**. Full direct JUnit **3578/3578 passed, zero failures/skips/aborts**, including voice loopback tests. No new test cases were added; the existing tests do not simulate recruitment timing in Minecraft. Cached Byte Buddy agent, experimental flag, test resources and build-local temp paths were used. Source/diff review and `git diff --check` passed. Scratch under `build/verify-recruitment-delay/` removed after verification. This is not a Gradle/remap or live-game result; normal Java 21 Gradle build remains required before release.
+
+**Hardest review / field checks:** dedicated online-mode recruitment with a profile lookup taking a few seconds: checks should be separated by about one second and registration/meeting-site setup should run once the bot arrives. Stop/switch worlds between retries: no stale setup on the old server. Offline synchronous spawn still gets the initial delayed setup. A lookup slower than the retained roughly eight-second budget can still finish after failure is reported; recruitment ownership/state is still persisted before verified arrival. This task does not redesign that transaction, add owner-transfer/setup identity guards, or change resurrection handling. Perfectionist concern: timing and slow-profile success remain field-unverified; pragmatic scope: reuse the existing lifecycle-safe scheduler without changing the setup transaction or adding duplicated infrastructure. Preserve all earlier limits and field checks below.
+
+## Session Handoff 2026-10-22 (sleep dialogue and co-sleep retry really wait) — previous unreleased phase
+
+**Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **58 pending source/handoff files: 56 Java plus handoff/changelog.** Prior cumulative manifests below plus the two newly pending paths here cover current work. Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. This bounded task is finished; no implementation remains in progress.
+
+**Actual defect:** BotWakeUpDialogueService queued its intended 40-tick wake greeting and 60-tick busy-bot retry with `server.send(new ServerTask(futureTick, ...))`. Cached 1.21.11 MinecraftServer bytecode confirms `canExecute(ServerTask)` may execute whenever `shouldKeepTicking()` is true, regardless of that future timestamp: creation time is not a delay. The retry also omitted the initial path's current-controller, registration and zzz-cycle checks, allowing a former controller's queued retry or duplicate sleep cycle.
+
+**Changed files (one four-file phase):**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotWakeUpDialogueService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/WakeUpDelayWiringTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md`
+
+**Implementation:** both callbacks now use existing `TaskService.runOnServerAfterTicks`, which waits off-thread and rechecks lifecycle/server thread before running the body. This means roughly two/three real seconds (50ms per requested tick), not exact game-tick counting under lag. Greeting checks that the captured bot is still the same online registered entity, awake and not removed. Retry resolves the live bot/controller again, requires the sleeping player still controls it, and skips unregistered bots and zzz/logoff cycles before cooldown stamp or sleep scheduling. Existing range/world/time/task/cooldown checks and worker scheduling stay intact. No new scheduler or duplicate policy was introduced; no TaskService edit.
+
+**Verification:** five new Minecraft-free source-wiring regressions all failed against unchanged production source, then passed. Focused wiring/cooldown/zzz/controller tests **27/27**. Java 21 `javac --release 21 -proc:none` compiled **all 56 pending Java files**. Full direct JUnit **3578/3578 passed, zero failures/skips/aborts**, including voice loopback tests. Cached Byte Buddy agent, experimental flag, test resources and build-local temp paths were used. Source/diff review and `git diff --check` passed. Scratch under `build/verify-sleep-delays/` removed after verification. This is not a Gradle/remap or live-game result; normal Java 21 Gradle build remains required before release.
+
+**Hardest review / field checks:** busy companion's task clears within three seconds while its controller stays asleep; retry should run later and start sleep once. Wake greeting waits through the two-second screen fade. Transfer ownership, enter a zzz cycle, remove/recreate the bot, wake the player or stop/switch worlds before callbacks: stale work should not act or stamp retry cooldown. Existing probability/voiced-line cooldown can suppress a greeting, so absence alone is not timing proof. Perfectionist concern: these new regressions pin source wiring, not a live Minecraft timing simulation. Pragmatic scope: use the existing lifecycle-safe helper and eligibility policies rather than duplicate them in another scheduler. Preserve all prior field checks and unresolved spawn/resurrection limits below.
+
+**Scope triage:** the old misleading-inventory-denial backlog claim is not a demonstrated current ownership bypass: both `/bot open` branches already check access and explicitly report permission refusal before calling BotInventoryAccess. It was left untouched; no broad inventory refactor or full-state update changes were made.
+
+## Session Handoff 2026-10-21 (deferred online spawns reject stale server callbacks) — previous unreleased phase
+
+**Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **56 pending source/handoff files: 54 Java plus handoff/changelog.** The prior cumulative manifests below plus the three newly pending Java paths here cover the changes. Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. No staging, commits, version bump, game/PrismLauncher access, packaging, deployment or publication. This bounded task is finished; no implementation remains in progress.
+
+**Actual cause:** online-mode `createFake` chained profile lookup into an unobserved `thenAccept`, then queued a connection with no server-lifecycle guard. A late callback could target a stopped/replaced server; dispatch rejection failed only the discarded stage, leaving the returned spawn future pending. Cancelling that returned future did not prevent pending connection work.
+
+**Changed files (one five-file phase):**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Entity/createFakePlayer.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/DeferredSpawnPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/DeferredSpawnPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md`
+
+**Implementation:** pure Minecraft-free `DeferredSpawnPolicy` observes lookup, dispatch and connection failures in the returned future. It checks lifecycle before dispatch and inside the queued body and skips already-completed/cancelled work. Production uses the existing TaskService stop flag, captured server stopped state, and current-server identity semantics. Logging observes the original future without replacing it, preserving cancellation. Existing local-profile fallback after lookup failure and synchronous offline/integrated spawning remain intact. No broader spawn or resurrection transaction changes.
+
+**Verification:** nine new tests: eight pure ordering/failure/cancellation/lifecycle cases and one source-wiring check. Before production wiring, **8 passed / 1 failed**; final spawn/lifecycle focus **20/20**. Java 21 `javac --release 21 -proc:none` compiled **all 54 pending Java files**. Full direct JUnit **3573/3573 passed, zero failures/skips/aborts**, including voice loopback tests. Cached Byte Buddy agent, experimental flag, test resources and build-local temp paths were used. Initial compile accidentally included Fabric source jars and failed on their untransformed private constants; excluding source/javadoc jars resolved it without source changes. Direct source review and `git diff --check` passed. Scratch under `build/verify-deferred-spawn/` removed after verification. This is not a Gradle/remap or live-game result; run normal Java 21 Gradle build before release.
+
+**Limits / hardest review:** online dedicated-server lookup completion after stop/world replacement, stop after dispatch but before execution, dispatch rejection, caller cancellation before lookup/while queued, and normal fallback-profile spawning need authorized field checks. Already-started connection and lookup HTTP work are not interrupted or rolled back. A server that accepts then silently discards a queued task can still leave its future pending: this patch adds no shutdown registry/timeout. The pre-dispatch identity check follows existing TaskService semantics; server-thread recheck is authoritative. Perfectionist concern is this remaining accepted-but-discarded queue lifetime; pragmatic scope is preventing stale connection and observing actual rejection without introducing global tracking. Preserve all earlier field checks below.
+
+**Separate follow-up discovered, untouched:** `CompanionResurrectionService` consumes ritual resources/anchor and updates alive state before asynchronous `createFake` completes, and ignores the future. Correct failure handling needs a deliberate reservation/refund and persisted-state design, not merely deleting historical death records (retrieval needs those). Do not call this fixed by the lifecycle guard.
+
+## Session Handoff 2026-10-21 (respawn replies recheck authority through queued spawning) — previous unreleased phase
+
+**Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **53 pending files: 51 Java files plus handoff/changelog.** Preserve all earlier edits and unrelated `.superpowers/` / `logs/*.gz`. The complete prior manifest below plus the three newly pending paths in this task covers current work. No staging, commits, version bump, game/PrismLauncher access, artifact packaging, deployment or publication. Nothing remains in progress.
+
+**Actual defect:** BotRespawnPromptService trusted the original recipient of a death-time respawn question. A later ownership transfer did not stop their yes/no; yes spawned under a console source. Both maps were removed before validation. Permission could also change after an answer but before its queued console action. Unconditional reverse-map removal could erase the same owner's newer route to another bot.
+
+**Implementation, verified in bounded phases:**
+
+Phase A (two files) shares the existing owner-first/recruiter-fallback lookup with shelved bots through `resolveControllerUuidForAlias`. The live-entity accessor delegates to it; owner parsing remains one source. Existing recorded-owner precedence, offline identity, alias matching and legacy recruiter rules are unchanged. Eight controller tests pass.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/CompanionCommunicationPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/CompanionControllerPolicyTest.java`
+
+Phase B (three files) adds a pure reply policy requiring the original reply route and current controller/admin authority. Chat checks before either answer removes the request; yes keeps it until the queued action checks the exact Pending identity, sender availability and current authority again before invoking the console command. No uses conditional removal. Refusal visibly retains the alias request and retires only the sender's matching reverse route. Failed command execution restores only an unreplaced request, preserves a newer route and tells the player. Existing automatic/control-triggered spawning retains its behavior; its shared console command executor now returns the result to chat callers.
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotRespawnPromptService.java` (newly pending)
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/RespawnReplyPolicy.java` (new)
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/RespawnReplyPolicyTest.java` (new)
+
+Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md` and `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md` after code verification.
+
+**Verification:** ten new respawn tests (five pure authority cases, five source-wiring checks) plus one controller-accessor regression. Before the service change, five source tests failed while the five pure tests passed. Final focused reply/controller/access tests **37/37**. Java 21 `javac --release 21 -proc:none` compiled **all 51 pending Java files**. Full direct JUnit **3564/3564 passed, zero failures/skips/aborts**, including voice loopback tests; 11 more than the prior3553. The cached Byte Buddy agent, experimental flag, test resources and build-local temp paths were used. Independent read-only review found no blockers. `git diff --check` passes. All runner/classes/logs under `build/verify-respawn-authority/` were removed. This is not a Gradle/remap or live-game result.
+
+**Limits and reviewer focus:** ownership transfer does not automatically forward an old prompt to its new owner; the request is retained for existing authorized Bot Controls/spawn paths. Owner-level typed SPAWN support remains its separate backlog item. A positive command result means accepted command, not verified asynchronous entity join. Hardest checks: transfer before reply and between reply/queued dispatch; disconnected sender; replaced/cleared Pending before dispatch; admin/host still authorized on their own route; two dead bots sharing one controller; spawn refusal/error preserving the current request. Run those in a future authorized game check, and normal Java 21 Gradle build before release. Preserve every previous field check below.
+
+## Session Handoff 2026-10-21 (resume answers recheck current bot access) — previous unreleased phase
+
+**State:** same original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **50 pending files: 48 Java files plus handoff/changelog.** This phase adds two paths to the complete 48-file manifest in the previous handoff below. All earlier edits and unrelated `.superpowers/` / `logs/*.gz` remain preserved. No staging, commits, version bump, game/PrismLauncher access, artifact packaging, deployment or publication.
+
+**This bounded phase (four files):**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/SkillResumeService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/SkillResumeReplyAccessTest.java` (new)
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md`
+
+**Actual defect and fix:** `SkillResumeService.handleChat` associated a death-time continue prompt with its original responder, then let that responder's `no` call `clear(botUuid)` without checking current ownership. A former owner's `yes` also consumed resume state before a later dispatch gate could reject it. The chat answer now resolves the live target by saved UUID and uses existing `BotAccessGate.permits` before either branch. Current owner/op/host rules are unchanged. If unavailable or unauthorized, it tells the sender the saved job was kept, consumes this answer, and compare-removes only that responder's observed route (`remove(key, pending)`). Main paused-job, awaiting-decision, deferred and sunrise state stay untouched. Retiring the route prevents stale prompts swallowing that player's future yes/no messages, while preserving a newer route installed concurrently. Authorized resume/stand-down behavior is unchanged. The direct manual/automatic resume paths were not refactored.
+
+**Verification:** four new Minecraft-free source-wiring tests pin current-target authorization before both mutation branches, UUID lookup, visible refusal with job preservation/conditional route cleanup, and unchanged authorized branches. Three tests failed before the access gate; a separate red regression caught missing route retirement during review. Existing pure `BotAccessPolicyTest` supplies owner/op/host decision coverage; no new authorization policy was invented. All 48 pending Java files compiled with Java 21; final service/test edits were recompiled. Focused reply/access/resume tests **49/49**. Final full direct JUnit **3553/3553 passed, 0 failed/skipped/aborted**, including voice loopback tests. Source/diff review found no remaining blocker; `git diff --check` passes. All scratch under `build/verify-resume-reply/` was removed. This is not a Gradle/remap build or live-game test.
+
+**Review/field checks:** hardest edge is refusing a stale responder without deleting the current owner's resumable job or a replacement prompt. Pause a job at death, transfer ownership, then answer yes/no as former owner: visible refusal, no resume/stand-down, saved job retained. Verify the current owner can manually resume it, an authorized op/host can still answer, and later unrelated yes/no messages are not captured by the retired route. An unavailable bot also refuses while retaining the job; retry through manual resume when it returns. Preserve all prior field checks below. Before release run the normal Java 21 Gradle build with normal access; no release work was authorized here. Nothing remains in progress.
+
+## Session Handoff 2026-10-21 (second reliability wave verified; preference dispatch fixed) — previous unreleased wave
+
+**Current state:** checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. **48 pending files: 46 Java sources/tests plus this handoff and changelog.** Preserve all earlier work and unrelated `.superpowers/` / `logs/*.gz`. The app folder is not this repository. The usage interruption left playback tests unfinished; Bradley reset usage and requested continuation plus a new task. That work is now verified, with no task left in progress. No staging, commits, version bump, PrismLauncher/game access, deployment, or publication.
+
+**New task, preference dispatch (two files):** `src/main/java/net/wcfcarolina13/Frens.java` and new `src/test/java/net/wcfcarolina13/network/PlayerPreferenceReceiverWiringTest.java`. Removed only the extra `context.server().execute` around the preserve-gear and precious-food UPDATE receivers. Cached Fabric networking API 5.1.0 source explicitly guarantees the callback runs on the server thread (ServerPlayNetworking.java lines 46 and 326). Sender identity, every admission/full-state update, cooldown, rate-limit resync, coalesced save and preserve-gear rising-edge cleanup remain intact. Fabric's initial packet dispatch remains; this does not mean zero server tasks per incoming packet. Five new wiring tests reproduce one failure on HEAD and pass with the fix; preference wiring/policy focus **15/15**.
+
+**Owner and food-consent phases:** `CompanionCommunicationPolicy`, new `CompanionControllerPolicy` + test, `FoodConsumptionConfirmationService`, `FoodConfirmReplyPolicy` + test. Recorded ownership stays authoritative even when offline; only ownerless companions fall back to their recruiter. One offline-independent controller identity accessor feeds online routing and cached-consent provenance. Stale food answers visibly refuse before decision changes, consume only that responder's pending entry, and leave items/new-owner prompts untouched. Approvals, denials and explicit hand-feed grants bind to controller identity. Ownership changes invalidate cached decisions; unchanged owners going offline do not. Explicit ownerless hand-feeds remain valid only while ownerless; chat answers require a non-null controller. Seven new controller tests and nine new food tests; final focused **28/28**. Implemented in separate 3/3/2/3-file phases. Reviewer found no blockers in routing/reply gates; final cache changes received direct source review.
+
+**Novelty (two files):** `SoulNoveltyPolicy` + test retain distinct normalized recent lines and refresh repeated lines to newest, so rescued exact repeats cannot evict all other history. Three new pure tests; old policy fails one of 26, fixed novelty/controller focus **30/30**.
+
+**Respawn (four files):** `BotEventHandler`, new pure `RespawnHandlingTracker`, new tracker and wiring tests. Per-bot handled ticks stop one bot suppressing another's fallback. Captured lifecycle identity plus current server/registration checks reject old callbacks after unregister/re-register/reset. Existing ServerTask mechanism and captured tick comparison are unchanged; it is **not a guaranteed five-tick delay**. Nine new tests. **Diagnostics (four files, overlapping BotEventHandler):** new `DiagnosticCooldownPolicy` + test, `Frens`, `BotEventHandler` fix two Long.MIN_VALUE subtraction overflows that suppressed first diagnostics. Clock rollback re-arms logs; recovery/escape mutations remain outside logging gates. Six new tests. Combined respawn/diagnostic/controller focus **22/22**; six source-wiring regressions fail on HEAD. Independent review found no blockers.
+
+**Party lifecycle, completed interrupted work:** `SoulGenerationScheduler` + `SoulProviderSchedulerTest`, `SoulGroupConversationService` + test, `SoulRuntime`, `GroupScenePlayback` + test. Phase A (five files) adds exact party-roster scheduler cancellation and participant revision guards from before HEARD-token creation through history/provider completion, pipeline replacement and queued server-side effects. Phase B (three files) cancels all queued/playing scenes containing a dead/removed bot, independent of the current generation pipeline. Pending synth futures and later lines are discarded; exact-once compare/remove cleanup preserves replacement scenes, releases pending speech-floor reservations and clears scene bookkeeping. Review found a late failure-append notice race; a separate two-file fix and two regressions guard its completion too. **12 new behavioral tests; final party focus 89/89.** An initial compile caught a test using nonexistent `isOpenFor`; it was corrected to the verified `isFloorOpen` API before final verification. Already-sent client audio and already-running synthesis-engine rendering cannot be retracted by the existing API. An already accepted store write is not undone. Source reviews found no remaining blockers; new playback tests received direct source review.
+
+**Final verification:** Java 21 `javac --release 21 -proc:none` compiled **all 46 pending Java files** against cached dependencies and baseline classes. Full direct JUnit: **3549/3549 passed, zero failures/skips/aborts**, including voice loopback tests. This adds 51 tests to the prior wave's 3498. The runner used cached Byte Buddy agent, `-Dnet.bytebuddy.experimental=true`, test resources, and build-local temp paths with scoped access. `git diff --check` passes. All runner/classes/fixtures/logs under `build/verify-grind2/` were deleted after success. This is not a Gradle/remap or live-game result; prior wrapper-lock restrictions remain documented below. No artifact was packaged or deployed.
+
+**Review/field priorities:** ownership transfer while a food question/approval/denial exists; same owner disconnect/reconnect; two bots respawning together; unregister/re-register before a queued fallback; first suffocation/follow-backoff diagnostics; participant death before token/provider reply, during pending synthesis and after pipeline reload; remaining scene lines must stop, while already-sent audio may finish. Check both preference toggles, rapid reversals and current-state resync without losing the final accepted state. Preserve all earlier pending checks (woodcut backoff/cleanup, finding 59 two-bot rerun, beehive contention, movement cancellation, relation toggle). Before future release run normal Java 21 `./gradlew build` with normal build access, then authorized field checks. Historical death records deliberately remain: deleting them would break retrieval; resurrection eligibility needs separate persisted-state/migration scope. BAD_AT mixed-evidence policy, HEARD privacy and user rulings remain open.
+
+**Complete pending-file manifest (absolute paths, including preserved earlier phases):**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/Frens.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/BotActions.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BeehiveVerificationPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotBeehiveRegistryService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotIdleHobbiesService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/CompanionCommunicationPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/CompanionControllerPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/DiagnosticCooldownPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/FoodConfirmReplyPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/FoodConsumptionConfirmationService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/HobbyBackoffPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/IdleFallbackGatePolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/RespawnHandlingTracker.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/souls/GroupScenePlayback.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/souls/SoulBanterDirector.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/souls/SoulGenerationScheduler.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/souls/SoulGroupConversationService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/souls/SoulNoveltyPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/souls/SoulRuntime.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/PlayerUtils/MiningTool.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/PlayerUtils/ToolSelector.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/network/BotAnvilNetworkManager.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/network/BotEnchantNetworkManager.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/ui/BotAnvilScreenHandler.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/ui/BotEnchantmentScreenHandler.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/BeehiveVerificationPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/CompanionControllerPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/DiagnosticCooldownPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/FoodConfirmReplyPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/HobbyBackoffPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/IdleFallbackGatePolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/MovementAbortPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/RespawnHandlingTrackerTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/RespawnHandlingWiringTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/ToolSearchCancellationWiringTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/souls/GroupScenePlaybackTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/souls/SoulGroupConversationServiceTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/souls/SoulNoveltyPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/souls/SoulProviderSchedulerTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/PlayerUtils/MiningToolPreparationWiringTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/PlayerUtils/ToolSelectorLifecycleTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/network/BotAnvilAccessTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/network/BotEnchantAccessTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/network/PlayerPreferenceReceiverWiringTest.java`
+
+## Session Handoff 2026-10-21 (unreleased reliability and access wave) — previous unreleased wave
+
+**Current state:** checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`, version `1.1.290-release+1.21.11`. Twenty-seven source/test/handoff files are pending across nine bounded phases. Preserve all prior beehive, movement, and relations-supplier edits described below, plus existing untracked `.superpowers/` and `logs/*.gz`. Bradley authorized continuing bounded tasks until near the five-hour usage limit and updating handoffs. No staging, commits, version bump, PrismLauncher/game access, deployment, or publication. Use the explicit original checkout; the app folder is not the repository.
+
+**Anvil access phase (three files):** `network/BotAnvilNetworkManager.java`, `ui/BotAnvilScreenHandler.java`, new `src/test/java/net/wcfcarolina13/network/BotAnvilAccessTest.java` (production paths start `src/main/java/net/wcfcarolina13/`). Opening now checks the existing owner/op/host registry gate before workstation lookup or inventory exposure and tells the player when refused. Live `canUse` rechecks registry/ownership, bot removal, same world, 64-block bot reach, and vanilla workstation reach. Slot clicks and output permission recheck it. Close cleanup remains unguarded so revoked access cannot strand inputs/cursor items. Cached 1.21.11 handler bytecode confirms rename packets and output-taking use the guarded hooks; no guard was added after output has already moved.
+
+**Enchanting access phase (three files):** `network/BotEnchantNetworkManager.java`, `ui/BotEnchantmentScreenHandler.java`, new `src/test/java/net/wcfcarolina13/network/BotEnchantAccessTest.java`. The same server-side open refusal and live owner/registry/bot/world/reach rules apply; slot and enchant-button entrypoints check before mutation. The client prediction path and close-time item returns remain intact. The eight new tests assert source wiring without Minecraft imports and use the existing pure BotAccessPolicy for authorization decisions. Against untouched HEAD source they reproduced six access failures (two cleanup protections already passed); with both fixes, these plus existing policy tests pass 27/27. Independent cross-review found no blockers. Field check still needed: nonowner open denial; owner/op/host open; ownership transfer/despawn/world change while open; remote workstation distance; no mutation after revocation; items returned on closure.
+
+**Idle woodcut backoff phase (five files):** `GameAI/services/BotIdleHobbiesService.java`, `HobbyBackoffPolicy.java`, `IdleFallbackGatePolicy.java`, and their two policy tests. Actual bypasses were a held-axe resource gate, unconditional reset when axe+weapon were present, and level-triggered availability probes. All woodcut routes now respect failure backoff. A per-bot baseline ranks inventory axe readiness at server-observed failure (absent/craftable/held); only strictly better readiness clears it once. Unchanged tools, movement, task/shelter/follow scheduling, or losing/regaining the same tools cannot reset it. Success/session reset clears it; cancellation preserves it. Other hobbies remain available. Four net new tests cover readiness transitions and route gates. The old HEAD gate reproduces two failures in the ten route-policy tests. Review found no storm bypass. Timing limit: an axe delivered between skill return and server completion callback is included in the failure baseline and may leave an unnecessary ordinary backoff until expiry; inventory reads remain on the server thread. Existing abort-latch timing is unchanged. Field check: unchanged held axe with impossible woodcut keeps escalating; supplying an axe after a toolless failure unblocks; movement/task churn does not; other hobbies still run.
+
+**Tool cooldown lifecycle phase (three files):** `src/main/java/net/wcfcarolina13/PlayerUtils/ToolSelector.java`, `src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java`, and new `src/test/java/net/wcfcarolina13/PlayerUtils/ToolSelectorLifecycleTest.java`. The per-bot bundled-tool cooldown map previously retained UUIDs indefinitely. Null-safe `forgetBot` removes only the departing bot, called beside combat cleanup in unregister; `resetSession` clears all entries beside registry clearing in resetAll. Existing cooldown logic is unchanged. These cleanup hooks do not cancel an already-running selector. Four source-wiring regressions fail 4/4 against HEAD and pass with the fix; focused lifecycle/bundle tests pass 21/21; both production files compile. Independent review found no blockers. This resolves the historical 1.1.272 map-pruning deferral in source; no gameplay fault was claimed.
+
+**Mining preparation timeout phase (three files):** `src/main/java/net/wcfcarolina13/PlayerUtils/MiningTool.java`, `ToolSelector.java`, and new `src/test/java/net/wcfcarolina13/PlayerUtils/MiningToolPreparationWiringTest.java`. Both duplicate tool hops previously left mutations queued after their actual 2-second wait expired (historical 750 ms wording is stale). Both now use the existing cancellable server hop, preserving 2,000 ms and exception/null fallback behavior. Mining verifies the actual held selected stack because a hotbar lock can refuse selection. Harmless fallback returns verified actual-held safety (empty or nonfood/nonweapon/drop-preserving), and failure stops each initial branch or re-poll with a visible result before mining proceeds. Fallback priority is unchanged. Six new source tests reproduce five failures on HEAD (priority already passed); focused preparation/server-hop/lifecycle/bundle/harmless tests pass 58/58. Queued abandoned actions cannot start; an action already running may finish. Field check still needed: stall server past two seconds, interrupt tool hop, hotbar-lock rejection, packed inventory with weapons/food, preserved shears on leaves, and mid-mine repoll.
+
+**Task-ticket wiring verification phase (one test file):** new `src/test/java/net/wcfcarolina13/GameAI/services/ToolSearchCancellationWiringTest.java` pins existing `ToolProvisionService.retrieveToolFromChests` original-ticket capture before server refresh, the captured cancellation supplier across queued refresh/candidate attempts, the ask/walk/final withdrawal chain, and the withdrawal facade's per-step and waiting abort checks. Five source tests complement the existing pure identity/cancellation rules; focused wiring/supply/abort tests pass 59/59. No production behavior changed. The source-reading-only backlog deferral is now closed in source; actual stop/replace-during-prompt gameplay remains unverified.
+
+**Verification:** Java 21 `javac --release 21 -proc:none` compiled all 25 pending production/test Java files against cached dependencies/baseline classes. Full direct JUnit: **3498/3498 passed, 0 failed/skipped/aborted**, including voice loopback tests. Cached Byte Buddy agent, `-Dnet.bytebuddy.experimental=true`, test resources, and build-local temp directory were used with scoped access. This is not a Gradle/remap build or live-game test. Prior Gradle wrapper-lock sandbox limitation remains documented below. All scratch runner/classes/fixtures/logs under `build/verify-grind/` were removed after the final successful run. `git diff --check` passes. Independent reviews found no blockers in the workstation, backoff, lifecycle and mining phases; the final ticket tests received a direct source check. Run normal Java 21 `./gradlew build` when build access is available.
+
+**Next:** inspect the combined diff, especially live permission revocation versus close cleanup and failure-baseline reset call sites. Preserve all prior pending field checks (movement stop/timeouts, beehive contention/unknown chunks, relations live toggle, two-bot finding 59). The mining/tool-selection timeout hazard is now fixed in source. Captured task-ticket wiring is now covered by five new tests. No task remains in progress. This wave stopped near the usage reserve after verification and cleanup. BAD_AT inference remains open: failure events exist now, but threshold/mixed-evidence and contradiction rules need a deliberate policy. HEARD privacy is not a demonstrated leak; do not blindly mark shared party speech private.
+
+**Complete pending-file manifest (absolute paths; includes preserved earlier phases):**
+
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/RALPH_TASK.md`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/changelog.md`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/BotActions.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BeehiveVerificationPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotBeehiveRegistryService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/BotIdleHobbiesService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/HobbyBackoffPolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/IdleFallbackGatePolicy.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/souls/SoulBanterDirector.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/GameAI/souls/SoulRuntime.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/PlayerUtils/MiningTool.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/PlayerUtils/ToolSelector.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/network/BotAnvilNetworkManager.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/network/BotEnchantNetworkManager.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/ui/BotAnvilScreenHandler.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/main/java/net/wcfcarolina13/ui/BotEnchantmentScreenHandler.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/BeehiveVerificationPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/HobbyBackoffPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/IdleFallbackGatePolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/MovementAbortPolicyTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/GameAI/services/ToolSearchCancellationWiringTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/PlayerUtils/MiningToolPreparationWiringTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/PlayerUtils/ToolSelectorLifecycleTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/network/BotAnvilAccessTest.java`
+- `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad/src/test/java/net/wcfcarolina13/network/BotEnchantAccessTest.java`
+
+## Session Handoff 2026-10-21 (unreleased relations supplier, movement and beehive fixes) — previous unreleased phase
+
+**Current state:** original checkout `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12`; version remains `1.1.290-release+1.21.11`. Ten source/test/handoff files are pending across three phases. All are uncommitted, unversioned and undeployed. The app's `/Users/roti/Documents/ChatGPT/Minecraft` folder is not this repository; use the explicit checkout, with scoped write access when required. Preserve prior movement/beehive edits and existing untracked `.superpowers/` / `logs/*.gz`. No commits, PrismLauncher/game access, publication, or deployment were authorized by the repeated "another task" requests.
+
+**This phase (four files):** `src/main/java/net/wcfcarolina13/GameAI/souls/SoulBanterDirector.java`, `src/main/java/net/wcfcarolina13/GameAI/souls/SoulRuntime.java`, `RALPH_TASK.md`, `changelog.md`. Implemented the backlog item "SoulBanterDirector.relationsEnabled() static read → supplier." The director now receives a required `BooleanSupplier` and calls it at the existing relation-anchor gate. Runtime's sole constructor call supplies a lambda that rereads current `Frens.CONFIG` on every invocation, preserving null-config → off and live-setting behavior. The old static method/direct global-config reference is removed. No persistence format, relation policy, seed ordering or random consumption changed. The constructor now has one additional required argument; all repository call sites were checked and recompiled.
+
+**Verification:** Java 21 `javac --release 21 -proc:none` compiled all six pending production files and both pending test classes against cached dependencies and existing baseline classes. The existing `SoulBanterDirectorTest`, `SoulRuntimeTest`, `SoulBanterSeedTest` and `SoulRelationOpsTest` passed **98/98 before and after** this behavior-preserving refactor. No new tests were added for the supplier plumbing. Full direct JUnit, including preserved movement and beehive regressions: **3471/3471 passed, no failed/skipped/aborted tests**, including loopback voice tests. Scoped access, cached Byte Buddy `-javaagent`, `-Dnet.bytebuddy.experimental=true`, `src/test/resources` and a build-local `java.io.tmpdir` were used. Independent read-only review found no blockers; `git diff --check` passed. Scratch under `build/verify-relations-supplier/` was removed after verification. This is not a Gradle/remap build or live-game result; the prior sandbox Gradle wrapper-lock limitation is detailed below.
+
+**Backlog status:** the supplier item is checked as source-complete and explicitly unreleased. Other unchecked items, including HEARD-record privacy and axe-bearer woodcut backoff, were not changed. The two previous detailed handoffs below describe the remaining eight pending files and field checks; do not redo that work.
+
+**Next:** review the combined ten-file diff and run `JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home ./gradlew build` when normal build access is available. In a future authorized game check, toggle relations off/on during an existing runtime and confirm later banter evaluations follow the new value without rebuilding the director; off should omit relation anchors and on should allow them. Keep all earlier movement timeout/stop-cleanup, beehive contention/unknown-chunk and finding-59 two-bot checks pending. No version bump, packaged JAR, commit or deployment was performed this session.
+
+## Session Handoff 2026-10-21 (unreleased movement dispatch and beehive fixes) — previous unreleased phase
+
+**Current checkout:** `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12` (1.1.290). Both the prior beehive fix and this movement fix are uncommitted. `mod_version` remains `1.1.290-release+1.21.11`; no packaged JAR, deployment, or publication this session. The app now opens `/Users/roti/Documents/ChatGPT/Minecraft`, which is not this repository: use the explicit original checkout as working directory. Repository writes/verification there required approved scoped escalation after the app folder changed. Do not move/copy the source into the app folder. No-commit/no-PrismLauncher restrictions remain in force. Existing untracked `.superpowers/` and `logs/*.gz` are untouched.
+
+**Task completed in source:** Bradley asked to take another task. Resolved the 1.1.289 no-cancel movement-dispatch deferral in both `MovementService.runOnServerThread` and `BotActions.runOnServerThread`. Each previously queued a `CompletableFuture` action that could still mutate the bot after a timeout or interruption; missing-server paths also ran the action on the caller thread. Both now use the existing `BotActions.callOnServerThread` / `ServerThreadCallPolicy` hop, whose `FutureTask` is cancelled when the caller stops waiting. Missing server returns false. The policy restores interrupted status and never interrupts the server thread. Cancellation prevents queued actions from starting; an action already running may finish.
+
+**Abort versus cleanup:** `MovementService` retains its captured walk-ticket abort predicate and now reports false if that predicate suppresses steering. `BotActions`' shared low-level helper deliberately has no blanket walk-abort guard: it also dispatches `stop`, sprint/sneak reset, and ranged-use cleanup. Review caught a blanket guard suppressing stop after a revoked walk; this was corrected and pinned by a regression. Direct low-level movement retains its previous walk-abort semantics, with the new timeout cancellation. The old MovementService-specific `Walk step failed` warning was removed with the duplicate wait; failures use the shared false result and caller-specific handling.
+
+**Five files touched in this phase:**
+
+- `src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java`
+- `src/main/java/net/wcfcarolina13/GameAI/BotActions.java`
+- `src/test/java/net/wcfcarolina13/GameAI/services/MovementAbortPolicyTest.java`
+- `RALPH_TASK.md`
+- `changelog.md`
+
+**Preserved prior work:** `BotBeehiveRegistryService.java`, new `BeehiveVerificationPolicy.java`, and new `BeehiveVerificationPolicyTest.java` remain uncommitted with this phase. Combined with the five paths above, the pending work is eight files. Do not redo or revert the beehive changes; its detailed handoff follows below. A read-only investigation also confirmed the axe-bearer resource-woodcut backoff bypass still exists, but correcting its reset/probe semantics needs more scope; it was not changed and remains open.
+
+**Verification:** Java 21 `javac --release 21 -proc:none` compiled both movement files, the preserved beehive service/helper, and both changed/new test classes against cached dependencies and existing 1.1.290 baseline classes. Focused movement-abort, server-hop, and beehive tests: **27/27 passed**. Full direct JUnit: **3471 started, 3471 passed, 0 failed/skipped/aborted**. This includes five added movement regressions and the eight prior beehive tests. Both old dispatcher source contracts failed before replacement; an additional red regression caught the review's stop-cleanup hazard. Two tests assert source dispatch wiring because tests cannot load Minecraft types; the behavior tests use the actual pure abort/server-hop policies. A fresh read-only review found no remaining blockers after the cleanup correction. `git diff --check` passed. Temporary runner/classes/logs under `build/verify-movement-dispatch/` were removed after verification.
+
+**Build scope:** The full direct-JUnit run used approved scoped escalation for access to this original checkout and loopback-only test sockets; unlike the earlier restricted run, all four `PocketVoiceEngineTest` cases passed. Cached Byte Buddy `-javaagent`, `-Dnet.bytebuddy.experimental=true`, `src/test/resources`, and a build-local `java.io.tmpdir` were used. Gradle was not rerun: the preceding sandbox attempt failed at the unwritable wrapper-cache lock. This is not a Gradle/remap build or live-game result. When normal build access is available, run `JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home ./gradlew build`; focused Gradle filters are `*MovementAbortPolicyTest`, `*ServerThreadCallPolicyTest`, and `*BeehiveVerificationPolicyTest`.
+
+**Pending authorized field checks:** interrupt/stop or replace a chest walk, then resume server ticks: no abandoned queued steering or door action should run, and stop must clear velocity/sprint/sneak/ranged use. Exercise ordinary forward/backward/toward movement, doors and leaf sidesteps. A deliberately stalled server exceeding the hop timeout must not apply a queued step after it recovers; do not expect cancellation to undo an already-started action. Keep the prior beehive contention/unknown-chunk checks, finding-59 two-bot rerun, and all earlier unverified field checks open. No game instance was touched here.
+
+**Next:** review the combined eight-file diff and perform normal build/release work only when authorized. Worker-side cleanup LOS ranking and the documented movement-snap >750 ms fallback remain deferred. The no-cancel dispatch deferral in the historical 1.1.289 handoff is addressed in source by this unreleased phase.
+
+## Session Handoff 2026-10-21 (unreleased beehive lock fix) — previous unreleased phase
+
+**State:** worktree `/Users/roti/AI-Player-checkpoint/.claude/worktrees/adoring-hertz-5defad`, branch `claude/jolly-goldberg-b5b405`, HEAD `b0654f12` (1.1.290). The five-file fix below is uncommitted and unversioned; `mod_version` stays `1.1.290-release+1.21.11`. No JAR was packaged or deployed this session. Earlier fixes from this chat are already in history; do not redo them. Existing untracked `.superpowers/` and `logs/*.gz` were left alone.
+
+**Scope and authority:** Bradley selected "Fix the beehive lock risk and update handoffs." Work remains in this checkout. The earlier no-commit/no-PrismLauncher boundary remains in force; this request authorizes the repository handoff/changelog updates. Do not infer permission to deploy or publish. Entry instructions remain the parent `CLAUDE.md` and `docs/GUARDRAILS.md`; tests must not import Minecraft types.
+
+**Fixed in source:** `verifyBeehives` could hold registry `LOCK` while a worker's `ChunkBlockReader.state()` waited for the server thread. A server-thread protection lookup waiting for the same lock completed the deadlock cycle. Verification now snapshots candidate identities and revisions under the lock, reads blocks outside it, and removes known-missing records under the lock only if their registration revision is unchanged. Refreshing a hive increments a transient counter under the same lock, so a concurrent registration survives an older missing verdict. The JSON schema is unchanged. The no-reader verification overload now also uses `ChunkBlockReader`: unloaded/unknown blocks retain protection rather than being marked destroyed. Target-specific checks still skip unrelated hives, and known broken nests still lose protection.
+
+**Changed files (exactly five):**
+
+- `src/main/java/net/wcfcarolina13/GameAI/services/BotBeehiveRegistryService.java`
+- `src/main/java/net/wcfcarolina13/GameAI/services/BeehiveVerificationPolicy.java` (new, Minecraft-free locking/version helper)
+- `src/test/java/net/wcfcarolina13/GameAI/services/BeehiveVerificationPolicyTest.java` (new)
+- `RALPH_TASK.md`
+- `changelog.md`
+
+**Verification:** Java 21 direct `javac --release 21 -proc:none` compiled both production files and the new test against cached project dependencies and existing baseline classes. The eight pure tests first reproduced three failures with the old locking pattern, then passed 8/8: lock-free block probes, a simulated server lookup while the worker waits, refreshed/added/replaced registrations, unknown blocks, relevant-only removal, and failed reads. Full direct JUnit: **3466 started, 3462 passed, 4 failed**, no skipped/aborted tests. All four failures are `PocketVoiceEngineTest` loopback binds rejected with `java.net.SocketException: Operation not permitted`. Mockito used the cached Byte Buddy `-javaagent` and `-Dnet.bytebuddy.experimental=true`; `src/test/resources` was on the classpath. This is bounded fallback evidence, not a passing Gradle build or game test. Independent source review found no blockers; overlapping verification passes and legacy null/destroyed-record cleanup lack dedicated new tests. Verification scratch under `build/` was removed after checks.
+
+**Build limitation and next verification:** `JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home ./gradlew test --tests '*BeehiveVerificationPolicyTest' --console=plain` failed before compilation because `~/.gradle/wrapper/dists/.../gradle-8.14.2-bin.zip.lck` is not writable in the sandbox. When normal Gradle access is available, run that focused command and `./gradlew build` with Java 21. The fallback ran the new class plus the 3458 cached baseline tests. `git diff --check` passed. No full build, remapped artifact, restart, or live Minecraft verification is claimed.
+
+**Pending field check (future authorized sandbox run):** woodcut/cleanup verifies a remembered hive while a server-thread protection lookup runs; server ticks and cleanup must continue. Check an intact loaded hive still protects nearby logs; break the hive and verify those logs become eligible; unload its chunk and verify remembered protection is retained; rediscover/refresh a hive during verification and confirm it is not discarded. Keep all earlier pending checks below, including the two-bot finding-59 rerun, open.
+
+**Next:** review the five-file diff, then perform the normal build/release steps only when authorized. Remaining 1.1.290 deferrals are worker-side LOS ranking in cleanup and the documented >750 ms movement snap fallback; this session does not resolve them. The beehive lock deferral in the superseded handoff below is addressed in source by this uncommitted fix, not field-verified.
+
+## Session Handoff 2026-10-20 (1.1.290) — superseded
 
 **State:** main = origin/main @ 1.1.290. Suite 3458 green. Deployed to Nirn. 1.1.290 = backlog 168, 184 and the 1.1.289 review leftovers (moveTo teleport and snapTo writes on the server thread, death during the resume wait prompts "continue?") (Codex; Fable review, fix wave, follow-up). The threading batch from the triage is now done except 210 (wrong as written). Deferred: `sortByVisibility` in cleanup is off on workers (LOS ranking of fast targets dropped); `verifyBeehives` reads blocks under `LOCK` from a worker (pre-existing deadlock risk if a server-thread caller contends); a walk that hit a >750 ms server stall on its snap now replans once, then reports blocked.
 
@@ -234,7 +690,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "unified sunset probes returned `pathLen=0` or `7` with `next=none` inside 200 ms, so the return fell back to a direct follow plan to the far anchor. Worth a scope before Slice D." (1.1.265 handoff, 2026-10-17)
 - [ ] "Slice D (remove the legacy boolean and bidir) once the default has held." (1.1.261 handoff; also 1.1.263 and 1.1.242 handoffs, 2026-10-15/17)
 - [x] "after the first shared-settings save the file stores `"pathfinder": "unified"` explicitly rather than null, so a later default change would not move that install." (1.1.261 handoff, 2026-10-17) — ✅ 1.1.286 77df45d2
-- [ ] "diagonal wall nudge (eye-box geometry)" (1.1.264 handoff, 2026-10-17)
+- [x] "diagonal wall nudge (eye-box geometry)" (1.1.264 handoff, 2026-10-17) — Source fixed in prior unreleased2026-10-22 phase, extreme-corner regression included. Live field checks remain.
 - [ ] "scaffold Phase 3 pillaring up while on a pillar" (1.1.264 handoff, 2026-10-17)
 - [x] "the two off-thread `rescueFromBurial` callers (ReturnBaseStuck async mine escape, MovementService nudge loop)." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.289
 - [x] "a backup jump-sprint logged `succeeded, now at 199, 110, 202` from inside a closed stone pocket. Worth a scope." (1.1.264 handoff, 2026-10-17) — ✅ 1.1.279 741355c8 + 5eb24b38 (sandbox 6bq PASS)
@@ -285,7 +741,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "The MutualAid recipient's inventory is mutated from the donor's tick while its own skill worker may run (pre-existing)." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.290
 - [x] "`dropCheapStackForSpace` drops the LARGEST stack when nothing is cheap, and the dropped stack can be re-picked after 2 s." ("Needs a cheap-only mode or a longer pickup delay"; 1.1.222 handoff, 2026-09-25) — ✅ 1.1.279 4569ab87 (restated: aid make-room never drops valuables; sandbox 6bq PASS)
 - [x] "A flower keeps targeting a full preferred recipient (cosmetic)." (1.1.222 handoff, 2026-09-25) — ✅ 1.1.283 003fd626
-- [ ] "the per-hobby backoff state is written for hunt and collect_dirt but read only by woodcut — ready if a later item gates `pickHobby` on tool availability." (1.1.216 handoff, 2026-09-07) — 1.1.288: both idle pickers now read it (cook and hangout never record attempts; the axe-bearer woodcut bypass at IdleFallbackGatePolicy:38 remains)
+- [x] "the per-hobby backoff state is written for hunt and collect_dirt but read only by woodcut — ready if a later item gates `pickHobby` on tool availability." (1.1.216 handoff, 2026-09-07) — 1.1.288: both idle pickers now read it (cook and hangout never record attempts; axe-bearer bypass and repeated availability reset fixed in source 2026-10-21, unreleased; field check pending)
 - [ ] "Farm manual placement still has multiple `Heightmap.Type.WORLD_SURFACE` / `findSurfaceY` call sites outside `assessFarmSite`." ("If they misbehave in forests, apply the same walkable-ground-Y treatment"; Farm Pipeline next-session notes, 2026-04-08)
 - [ ] (uncertain) "PvE only. ... Alliances feature is the planned PvP gate, not yet built." (Tamed-animal defense notes, 2026-04-11)
 - [ ] Field check (from .ralph/progress.md, 2026-03-27, never moved to a field phase; re-check against current hunger/cooking code first): spawn bot, give sword, set hunger to 3, verify it hunts and doesn't stop until 4+ food items (.ralph/progress.md, now in docs/handoffs/ARCHIVE_2026.md)
@@ -296,7 +752,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 ### Multiplayer, ownership and permissions
 - [x] "join-check commander radius" (48; 1.1.236 handoff, 2026-10-14) — ✅ 1.1.284 c982f8b6
 - [ ] "multiplayer roster payload" (1.1.236 handoff, 2026-10-14)
-- [ ] "level-name-keyed stores (chest/furnace/beehive registries, hunt + crafting history, fortifications, mapped villages" (1.1.256 fixed spawns only; 1.1.234 handoff, 2026-10-14)
+- [x] "level-name-keyed stores (chest/furnace/beehive registries, hunt + crafting history, fortifications, mapped villages" (1.1.256 fixed spawns only; 1.1.234 handoff, 2026-10-14) — Source complete unreleased2026-10-22: chest was already fingerprinted; remaining stores plus hunting settings isolated with explicit retained-original recovery. Full3652/3652. Field migration checks remain.
 - [x] "D7 non-op zone edit/delete" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.287
 - [x] "anyone can map a village" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.287
 - [x] "claim an ownerless wall" (1.1.233 handoff, 2026-10-13) — ✅ 1.1.287
@@ -304,11 +760,11 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "SPAWN for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
 - [x] "resurrection owner clause." (1.1.233 handoff, 2026-10-13) ✅ 1.1.272 (Questing-off ritual: owner, op or host)
 - [ ] "After 6ac/6ad results: bot-slot check refuse mode" (6ad item 7 was clean; `AuthorizedBotDispatch` is still WARN-only; 1.1.233 handoff; also 1.1.232 "D5 refuse mode", 2026-10-13)
-- [ ] "A bot respawned by the End exit is a plain `ServerPlayerEntity`, so it gets \"not a companion\" until it is recreated." ("fails closed, and the mod's 78 other `instanceof` checks share it"; 1.1.220 handoff, 2026-09-25)
-- [ ] (uncertain) "An offline-mode LAN guest using the host's name passes `isHost`; `configNetworkManager` has the same gap." (1.1.220 handoff, 2026-09-25)
+- [x] "A bot respawned by the End exit is a plain `ServerPlayerEntity`, so it gets \"not a companion\" until it is recreated." ("fails closed, and the mod's 78 other `instanceof` checks share it"; 1.1.220 handoff, 2026-09-25) — Source fixed unreleased2026-10-22 with exact respawn constructor redirect; actual offline Mixin transformation validated, full3652/3652. Live End/mod coexistence check remains.
+- [x] (uncertain) "An offline-mode LAN guest using the host's name passes `isHost`; `configNetworkManager` has the same gap." (1.1.220 handoff, 2026-09-25) — Shared host gate now compares UUID and captured server, unreleased2026-10-22; full3652/3652. Same-UUID spoof authentication is not solved.
 - [ ] (uncertain) "misleading \"Out of range\" text after an inventory deny (modCommandRegistry)" (1.1.224 handoff/changelog deferral, 2026-09-25)
-- [ ] "the recruiter-fallback prompt edge in `resolveController`" (1.1.224 changelog deferral, 2026-09-25)
-- [ ] "each rejected preference packet still queues one server task" (1.1.224 changelog deferral, 2026-09-25)
+- [x] "the recruiter-fallback prompt edge in `resolveController`" (1.1.224 changelog deferral, 2026-09-25) — Current-owner authority and stale/cache food consent fixed in source, unreleased 2026-10-21; focused 28/28, full 3549/3549. Field checks remain.
+- [x] "each rejected preference packet still queues one server task" (1.1.224 changelog deferral, 2026-09-25) — Retargeted 2026-10-21: redundant application dispatch removed in source; Fabric initial dispatch remains. Full-state/resync behavior retained; focus 15/15, full 3549/3549. Unreleased.
 - [ ] (uncertain) "the reporter says brand-new worlds failed too, which the per-world key should prevent." ("server is full" report; suspects global `config/frens/` sidecars and legacy level-name-only keys; 1.1.226 handoff, 2026-10-13)
 
 ### Supplies and chests
@@ -319,7 +775,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "CraftingHelper pull hint maps aren't cleared at stop (bounded wall-clock hints)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.282 2b9de28c
 - [x] "A double chest whose other half is unloaded reads as unreadable (skipped for that pass)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.287
 - [x] "A grant-covered ask while the owner is away is still refused (only Always skips the owner-range check)." (1.1.221 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
-- [ ] "The `/bot stop` fix for the chest tool search (read `hasActiveTask` once before the loop) is verified by reading only; its test pins the pure helper, not the wiring." (1.1.221 handoff, 2026-09-25)
+- [x] "The `/bot stop` fix for the chest tool search (read `hasActiveTask` once before the loop) is verified by reading only; its test pins the pure helper, not the wiring." (1.1.221 handoff, 2026-09-25) — Source wiring covered 2026-10-21 by five ToolSearchCancellationWiringTest cases; focused 59/59, full 3498/3498. Unreleased; live stop/replace check remains pending.
 - [x] "Pre-existing latch race: after `/bot stop`, a later `beginSkill` for the same bot clears the abort latch, so a search still inside a hop can resume." ("needs the captured ticket's cancel flag (a TaskService accessor)"; 1.1.221 handoff, 2026-09-25) — ✅ 1.1.287
 - [x] "Ownership is not re-checked on arrival." (Bot Storage collect; 1.1.220 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
 - [x] "`verifyChests` revives a record for any chest placed back at its position." (1.1.220 handoff, 2026-09-25) — ✅ 1.1.285 9b23cffb
@@ -347,7 +803,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] "`threads.closed` matching (needs a per-question `SoulMindOps.markAnswered` overload)" (1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
 - [ ] "`BAD_AT` from repeated `TASK_FAILED`" (1.1.213-1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
 - [ ] "TEASE peer rule once `SoulSpeechAct` rides on `GroupSceneTurn`" (1.1.212-1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
-- [ ] "`SoulBanterDirector.relationsEnabled()` static read → supplier" (1.1.216 and earlier handoffs, 2026-09-06/07)
+- [x] "`SoulBanterDirector.relationsEnabled()` static read → supplier" (1.1.216 and earlier handoffs, 2026-09-06/07) — Source-complete in the unreleased 2026-10-21 diff: live supplier injected by SoulRuntime; focused 98/98 and full direct JUnit 3471/3471. Not committed, released or field-checked.
 - [ ] "`MIN_TRIGRAMS` 3→4" ("if the field session shows quoted-idiom drops"; 1.1.216 and earlier handoffs, 2026-09-06/07)
 - [ ] "OWNER_DAMAGE-peer rule deferred (event carries only `ownerId`)." (1.1.212 handoff, 2026-09-06 evening)
 - [ ] "ring idle eviction only if a leak shows" (1.1.211 handoff, 2026-09-06)

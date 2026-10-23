@@ -2,6 +2,123 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Unreleased: spawn lifecycle, ritual ordering, host authority and save isolation (2026-10-22)
+
+- Shutdown drains pending online spawn futures after closing admission. End respawn constructs a fake-player replacement and leaves vanilla state/connection copying intact.
+- Resurrection validates current authority, offerings and charged anchor around the actual connection, commits payment only after connection, rejects duplicate attempts and reports retained/used resources on failure. A persistent crash transaction journal is not included.
+- Integrated host permission compares host UUID on the captured server rather than vanilla name equality. Dedicated/null/mismatched contexts deny host authority. Identical-UUID spoof authentication is outside this fix.
+- Saved positions no longer automatically adopt ambiguous level-name entries. Position access and file publication share one monitor, with conditional failed-import rollback.
+- Furnace/beehive registries, crafting/hunt history, fortifications, mapped villages and hunting settings use save fingerprints plus dimensions. Reads do not create recovery-blocking empty stores. Hunting settings return/save defensive copies.
+- Admin preview/confirmed absent-only recovery keeps original legacy entries, deep-copies registry/history/settings/structure payloads and rewrites copied structure world identities. Current destinations are never overwritten. Atomic file replacement and unreadable-original guards protect persistence. Legacy structures are not normalized eagerly.
+
+All **94 pending Java files compile** with Java21. Full direct JUnit **3652/3652 passed**, zero failures/skips/aborts, including PocketVoice socket tests;53 tests added since3599. The first full run caught player-text semicolons, corrected before the passing rerun. Cached offline Mixin transformation and ASM verification passed for the End hook. Independent source reviews passed. RALPH_TASK records exact per-item paths, recovery commands, preservation/transaction limits, triaged stale or feature-only headings and remaining field checks. Scratch removed. No Gradle/remap or live-game result, staging/commit, version bump, packaging or deployment.
+
+## Unreleased: failed-route memory survives concurrent clear and renewal (2026-10-22)
+
+Remaining-time lookup could throw if bot cleanup cleared the route map between its two reads. Expiry cleanup could delete a renewed route/sidestep, and separate refresh/log puts could overwrite newer TTL or throttle state. The cache now reads one snapshot, conditionally removes observed expired entries, and updates refresh/log state atomically per route. TTL, log intervals and route-selection behavior are unchanged.
+
+Five deterministic pure interleaving regressions failed before the fix; final policy **14/14**, focused tests **44/44**. All **67 pending Java files compile**; full direct JUnit **3599/3599 passed, zero failures/skips/aborts**. Handoff updated; scratch removed. No Gradle/remap or live-game result, commit, version bump, packaging or deployment.
+
+## Unreleased: five bounded farm, rescue, recruitment and cooking fixes (2026-10-22)
+
+- Farm site grading uses ground beneath trees consistently, preventing flat forest rejection before tree clearing. Real cut/fill limits remain.
+- Wall rescue detects diagonal body overlaps; both entrypoints validate the whole destination body before a bounded nudge. Extreme corners have axial alternatives.
+- Recruitment enforces the server's offered alias and existing ownership before consuming a grant or spawning/moving a bot. Delayed setup rechecks ownership; refusals tell the player.
+- Soul snapshots count bundled/offhand food, avoiding contradictory 'no food' descriptions while preserving direct-slot occupancy.
+- Cooking load/poll/final evacuation require the bot in the furnace's world and interaction reach. Refused polling stops without a new false-success result or remote item transfer.
+
+Sixteen new geometry/authorization tests; focused checks **96/96**. All **65 pending Java files compile**; full direct JUnit **3594/3594 passed, zero failures/skips/aborts**. Read-only reviews found no blockers. Handoff records exact paths, causes, skipped stale/larger candidates and field limits. Scratch removed. No Gradle/remap or live-game result, commit, version bump, packaging or deployment.
+
+## Unreleased: recruitment spawn retries wait between checks (2026-10-22)
+
+Recruitment post-spawn setup used future ServerTask creation timestamps as delays, allowing its eight retries to run back-to-back before an online profile lookup completed. It now uses the existing guarded delayed-server helper: roughly 50ms before the first check, then one second between retries. Setup, retry budget and player notifications are unchanged. Slow lookups beyond the retained budget and recruitment transaction handling remain separate limitations.
+
+All **57 pending Java files compile**; existing focused checks **18/18**, full direct JUnit **3578/3578 passed, zero failures/skips/aborts**. No new test cases; live recruitment timing remains unverified. Handoff updated and build scratch removed. No Gradle/remap result, commit, version bump, packaging or deployment.
+
+## Unreleased: wake greetings and busy co-sleep retries honor their delay (2026-10-22)
+
+The sleep dialogue service used future ServerTask creation timestamps as if they were deadlines, so wake greetings and busy-bot retries could run immediately. Both now use the existing lifecycle-safe delayed-server helper (roughly two/three seconds). Delayed greetings require the same registered awake bot; retry rechecks current controller, registration and zzz-cycle state before consuming cooldown or scheduling sleep. Existing proximity, time and task checks remain.
+
+Five new Minecraft-free source-wiring checks failed before the fix and now pass; focused tests **27/27**. All **56 pending Java files compile**; full direct JUnit **3578/3578 passed, zero failures/skips/aborts**. Handoff updated; build scratch removed. Exact in-game timing, stop/reload and ownership-transfer checks remain for an authorized field session. No Gradle/remap result, commit, version bump, packaging or deployment.
+
+## Unreleased: deferred online spawn callbacks check server lifecycle (2026-10-21)
+
+Online-mode profile completion now checks the captured server before dispatch and again before connection. A pure handoff helper carries lookup/dispatch/connection failures to the returned spawn future; actual dispatch rejection no longer leaves it pending. Cancelling that future prevents connection work that has not started. Local-profile fallback and synchronous offline/integrated spawning remain unchanged. Already-started lookup/connection is not interrupted; accepted tasks silently discarded on shutdown still require separate lifetime tracking. Resurrection resource/refund behavior is untouched.
+
+Nine new Minecraft-free tests reproduce one missing-wiring failure before the fix. Final spawn/lifecycle focus **20/20**; all **54 pending Java files compile**, full direct JUnit **3573/3573 passed, zero failures/skips/aborts**. Handoff records lifecycle limits and the separate ritual transaction follow-up. Scratch removed. No Gradle/remap or live-game verification, commit, version bump, packaging or deployment.
+
+## Unreleased: respawn answers keep current authority through queued spawning (2026-10-21)
+
+Death-time respawn answers now check current ownership/admin authority before either yes/no acts, and queued yes checks the same Pending identity and authority again before console dispatch. This closes the original-recipient ownership-transfer bypass. Offline companions use the same controller-identity logic as live ones. Conditional map cleanup preserves another bot's/newer prompt route; refused answers retain the request, and failed command execution restores it without overwriting a replacement and tells the responder. Transfers do not automatically forward existing prompts to a new owner; command acceptance does not prove entity join.
+
+Ten new pure/wiring tests plus one controller-accessor regression; focused checks pass 37/37. All 51 pending Java files compile; full direct JUnit **3564/3564 passed, zero failures/skips/aborts**. Independent review found no blockers. Handoff updated and scratch deleted. No Gradle/remap build, live game check, commit, version bump, packaged JAR or deployment.
+
+## Unreleased: stale resume answers cannot clear another owner's job (2026-10-21)
+
+Post-death continue replies now resolve the bot by UUID and recheck current owner/op/host access before either yes or no changes saved work. Previously the original responder could clear the job with no ownership check, while yes consumed state before a later dispatch refusal. A denied/unavailable answer visibly preserves the saved job and retires only the observed responder route, so later yes/no chat is not swallowed and a newer route is not removed. Authorized behavior is unchanged.
+
+Four new Minecraft-free wiring regressions plus existing pure authorization/resume tests pass 49/49. All 48 pending Java files compile; full direct JUnit passes **3553/3553, zero failures/skips/aborts**. Scratch removed; handoff records all phase paths and ownership-transfer field checks. No Gradle/remap or live-game verification, commit, version bump, packaged JAR or deployment.
+
+## Unreleased: preference updates avoid a redundant server dispatch (2026-10-21)
+
+The two preference UPDATE callbacks already run on Fabric's server thread. Their nested server execution is removed; sender-bound admission, every full-state update, rate-limit correction, coalesced save and preserve-gear rising-edge cleanup stay intact. Fabric's initial network dispatch remains. Five wiring tests reproduce one HEAD failure; focused wiring/policy tests pass 15/15.
+
+## Unreleased: party work is revoked when a participant dies (2026-10-21)
+
+Party keys identify an owner, so the old bot-key cancellation missed roster participants. Scheduler roster metadata and per-participant revision guards now cover work before token creation, queued/active providers, ignored cancellation, reload and queued side effects. Playback independently cancels every matching roster, discards pending synth results and remaining lines, and finishes exactly once without removing a replacement scene. A reviewed late failure-append callback now also suppresses obsolete status notices. Twelve new behavioral tests; focused party tests pass 89/89. Existing voice APIs cannot retract already-sent client audio or interrupt engine rendering already in progress.
+
+## Unreleased: current ownership controls food consent (2026-10-21)
+
+An offline recorded owner no longer hands prompt authority back to the original recruiter. Controller identity is shared by routing and food-consent caches. Former-owner replies visibly refuse before decisions change; cached approvals/denials cannot cross ownership changes. The same owner going offline retains identity; explicit ownerless hand-feeds stay valid only while ownerless. Sixteen new controller/food tests; focus 28/28. Items and another owner's pending question remain untouched by a stale reply.
+
+## Unreleased: isolated respawn tracking, first diagnostics, distinct novelty history (2026-10-21)
+
+Respawn completion is tracked per bot, with lifecycle/server/registration guards preventing queued work from re-registering a removed bot. Existing queue timing is unchanged and does not guarantee a five-tick delay. Two sentinel-subtraction overflows no longer suppress the first suffocation/follow-backoff log; recovery remains outside diagnostic gates. Repeated normalized dialogue refreshes one novelty entry instead of evicting other distinct history. Nine respawn, six diagnostic and three novelty tests added.
+
+Final cumulative verification: **46 pending Java files compile; 3549/3549 direct JUnit tests pass, zero failures/skips/aborts**. Verification scratch was deleted. No Gradle/remap build, live game test, commit, version bump, packaged JAR or deployment. The top handoff records phase files, all 48 pending absolute paths, review limits and field checks.
+
+## Unreleased: chest-tool cancellation wiring is pinned (2026-10-21)
+
+Five Minecraft-free source-wiring tests now cover original task-ticket capture and propagation through queued refresh, chest asks, movement, final withdrawals and waiting retries. This closes the old reading-only test gap without changing production behavior. Focused supply/wiring/abort tests pass 59/59. Final cumulative Java 21 compilation covers all 25 pending Java files; full direct JUnit passes **3498/3498, zero failures/skips/aborts**. All build-local verification scratch was removed. No Gradle/remap build or live-game verification; edits remain uncommitted and undeployed. The top handoff lists all 27 pending files by absolute path, review priorities, limits, and next checks.
+
+## Unreleased: mining requires confirmed tool preparation (2026-10-21)
+
+MiningTool and ToolSelector now use the shared cancellable server hop instead of allowing abandoned queued inventory mutations after their 2-second wait. Mining verifies the actual held tool after selection, since a hotbar lock can silently refuse it. A harmless fallback reports actual success, and all initial branches plus mid-mine repoll stop with a visible failure if preparation fails. Empty-hand/harmless/damageable fallback priority is unchanged; queued cancellation cannot undo an action already running. Six source regressions reproduce five HEAD failures; focused coverage passes 58/58.
+
+Java 21 compilation of all 24 pending Java files passes. Full direct JUnit: **3493/3493 passed, no failures/skips/aborts**, including loopback voice tests. No Gradle/remap build, game check, commit, version bump, packaged artifact, or deployment. The top handoff preserves phase files, limitations, and pending checks.
+
+## Unreleased: tool bundle cooldowns follow bot and server lifecycle (2026-10-21)
+
+ToolSelector's UUID-to-tick map previously retained removed bots indefinitely. Unregister now forgets only that bot's timestamp; server reset clears the map. Cooldown decisions are unchanged. Four Minecraft-free wiring regressions reproduce missing hooks on HEAD and pass with the fix; focused lifecycle/bundle tests pass 21/21 and Java 21 compilation passes. Independent review found no blockers. Cleanup does not cancel an in-flight selector. No commit, version bump, deployment or game access.
+
+## Unreleased: bot workstation access is enforced on the server (2026-10-21)
+
+Anvil and enchanting receivers now check the existing bot owner/op/host registry gate before opening inventory-backed screens, with a visible refusal. Open handlers recheck current access, bot presence, same world, bot reach, and vanilla workstation reach before slot/output/enchant mutations. Ownership changes cannot leave the old viewer authorized. Close cleanup still returns inputs/cursor items after revocation. Eight Minecraft-free source-wiring regressions reproduced six access failures on HEAD; two cleanup checks already passed. New tests plus existing access-policy coverage pass 27/27. Independent cross-review checked vanilla packet hooks and found no blockers. Gameplay checks remain pending.
+
+## Unreleased: unchanged axes cannot erase idle woodcut failure backoff (2026-10-21)
+
+Resource woodcut previously bypassed failure backoff whenever an axe was held; the wooden fallback and availability probe could also reset it repeatedly on unchanged tools. All routes now honor failure backoff, and resets require inventory axe readiness strictly above the last server-observed failed attempt. Movement and unrelated scheduling preserve that baseline. Success and session reset clear it; other hobbies remain available. Four net new policy tests cover transitions and route gates. A supply received before the completion callback can conservatively remain backed off until expiry; no worker inventory reads were added.
+
+Java 21 compilation of all 19 pending Java files and full direct JUnit pass: **3483/3483, no failures/skips/aborts**. This includes the prior beehive, movement and relation-supplier work. Source review found no blockers. No Gradle/remap or live-game verification, packaged JAR, version bump, commit, or deployment. The current handoff records exact phase files, bounded verification and future field checks.
+
+## Unreleased: banter relations use an injected live setting supplier (2026-10-21)
+
+Completes the old `SoulBanterDirector.relationsEnabled()` supplier deferral. The director now receives a `BooleanSupplier` like its other enablement gates, removing its direct `Frens.CONFIG` dependency. `SoulRuntime` passes a lambda that reads the current config at each relation-anchor check; missing config still disables relations. Gate timing, seed ordering, default behavior, and stored data are unchanged. The only repository constructor call was updated and recompiled.
+
+The existing banter-director/runtime/seed/relation tests pass **98/98 before and after**; full direct JUnit with all pending fixes passes **3471/3471**, zero failures/skips/aborts. Java 21 compilation and `git diff --check` pass; independent source review found no blockers. No tests were added for the behavior-preserving supplier plumbing. No Gradle/remap build, live-toggle field check, version bump, commit, packaged JAR, or deployment. `RALPH_TASK.md` records the combined ten-file unreleased state and the next build/field checks.
+
+## Unreleased: timed-out movement dispatch cannot run its queued action later (2026-10-21)
+
+Resolves the 1.1.289 no-cancel dispatch deferral in `MovementService` and the low-level `BotActions` movement wrappers. Both now use the existing cancellable server hop instead of leaving a queued action eligible after a timeout/interruption. A missing server returns false instead of running the mutation on the caller thread. Steering retains the captured walk abort check; the shared low-level helper lets stop/sprint/sneak/ranged cleanup run after revocation. Review caught and corrected a blanket guard that would have suppressed that cleanup. Already-running actions may finish; only abandoned queued actions are prevented from starting.
+
+Five new Minecraft-free regressions cover the two dispatcher source contracts, expired steering, revoked steering, and stop cleanup. Java 21 compilation passes; focused tests **27/27**. Final full direct JUnit, including the prior beehive fix: **3471/3471 passed, zero failures/skips/aborts**. Approved scoped access allowed the loopback voice tests to pass this time. Source review found no remaining blockers. No Gradle/remap build or live game check ran; no version bump, commit, packaged artifact, or deployment. The current `RALPH_TASK.md` handoff preserves the combined eight-file unreleased state, verification setup, cancellation limits, and pending field checks.
+
+## Unreleased: beehive verification releases the registry lock before reading blocks (2026-10-21)
+
+Fixes the beehive lock-inversion deferral from 1.1.290. A worker could hold the registry lock while waiting for a server-thread chunk read, while a server-thread protection lookup waited for that same lock. `BeehiveVerificationPolicy` now snapshots registrations under the lock, probes blocks outside it, then removes only known-missing entries whose registration revision is unchanged. Rediscovery increments a transient revision, preventing an older read from discarding a refreshed hive without changing saved JSON. Unknown/unloaded blocks retain protection in both verification overloads; known broken nests still lose protection.
+
+Eight new Minecraft-free tests cover the lock cycle, revision races, additions/replacements, unknown blocks, target filtering, and failed reads. All 8 pass; Java 21 direct compilation passes. Full fallback JUnit: **3466 tests, 3462 passed, 4 PocketVoiceEngineTest socket-bind failures** (`Operation not permitted` in the sandbox). Gradle stops before compilation at its unwritable wrapper-cache lock. Independent source review found no blockers; no live game check ran. This is uncommitted source on top of 1.1.290, with no version bump, packaged JAR, deployment, or publication. The current `RALPH_TASK.md` handoff records the exact files, verification setup, restrictions, and pending field checks for the next model.
+
 ## Woodcut cleanup scan reads chunks safely, mutual aid waits for a commanded job, teleport and snap on the server thread, broken bee nests stop protecting; 1.1.290 (2026-10-20)
 
 Codex build finishing the threading batch (backlog 168, 184) and the 1.1.289 review leftovers, with a Fable review, a fix wave and a follow-up.
