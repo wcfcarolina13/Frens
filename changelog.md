@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Published on Modrinth: 1.1.297 (2026-10-24, no build)
+
+Modrinth version `vpXoMul4`, 1.1.297-release+1.21.11, "Better navigation, death retrieval and safer nights", listed release for 1.21.11 Fabric (Fabric API required). First public release since 1.1.230, covering 1.1.231 to 1.1.297. Notes are the text Bradley OKed (`.superpowers/sdd/modrinth/MODRINTH_CHANGELOG_1.1.297.md`). Uploaded by Bradley with `publish-1.1.297.sh`. The script's token check now accepts tokens without the old `mrp_` prefix (Modrinth issued a 64-character token).
+
 ## Hillside house join, scale 5 text clips; 1.1.297 (2026-10-23)
 
 Follow-up from the 1.1.296 sandbox check (`docs/testing/FIELD_1_1_296_SANDBOX_2026-10-23.md`). One implementer, the controller read the join-gate diff, then a sandbox check (`docs/testing/FIELD_1_1_297_SANDBOX_2026-10-23.md`).
