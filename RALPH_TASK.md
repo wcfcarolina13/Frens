@@ -4,7 +4,15 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-23 (1.1.297) — next session starts here
+## Session Handoff 2026-10-24 (1.1.298) — next session starts here
+
+**State:** 1.1.298 on main. From Bradley's Nirn report on 1.1.297: a sleeping bot stays in bed in every mode (follow kept ticking and dragged it off the bed, the 1.1.229 resume theory was wrong), follow does not pull a bot away while it walks to a bed, `/bot follow`, `/bot stop` and the follow toggle wake it. New admin setting "Log Off If Can't Sleep" (default on): after zzz or co-sleep a bot with no bed logs off at once and comes back at dawn with its inventory, off keeps bots online. Bot-placed beds are no longer "obstructed" (trySleep gets the head). Sandbox-checked, 5 of 5 pass, `docs/testing/FIELD_1_1_298_SANDBOX_2026-10-23.md`, replays `frens_1_1_298_*`. Tests 3853.
+
+**Field checks pending:** Phase 6cf (a real night on Nirn with bots). Earlier: 6ce, 6cd, 6cc, guided LAN-guest check.
+
+**Deferred (with reasons):** auto-spawn on restart or host rejoin ignores logged-off bots, so they come back at night (`BotControlApplier.scheduleAutoSpawns`, sidecar loads on the first tick after a dedicated server's start-time auto-spawn). Not run in game: safeguards (frozen time, mounted, Nether/End, daytime), a failed co-sleep into logoff, `/bot stop` and toggle as wake paths (unit tests only). Daytime thunderstorm failure does not log off. Rollback past 1.1.298 needs `config/frens/sleep_logoff_state.json` deleted if it holds a dawnOnly entry. The 1.1.297 next candidates below are still open.
+
+## Session Handoff 2026-10-23 (1.1.297) — superseded
 
 **State:** 1.1.297 on main. Follow-up to 1.1.296 (handoff below, still valid for deferrals and field checks): a bot inside a house dug into a hillside no longer digs out (a wooden door that opens to the sky counts), and the scale 5 clips are fixed (checklist step 4, model blurbs, bot inventory titles). Sandbox-checked, `docs/testing/FIELD_1_1_297_SANDBOX_2026-10-23.md`, replays `frens_1_1_297_*`. Tests 3825.
 
