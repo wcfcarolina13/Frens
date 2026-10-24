@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.registry.RegistryKey;
@@ -82,7 +83,9 @@ public final class BotZzzSleepService {
     private static final Pattern ZZZ_PATTERN = Pattern.compile("^z{3,}$", Pattern.CASE_INSENSITIVE);
 
     private static final String SIDECAR_NAME = "sleep_logoff_state.json";
-    private static final ObjectMapper JSON = new ObjectMapper();
+    // Unknown fields are ignored so an older jar can still read a sidecar a newer one wrote.
+    private static final ObjectMapper JSON = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     /** ATTEMPTING: a zzz sleep attempt is running. LOGOFF_PENDING: an attempt (zzz or
      *  co-sleep) failed and the next state-machine tick on the server thread re-checks the
@@ -563,8 +566,10 @@ public final class BotZzzSleepService {
             if (!LOGGED_OFF.isEmpty()) {
                 LOGGER.info("[zzz] restored {} logged-off bot(s) from disk", LOGGED_OFF.size());
             }
-        } catch (IOException e) {
-            LOGGER.warn("[zzz] failed to load logoff state: {}", e.getMessage());
+        } catch (IOException | RuntimeException e) {
+            // A bad or foreign file is logged once: the caller marks the disk loaded either way,
+            // so this never throws or warns again on every tick.
+            LOGGER.warn("[zzz] failed to load logoff state from {}: {}", file, e.toString());
         }
     }
 

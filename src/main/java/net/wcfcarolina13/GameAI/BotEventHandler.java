@@ -1287,6 +1287,16 @@ public class BotEventHandler {
         }
         BotArrowRecoveryService.tickArrowTracking(bot, server, !augmentedHostiles.isEmpty());
 
+        // ---- A sleeping bot holds still (all modes) ----
+        // Nothing below may move or fight with a body that is in bed: creeper backoff, the
+        // post-combat and idle drop sweeps, flee, starvation and shelter overrides and
+        // engageHostiles would all drag it out without a vanilla wake-up. A primed creeper does
+        // not wake it either: damage wakes it as in vanilla, and the next tick acts normally.
+        // The bookkeeping above only records state and still runs.
+        if (bot.isSleeping()) {
+            return true;
+        }
+
         // ---- Creeper fuse backoff (all modes, pre-empts skills + follow) ----
         // Always-on defensive interrupt: if any ignited creeper is within range,
         // back the bot off to a safe distance before doing ANYTHING else this

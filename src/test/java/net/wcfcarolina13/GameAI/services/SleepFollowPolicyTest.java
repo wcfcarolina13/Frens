@@ -66,6 +66,21 @@ class SleepFollowPolicyTest {
     }
 
     @Test
+    void sleepingBotReturnsBeforeCreeperBackoffAndPostCombatSweepInEveryMode() throws IOException {
+        String body = updateBehavior();
+        int hold = body.indexOf("if (bot.isSleeping()) {\n            return true;\n        }");
+        assertTrue(hold >= 0, "updateBehavior must return early for a sleeping bot");
+        int teleport = body.indexOf("External teleport detected.");
+        assertTrue(teleport >= 0 && teleport < hold, "the hold sits after teleport detection");
+        // Mode-agnostic: no mode test on the lines leading into it.
+        assertFalse(body.substring(Math.max(0, hold - 120), hold).contains("mode =="));
+        assertTrue(hold < body.indexOf("BotCreeperDefenseService.tickBackoff(bot, server)"));
+        assertTrue(hold < body.indexOf("tickPostCombatSweep(bot, server, mode)"));
+        assertTrue(hold < body.indexOf("tickOpportunisticIdleSweep(bot, state, server, mode)"));
+        assertTrue(hold < body.indexOf("SleepFollowPolicy.suppressFollowTick("));
+    }
+
+    @Test
     void followStopAndToggleWakeTheBotBeforeChangingFollow() throws IOException {
         String src = commands();
         String follow = between(src, "private static int executeFollow(CommandContext", "private static int executeFollowDistance(");

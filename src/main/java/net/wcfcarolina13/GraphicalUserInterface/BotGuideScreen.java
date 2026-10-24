@@ -1397,6 +1397,7 @@ public final class BotGuideScreen extends Screen {
                                 "Go to look / context action -> - -> go_to_look, recruitment contact, or spells (depends on context)",
                             "Switch bot in inventory -> [ / ] -> previous / next companion",
                                 "Sleep -> (hold \\ then 5) -> bot sleep <bot>",
+                                "Send your bots to bed -> type zzz in chat -> admins choose (Log Off If Can't Sleep) if a bot that can't find or make a bed logs off for the night and comes back at dawn",
                                 "Stop -> \\ -> bot stop <bot>",
                                 "Leash / tether helper -> ' -> leash action when available",
                                 "Let go of leads -> Release Leads in the bot menu -> bot leash release <bot>",
