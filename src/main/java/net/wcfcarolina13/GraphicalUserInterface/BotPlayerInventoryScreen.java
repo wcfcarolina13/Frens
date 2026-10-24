@@ -4765,9 +4765,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (guideRemoteOpen && !guideRemoteFullAccess) {
             return;
         }
-        context.drawText(this.textRenderer, this.botAlias, this.titleX, this.titleY, 0xFF404040, false);
+        // No "<bot>" / "Inventory" titles: at (8, 6) on the vanilla inventory texture they land on
+        // the first armor slot and the portrait (vanilla's own InventoryScreen hides them too).
+        // The bot's name is on the portrait nameplate and the bot switch control.
         context.drawText(this.textRenderer, "Level: " + this.handler.getBotLevel(), this.titleX + 90, this.titleY, 0xFF404040, false);
-        context.drawText(this.textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0xFF404040, false);
     }
 
     @Override

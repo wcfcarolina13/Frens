@@ -131,8 +131,8 @@ public final class AiSetupChecklistPolicy {
             rows.add(new BotRow(bot.name(), bot.uuid(), enabled ? State.DONE : State.TODO, !enabled));
         }
         String botsDetail = rows.isEmpty()
-                ? "No companion of yours is online. Spawn or recruit one first."
-                : anyEnabled ? "At least one companion has an AI persona." : "Enable a companion below.";
+                ? "Spawn or recruit a companion."
+                : anyEnabled ? "A companion has an AI persona." : "Enable a companion below.";
         steps.add(new Step(StepId.BOTS, anyEnabled ? State.DONE : State.TODO, false, false, botsDetail));
 
         // 5. Test chat
@@ -188,6 +188,23 @@ public final class AiSetupChecklistPolicy {
             case NONE -> List.of("New bots: None", "New: None", "None");
             case HIDDEN -> List.of("");
         };
+    }
+
+    /**
+     * Step 4's title, longest first, for {@code UiFitPolicy.pickLabel}: the bot range and the
+     * scroll hint when the bot list scrolls, then shorter forms, then the bare title. With no
+     * scrolling it is the bare title only. {@code first} and {@code last} are 1-based.
+     */
+    public static List<String> botsTitleCandidates(String base, int first, int last, int total) {
+        if (total <= 0 || (first <= 1 && last >= total)) {
+            return List.of(base);
+        }
+        String range = first + "–" + last;
+        return List.of(
+                base + "  §7(" + range + " of " + total + ", scroll)",
+                base + "  §7(" + range + " of " + total + ")",
+                base + " §7(" + range + "/" + total + ")",
+                base);
     }
 
     /** Tooltip for the new-bot soul button: the question, the current answer, what a click does. */

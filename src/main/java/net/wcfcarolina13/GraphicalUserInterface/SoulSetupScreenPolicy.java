@@ -41,6 +41,32 @@ public final class SoulSetupScreenPolicy {
         return Math.max(1, popupWidth - pad * 2 - buttonWidth - ENGINE_TEXT_BUTTON_GAP);
     }
 
+    /** Most lines a model row's blurb may take: y+10 and y+20 end at y+29, before the next row at y+34. */
+    public static final int MODEL_BLURB_MAX_LINES = 2;
+
+    /**
+     * A model row's blurb, wrapped to the width left of the row's button (the blurb's first line
+     * sits beside the button) and cut with "…" after {@link #MODEL_BLURB_MAX_LINES} lines. A colour
+     * code still open at a line break is repeated at the start of the next line, since each line
+     * is drawn on its own.
+     */
+    public static java.util.List<String> modelBlurbLines(String text, int popupWidth, int pad, int buttonWidth,
+                                                          java.util.function.ToIntFunction<String> width) {
+        int maxWidth = engineTextWidth(popupWidth, pad, buttonWidth);
+        java.util.List<String> lines = UiFitPolicy.wrap(text == null ? "" : text, maxWidth, width, MODEL_BLURB_MAX_LINES);
+        java.util.List<String> out = new java.util.ArrayList<>(lines.size());
+        String open = "";
+        for (String line : lines) {
+            String shown = !open.isEmpty() && !line.startsWith("§") ? open + line : line;
+            out.add(shown);
+            int at = shown.lastIndexOf('§');
+            if (at >= 0 && at + 1 < shown.length()) {
+                open = shown.substring(at, at + 2);
+            }
+        }
+        return out;
+    }
+
     /**
      * The Model screen's header under the Ollama line: system figures, where models come from,
      * and the switch note, each short enough for the 326 px popup (scale 5 in a 342 px window).

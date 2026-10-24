@@ -160,7 +160,7 @@ class AiSetupChecklistPolicyTest {
         Checklist c = AiSetupChecklistPolicy.evaluate(
                 hostStatus(ollama(true, "llama3.2:3b"), true, true, "llama3.2:3b", List.of(), false));
         assertEquals(State.TODO, c.step(StepId.BOTS).state());
-        assertEquals("No companion of yours is online. Spawn or recruit one first.", c.step(StepId.BOTS).detail());
+        assertEquals("Spawn or recruit a companion.", c.step(StepId.BOTS).detail());
         assertFalse(c.step(StepId.TEST_CHAT).buttonEnabled());
     }
 
@@ -199,6 +199,63 @@ class AiSetupChecklistPolicyTest {
         // the 320-wide window and ~298 px at 342, so it must fit 276 with a three-digit RAM figure.
         assertTrue(fontWidth(AiSetupChecklistPolicy.ramGuidanceShort(128.0)) <= 276,
                 AiSetupChecklistPolicy.ramGuidanceShort(128.0));
+    }
+
+    // ── Step 4 text at GUI scale 5 (342 px window: 326 px panel, 190 px text column) ──
+
+    /** Text column beside the step buttons at scale 5: 326 - 2*8 - 104 - 16. */
+    private static final int SCALE5_TEXT_W = 190;
+
+    /** {@link #fontWidth} with colour codes removed (they draw nothing). */
+    private static int shownWidth(String text) {
+        return fontWidth(text.replaceAll("§.", ""));
+    }
+
+    @Test
+    void botsDetailsFitTheScale5TextColumn() {
+        Checklist none = AiSetupChecklistPolicy.evaluate(hostStatus(ollama(true, "llama3.2:3b"), true, true,
+                "llama3.2:3b", List.of(), true));
+        Checklist off = AiSetupChecklistPolicy.evaluate(hostStatus(ollama(true, "llama3.2:3b"), true, true,
+                "llama3.2:3b", List.of(bot("Bob", BOB_ID, false, true, true, false)), true));
+        Checklist on = AiSetupChecklistPolicy.evaluate(hostStatus(ollama(true, "llama3.2:3b"), true, true,
+                "llama3.2:3b", List.of(bot("Bob", BOB_ID, true, true, true, true)), true));
+        for (Checklist c : List.of(none, off, on)) {
+            String detail = c.step(StepId.BOTS).detail();
+            assertTrue(shownWidth(detail) <= SCALE5_TEXT_W, detail);
+        }
+        assertEquals("A companion has an AI persona.", on.step(StepId.BOTS).detail());
+    }
+
+    @Test
+    void botsTitleKeepsTheRangeAtScale5() {
+        List<String> candidates = AiSetupChecklistPolicy.botsTitleCandidates("4. Companion enabled", 1, 3, 7);
+        assertEquals("4. Companion enabled  §7(1–3 of 7, scroll)", candidates.get(0));
+        String picked = net.wcfcarolina13.GraphicalUserInterface.UiFitPolicy.pickLabel(
+                candidates, SCALE5_TEXT_W, AiSetupChecklistPolicyTest::shownWidth);
+        assertEquals("4. Companion enabled  §7(1–3 of 7)", picked);
+        assertFalse(picked.endsWith("…"), picked);
+    }
+
+    @Test
+    void botsTitleCandidatesShrinkToTheBareTitle() {
+        List<String> candidates = AiSetupChecklistPolicy.botsTitleCandidates("4. Companion enabled", 10, 12, 14);
+        for (int i = 1; i < candidates.size(); i++) {
+            assertTrue(shownWidth(candidates.get(i)) < shownWidth(candidates.get(i - 1)), candidates.get(i));
+        }
+        assertEquals("4. Companion enabled", candidates.get(candidates.size() - 1));
+        // Every form fits the narrowest panel too (320 px window: 304 px panel, 168 px column) or is the bare title.
+        String picked = net.wcfcarolina13.GraphicalUserInterface.UiFitPolicy.pickLabel(
+                candidates, 168, AiSetupChecklistPolicyTest::shownWidth);
+        assertTrue(shownWidth(picked) <= 168, picked);
+        assertFalse(picked.endsWith("…"), picked);
+    }
+
+    @Test
+    void botsTitleWithoutScrollingIsTheBareTitle() {
+        assertEquals(List.of("4. Companion enabled"),
+                AiSetupChecklistPolicy.botsTitleCandidates("4. Companion enabled", 1, 3, 3));
+        assertEquals(List.of("4. Companion enabled"),
+                AiSetupChecklistPolicy.botsTitleCandidates("4. Companion enabled", 1, 0, 0));
     }
 
     private static int fontWidth(String text) {

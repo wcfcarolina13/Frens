@@ -135,4 +135,56 @@ class SoulSetupScreenPolicyTest {
             assertFalse(line.contains("—") || line.contains(";"), line);
         }
     }
+    /** Vanilla-ish advances: space 4, '.', ',' and ':' 2, the rest 6, colour codes 0. */
+    private static int fontWidth(String text) {
+        String shown = text.replaceAll("§.", "");
+        int w = 0;
+        for (char c : shown.toCharArray()) {
+            w += c == ' ' ? 4 : (c == '.' || c == ',' || c == ':' ? 2 : 6);
+        }
+        return w;
+    }
+
+    private static final String LLAMA_8B_BLURB = "§7Largest option. Best replies, slowest, heaviest.";
+
+    @Test
+    void modelBlurbStopsBeforeTheButtonAtEveryPopupWidth() {
+        for (int popup = 326; popup <= 430; popup++) {
+            int maxWidth = SoulSetupScreenPolicy.engineTextWidth(popup, 8, 96);
+            java.util.List<String> lines = SoulSetupScreenPolicy.modelBlurbLines(
+                    LLAMA_8B_BLURB + " §c(recommends ≥12 GB RAM)", popup, 8, 96, SoulSetupScreenPolicyTest::fontWidth);
+            assertTrue(lines.size() <= SoulSetupScreenPolicy.MODEL_BLURB_MAX_LINES, popup + ": " + lines);
+            for (String line : lines) {
+                assertTrue(fontWidth(line) <= maxWidth, popup + ": " + line);
+            }
+        }
+    }
+
+    @Test
+    void llamaBlurbWrapsWholeWordsAtScale5() {
+        java.util.List<String> lines = SoulSetupScreenPolicy.modelBlurbLines(
+                LLAMA_8B_BLURB, 326, 8, 96, SoulSetupScreenPolicyTest::fontWidth);
+        assertEquals(2, lines.size(), lines.toString());
+        assertEquals("Largest option. Best replies, slowest, heaviest.",
+                String.join(" ", lines).replaceAll("§.", ""));
+        for (String line : lines) {
+            assertFalse(line.endsWith("…"), line);
+            assertTrue(line.startsWith("§7"), "colour carried: " + line);
+        }
+    }
+
+    @Test
+    void llamaBlurbStaysOnOneLineAtTheFullPopup() {
+        assertEquals(java.util.List.of(LLAMA_8B_BLURB),
+                SoulSetupScreenPolicy.modelBlurbLines(LLAMA_8B_BLURB, 430, 8, 96, SoulSetupScreenPolicyTest::fontWidth));
+    }
+
+    @Test
+    void ramWarningColourCarriesOntoTheNextLine() {
+        java.util.List<String> lines = SoulSetupScreenPolicy.modelBlurbLines(
+                "§7Tiny. §c(recommends at least twelve GB of RAM for this one)", 200, 8, 96,
+                SoulSetupScreenPolicyTest::fontWidth);
+        assertEquals(2, lines.size(), lines.toString());
+        assertTrue(lines.get(1).startsWith("§c"), lines.toString());
+    }
 }

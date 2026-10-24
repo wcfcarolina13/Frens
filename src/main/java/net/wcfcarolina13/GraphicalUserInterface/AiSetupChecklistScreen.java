@@ -268,12 +268,26 @@ public class AiSetupChecklistScreen extends Screen {
             case OLLAMA -> "1. Ollama installed" + where;
             case MODEL -> "2. AI model downloaded" + where;
             case SOULS_ON -> "3. Soul Chat turned on";
-            case BOTS -> "4. Companion enabled" + (maxBotScroll() > 0
-                    ? "  §7(" + (botScroll + 1) + "–" + (botScroll + botRowsShown()) + " of "
-                            + checklist.bots().size() + ", scroll)" : "");
+            case BOTS -> botsTitleCandidates().get(0);
             case TEST_CHAT -> "5. Test chat";
             case VOICE -> "6. Voice (optional)" + where;
         };
+    }
+
+    /** Step 4's title forms, longest first: the bot range and scroll hint only when the list scrolls. */
+    private List<String> botsTitleCandidates() {
+        return maxBotScroll() > 0
+                ? AiSetupChecklistPolicy.botsTitleCandidates("4. Companion enabled",
+                        botScroll + 1, botScroll + botRowsShown(), checklist.bots().size())
+                : List.of("4. Companion enabled");
+    }
+
+    /** A step title that fits the text column: step 4 drops its scroll hint before it elides. */
+    private String fittedTitle(StepId id, int maxWidth) {
+        if (id == StepId.BOTS) {
+            return UiFitPolicy.pickLabel(botsTitleCandidates(), maxWidth, this.textRenderer::getWidth);
+        }
+        return elide(title(id), maxWidth);
     }
 
     private String headerLine(long now) {
@@ -307,11 +321,25 @@ public class AiSetupChecklistScreen extends Screen {
                 this.width / 2, cy + 15, COL_DIM);
 
         int textW = w - PAD * 2 - btnW() - 16;
+        int textX = cx + PAD + 12;
+        String hoverFull = null;
         for (Step step : checklist.steps()) {
             int y = stepY(step.id());
+            String fullTitle = title(step.id());
+            String shownTitle = fittedTitle(step.id(), textW);
+            String fullDetail = step.detail() == null ? "" : step.detail();
+            String shownDetail = elide(fullDetail, textW);
             context.drawTextWithShadow(this.textRenderer, step.state().icon(), cx + PAD, y + 3, colour(step.state()));
-            context.drawTextWithShadow(this.textRenderer, elide(title(step.id()), textW), cx + PAD + 12, y + 3, COL_TXT);
-            context.drawTextWithShadow(this.textRenderer, elide(step.detail(), textW), cx + PAD + 12, y + 13, COL_DIM);
+            context.drawTextWithShadow(this.textRenderer, shownTitle, textX, y + 3, COL_TXT);
+            context.drawTextWithShadow(this.textRenderer, shownDetail, textX, y + 13, COL_DIM);
+            // Anything still cut short shows in full on hover.
+            if (mouseX >= textX && mouseX < textX + textW) {
+                if (!shownTitle.equals(fullTitle) && mouseY >= y + 2 && mouseY < y + 12) {
+                    hoverFull = fullTitle;
+                } else if (!shownDetail.equals(fullDetail) && mouseY >= y + 12 && mouseY < y + 22) {
+                    hoverFull = fullDetail;
+                }
+            }
             if (step.id() == StepId.MODEL) {
                 double ram = status != null && status.ollama() != null ? status.ollama().hostRamGb() : -1;
                 context.drawTextWithShadow(this.textRenderer,
@@ -331,6 +359,11 @@ public class AiSetupChecklistScreen extends Screen {
         }
 
         super.render(context, mouseX, mouseY, delta);
+        if (hoverFull != null) {
+            context.drawOrderedTooltip(this.textRenderer,
+                    this.textRenderer.wrapLines(Text.literal(hoverFull), Math.max(80, Math.min(220, this.width - 24))),
+                    mouseX, mouseY);
+        }
     }
 
     @Override

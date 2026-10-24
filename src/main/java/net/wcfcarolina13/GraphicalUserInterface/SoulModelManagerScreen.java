@@ -30,6 +30,8 @@ public class SoulModelManagerScreen extends Screen {
     private int popupH() { return UiFitPolicy.popupExtent(POPUP_HEIGHT, this.height, 8); }
 
     private static final int PAD = 8;
+    /** Width of each model row's Download / Use / Selected button. */
+    private static final int MODEL_BTN_W = 96;
     private static final int COL_OK = 0xFF7FD97F;
     private static final int COL_BAD = 0xFFE07070;
     private static final int COL_DIM = 0xFFB0B0B0;
@@ -81,7 +83,7 @@ public class SoulModelManagerScreen extends Screen {
         int rowY = cy + 78;
         for (OllamaModelInstaller.KnownModel model : models) {
             ButtonWidget btn = ButtonWidget.builder(buttonLabel(model), b -> onModelButton(model))
-                    .dimensions(cx + popupW() - PAD - 96, rowY - 2, 96, 18)
+                    .dimensions(cx + popupW() - PAD - MODEL_BTN_W, rowY - 2, MODEL_BTN_W, 18)
                     .build();
             modelButtons.add(btn);
             addDrawableChild(btn);
@@ -262,10 +264,8 @@ public class SoulModelManagerScreen extends Screen {
                                 + (installed ? " §a· installed" : String.format(" §7· %.1f GB download", m.downloadGb())),
                                 textW() - 100),
                         cx + PAD, rowY, COL_TXT);
-                context.drawTextWithShadow(this.textRenderer,
-                        fitLine("§7" + m.description() + (ramOk ? "" : " §c(recommends ≥" + (int) m.recommendedRamGb() + " GB RAM)"),
-                                textW()),
-                        cx + PAD, rowY + 10, COL_DIM);
+                drawBlurb(context, "§7" + m.description()
+                        + (ramOk ? "" : " §c(recommends ≥" + (int) m.recommendedRamGb() + " GB RAM)"), cx, rowY);
                 rowY += 34;
             }
 
@@ -300,6 +300,19 @@ public class SoulModelManagerScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
     }
 
+    /**
+     * A model row's blurb under its label, wrapped to stop before the row's button (it shares
+     * the button's rows) and kept to two lines above the next row.
+     */
+    private void drawBlurb(DrawContext context, String text, int cx, int rowY) {
+        int y = rowY + 10;
+        for (String line : SoulSetupScreenPolicy.modelBlurbLines(text, popupW(), PAD, MODEL_BTN_W,
+                this.textRenderer::getWidth)) {
+            context.drawTextWithShadow(this.textRenderer, line, cx + PAD, y, COL_DIM);
+            y += 10;
+        }
+    }
+
     /** Text width inside the popup (it shrinks with the popup on narrow screens). */
     private int textW() {
         return popupW() - PAD * 2;
@@ -331,14 +344,14 @@ public class SoulModelManagerScreen extends Screen {
         int rowY = cy + 72;
         for (OllamaModelInstaller.KnownModel model : OllamaModelInstaller.KNOWN_MODELS) {
             boolean installed = ollama != null && ollama.isInstalled(model.tag());
-            context.drawTextWithShadow(this.textRenderer, model.label() + " §7(" + model.tag() + ")"
+            context.drawTextWithShadow(this.textRenderer, fitLine(model.label() + " §7(" + model.tag() + ")"
                     + (ollama == null ? "" : installed ? " §a· installed" : " §7· missing on server"),
-                    cx + PAD, rowY, COL_TXT);
-            context.drawTextWithShadow(this.textRenderer,
+                    textW() - 100), cx + PAD, rowY, COL_TXT);
+            drawBlurb(context,
                     ollama == null ? "Server model list unavailable."
                             : installed ? model.description()
                             : "Pull it on the server machine: ollama pull " + model.tag(),
-                    cx + PAD, rowY + 10, COL_DIM);
+                    cx, rowY);
             rowY += 34;
         }
     }
