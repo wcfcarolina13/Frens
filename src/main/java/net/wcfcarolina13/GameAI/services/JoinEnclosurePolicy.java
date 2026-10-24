@@ -18,8 +18,9 @@ public final class JoinEnclosurePolicy {
 
     /**
      * A player-built structure only counts when the bot's feet are at most this far below the
-     * surface heightmap at its column. A house roof or a cellar is a few blocks; a stronghold or a
-     * trial chamber is far deeper.
+     * surface heightmap at its column, or when one of its wooden doors opens to the sky
+     * ({@link #isInsidePlayerBuilt(int, boolean, boolean, boolean)}). A house roof or a cellar is
+     * a few blocks; a stronghold or a trial chamber is far deeper.
      */
     public static final int MAX_DEPTH_BELOW_SURFACE = 8;
 
@@ -67,6 +68,52 @@ public final class JoinEnclosurePolicy {
      */
     public static boolean isInsidePlayerBuilt(int builtBlocks, boolean doorNearby) {
         return doorNearby && builtBlocks >= MIN_BUILT_BLOCKS;
+    }
+
+    /**
+     * Inside a player-built structure, with the depth gate: a door nearby, enough player-built
+     * blocks, and either the bot is shallow ({@link #withinSurfaceDepth(int)}) or one of the
+     * wooden doors opens to the sky ({@link #doorCellOpensToSky(int, int)}). The second branch
+     * keeps a house dug into a hillside or under a mountain, whose front door faces the open
+     * slope. A stronghold door opens to a corridor under stone and stays out.
+     */
+    public static boolean isInsidePlayerBuilt(int builtBlocks, boolean doorNearby,
+                                              boolean withinSurfaceDepth, boolean doorOpensToSky) {
+        return isInsidePlayerBuilt(builtBlocks, doorNearby) && (withinSurfaceDepth || doorOpensToSky);
+    }
+
+    /** Cells checked on each side of a door, 1 and 2 blocks out. */
+    public static final int DOOR_SKY_REACH = 2;
+
+    /**
+     * Horizontal offsets {dx, dz} of the cells checked around a door for open sky: 1 and 2 blocks
+     * out on both sides, along both horizontal axes. Both axes, so a modded door without a facing
+     * property works too; the cells along the wall are wall or roof and never read as sky.
+     */
+    public static int[][] doorSkyOffsets() {
+        int[][] out = new int[DOOR_SKY_REACH * 4][];
+        int i = 0;
+        for (int d = 1; d <= DOOR_SKY_REACH; d++) {
+            out[i++] = new int[]{d, 0};
+            out[i++] = new int[]{-d, 0};
+            out[i++] = new int[]{0, d};
+            out[i++] = new int[]{0, -d};
+        }
+        return out;
+    }
+
+    /** The Y of a door's top half: the block itself for the upper half, one above for the lower. */
+    public static int doorTopY(int y, boolean upperHalf) {
+        return upperHalf ? y : y + 1;
+    }
+
+    /**
+     * Whether a cell next to a door is open to the sky at the door's top: the column's surface
+     * heightmap (the Y just above its highest motion-blocking block) is at or below the door's
+     * top half. {@link Integer#MIN_VALUE} (chunk not loaded) is never sky.
+     */
+    public static boolean doorCellOpensToSky(int surfaceY, int doorTopY) {
+        return surfaceY != Integer.MIN_VALUE && surfaceY <= doorTopY;
     }
 
     /**

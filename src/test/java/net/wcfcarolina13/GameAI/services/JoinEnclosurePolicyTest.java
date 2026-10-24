@@ -90,4 +90,60 @@ class JoinEnclosurePolicyTest {
         assertTrue(JoinEnclosurePolicy.lingerStaysAtNonFunctionalPosition(false, false, true));
         assertFalse(JoinEnclosurePolicy.lingerStaysAtNonFunctionalPosition(false, false, false));
     }
+    @Test
+    void hillsideHouseCountsWhenItsDoorOpensToSky() {
+        // Deep below the heightmap (stone over the roof), but the front door faces the open slope.
+        assertTrue(JoinEnclosurePolicy.isInsidePlayerBuilt(ENOUGH, true, false, true));
+        assertTrue(JoinEnclosurePolicy.isInsidePlayerBuilt(ENOUGH, true, true, false));
+        assertTrue(JoinEnclosurePolicy.isInsidePlayerBuilt(ENOUGH, true, true, true));
+    }
+
+    @Test
+    void deepRoomWhoseDoorOpensToACorridorStaysOut() {
+        assertFalse(JoinEnclosurePolicy.isInsidePlayerBuilt(40, true, false, false));
+    }
+
+    @Test
+    void doorToSkyStillNeedsADoorAndEnoughBuiltBlocks() {
+        assertFalse(JoinEnclosurePolicy.isInsidePlayerBuilt(ENOUGH - 1, true, false, true));
+        assertFalse(JoinEnclosurePolicy.isInsidePlayerBuilt(40, false, true, true));
+    }
+
+    @Test
+    void doorTopIsTheUpperHalf() {
+        assertEquals(65, JoinEnclosurePolicy.doorTopY(64, false));
+        assertEquals(65, JoinEnclosurePolicy.doorTopY(65, true));
+    }
+
+    @Test
+    void doorCellIsSkyWhenTheHeightmapIsAtOrBelowTheDoorTop() {
+        // Ground in front of the door: heightmap at the door's bottom half.
+        assertTrue(JoinEnclosurePolicy.doorCellOpensToSky(64, 65));
+        assertTrue(JoinEnclosurePolicy.doorCellOpensToSky(65, 65));
+        // A slope dropping away below the door.
+        assertTrue(JoinEnclosurePolicy.doorCellOpensToSky(58, 65));
+        // An awning or stone over the cell.
+        assertFalse(JoinEnclosurePolicy.doorCellOpensToSky(66, 65));
+        assertFalse(JoinEnclosurePolicy.doorCellOpensToSky(90, 65));
+    }
+
+    @Test
+    void unloadedColumnIsNeverSky() {
+        assertFalse(JoinEnclosurePolicy.doorCellOpensToSky(Integer.MIN_VALUE, 65));
+        assertFalse(JoinEnclosurePolicy.doorCellOpensToSky(Integer.MIN_VALUE, Integer.MIN_VALUE + 1));
+    }
+
+    @Test
+    void doorSkyCellsAreOneAndTwoOutOnBothAxes() {
+        int[][] offsets = JoinEnclosurePolicy.doorSkyOffsets();
+        assertEquals(8, offsets.length);
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (int[] o : offsets) {
+            assertTrue(o[0] == 0 || o[1] == 0, "one axis at a time");
+            int d = Math.abs(o[0]) + Math.abs(o[1]);
+            assertTrue(d == 1 || d == 2, "1 or 2 blocks out");
+            seen.add(o[0] + "," + o[1]);
+        }
+        assertEquals(java.util.Set.of("1,0", "-1,0", "0,1", "0,-1", "2,0", "-2,0", "0,2", "0,-2"), seen);
+    }
 }
