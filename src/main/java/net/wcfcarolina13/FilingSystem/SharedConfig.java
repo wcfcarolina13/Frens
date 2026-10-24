@@ -22,6 +22,7 @@ public class SharedConfig {
     public List<String> mutedTextCategories;
     public Boolean gameplayTipsEnabled;
     public Boolean idleHobbiesAnywhereEnabled;
+    public Boolean botsLogOffWhenCantSleep;
     /** Legacy flag, still sent for older peers. Applying ignores it: the finder follows {@link #pathfinder}. */
     public Boolean baritonePathfinderEnabled;
     /** Saved finder choice since 1.1.261: "unified", "baritone", "classic", or null for the default. */
@@ -72,6 +73,7 @@ public class SharedConfig {
         snapshot.mutedTextCategories = new ArrayList<>(config.getMutedTextCategories());
         snapshot.gameplayTipsEnabled = config.isGameplayTipsEnabled();
         snapshot.idleHobbiesAnywhereEnabled = config.isIdleHobbiesAnywhereEnabled();
+        snapshot.botsLogOffWhenCantSleep = config.isBotsLogOffWhenCantSleepEnabled();
         snapshot.baritonePathfinderEnabled = config.isBaritonePathfinderEnabled();
         // Always an explicit token ("unified" for the default): Gson drops nulls, so a null here
         // would let the receiver keep a stale pick of its own.
@@ -124,6 +126,7 @@ public class SharedConfig {
         }
         if (gameplayTipsEnabled != null) config.setGameplayTipsEnabled(gameplayTipsEnabled);
         if (idleHobbiesAnywhereEnabled != null) config.setIdleHobbiesAnywhereEnabled(idleHobbiesAnywhereEnabled);
+        if (botsLogOffWhenCantSleep != null) config.setBotsLogOffWhenCantSleepEnabled(botsLogOffWhenCantSleep);
         // The legacy boolean is not applied: an older peer resends it with every save, and it
         // cannot say "unified". A null string (a peer older than 1.1.261) leaves ours.
         if (pathfinder != null) config.setPathfinder(pathfinder, !Boolean.FALSE.equals(pathfinderExplicitlySet));

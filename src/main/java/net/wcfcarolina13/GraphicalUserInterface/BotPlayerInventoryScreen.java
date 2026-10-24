@@ -524,6 +524,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         GAMEPLAY_TIPS,
         IDLE_HOBBIES_ANYWHERE,
         UNIFIED_PATHFINDER,
+        BOTS_LOG_OFF_CANT_SLEEP,
         UNLEASH_TETHERED,
         LEASH_ON_DISMOUNT,
         LEASH_RELEASE,
@@ -743,6 +744,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new TopicEntry("Gameplay Tips (Hints)", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
                 new TopicEntry("Unified Pathfinder", TopicCategory.ADMIN, TopicAction.UNIFIED_PATHFINDER, true, 0, null),
+                new TopicEntry("Log Off If Can't Sleep", TopicCategory.ADMIN, TopicAction.BOTS_LOG_OFF_CANT_SLEEP, true, 0, null),
                 new TopicEntry("Allow Autonomous Rescues", TopicCategory.ADMIN, TopicAction.AUTONOMOUS_RESCUES, true, 0, null),
                 new TopicEntry("Owned Sunset SS", TopicCategory.ADMIN, TopicAction.OWNED_SUNSET_SS, true, 0, null),
                 new TopicEntry("Lock Blocks Mode", TopicCategory.ADMIN, TopicAction.LOCK_BLOCKS_MODE, true, 0, null),
@@ -4183,6 +4185,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "Current: " + ownedSunsetSelfSufficientStatusLabel()
                 );
             }
+            if (entry.action == TopicAction.BOTS_LOG_OFF_CANT_SLEEP) {
+                return java.util.List.of(
+                        "Bots log off when they can't sleep",
+                        "When a bot can't find, place or make a bed after zzz",
+                        "or when you sleep, it logs off so the night can pass,",
+                        "and comes back at dawn. Off: bots stay online.",
+                        "This affects all players on the server. Admins only.",
+                        "Current: " + (isBotsLogOffWhenCantSleepActive() ? "ON" : "OFF")
+                );
+            }
             if (entry.action == TopicAction.PRESERVE_EXPENSIVE_GEAR) {
                 return java.util.List.of(
                         "Preserve Expensive Gear",
@@ -5155,6 +5167,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case GAMEPLAY_TIPS -> toggleGameplayTips();
             case IDLE_HOBBIES_ANYWHERE -> toggleIdleHobbiesAnywhere();
             case UNIFIED_PATHFINDER -> toggleUnifiedPathfinder();
+            case BOTS_LOG_OFF_CANT_SLEEP -> toggleBotsLogOffWhenCantSleep();
             case UNLEASH_TETHERED -> toggleUnleashTethered();
             case LEASH_ON_DISMOUNT -> toggleLeashOnDismount();
             case LEASH_RELEASE -> runLeashReleaseCommand();
@@ -5588,6 +5601,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case GAMEPLAY_TIPS -> isGameplayTipsActive();
             case IDLE_HOBBIES_ANYWHERE -> isIdleHobbiesAnywhereActive();
             case UNIFIED_PATHFINDER -> isUnifiedPathfinderActive();
+            case BOTS_LOG_OFF_CANT_SLEEP -> isBotsLogOffWhenCantSleepActive();
             case ADMIN_PREVIEW_NON_ADMIN -> adminPreviewAsNonAdmin;
             case AUTONOMOUS_RESCUES -> isAutonomousRescuesActive();
             case OWNED_SUNSET_SS -> ownedSunsetSelfSufficientAggregateState() == 1;
@@ -6580,6 +6594,22 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         net.wcfcarolina13.PathFinding.PathFinder.ACTIVE =
                 net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.fromSaved(Frens.CONFIG.getPathfinder());
+    }
+
+    /** 1.1.298 admin setting, default ON. Shown ON before the config exists, matching the default. */
+    private boolean isBotsLogOffWhenCantSleepActive() {
+        return Frens.CONFIG == null || Frens.CONFIG.isBotsLogOffWhenCantSleepEnabled();
+    }
+
+    private void toggleBotsLogOffWhenCantSleep() {
+        if (Frens.CONFIG == null) return;
+        Frens.CONFIG.setBotsLogOffWhenCantSleepEnabled(!Frens.CONFIG.isBotsLogOffWhenCantSleepEnabled());
+        Frens.CONFIG.save();
+        if (Frens.CONFIG.isRemoteAuthoritative()) {
+            // save() is skipped while connected to a server, so push the change there instead.
+            net.wcfcarolina13.network.configNetworkManager.sendSaveConfigPacket(
+                    net.wcfcarolina13.network.ConfigJsonUtil.configToJson());
+        }
     }
 
     private boolean isLockBlocksModeActive() {

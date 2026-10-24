@@ -66,6 +66,38 @@ class SharedConfigSnapshotTest {
     }
 
     @Test
+    void botsLogOffWhenCantSleepIsCapturedAndApplied() throws Exception {
+        ManualConfig cfg = newRealConfig();
+        assertTrue(cfg.isBotsLogOffWhenCantSleepEnabled(), "default on");
+        assertEquals(Boolean.TRUE, SharedConfig.capture(cfg).botsLogOffWhenCantSleep);
+
+        cfg.setBotsLogOffWhenCantSleepEnabled(false);
+        SharedConfig off = SharedConfig.capture(cfg);
+        assertEquals(Boolean.FALSE, off.botsLogOffWhenCantSleep);
+
+        ManualConfig other = newRealConfig();
+        off.applyTo(other);
+        assertFalse(other.isBotsLogOffWhenCantSleepEnabled());
+
+        // A snapshot from an older peer (field absent) leaves the local value alone.
+        new SharedConfig().applyTo(other);
+        assertFalse(other.isBotsLogOffWhenCantSleepEnabled());
+    }
+
+    @Test
+    void diskFileMissingTheLogOffFieldKeepsTheDefaultOn() {
+        // load() parses with a plain Gson over the private constructor, so the initializer survives.
+        ManualConfig fromOld = new Gson().fromJson("{\"gameplayTipsEnabled\":false}", ManualConfig.class);
+        assertTrue(fromOld.isBotsLogOffWhenCantSleepEnabled());
+        assertFalse(fromOld.isGameplayTipsEnabled());
+
+        ManualConfig fromOff = new Gson().fromJson("{\"botsLogOffWhenCantSleep\":false}", ManualConfig.class);
+        assertFalse(fromOff.isBotsLogOffWhenCantSleepEnabled());
+        ManualConfig back = new Gson().fromJson(new Gson().toJson(fromOff), ManualConfig.class);
+        assertFalse(back.isBotsLogOffWhenCantSleepEnabled());
+    }
+
+    @Test
     void selfApplyKeepsBotControlsAndTextMask() throws Exception {
         ManualConfig cfg = newRealConfig();
         cfg.getMutedTextCategories().clear();

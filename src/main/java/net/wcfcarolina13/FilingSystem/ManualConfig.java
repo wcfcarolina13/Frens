@@ -79,6 +79,9 @@ public class ManualConfig {
     private List<String> mutedTextCategories = new ArrayList<>();
     private boolean gameplayTipsEnabled = true;
     private boolean idleHobbiesAnywhereEnabled = false;
+    // 1.1.298: a bot that can't find, place or make a bed when it should sleep logs off for the
+    // night and rejoins at dawn. Default ON; Gson keeps the initializer for old files missing it.
+    private boolean botsLogOffWhenCantSleep = true;
     // Legacy finder flag (1.1.240 to 1.1.260: true = baritone, false = classic). Since 1.1.261 the
     // decision follows `pathfinder`; this is kept so old JSON parses and older clients see a
     // value, re-synced on every write (true iff the effective choice is BARITONE). Only the
@@ -724,6 +727,14 @@ public class ManualConfig {
 
     public void setIdleHobbiesAnywhereEnabled(boolean idleHobbiesAnywhereEnabled) {
         this.idleHobbiesAnywhereEnabled = idleHobbiesAnywhereEnabled;
+    }
+
+    public boolean isBotsLogOffWhenCantSleepEnabled() {
+        return botsLogOffWhenCantSleep;
+    }
+
+    public void setBotsLogOffWhenCantSleepEnabled(boolean botsLogOffWhenCantSleep) {
+        this.botsLogOffWhenCantSleep = botsLogOffWhenCantSleep;
     }
 
     /** Legacy flag, kept for older clients and the migrations. The finder follows {@link #getPathfinderChoice()}. */

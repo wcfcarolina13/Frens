@@ -35,6 +35,7 @@ class ConfigJsonUtilRoundTripTest {
         cfg.setTextCategoryMuted("combat", true);
         cfg.setGameplayTipsEnabled(false);
         cfg.setIdleHobbiesAnywhereEnabled(true);
+        cfg.setBotsLogOffWhenCantSleepEnabled(false);
         cfg.setPathfinder("classic"); // syncs the legacy flag to false
         cfg.setFortifyForcePlaceEnabled(true);
         cfg.setGlobalTeleportDuringSkills(Boolean.TRUE);
@@ -65,6 +66,7 @@ class ConfigJsonUtilRoundTripTest {
         assertEquals(expected.getMutedTextCategories(), actual.getMutedTextCategories());
         assertEquals(expected.isGameplayTipsEnabled(), actual.isGameplayTipsEnabled());
         assertEquals(expected.isIdleHobbiesAnywhereEnabled(), actual.isIdleHobbiesAnywhereEnabled());
+        assertEquals(expected.isBotsLogOffWhenCantSleepEnabled(), actual.isBotsLogOffWhenCantSleepEnabled());
         assertEquals(expected.isBaritonePathfinderEnabled(), actual.isBaritonePathfinderEnabled());
         assertEquals(expected.getPathfinder(), actual.getPathfinder());
         assertEquals(expected.isFortifyForcePlaceEnabled(), actual.isFortifyForcePlaceEnabled());
@@ -160,6 +162,24 @@ class ConfigJsonUtilRoundTripTest {
         assertTrue(target.isSoulStructuredOutputEnabled());
         assertTrue(ConfigJsonUtil.applyConfigJson("{\"soulStructuredOutputEnabled\":false}", target));
         assertFalse(target.isSoulStructuredOutputEnabled());
+    }
+
+    @Test
+    void botsLogOffWhenCantSleepDefaultsOnAndTravelsBothWays() throws Exception {
+        assertTrue(newRealConfig().isBotsLogOffWhenCantSleepEnabled(), "default on");
+
+        ManualConfig target = newRealConfig();
+        assertTrue(ConfigJsonUtil.applyConfigJson("{\"botsLogOffWhenCantSleep\":false}", target));
+        assertFalse(target.isBotsLogOffWhenCantSleepEnabled());
+        // An older peer that never sends the field leaves ours alone.
+        assertTrue(ConfigJsonUtil.applyConfigJson("{\"soulsEnabled\":true}", target));
+        assertFalse(target.isBotsLogOffWhenCantSleepEnabled());
+        assertTrue(ConfigJsonUtil.applyConfigJson("{\"botsLogOffWhenCantSleep\":true}", target));
+        assertTrue(target.isBotsLogOffWhenCantSleepEnabled());
+
+        ManualConfig off = newRealConfig();
+        off.setBotsLogOffWhenCantSleepEnabled(false);
+        assertTrue(ConfigJsonUtil.configToJson(off).contains("botsLogOffWhenCantSleep"));
     }
 
     @Test
