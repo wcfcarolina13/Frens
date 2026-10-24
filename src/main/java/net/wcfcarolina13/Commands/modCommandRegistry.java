@@ -3362,6 +3362,9 @@ public class modCommandRegistry {
     private static int executeFollow(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity target) {
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow.");
         TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot follow.");
+        // An explicit follow is the owner calling the bot: get it out of bed first (the follow
+        // tick leaves a sleeping bot alone, see SleepFollowPolicy).
+        wakeIfSleeping(bot);
         // /bot follow is an explicit take-manual-control signal. Drop any pending
         // auto-resume (sunrise fishing etc.) and cancel an active sunset-return
         // session so neither re-fires behind the player's back once follow ends.
@@ -6064,6 +6067,17 @@ public class modCommandRegistry {
         return total;
     }
 
+    /**
+     * Server thread only (commands and BotActionPayload both run there). Vanilla's leave-bed
+     * call: {@code wakeUp(skipSleepTimer=false, updateSleepingPlayers=true)}, which also moves the
+     * bot to the bed's wake-up spot.
+     */
+    private static void wakeIfSleeping(ServerPlayerEntity bot) {
+        if (bot != null && bot.isSleeping()) {
+            bot.wakeUp(false, true);
+        }
+    }
+
     private static int executeStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
         MinecraftServer server = context.getSource().getServer();
         if (server == null || bot == null) {
@@ -6082,6 +6096,8 @@ public class modCommandRegistry {
         // Suppress the join-enclosure check that stopFollowing→registerBot will schedule,
         // so stopping a bot underground doesn't launch an unwanted break-free.
         net.wcfcarolina13.GameAI.BotEventHandler.noteStopCommand(bot.getUuid());
+        // An explicit stop wakes a sleeping bot so it stands up where the owner can see it.
+        wakeIfSleeping(bot);
         // Kill any active sunset-return session so the auto-return doesn't re-trigger
         // within seconds of the stop command.
         net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.clearSession(bot.getUuid());
@@ -7407,10 +7423,15 @@ public class modCommandRegistry {
             interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow toggle.");
             boolean isFollowingTarget = BotEventHandler.getCurrentMode(bot) == BotEventHandler.Mode.FOLLOW
                     && followTarget.getUuid().equals(BotEventHandler.getFollowTargetUuid(bot));
-            if (isFollowingTarget) {
+            // A following bot that is asleep or walking to a bed looks like it is not following:
+            // the press calls it back (wake, drop the sleep task, keep following), not off.
+            boolean callsBack = net.wcfcarolina13.GameAI.services.SleepFollowPolicy.toggleCallsBack(
+                    isFollowingTarget, bot.isSleeping(), TaskService.getActiveTaskName(bot.getUuid()).orElse(null));
+            if (isFollowingTarget && !callsBack) {
                 BotEventHandler.stopFollowing(bot, false);
             } else {
                 TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot follow toggle.");
+                wakeIfSleeping(bot);
                 BotEventHandler.setFollowMode(bot, followTarget, false, true);
                 if (isFollowingTarget(bot, followTarget)) {
                     turnedOn++;

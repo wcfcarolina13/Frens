@@ -1314,6 +1314,20 @@ public class BotEventHandler {
                 return true;
             }
         }
+        // ---- Sleeping bot stays in bed (FOLLOW) ----
+        // Sleep runs its own "skill:sleep" ticket and never suspends follow, so without this the
+        // follow tick (and the linger/idle sweeps below) moved the body out of the bed without a
+        // vanilla wake-up, and wolf-teleported a bot walking to a bed back to its owner. Mode stays
+        // FOLLOW: vanilla wakes the bot at daybreak and follow resumes on the next tick. The sleep
+        // task's own walk runs on its worker through MovementService, not through this tick.
+        if (mode == Mode.FOLLOW
+                && net.wcfcarolina13.GameAI.services.SleepFollowPolicy.suppressFollowTick(
+                        bot.isSleeping(),
+                        TaskService.getActiveTaskName(botId).orElse(null),
+                        !augmentedHostiles.isEmpty())) {
+            return true;
+        }
+
         // Linger window: FOLLOW mode pauses near the combat site while sweep delay elapses
         // so drops stay within pickup range.  Pick up any items already at our feet.
         if (augmentedHostiles.isEmpty()
