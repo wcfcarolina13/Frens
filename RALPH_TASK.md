@@ -4,7 +4,17 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-23 (1.1.295) — next session starts here
+## Session Handoff 2026-10-23 (1.1.296) — next session starts here
+
+**State:** 1.1.296 on main. Ships: fresh-install screens fit at scale 5 (Voice Engine blurbs, model header, checklist RAM hint), the first roster greets Jake instead of "Restore", the AI setup checklist asks once whether new companions get a soul (Bradley's ruling, `soulNewBotDefault`), the owner's replies in a private party scene stay private (read-time inheritance), granted UI dispatch refuses a bot-slot mismatch (was WARN-only), a bot joining inside a house near the surface no longer digs out, sunset return keeps short unified partials and logs status/reason/ms/manhattan. Sandbox-checked, `docs/testing/FIELD_1_1_296_SANDBOX_2026-10-23.md`, replays `frens_1_1_296_*`. Tests 3810.
+
+**Field checks pending:** Phase 6ce (a long sunset return over real terrain). Guided: a private party scene with a LAN guest arriving. Phase 6cd, 6cc on Nirn, the LAN-guest check.
+
+**Deferred (with reasons):** digest batch that reads a scene's HEARD before its private lines commit can still make a PUBLIC memory (cursor split, needs a digest hold-back), the privacy-conflict exit leaves its HEARD unmarked (two owners, no single privateTo). `breakFreeGeneric` and the JOIN_ENCLOSED dawn exit have no door exit (model: `breakFreeVillageHouse`). A new client on an old server shows "New bots: Ask" and the click does nothing (no reply). Vanilla tutorial toast left alone (ruling). Pre-existing: "Fakeplayer still present after removal attempt" on every despawn, once a respawn put the bot by the player. `tools/sandbox/sunsettest.py` name match is case-sensitive and its day numbers are stale.
+
+**For 1.1.297 (sandbox findings):** a house under terrain deeper than 8 blocks (hillside) still breaks free. Scale 5 clips: checklist step 4 title/subtitle, the llama3.1:8b blurb under the Selected button, bot inventory titles over the slots.
+
+## Session Handoff 2026-10-23 (1.1.295) — superseded
 
 **State:** 1.1.295 on main and deployed to Nirn. It is the next public Modrinth release (Bradley 2026-10-23), pending the fresh-install part 2 check and Bradley's OK on the release notes. Ships: a following bot gets up a leafy step (sweep F1), `/bot place` onto snow in one command with no tick freeze or error (F2), a bot that walks into the End exit portal comes back by itself, a dead bot's task stops (no "Mining complete" after death), "Task ended: changed dimension." once, the 39 placeholder-only voice lines are text only, and a client crash on `/bot spawn` (ConcurrentModificationException in the alias maps) is fixed. Sandbox-checked, `docs/testing/FIELD_1_1_295_SANDBOX_2026-10-23.md`, replays `frens_1_1_295_*`. Tests 3745.
 
@@ -740,7 +750,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 
 ### Navigation, pathfinding and stuck escape
 - [x] "go_to plans in `server.getOverworld()` whatever the bot's dimension." (still `server.getOverworld()` in `modCommandRegistry`; 1.1.265 handoff, 2026-10-17) — ✅ 1.1.278 8d6a7880 (sandbox 6bp PASS)
-- [ ] **P2 (M)** "unified sunset probes returned `pathLen=0` or `7` with `next=none` inside 200 ms, so the return fell back to a direct follow plan to the far anchor. Worth a scope before Slice D." (1.1.265 handoff, 2026-10-17)
+- [x] **P2 (M)** "unified sunset probes returned `pathLen=0` or `7` with `next=none` inside 200 ms, so the return fell back to a direct follow plan to the far anchor. Worth a scope before Slice D." (1.1.265 handoff, 2026-10-17) ✅ 1.1.296
 - [ ] **P3 (M)** "Slice D (remove the legacy boolean and bidir) once the default has held." (1.1.261 handoff; also 1.1.263 and 1.1.242 handoffs, 2026-10-15/17)
 - [x] "after the first shared-settings save the file stores `"pathfinder": "unified"` explicitly rather than null, so a later default change would not move that install." (1.1.261 handoff, 2026-10-17) — ✅ 1.1.286 77df45d2
 - [x] "diagonal wall nudge (eye-box geometry)" (1.1.264 handoff, 2026-10-17) — Source fixed in prior unreleased2026-10-22 phase, extreme-corner regression included. Live field checks remain.
@@ -770,7 +780,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] **P3 (M)** "Egress follow-ups: outside→inside entry routing, and Fortify onto the shared helper." (hovel `enterInteriorViaDoor`; 1.1.218 ruling "don't touch Fortify" for now; 1.1.218 handoff, repeated 1.1.219-1.1.222, 2026-09-25)
 - [ ] **P3 (S)** "inline four single-caller delegates (`tryBreakThroughObstacle` ×2, `attemptFinalizeCarveTransaction`, `isCarveEligibleForBreakAttempt`)" (1.1.210 Minor 3; 2026-09-05 late night handoff, repeated through 1.1.216)
 - [ ] **P3 (S)** (uncertain) "Suffocation during scaffold descent — bot embeds in terrain after dropping through scaffold gaps." (Farm Pipeline next-session notes, 2026-04-08) (retest in sandbox)
-- [ ] **P2 (S)** (uncertain) "Shelter-breakfree misfires on indoor spawn." ("When bot legitimately respawns inside an enclosed structure ... auto-mines upward, destroying stairs"; Door passage series notes, 2026-04-16)
+- [x] **P2 (S)** (uncertain) "Shelter-breakfree misfires on indoor spawn." ("When bot legitimately respawns inside an enclosed structure ... auto-mines upward, destroying stairs"; Door passage series notes, 2026-04-16) ✅ 1.1.296
 - [x] (uncertain) "This change intentionally breaks the old shelter-escape \"trapped in corner, needs door as exit\" behavior ... re-address later." (Door passage series notes, 2026-04-16) → covered by "Doorway / pressure plate stuck (still recurring)" in P1 below (triage 2026-10-23)
 
 ### Woodcut and mining
@@ -812,7 +822,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] ✅ Ruled 2026-10-23 (Bradley): screens only, non-op owners get no typed /bot and no spawn. A server option only if an admin asks (triage 2026-10-23, Bradley ruling). Was: "typed /bot ... for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
 - [x] ✅ Ruled 2026-10-23 (Bradley): screens only, no spawn for non-op owners (same ruling as the line above) (triage 2026-10-23, Bradley ruling). Was: "SPAWN for owners" (1.1.233 handoff; also 1.1.231 handoff, 2026-10-13)
 - [x] "resurrection owner clause." (1.1.233 handoff, 2026-10-13) ✅ 1.1.272 (Questing-off ritual: owner, op or host)
-- [ ] **P2 (S)** "After 6ac/6ad results: bot-slot check refuse mode" (6ad item 7 was clean; `AuthorizedBotDispatch` is still WARN-only; 1.1.233 handoff; also 1.1.232 "D5 refuse mode", 2026-10-13)
+- [x] **P2 (S)** "After 6ac/6ad results: bot-slot check refuse mode" (6ad item 7 was clean; `AuthorizedBotDispatch` is still WARN-only; 1.1.233 handoff; also 1.1.232 "D5 refuse mode", 2026-10-13) ✅ 1.1.296
 - [x] "A bot respawned by the End exit is a plain `ServerPlayerEntity`, so it gets \"not a companion\" until it is recreated." ("fails closed, and the mod's 78 other `instanceof` checks share it"; 1.1.220 handoff, 2026-09-25) — Source fixed unreleased2026-10-22 with exact respawn constructor redirect; actual offline Mixin transformation validated, full3652/3652. Live End/mod coexistence check remains.
 - [x] (uncertain) "An offline-mode LAN guest using the host's name passes `isHost`; `configNetworkManager` has the same gap." (1.1.220 handoff, 2026-09-25) — Shared host gate now compares UUID and captured server, unreleased2026-10-22; full3652/3652. Same-UUID spoof authentication is not solved.
 - [x] (uncertain) "misleading \"Out of range\" text after an inventory deny (modCommandRegistry)" (1.1.224 handoff/changelog deferral, 2026-09-25) ✅ done: access is checked first, then the real reason is named (too far or another dimension), 1.1.280 51363665 (triage 2026-10-23)
@@ -843,11 +853,11 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] **P3 (M)** "Later: scene smoothing step 2 (scene boundaries in history)" (1.1.223 handoff, 2026-09-25)
 - [ ] **P3 (L)** "self-directed goals (proposer-only)." (1.1.223 handoff, 2026-09-25)
 - [x] "The Pocket installer's pre-wait EOF read, which can hang." (1.1.223 handoff, 2026-09-25) — ✅ 1.1.279 911b1243 (unit-tested; not run in the sandbox)
-- [ ] **P2 (S)** "HEARD records (the owner's own replies) are never marked private." (1.1.224 changelog deferral, 2026-09-25)
+- [x] **P2 (S)** "HEARD records (the owner's own replies) are never marked private." (1.1.224 changelog deferral, 2026-09-25) ✅ 1.1.296
 - [ ] **P3 (M)** "remote model pulls and voice installs on the server host" (1.1.225 handoff, 2026-09-26)
 - [ ] **P3 (S)** "a voice-preset picker" (1.1.225 handoff, 2026-09-26)
 - [ ] **P3 (S)** "a persona picker" (1.1.225 handoff, 2026-09-26)
-- [ ] **P2 (S)** Ruled 2026-10-23 (Bradley): ask once in the AI setup checklist ("Give new companions a soul when Ollama is ready?"), and the answer becomes the default for new bots. Was: "auto-enable on spawn" (souls; 1.1.225 handoff, 2026-09-26)
+- [x] **P2 (S)** Ruled 2026-10-23 (Bradley): ask once in the AI setup checklist ("Give new companions a soul when Ollama is ready?"), and the answer becomes the default for new bots. Was: "auto-enable on spawn" (souls; 1.1.225 handoff, 2026-09-26) ✅ 1.1.296
 - [ ] **P3 (S)** "dry-run generation" (1.1.225 handoff, 2026-09-26)
 - [ ] **P3 (M)** "Addressee deferrals: mid-sentence third-person mentions, \"you and Bob\" clauses, human nicknames." (1.1.219 handoff; repeated 1.1.220-1.1.222, 2026-09-25)
 - [ ] **P3 (S)** "the new `ollama usage` log lets `NUM_CTX` be right-sized." (1.1.217 handoff, 2026-09-25)

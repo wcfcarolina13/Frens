@@ -473,3 +473,7 @@ From the 6bt-6cb sandbox sweep (1.1.292, 2026-10-23, `FIELD_6BT_6CB_SANDBOX_2026
 - [ ] **Phase 6by: An ownerless wall can be claimed only by an op or the host (1.1.287)** (joins Block D)
   - Bradley does: Unclaim a wall in the Base Manager, then as the second non-op player press Claim Wall on it; then claim it back as the host.
   - Pass when: the non-op player gets "This wall has no recorded owner or builder. Only an operator or the host can claim it." and the host can claim it.
+- [ ] **Phase 6ce: The owner's private reply stays out of a shared scene (1.1.296)** (joins Block D)
+  - Bradley does: with souls on and alone online, talk with two bots about something private (a private memory in play), reply a couple of times, then have the second player join and start a group chat.
+  - Claude watches for: in the soul prompt logs, none of Bradley's earlier replies in the shared scene's history.
+  - Pass when: the bots never repeat or refer to those replies with the second player online.
