@@ -4,7 +4,13 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-23 (1.1.296) — next session starts here
+## Session Handoff 2026-10-23 (1.1.297) — next session starts here
+
+**State:** 1.1.297 on main. Follow-up to 1.1.296 (handoff below, still valid for deferrals and field checks): a bot inside a house dug into a hillside no longer digs out (a wooden door that opens to the sky counts), and the scale 5 clips are fixed (checklist step 4, model blurbs, bot inventory titles). Sandbox-checked, `docs/testing/FIELD_1_1_297_SANDBOX_2026-10-23.md`, replays `frens_1_1_297_*`. Tests 3825.
+
+**Next candidates:** the 1.1.296 deferrals (digest cursor split, door exit for `breakFreeGeneric` and the JOIN_ENCLOSED dawn exit, old-server reply for the new-bots button), the combined chest ask (own build), the End second-exit plain teleport from 1.1.295. Sandbox "Wall Test" save holds three stuck bots (Ender294b-d) from an older session that log `linger: bypassed` every 10 s.
+
+## Session Handoff 2026-10-23 (1.1.296) — superseded
 
 **State:** 1.1.296 on main. Ships: fresh-install screens fit at scale 5 (Voice Engine blurbs, model header, checklist RAM hint), the first roster greets Jake instead of "Restore", the AI setup checklist asks once whether new companions get a soul (Bradley's ruling, `soulNewBotDefault`), the owner's replies in a private party scene stay private (read-time inheritance), granted UI dispatch refuses a bot-slot mismatch (was WARN-only), a bot joining inside a house near the surface no longer digs out, sunset return keeps short unified partials and logs status/reason/ms/manhattan. Sandbox-checked, `docs/testing/FIELD_1_1_296_SANDBOX_2026-10-23.md`, replays `frens_1_1_296_*`. Tests 3810.
 
@@ -12,7 +18,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 **Deferred (with reasons):** digest batch that reads a scene's HEARD before its private lines commit can still make a PUBLIC memory (cursor split, needs a digest hold-back), the privacy-conflict exit leaves its HEARD unmarked (two owners, no single privateTo). `breakFreeGeneric` and the JOIN_ENCLOSED dawn exit have no door exit (model: `breakFreeVillageHouse`). A new client on an old server shows "New bots: Ask" and the click does nothing (no reply). Vanilla tutorial toast left alone (ruling). Pre-existing: "Fakeplayer still present after removal attempt" on every despawn, once a respawn put the bot by the player. `tools/sandbox/sunsettest.py` name match is case-sensitive and its day numbers are stale.
 
-**For 1.1.297 (sandbox findings):** a house under terrain deeper than 8 blocks (hillside) still breaks free. Scale 5 clips: checklist step 4 title/subtitle, the llama3.1:8b blurb under the Selected button, bot inventory titles over the slots.
+**Fixed in 1.1.297 (sandbox findings):** hillside house break-free, scale 5 clips.
 
 ## Session Handoff 2026-10-23 (1.1.295) — superseded
 

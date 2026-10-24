@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Hillside house join, scale 5 text clips; 1.1.297 (2026-10-23)
+
+Follow-up from the 1.1.296 sandbox check (`docs/testing/FIELD_1_1_296_SANDBOX_2026-10-23.md`). One implementer, the controller read the join-gate diff, then a sandbox check (`docs/testing/FIELD_1_1_297_SANDBOX_2026-10-23.md`).
+
+- **A bot inside a house dug into a hillside does not dig out** (d07e54b0). 1.1.296 counted a player-built structure only within 8 blocks of the surface heightmap, so a house under a mountain still broke free. It now also counts when one of its wooden doors opens to the sky: a cell 1 or 2 blocks out from the door whose highest block is at or below the door's top (`JoinEnclosurePolicy.doorCellOpensToSky`, heightmap reads only, safe on the worker). A buried room whose door leads into a stone corridor (a stronghold) still escapes.
+- **Scale 5 text fits** (fc3e63e9). Checklist step 4 drops its scroll hint before it would be cut ("4. Companion enabled (1-3 of 7)") and has shorter subtitles, and any still-cut step text shows in full in a tooltip. Model screen blurbs wrap to two lines left of the row button (`SoulSetupScreenPolicy.modelBlurbLines`), the llama3.1:8b blurb was cut under "Selected". The bot inventory screen no longer draws the bot name and "Inventory" over the first armor slot (every scale, the name stays on the portrait nameplate).
+- **Ruling:** a door opening to the sky is enough for a deep house (cost if wrong: a deep natural structure with a wooden door next to a ravine or open cave keeps the bot still instead of escaping, the burial rescue still runs).
+- **Sandbox check** (driver `tools/sandbox/fix297.py`, replays `frens_1_1_297_house_join.zip`, `frens_1_1_297_ui_scale5.zip`): hillside house 21 blocks under the surface logged `join enclosure suppressed` with 0 blocks changed, the same house with its door into a stone corridor escaped as before, the open-sky house and the deep stone-brick room unchanged from 1.1.296, the three screens fit at 342x328.
+- **Tests** 3810 → 3825.
+- **Field checks:** no new items.
+
 ## Fresh-install text fits, new-bot soul default, private owner replies, bot-slot refuse, no break-free inside a house, sunset partials; 1.1.296 (2026-10-23)
 
 P2 backlog items plus the 1.1.295 fresh-install findings. Every item scoped read-only first (one premise was narrower than written: a DM's HEARD never reaches a group prompt, the leak was in the party store), six implementers in their own worktrees, one Fable batch review (1 Critical, 2 Important), one fix wave, a scoped Fable re-review (merge-ready), then a sandbox check. Sandbox results: `docs/testing/FIELD_1_1_296_SANDBOX_2026-10-23.md`.
