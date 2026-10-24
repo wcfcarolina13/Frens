@@ -75,6 +75,8 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
     private final StatusSink status;
     /** Scene provider metadata by correlationId, for per-line SPOKEN appends during playback. */
     private final Map<UUID, SoulTypes.ProviderResult> sceneResults = new ConcurrentHashMap<>();
+    /** Private owner by correlationId for scenes handed to playback privately seeded (1.1.296). */
+    private final Map<UUID, UUID> scenePrivateOwners = new ConcurrentHashMap<>();
     /**
      * Per-bot ring of recently delivered normalised lines (Phase 3d novelty rejection). Scenes for
      * different owners complete on different provider-future worker threads, so the map is
@@ -311,12 +313,13 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             return;
         }
         if (providerError != null) {
-            failTurn(turn, token, correlationId, SoulTypes.FailureCode.INTERNAL, "", "", null, outcome);
+            failTurn(turn, token, correlationId, SoulTypes.FailureCode.INTERNAL, "", "", null, outcome,
+                    privateSeedOwner);
             return;
         }
         if (!result.success()) {
             failTurn(turn, token, correlationId, result.failureCode(), result.provider(),
-                    result.model(), result.elapsedMillis(), outcome);
+                    result.model(), result.elapsedMillis(), outcome, privateSeedOwner);
             return;
         }
 
@@ -342,7 +345,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         logDrops(correlationId, turn, parse, privateSeedOwner == null);
         if (!parse.accepted()) {
             failTurn(turn, token, correlationId, parse.failureCode(), result.provider(),
-                    result.model(), result.elapsedMillis(), outcome);
+                    result.model(), result.elapsedMillis(), outcome, privateSeedOwner);
             return;
         }
 
@@ -359,12 +362,16 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
 
                 // Put before enqueue: playback may commit the first line before enqueue returns.
                 sceneResults.put(correlationId, result);
+                if (privateSeedOwner != null) {
+                    scenePrivateOwners.put(correlationId, privateSeedOwner);
+                }
                 if (!player.enqueue(new GroupScenePlayback.PlayableScene(turn, token, lines, privateSeedOwner))) {
                     // Playback refused the scene (another one is live for this owner, or no
                     // playback machine). It never plays, so sceneFinished never runs: release its
                     // metadata here and close the turn through failTurn below. Its side channel is
                     // not applied: a scene nobody heard must not change anyone's mind.
                     sceneResults.remove(correlationId);
+                    scenePrivateOwners.remove(correlationId);
                     handedOff = false;
                     dropped = true;
                     LOGGER.info("[souls] scene correlationId={} owner={} kind={} lines={} outcome=scene-dropped",
@@ -385,7 +392,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             // player-asked scene, completes FAILED, and the submit() completion hook removes the
             // pendingScenes entry.
             failTurn(turn, token, correlationId, SoulTypes.FailureCode.OVERLOADED, result.provider(),
-                    result.model(), result.elapsedMillis(), outcome);
+                    result.model(), result.elapsedMillis(), outcome, privateSeedOwner);
             return;
         }
         outcome.complete(handedOff ? Submission.SCENE_STARTED : Submission.FAILED);
@@ -525,6 +532,18 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
     private void failTurn(SoulGroupTypes.GroupSceneTurn turn, SoulTypes.TurnToken token,
                            UUID correlationId, SoulTypes.FailureCode code, String providerId,
                            String model, Long elapsedMillis, CompletableFuture<Submission> outcome) {
+        failTurn(turn, token, correlationId, code, providerId, model, elapsedMillis, outcome, null);
+    }
+
+    /**
+     * @param privateTo the scene's private owner once {@link SoulPrivacyPolicy#strictestOwner} has
+     *     named one, else null. A marked FAILURE is the only marked record of a scene that spoke no
+     *     line, so the owner's HEARD still inherits the mark at read time.
+     */
+    private void failTurn(SoulGroupTypes.GroupSceneTurn turn, SoulTypes.TurnToken token,
+                           UUID correlationId, SoulTypes.FailureCode code, String providerId,
+                           String model, Long elapsedMillis, CompletableFuture<Submission> outcome,
+                           UUID privateTo) {
         if (!isCurrent(turn, outcome)) {
             outcome.complete(Submission.FAILED);
             return;
@@ -540,7 +559,7 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
             outcome.complete(Submission.FAILED);
             return;
         }
-        partyStore.appendFailure(token, code, providerId, model, elapsedMillis)
+        partyStore.appendFailure(token, code, providerId, model, elapsedMillis, privateTo)
                 .whenComplete((v, appendError) -> {
                     if (!isCurrent(turn, outcome)) {
                         outcome.complete(Submission.FAILED);
@@ -631,7 +650,20 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
 
     @Override
     public void sceneFinished(SoulTypes.TurnToken token, int deliveredLines, int totalLines) {
-        sceneResults.remove(token.correlationId());
+        SoulTypes.ProviderResult metadata = sceneResults.remove(token.correlationId());
+        UUID privateOwner = scenePrivateOwners.remove(token.correlationId());
+        if (deliveredLines == 0 && privateOwner != null) {
+            // A privately seeded scene that spoke nothing (privacy stop, every line muted) leaves no
+            // marked SPOKEN line, so write a marked FAILURE: the owner's HEARD inherits it.
+            partyStore.appendFailure(token, SoulTypes.FailureCode.CANCELLED,
+                    metadata == null ? "" : metadata.provider(), metadata == null ? "" : metadata.model(),
+                    metadata == null ? null : metadata.elapsedMillis(), privateOwner)
+                    .exceptionally(appendError -> {
+                        LOGGER.warn("[souls] scene correlationId={} private-marker append failed errorClass={}",
+                                token.correlationId(), appendError.getClass().getName());
+                        return null;
+                    });
+        }
         synchronized (sceneLock) {
             pendingScenes.remove(token.correlationId());
         }

@@ -16,6 +16,13 @@ public final class JoinEnclosurePolicy {
     /** Player-built blocks needed in the count box, besides a door in the wider door box. */
     public static final int MIN_BUILT_BLOCKS = 6;
 
+    /**
+     * A player-built structure only counts when the bot's feet are at most this far below the
+     * surface heightmap at its column. A house roof or a cellar is a few blocks; a stronghold or a
+     * trial chamber is far deeper.
+     */
+    public static final int MAX_DEPTH_BELOW_SURFACE = 8;
+
     public enum Decision {
         SKIP_NEAR_BASE,
         SKIP_AT_SURFACE,
@@ -60,6 +67,15 @@ public final class JoinEnclosurePolicy {
      */
     public static boolean isInsidePlayerBuilt(int builtBlocks, boolean doorNearby) {
         return doorNearby && builtBlocks >= MIN_BUILT_BLOCKS;
+    }
+
+    /**
+     * Whether the bot is shallow enough for a player-built structure to count.
+     *
+     * @param depthBelowSurface surface heightmap Y at the bot's column minus the bot's feet Y
+     */
+    public static boolean withinSurfaceDepth(int depthBelowSurface) {
+        return depthBelowSurface <= MAX_DEPTH_BELOW_SURFACE;
     }
 
     /**

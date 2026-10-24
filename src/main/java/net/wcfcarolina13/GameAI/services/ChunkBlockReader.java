@@ -7,6 +7,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.Heightmap;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.ChunkStatus;
 import net.minecraft.world.chunk.WorldChunk;
@@ -114,6 +115,19 @@ public final class ChunkBlockReader {
     /** See {@link #state(int, int, int)}. */
     public BlockState state(BlockPos pos) {
         return state(pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    /**
+     * The MOTION_BLOCKING_NO_LEAVES heightmap at column (x, z): the Y just above the highest
+     * motion-blocking non-leaf block. {@link Integer#MIN_VALUE} when the chunk is not loaded.
+     * Off-thread this reads the chunk's heightmap array with the same accepted race as the palettes.
+     */
+    public int surfaceY(int x, int z) {
+        WorldChunk c = chunk(x >> 4, z >> 4);
+        if (c == null) {
+            return Integer.MIN_VALUE;
+        }
+        return c.sampleHeightmap(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x & 15, z & 15);
     }
 
     /** The fluid state, or null when the cell is outside the world height or its chunk is not loaded. */

@@ -145,4 +145,21 @@ class RosterScreenCopyTest {
         assertEquals(0, RosterScreenCopy.savedCount(null, java.util.Set.of("jake")));
         assertEquals(0, RosterScreenCopy.savedCount(java.util.List.of("Jake"), null));
     }
+
+    @Test
+    void savedBotAlreadyPresentMeansNoFirstMeeting() {
+        // Bob is saved and already in the world (hidden from the list); the unsaved default
+        // recruit Jake is the only listed name. Counting over the world's scope finds Bob.
+        java.util.List<String> thisWorld = java.util.List.of("Jake", "Bob");
+        java.util.List<String> restorable = java.util.List.of("Jake");
+        java.util.Set<String> saved = java.util.Set.of("bob");
+        int savedHere = RosterScreenCopy.savedCount(thisWorld, saved);
+        assertEquals(1, savedHere);
+        assertEquals(RosterScreenCopy.State.HAS_RESTORABLE,
+                RosterScreenCopy.state(restorable.size(), false, 0, savedHere));
+        // Control: nothing saved anywhere in this world is still a first meeting.
+        assertEquals(RosterScreenCopy.State.FIRST_COMPANION,
+                RosterScreenCopy.state(restorable.size(), false, 0,
+                        RosterScreenCopy.savedCount(thisWorld, java.util.Set.of())));
+    }
 }

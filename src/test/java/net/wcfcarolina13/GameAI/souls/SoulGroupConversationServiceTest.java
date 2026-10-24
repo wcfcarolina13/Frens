@@ -433,6 +433,70 @@ class SoulGroupConversationServiceTest {
         assertTrue(player.enqueued.isEmpty());
     }
 
+    private SoulGroupTypes.GroupSceneTurn privatelySeededTurn() {
+        return new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.PLAYER, OWNER_ID, "Bradley",
+                turn.roster(), "yeah, still scared", Instant.EPOCH, UUID.randomUUID(),
+                false, java.util.Set.of(OWNER_ID), OWNER_ID);
+    }
+
+    @Test
+    void privatelySeededProviderFailureMarksItsFailureSoTheHeardInherits() throws Exception {
+        provider.clear();
+        provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(
+                false, "", SoulTypes.FailureCode.TIMEOUT, "test", "test-model", 5L, null, null, null)));
+        SoulGroupTypes.GroupSceneTurn seeded = privatelySeededTurn();
+        assertEquals(SoulGroupConversationService.Submission.FAILED, service.submit(seeded).get(2, SECONDS));
+
+        List<SoulTypes.ConversationRecord> records = partyStore.recent(seeded.key(), 20, 12_000).get(2, SECONDS);
+        assertEquals(List.of(SoulTypes.TurnKind.HEARD, SoulTypes.TurnKind.FAILURE),
+                records.stream().map(SoulTypes.ConversationRecord::kind).toList());
+        assertEquals(null, records.get(0).privateTo(), "the HEARD itself is written unmarked");
+        assertEquals(OWNER_ID, records.get(1).privateTo());
+        assertEquals(records.get(0).correlationId(), records.get(1).correlationId());
+        assertEquals(OWNER_ID, SoulPrivacyPolicy.withInheritedPrivacy(records).get(0).privateTo());
+    }
+
+    @Test
+    void sharedSceneFailureStaysUnmarked() throws Exception {
+        provider.clear();
+        provider.enqueue(CompletableFuture.completedFuture(new SoulTypes.ProviderResult(
+                false, "", SoulTypes.FailureCode.TIMEOUT, "test", "test-model", 5L, null, null, null)));
+        service.submit(turn).get(2, SECONDS);
+        List<SoulTypes.ConversationRecord> records = partyRecords();
+        assertEquals(SoulTypes.TurnKind.FAILURE, records.get(1).kind());
+        assertEquals(null, records.get(1).privateTo());
+    }
+
+    @Test
+    void privatelySeededSceneThatDeliveredNothingLeavesAMarkedRecord() throws Exception {
+        SoulGroupTypes.GroupSceneTurn seeded = privatelySeededTurn();
+        assertEquals(SoulGroupConversationService.Submission.SCENE_STARTED, service.submit(seeded).get(2, SECONDS));
+        SoulTypes.TurnToken token = player.enqueued.get(0).token();
+
+        service.sceneFinished(token, 0, 2); // privacy stop before line 1
+        partyStore.state(OWNER_ID).get(2, SECONDS); // barrier: drain the writer queue
+
+        List<SoulTypes.ConversationRecord> records = partyStore.recent(seeded.key(), 20, 12_000).get(2, SECONDS);
+        assertEquals(List.of(SoulTypes.TurnKind.HEARD, SoulTypes.TurnKind.FAILURE),
+                records.stream().map(SoulTypes.ConversationRecord::kind).toList());
+        assertEquals(OWNER_ID, records.get(1).privateTo());
+        assertEquals(OWNER_ID, SoulPrivacyPolicy.withInheritedPrivacy(records).get(0).privateTo());
+    }
+
+    @Test
+    void sceneThatDeliveredLinesWritesNoExtraMarker() throws Exception {
+        SoulGroupTypes.GroupSceneTurn seeded = privatelySeededTurn();
+        service.submit(seeded).get(2, SECONDS);
+        SoulTypes.TurnToken token = player.enqueued.get(0).token();
+        service.commitLine(token, 0, "Jake: still scared of the dark?", OWNER_ID);
+        service.sceneFinished(token, 1, 2);
+        partyStore.state(OWNER_ID).get(2, SECONDS);
+
+        assertEquals(List.of(SoulTypes.TurnKind.HEARD, SoulTypes.TurnKind.SPOKEN),
+                partyStore.recent(seeded.key(), 20, 12_000).get(2, SECONDS)
+                        .stream().map(SoulTypes.ConversationRecord::kind).toList());
+    }
+
     private static final String SIDE_CHANNEL_SCENE =
             "Jake: Mining tonight.\nSara: Fishing is safer.\n##FRENS {\"stance\":{\"Sara\":{\"warmth\":1}}}";
 

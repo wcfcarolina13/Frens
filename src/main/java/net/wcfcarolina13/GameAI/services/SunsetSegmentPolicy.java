@@ -14,11 +14,17 @@ final class SunsetSegmentPolicy {
     /** A FULL (or old-finder) path must move the goal at least this far, unless it ends on the anchor. */
     static final double MIN_SEGMENT_PROGRESS = 8.0D;
     /**
-     * A unified PARTIAL counts as progress once its end is beyond this from the bot. Matches
-     * UnifiedPathFinder.MIN_DIST_PATH: the finder only returns partials that end further out than this,
-     * so a stricter floor here turned every 5-8 block partial into next=none.
+     * The bot counts as within reach of its segment goal (and reprobes) at or inside this squared
+     * distance. Shared with {@link BotAutoReturnSunsetService} so the two cannot drift apart.
      */
-    static final double MIN_PARTIAL_PROGRESS = 5.0D;
+    static final double SEGMENT_REFRESH_REACH_SQ = 6.0D * 6.0D;
+    /**
+     * A unified PARTIAL counts as progress once its end lies strictly outside the refresh radius
+     * (squared distance above {@link #SEGMENT_REFRESH_REACH_SQ}). A looser floor (5 blocks, to match
+     * UnifiedPathFinder.MIN_DIST_PATH) let a goal 5-6 blocks out count as within reach on the next
+     * tick, so every tick ran another 200 ms probe on the server thread.
+     */
+    static final double MIN_PARTIAL_PROGRESS_SQ = SEGMENT_REFRESH_REACH_SQ;
 
     private SunsetSegmentPolicy() {
     }
@@ -60,10 +66,10 @@ final class SunsetSegmentPolicy {
         if (atAnchor) {
             return best;
         }
-        double progress = dist(sx, sy, sz, xs[best], ys[best], zs[best]);
         if (status == PlanStatus.PARTIAL) {
-            return progress > MIN_PARTIAL_PROGRESS ? best : -1;
+            return distSq(sx, sy, sz, xs[best], ys[best], zs[best]) > MIN_PARTIAL_PROGRESS_SQ ? best : -1;
         }
+        double progress = dist(sx, sy, sz, xs[best], ys[best], zs[best]);
         return progress >= MIN_SEGMENT_PROGRESS ? best : -1;
     }
 
@@ -83,9 +89,14 @@ final class SunsetSegmentPolicy {
     }
 
     private static double dist(int x1, int y1, int z1, int x2, int y2, int z2) {
+        return Math.sqrt(distSq(x1, y1, z1, x2, y2, z2));
+    }
+
+    /** Same arithmetic as BlockPos.getSquaredDistance(BlockPos), which the reach check uses. */
+    static double distSq(int x1, int y1, int z1, int x2, int y2, int z2) {
         double dx = x2 - x1;
         double dy = y2 - y1;
         double dz = z2 - z1;
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return dx * dx + dy * dy + dz * dz;
     }
 }

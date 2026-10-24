@@ -1530,8 +1530,11 @@ public class FrensClient implements ClientModInitializer {
         java.util.List<String> otherWorlds = net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
                 scope.otherWorlds(), presentOrEmpty);
         boolean allSavedPresent = !scope.thisWorld().isEmpty() && restorable.isEmpty();
+        // Count saved records across this world's whole scope, present (hidden) bots included: a
+        // player whose saved bot is already here plus the unsaved default recruit listed is not
+        // meeting a first companion.
         int savedCount = net.wcfcarolina13.GraphicalUserInterface.RosterScreenCopy.savedCount(
-                restorable, savedBotAliasesLower());
+                scope.thisWorld(), savedBotAliasesLower());
         return new BotRestoreScreen(parent, restorable, otherWorlds, allSavedPresent, savedCount);
     }
 

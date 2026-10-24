@@ -38,9 +38,10 @@ public final class RosterScreenCopy {
     }
 
     /**
-     * @param savedCount how many of the listed companions have a saved record. The roster also
-     *                   lists the default recruit before anything is saved, so a list of only
-     *                   unsaved names is a first meeting, not a restore.
+     * @param savedCount how many companions in this world's scope (listed or already present)
+     *                   have a saved record. The roster also lists the default recruit before
+     *                   anything is saved, so a world with no saved companion at all is a first
+     *                   meeting, not a restore.
      */
     public static State state(int restorableCount, boolean allSavedPresent, int otherWorldsCount, int savedCount) {
         if (restorableCount > 0) {

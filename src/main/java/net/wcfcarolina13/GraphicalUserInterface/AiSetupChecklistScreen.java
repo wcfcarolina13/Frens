@@ -200,7 +200,7 @@ public class AiSetupChecklistScreen extends Screen {
             boolean next = AiSetupChecklistPolicy.newBotSoulNextAnswer(newBotSoul);
             ButtonWidget newBots = ButtonWidget.builder(Text.literal(label),
                             b -> AiSetupNetworkManager.Client.setNewBotSoul(next))
-                    .dimensions(right - btnW(), stepY(StepId.BOTS) + 3, btnW(), 18)
+                    .dimensions(right - btnW(), stepY(StepId.BOTS) + 3, btnW(), newBotSoulButtonHeight())
                     .build();
             newBots.active = available;
             newBots.setTooltip(Tooltip.of(Text.literal(AiSetupChecklistPolicy.newBotSoulTooltip(newBotSoul))));
@@ -226,6 +226,14 @@ public class AiSetupChecklistScreen extends Screen {
         addDrawableChild(refreshButton);
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
                 .dimensions(right - 80, top() + popupHeight() - 26, 80, 20).build());
+    }
+
+    /**
+     * The BOTS-row button runs from stepY+3; the first bot Enable button starts at
+     * stepY+rowHeight-2. Keep a 1 px gap at every row height (22 gives 16, 24 and up give 18).
+     */
+    private int newBotSoulButtonHeight() {
+        return Math.min(18, rowHeight() - 6);
     }
 
     private void addStepButton(StepId id, String label, ButtonWidget.PressAction action) {

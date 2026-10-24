@@ -81,9 +81,10 @@ public class BotRestoreScreen extends Screen {
     }
 
     /**
-     * @param savedCount how many of {@code aliases} have a saved record. 0 means the list only
-     *                   holds the default recruit, so the header greets a first companion
-     *                   instead of offering a restore.
+     * @param savedCount how many companions in this world (listed or already present) have a
+     *                   saved record. 0 means nothing is saved here and the list only holds the
+     *                   default recruit, so the header greets a first companion instead of
+     *                   offering a restore.
      */
     public BotRestoreScreen(Screen parent, List<String> aliases, List<String> otherWorlds, boolean allSavedPresent,
                             int savedCount) {

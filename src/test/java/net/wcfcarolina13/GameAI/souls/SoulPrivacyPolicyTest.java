@@ -251,6 +251,17 @@ class SoulPrivacyPolicyTest {
         assertEquals(failure, out.get(1));
     }
 
+    @Test void heardInheritsFromAMarkedFailureOfASceneThatSpokeNothing() {
+        // 1.1.296: a privately seeded scene that failed or stopped before line 1 leaves only a
+        // marked FAILURE under its correlationId.
+        UUID scene = UUID.randomUUID();
+        List<SoulTypes.ConversationRecord> out = SoulPrivacyPolicy.withInheritedPrivacy(List.of(
+                line(scene, SoulTypes.TurnKind.HEARD, "Roti: yeah, still scared", null),
+                line(scene, SoulTypes.TurnKind.FAILURE, "", OWNER)));
+        assertEquals(OWNER, out.get(0).privateTo());
+        assertFalse(SoulPrivacyPolicy.admitsRecord(out.get(0), SoulPrivacyPolicy.Audience.shared(OWNER, Set.of(OWNER, OTHER))));
+    }
+
     @Test void inheritanceHandlesNullAndEmptyInput() {
         assertEquals(List.of(), SoulPrivacyPolicy.withInheritedPrivacy(null));
         assertEquals(List.of(), SoulPrivacyPolicy.withInheritedPrivacy(List.of()));

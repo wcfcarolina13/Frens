@@ -26,14 +26,37 @@ class SunsetSegmentPolicyTest {
     }
 
     @Test
-    void partialOfSixMovesIsProgress() {
-        // The field case: pathLen=7 (start + 6 moves) used to become next=none.
-        assertEquals(5, choose(6, PlanStatus.PARTIAL));
+    void partialEndingJustOutsideRefreshRadiusIsProgress() {
+        assertEquals(6, choose(7, PlanStatus.PARTIAL));
     }
 
     @Test
-    void partialEndingAtFiveBlocksIsNotProgress() {
+    void partialEndingOnOrInsideRefreshRadiusIsNotProgress() {
+        // A goal at 6 blocks is within reach on the next tick and would reprobe every tick.
+        assertEquals(-1, choose(6, PlanStatus.PARTIAL));
         assertEquals(-1, choose(5, PlanStatus.PARTIAL));
+    }
+
+    @Test
+    void acceptedPartialNeverLiesWithinRefreshRadius() {
+        // Every partial goal the policy accepts must be outside the reach the service reprobes at.
+        for (int dx = -9; dx <= 9; dx++) {
+            for (int dy = -4; dy <= 4; dy++) {
+                for (int dz = -9; dz <= 9; dz++) {
+                    int[] xs = {dx};
+                    int[] ys = {64 + dy};
+                    int[] zs = {dz};
+                    int idx = SunsetSegmentPolicy.chooseSegmentGoal(0, 64, 0, AX, AY, AZ, xs, ys, zs, PlanStatus.PARTIAL);
+                    if (idx >= 0) {
+                        double sq = (double) dx * dx + (double) dy * dy + (double) dz * dz;
+                        assertTrue(sq > SunsetSegmentPolicy.SEGMENT_REFRESH_REACH_SQ,
+                                "accepted partial at " + dx + "," + dy + "," + dz);
+                        assertFalse(SunsetSegmentPolicy.shouldReprobe(true,
+                                sq <= SunsetSegmentPolicy.SEGMENT_REFRESH_REACH_SQ, 0L, 40L, false));
+                    }
+                }
+            }
+        }
     }
 
     @Test
@@ -71,7 +94,7 @@ class SunsetSegmentPolicyTest {
 
     @Test
     void startNodeInPathIsSkipped() {
-        int[] xs = {0, 3, 6};
+        int[] xs = {0, 3, 7};
         int[] ys = {64, 64, 64};
         int[] zs = {0, 0, 0};
         assertEquals(2, SunsetSegmentPolicy.chooseSegmentGoal(0, 64, 0, AX, AY, AZ, xs, ys, zs, PlanStatus.PARTIAL));

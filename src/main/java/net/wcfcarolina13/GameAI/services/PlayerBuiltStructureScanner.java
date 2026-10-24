@@ -17,7 +17,10 @@ import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
  * Cells in unloaded chunks are skipped: both callers run at the bot's own position.
  *
  * <p>Classification is by tags so modded doors, planks, stairs and glass count without an
- * allowlist.
+ * allowlist. The door gate takes wooden doors only (iron and copper doors are in strongholds and
+ * trial chambers), and the bot must stand within
+ * {@link JoinEnclosurePolicy#MAX_DEPTH_BELOW_SURFACE} blocks of the surface heightmap at its
+ * column (skipped in dimensions with a ceiling).
  */
 public final class PlayerBuiltStructureScanner {
 
@@ -39,6 +42,15 @@ public final class PlayerBuiltStructureScanner {
     }
 
     public static boolean isInsidePlayerBuilt(ChunkBlockReader reader, BlockPos feet) {
+        // Depth gate first: strongholds, trial chambers and other deep structures have doors and
+        // stone bricks too. A dimension with a ceiling (the Nether) has no useful surface, so skip it.
+        if (!reader.world().getDimension().hasCeiling()) {
+            int surfaceY = reader.surfaceY(feet.getX(), feet.getZ());
+            if (surfaceY == Integer.MIN_VALUE
+                    || !JoinEnclosurePolicy.withinSurfaceDepth(surfaceY - feet.getY())) {
+                return false;
+            }
+        }
         int built = 0;
         boolean door = false;
         for (int dy = MIN_DY; dy <= MAX_DY; dy++) {
@@ -48,7 +60,7 @@ public final class PlayerBuiltStructureScanner {
                     if (state == null || state.isAir()) {
                         continue;
                     }
-                    if (!door && state.isIn(BlockTags.DOORS)) {
+                    if (!door && state.isIn(BlockTags.WOODEN_DOORS)) {
                         door = true;
                     }
                     if (Math.abs(dx) <= COUNT_RADIUS && Math.abs(dz) <= COUNT_RADIUS

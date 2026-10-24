@@ -48,7 +48,6 @@ public final class BotAutoReturnSunsetService {
     private static final long HOME_FAILOVER_GRACE_TICKS = 120L;
     private static final long NO_PROGRESS_FAILOVER_TICKS = 320L;
     private static final long ROUTE_REPLAN_INTERVAL_TICKS = 40L;
-    private static final double SEGMENT_REFRESH_REACH_SQ = 6.0D * 6.0D;
     /** At most one INFO "Sunset segment" line per session per ~10 s unless the finder changes. */
     private static final long SEGMENT_LOG_INFO_INTERVAL_TICKS = 200L;
     private static final double COMMANDER_FALLBACK_RANGE_SQ = 48.0D * 48.0D;
@@ -666,7 +665,7 @@ public final class BotAutoReturnSunsetService {
         BlockPos currentGoal = state != null ? state.followFixedGoal : null;
         boolean needSegmentRefresh = SunsetSegmentPolicy.shouldReprobe(
                 currentGoal != null,
-                currentGoal != null && bot.getBlockPos().getSquaredDistance(currentGoal) <= SEGMENT_REFRESH_REACH_SQ,
+                currentGoal != null && bot.getBlockPos().getSquaredDistance(currentGoal) <= SunsetSegmentPolicy.SEGMENT_REFRESH_REACH_SQ,
                 serverTick,
                 session.nextRouteServerTick,
                 session.lastRefreshFailed);

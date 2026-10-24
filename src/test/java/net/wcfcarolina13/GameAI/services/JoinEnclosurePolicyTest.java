@@ -68,6 +68,22 @@ class JoinEnclosurePolicyTest {
     }
 
     @Test
+    void houseRoomsAndCellarsAreShallowEnough() {
+        assertTrue(JoinEnclosurePolicy.withinSurfaceDepth(0));
+        assertTrue(JoinEnclosurePolicy.withinSurfaceDepth(4));
+        assertTrue(JoinEnclosurePolicy.withinSurfaceDepth(JoinEnclosurePolicy.MAX_DEPTH_BELOW_SURFACE));
+        // Standing on a roof or a tower: the heightmap is at or below the feet.
+        assertTrue(JoinEnclosurePolicy.withinSurfaceDepth(-3));
+    }
+
+    @Test
+    void deepStructuresDoNotCountAsPlayerBuilt() {
+        // A stronghold corridor or a trial chamber sits tens of blocks below the surface.
+        assertFalse(JoinEnclosurePolicy.withinSurfaceDepth(JoinEnclosurePolicy.MAX_DEPTH_BELOW_SURFACE + 1));
+        assertFalse(JoinEnclosurePolicy.withinSurfaceDepth(40));
+    }
+
+    @Test
     void lingerHoldsForCommanderBaseOrHouse() {
         assertTrue(JoinEnclosurePolicy.lingerStaysAtNonFunctionalPosition(true, false, false));
         assertTrue(JoinEnclosurePolicy.lingerStaysAtNonFunctionalPosition(false, true, false));

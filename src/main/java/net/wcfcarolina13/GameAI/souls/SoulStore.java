@@ -255,8 +255,20 @@ public final class SoulStore {
     public CompletableFuture<Void> appendFailure(
             SoulTypes.TurnToken token, SoulTypes.FailureCode code, String provider, String model,
             Long elapsedMillis) {
+        return appendFailure(token, code, provider, model, elapsedMillis, null);
+    }
+
+    /**
+     * As {@link #appendFailure(SoulTypes.TurnToken, SoulTypes.FailureCode, String, String, Long)},
+     * marking the record {@code privateTo} that player (1.1.296): a privately seeded scene that
+     * committed no SPOKEN line still leaves one marked record under its correlationId, so the
+     * owner's HEARD inherits the mark ({@link SoulPrivacyPolicy#withInheritedPrivacy}).
+     */
+    public CompletableFuture<Void> appendFailure(
+            SoulTypes.TurnToken token, SoulTypes.FailureCode code, String provider, String model,
+            Long elapsedMillis, UUID privateTo) {
         return submit(() -> {
-            appendTurn(token, SoulTypes.TurnKind.FAILURE, "", provider, model, elapsedMillis, code, null);
+            appendTurn(token, SoulTypes.TurnKind.FAILURE, "", provider, model, elapsedMillis, code, privateTo);
             return null;
         });
     }
