@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI.services;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,24 +17,59 @@ class SleepBedCandidatePolicyTest {
 
     @Test
     void botCarryingABedIsNeverSuppressedByANearbySleeper() {
-        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(true, true, true));
+        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(true, true, true, true));
     }
 
     @Test
     void botWithoutABedWaitsOutANearbySleeperInsteadOfCrafting() {
-        assertTrue(SleepBedCandidatePolicy.waitOutNearbySleeper(true, true, false));
+        assertTrue(SleepBedCandidatePolicy.waitOutNearbySleeper(true, true, true, false));
     }
 
     @Test
     void noNearbySleeperMeansNoSuppressionEitherWay() {
-        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(true, false, false));
-        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(true, false, true));
+        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(true, true, false, false));
+        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(true, true, false, true));
     }
 
     @Test
     void daytimeNeverReachesTheWaitOutBranch() {
         // canSleepNow=false attempts exit earlier with the not-night message; the policy must
         // not claim the wait-out path for them.
-        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(false, true, false));
+        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(true, false, true, false));
+    }
+
+    @Test
+    void settingOffNeverWaitsItOutSoTheBotCraftsItsOwnBed() {
+        // No logoff fallback with the setting off: crafting is the only way the bot sleeps.
+        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(false, true, true, false));
+        assertFalse(SleepBedCandidatePolicy.waitOutNearbySleeper(false, true, true, true));
+    }
+
+    @Test
+    void anObstructedNearbyBedIsReportedAsBlockedNotAsSomeoneSleeping() {
+        assertEquals(SleepBedCandidatePolicy.NoBedStep.BLOCKED_BED_WAIT_OUT,
+                SleepBedCandidatePolicy.afterNearbyBedsFailed(true, true, true, false));
+        assertEquals(SleepBedCandidatePolicy.NoBedStep.BLOCKED_BED_TRY_OWN,
+                SleepBedCandidatePolicy.afterNearbyBedsFailed(true, true, false, false));
+        assertEquals(SleepBedCandidatePolicy.NoBedStep.BLOCKED_BED_TRY_OWN,
+                SleepBedCandidatePolicy.afterNearbyBedsFailed(true, true, false, true));
+    }
+
+    @Test
+    void noNearbyBedWaitsOutOnlyWhenThePolicySaysSo() {
+        assertEquals(SleepBedCandidatePolicy.NoBedStep.NO_BED_WAIT_OUT,
+                SleepBedCandidatePolicy.afterNearbyBedsFailed(false, true, true, false));
+        assertEquals(SleepBedCandidatePolicy.NoBedStep.NO_BED_SET_UP_OWN,
+                SleepBedCandidatePolicy.afterNearbyBedsFailed(false, true, false, true));
+        assertEquals(SleepBedCandidatePolicy.NoBedStep.NONE,
+                SleepBedCandidatePolicy.afterNearbyBedsFailed(false, true, false, false));
+    }
+
+    @Test
+    void notNightSaysNothingHereBecauseTheNotNightMessageFollows() {
+        assertEquals(SleepBedCandidatePolicy.NoBedStep.NONE,
+                SleepBedCandidatePolicy.afterNearbyBedsFailed(true, false, false, true));
+        assertEquals(SleepBedCandidatePolicy.NoBedStep.NONE,
+                SleepBedCandidatePolicy.afterNearbyBedsFailed(false, false, false, true));
     }
 }

@@ -56,6 +56,16 @@ public final class SleepService {
     private SleepService() {}
 
     public static boolean sleep(ServerCommandSource source, ServerPlayerEntity bot) {
+        return sleep(source, bot, source == null ? null : source.getPlayer());
+    }
+
+    /**
+     * Sleep attempt with the commander named explicitly. Co-sleep runs with the BOT's command
+     * source, so {@code source.getPlayer()} there is the bot itself, not the player who owns the
+     * crafting materials and permission; callers that know the commander pass it here.
+     */
+    public static boolean sleep(ServerCommandSource source, ServerPlayerEntity bot,
+                                ServerPlayerEntity commander) {
         if (source == null || bot == null) {
             return false;
         }
@@ -101,24 +111,32 @@ public final class SleepService {
 
         boolean hasOwnBed = hasAnyBed(bot);
 
-        // Suppress own-bed CRAFTING when a nearby player is already sleeping — burning wool and
-        // planks is wasted work when the logoff fallback exists. A bot that already carries a
-        // bed is NOT suppressed: it places its bed and sleeps too, because bots count toward the
-        // players-sleeping percentage — a bot "waiting it out" awake is exactly what keeps the
-        // nearby sleeper's night from ever advancing (the pre-fix behavior Bradley reported:
-        // bed in inventory, commander in bed, bot never attempts placement and just logs off).
-        if (SleepBedCandidatePolicy.waitOutNearbySleeper(
-                canSleepNow, isAnyPlayerSleepingNearby(bot, world, 32), hasOwnBed)) {
-            ChatUtils.sendSystemMessage(source, "Someone's already sleeping. I'll wait it out.");
-            return false;
-        }
-
-        if (!nearbyBeds.isEmpty() && canSleepNow) {
-            ChatUtils.sendSystemMessage(source, "I couldn't get into a nearby bed (blocked or unsafe). Trying to set my own.");
-        } else if (nearbyBeds.isEmpty() && canSleepNow && hasOwnBed) {
+        // Suppress own-bed CRAFTING when a nearby player is already sleeping and the logoff
+        // fallback is on: burning wool and planks is wasted work when the bot can log off for the
+        // night instead. A bot that already carries a bed is NOT suppressed: it places its bed and
+        // sleeps too, because bots count toward the players-sleeping percentage. With the setting
+        // off there is no fallback, so the bot crafts and places its own bed (1.1.298).
+        boolean waitOut = SleepBedCandidatePolicy.waitOutNearbySleeper(
+                BotZzzSleepService.isLogOffWhenCantSleepEnabled(),
+                canSleepNow, isAnyPlayerSleepingNearby(bot, world, 32), hasOwnBed);
+        switch (SleepBedCandidatePolicy.afterNearbyBedsFailed(
+                !nearbyBeds.isEmpty(), canSleepNow, waitOut, hasOwnBed)) {
+            case BLOCKED_BED_WAIT_OUT -> {
+                ChatUtils.sendSystemMessage(source,
+                        "I couldn't get into a nearby bed (blocked or unsafe), and someone's already asleep, so I won't craft one.");
+                return false;
+            }
+            case NO_BED_WAIT_OUT -> {
+                ChatUtils.sendSystemMessage(source,
+                        "No free bed nearby, and someone's already asleep, so I won't craft one.");
+                return false;
+            }
+            case BLOCKED_BED_TRY_OWN -> ChatUtils.sendSystemMessage(source,
+                    "I couldn't get into a nearby bed (blocked or unsafe). Trying to set my own.");
             // No unoccupied bed anywhere in range (none placed, or all occupied) and we carry
-            // our own — explicit handoff message before the placement branch.
-            ChatUtils.sendSystemMessage(source, "No free bed nearby, setting up my own.");
+            // our own: explicit handoff message before the placement branch.
+            case NO_BED_SET_UP_OWN -> ChatUtils.sendSystemMessage(source, "No free bed nearby, setting up my own.");
+            case NONE -> { }
         }
 
         // If we can't sleep right now, avoid crafting/placing beds.
@@ -129,7 +147,6 @@ public final class SleepService {
 
         // 2) Ensure we have a bed item (craft if possible).
         if (!hasOwnBed) {
-            ServerPlayerEntity commander = source.getPlayer();
             if (commander == null) {
                 ChatUtils.sendSystemMessage(source, "Only players can ask bots to craft a bed.");
                 return false;
@@ -211,7 +228,11 @@ public final class SleepService {
             runOnServerThread(bot, () -> {
                 try {
                     selectEmptyOrSafeHand(bot);
-                    var result = bot.trySleep(bed.foot);
+                    // Target the HEAD, as vanilla BedBlock.onUse does before calling trySleep:
+                    // isBedObstructed(pos, facing) tests pos.up() and pos.up() one step back
+                    // along the facing, so passing the foot tests a cell outside the bed and a
+                    // clear placed bed was rejected as "obstructed" (1.1.298, javap-verified).
+                    var result = bot.trySleep(bed.head);
                     result.ifLeft(reason ->
                             sleepFuture.complete("rejected: " + reason));
                     result.ifRight(unit ->

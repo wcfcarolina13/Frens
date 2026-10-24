@@ -190,6 +190,11 @@ public final class BotWakeUpDialogueService {
                 LOGGER.info("Co-sleep: {} skipped — different world", botName);
                 continue;
             }
+            // Vanilla refuses sleep while mounted, and a mounted bot must never log off.
+            if (bot.hasVehicle()) {
+                LOGGER.info("Co-sleep: {} skipped — mounted", botName);
+                continue;
+            }
             // Skip if the bot is already mid-zzz-cycle (chat trigger). The zzz service
             // owns its own attempt + logoff state machine, and a redundant co-sleep call
             // here would fire a duplicate SleepService.sleep on a worker thread,
@@ -247,7 +252,7 @@ public final class BotWakeUpDialogueService {
             CO_SLEEP_QUEUED_TICK.put(botId, nowTick);
             LOGGER.info("Co-sleep: {} going to sleep because commander {} slept nearby",
                     botName, player.getName().getString());
-            scheduleCoSleep(server, bot);
+            scheduleCoSleep(server, bot, player);
         }
 
         // Schedule a delayed retry for bots skipped due to transient conditions (active task).
@@ -263,6 +268,7 @@ public final class BotWakeUpDialogueService {
                     if (bot == null || bot.isRemoved() || bot.isSleeping()
                             || !BotEventHandler.isRegisteredBot(bot)) continue;
                     if (bot.getEntityWorld() != retryPlayer.getEntityWorld()) continue;
+                    if (bot.hasVehicle()) continue;
                     ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(server, bot);
                     if (commander == null || !commander.getUuid().equals(retryPlayer.getUuid())) continue;
                     if (BotZzzSleepService.isInSleepCycle(botId)
@@ -280,14 +286,22 @@ public final class BotWakeUpDialogueService {
                     }
                     CO_SLEEP_QUEUED_TICK.put(botId, retryTick);
                     LOGGER.info("Co-sleep retry: {} going to sleep (task cleared)", bot.getName().getString());
-                    scheduleCoSleep(server, bot);
+                    scheduleCoSleep(server, bot, retryPlayer);
                 }
             });
         }
     }
 
-    private static void scheduleCoSleep(MinecraftServer server, ServerPlayerEntity bot) {
-        if (server == null || bot == null || bot.isRemoved()) return;
+    /**
+     * Runs a co-sleep attempt on a worker. The source is the bot's own (silent) command source,
+     * so the commander is passed explicitly for bed crafting and for the logoff message. On a
+     * real failure (not cancelled) the bot goes through the same immediate-logoff path as "zzz"
+     * ({@link BotZzzSleepService#requestImmediateLogoff}), which decides on the server thread.
+     */
+    private static void scheduleCoSleep(MinecraftServer server, ServerPlayerEntity bot,
+                                        ServerPlayerEntity commander) {
+        if (server == null || bot == null || bot.isRemoved() || commander == null) return;
+        UUID commanderUuid = commander.getUuid();
         UUID botUuid = bot.getUuid();
 
         // Avoid double-queueing.
@@ -304,11 +318,15 @@ public final class BotWakeUpDialogueService {
 
         CO_SLEEP_EXECUTOR.submit(() -> {
             boolean success = false;
+            boolean aborted = false;
             try {
                 TaskService.attachExecutingThread(ticket, Thread.currentThread());
-                success = SleepService.sleep(source, bot) && !TaskService.isAbortRequested(botUuid);
+                boolean slept = SleepService.sleep(source, bot, commander);
+                aborted = TaskService.isAbortRequested(botUuid) || Thread.currentThread().isInterrupted();
+                success = slept && !aborted;
             } catch (Exception e) {
                 LOGGER.warn("Co-sleep failed for {}: {}", bot.getName().getString(), e.getMessage());
+                aborted = TaskService.isAbortRequested(botUuid) || Thread.currentThread().isInterrupted();
             } finally {
                 TaskService.complete(ticket, success);
                 if (!success) {
@@ -318,6 +336,10 @@ public final class BotWakeUpDialogueService {
                     // manually laying beds nearby can't rescue the attempt.
                     CO_SLEEP_QUEUED_TICK.remove(botUuid);
                 }
+            }
+            if (!success && !aborted && !bot.isRemoved() && !bot.isSleeping()
+                    && !TaskService.isServerStopping()) {
+                BotZzzSleepService.requestImmediateLogoff(server, botUuid, commanderUuid);
             }
         });
     }

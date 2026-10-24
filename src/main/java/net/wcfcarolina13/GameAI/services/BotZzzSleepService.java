@@ -10,7 +10,10 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
+import net.minecraft.text.Text;
 import net.minecraft.world.World;
+import net.minecraft.world.rule.GameRules;
+import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import org.slf4j.Logger;
@@ -40,15 +43,16 @@ import java.util.regex.Pattern;
  *
  * <p>When a bot's commander types a "zzz" message (3+ z's, case-insensitive) in chat,
  * each of their Frens bots in the same dimension tries to sleep via
- * {@link SleepService#sleep}. If the bot fails to
- * sleep AND the sender is themselves sleeping {@link #FAILURE_DEADLINE_TICKS}
- * ticks later, the bot "logs off" — its fake-player entity is removed from
- * the world (state persisted) and the bot waits until either daytime or no
- * same-world non-bot player is sleeping, at which point it respawns at the
- * position where it logged off.</p>
+ * {@link SleepService#sleep}. If the bot can't find, place or make a bed and the
+ * admin setting "Bots log off when they can't sleep" is on (default), it "logs off"
+ * as soon as it gives up: its fake-player entity is removed from the world (state
+ * persisted) and it respawns at dawn where it logged off. Co-sleep failures
+ * ({@link BotWakeUpDialogueService}) use the same path via
+ * {@link #requestImmediateLogoff}. With the setting off the bot stays online and the
+ * owner is told once. Decisions live in {@link BotSleepLogoffPolicy}.</p>
  *
  * <p>Per-bot debouncing: once a bot enters any non-idle state in this
- * service's machine (ATTEMPTING / WAITING_LOGOFF / LOGGED_OFF), subsequent
+ * service's machine (ATTEMPTING / LOGOFF_PENDING / LOGGED_OFF), subsequent
  * "zzz" chat lines are ignored for that bot. Multiple players spamming
  * "zzzzz" produces exactly one sleep attempt per bot.</p>
  *
@@ -70,17 +74,9 @@ public final class BotZzzSleepService {
     private static final AtomicInteger SLEEP_THREAD_ID = new AtomicInteger();
     private static volatile ExecutorService sleepExecutor = createSleepExecutor();
 
-    /** How long after a failed sleep attempt before we decide whether to log off. */
-    private static final int FAILURE_DEADLINE_TICKS = 400; // 20s
-
-    /** Tick cadence for the state machine. 40 ticks = 2s — fast enough for the
-     *  20s deadline to land within ±2s, slow enough to not be noisy. */
+    /** Tick cadence for the state machine. 40 ticks = 2s: a pending logoff is
+     *  consumed within 2s of the failed attempt, slow enough to not be noisy. */
     private static final int TICK_INTERVAL = 40;
-
-    /** Vanilla day-cycle constant. */
-    private static final long DAY_TICKS = 24_000L;
-    /** Daytime range: tod in [0, NIGHT_START) is daytime. */
-    private static final long NIGHT_START = 12_000L;
 
     /** Chat trigger: 3 or more z's, nothing else. Case-insensitive. */
     private static final Pattern ZZZ_PATTERN = Pattern.compile("^z{3,}$", Pattern.CASE_INSENSITIVE);
@@ -88,9 +84,12 @@ public final class BotZzzSleepService {
     private static final String SIDECAR_NAME = "sleep_logoff_state.json";
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private enum State { ATTEMPTING, WAITING_LOGOFF }
+    /** ATTEMPTING: a zzz sleep attempt is running. LOGOFF_PENDING: an attempt (zzz or
+     *  co-sleep) failed and the next state-machine tick on the server thread re-checks the
+     *  safeguards and logs the bot off. */
+    private enum State { ATTEMPTING, LOGOFF_PENDING }
 
-    private record StateEntry(State state, long deadlineTick, UUID senderUuid) {}
+    private record StateEntry(State state, UUID senderUuid) {}
 
     /** Lightweight per-tick state for in-progress attempts and pending logoff. */
     private static final ConcurrentMap<UUID, StateEntry> ACTIVE = new ConcurrentHashMap<>();
@@ -103,16 +102,22 @@ public final class BotZzzSleepService {
         public String dimensionId;
         public String gameMode;
         public long loggedOffAtTickEpoch;
+        /** True for bots logged off by the immediate can't-sleep path: they come back at dawn
+         *  only. Entries written before 1.1.298 lack the key and read as false, which keeps
+         *  the older wake rule for them. */
+        public boolean dawnOnly;
 
         public LoggedOff() {}
 
-        LoggedOff(String name, Vec3d pos, float yaw, float pitch, String dim, String mode, long tick) {
+        LoggedOff(String name, Vec3d pos, float yaw, float pitch, String dim, String mode, long tick,
+                  boolean dawnOnly) {
             this.botName = name;
             this.x = pos.x; this.y = pos.y; this.z = pos.z;
             this.yaw = yaw; this.pitch = pitch;
             this.dimensionId = dim;
             this.gameMode = mode;
             this.loggedOffAtTickEpoch = tick;
+            this.dawnOnly = dawnOnly;
         }
     }
 
@@ -161,6 +166,24 @@ public final class BotZzzSleepService {
         return botName != null && LOGGED_OFF.containsKey(botName);
     }
 
+    /** The admin setting "Bots log off when they can't sleep", read on the server. Null-safe:
+     *  defaults to on when the config isn't loaded. A plain boolean read, safe from workers. */
+    public static boolean isLogOffWhenCantSleepEnabled() {
+        return Frens.CONFIG == null || Frens.CONFIG.isBotsLogOffWhenCantSleepEnabled();
+    }
+
+    /**
+     * Asks for a bot to log off for the night because its sleep attempt failed. Callable from
+     * any thread: it only records a pending entry. The next state-machine tick (server thread,
+     * within 2s) re-checks every safeguard and, if they still pass, runs the logoff there, so
+     * entity removal and the inventory snapshot save never happen on a worker.
+     */
+    static void requestImmediateLogoff(MinecraftServer server, UUID botId, UUID commanderUuid) {
+        if (server == null || botId == null) return;
+        ACTIVE.put(botId, new StateEntry(State.LOGOFF_PENDING, commanderUuid));
+        LOGGER.info("[zzz] {} couldn't sleep; logoff pending for the next tick", botId);
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Chat trigger.
     // ─────────────────────────────────────────────────────────────────────
@@ -191,10 +214,9 @@ public final class BotZzzSleepService {
         }
         if (controlledBots.isEmpty()) return true;
 
-        long nowTick = server.getTicks();
         // Pre-check world-level sleep eligibility ONCE — same for every bot in the world.
         // If it's daytime and not thundering, sleep is fundamentally impossible until
-        // night. No point entering WAITING_LOGOFF — just tell the user and skip.
+        // night. No point attempting, just tell the user and skip.
         boolean canSleepInWorld = !senderWorld.isDay() || senderWorld.isThundering();
 
         for (ServerPlayerEntity bot : controlledBots) {
@@ -209,7 +231,7 @@ public final class BotZzzSleepService {
             if (existing != null) {
                 String msg = switch (existing.state()) {
                     case ATTEMPTING -> botName + " is already trying to sleep. Give them a moment.";
-                    case WAITING_LOGOFF -> botName + " already tried, waiting to see if you sleep.";
+                    case LOGOFF_PENDING -> botName + " couldn't find a bed and is about to log off for the night.";
                 };
                 ChatUtils.sendSystemMessage(source, "§7" + msg + "§r");
                 continue;
@@ -218,20 +240,20 @@ public final class BotZzzSleepService {
                 ChatUtils.sendSystemMessage(source, "§7" + botName + " is already asleep.§r");
                 continue;
             }
-            // Vanilla refuses sleep while mounted. Skip the doomed 20s WAITING_LOGOFF wait.
+            // Vanilla refuses sleep while mounted, and a mounted bot never logs off.
             if (bot.hasVehicle()) {
                 ChatUtils.sendSystemMessage(source,
                         "§7" + botName + " can't sleep while mounted. Dismount them first.§r");
                 continue;
             }
-            // Not night / no thunder → vanilla refuses. Don't waste 20s; tell user clearly.
+            // Not night / no thunder → vanilla refuses. Tell the user clearly.
             if (!canSleepInWorld) {
                 ChatUtils.sendSystemMessage(source,
                         "§7" + botName + " can't sleep right now, it's not night yet.§r");
                 continue;
             }
             // Mark ATTEMPTING before invoking SleepService so a re-fire mid-attempt is debounced.
-            ACTIVE.put(botId, new StateEntry(State.ATTEMPTING, nowTick, sender.getUuid()));
+            ACTIVE.put(botId, new StateEntry(State.ATTEMPTING, sender.getUuid()));
             tryAttemptSleep(server, bot, sender);
         }
         return true;
@@ -301,13 +323,9 @@ public final class BotZzzSleepService {
             return;
         }
 
-        // Anchor the promised 20-second window after navigation returns.
-        long deadlineAnchor = server.getTicks();
-        ACTIVE.put(botId, new StateEntry(
-                State.WAITING_LOGOFF,
-                deadlineAnchor + FAILURE_DEADLINE_TICKS, sender.getUuid()));
-        LOGGER.info("[zzz] {} couldn't sleep; will check logoff conditions in {}s",
-                bot.getName().getString(), FAILURE_DEADLINE_TICKS / 20);
+        // Failed for real. The server-thread tick decides (setting, daylight cycle, mounted,
+        // daytime) and logs off or tells the owner why the bot stays online.
+        requestImmediateLogoff(server, botId, sender.getUuid());
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -323,11 +341,11 @@ public final class BotZzzSleepService {
         long tick = server.getTicks();
         if (tick % TICK_INTERVAL != 0) return;
 
-        tickActiveStates(server, tick);
+        tickActiveStates(server);
         tickWakeMonitor(server);
     }
 
-    private static void tickActiveStates(MinecraftServer server, long nowTick) {
+    private static void tickActiveStates(MinecraftServer server) {
         if (ACTIVE.isEmpty()) return;
         for (Map.Entry<UUID, StateEntry> e : new ArrayList<>(ACTIVE.entrySet())) {
             UUID botId = e.getKey();
@@ -342,29 +360,56 @@ public final class BotZzzSleepService {
                 ACTIVE.remove(botId);
                 continue;
             }
-            if (st.state() != State.WAITING_LOGOFF) continue;
-            if (nowTick < st.deadlineTick()) continue;
+            if (st.state() != State.LOGOFF_PENDING) continue;
 
-            // Deadline reached — decide whether to log off.
-            ServerPlayerEntity sender = server.getPlayerManager().getPlayer(st.senderUuid());
-            boolean senderSleeping = sender != null && !sender.isRemoved() && sender.isSleeping();
-            ACTIVE.remove(botId);
+            // Re-check every safeguard here on the server thread with fresh state.
+            if (!ACTIVE.remove(botId, st)) continue; // replaced meanwhile, next pass handles it
+            ServerPlayerEntity sender = st.senderUuid() == null ? null
+                    : server.getPlayerManager().getPlayer(st.senderUuid());
             String botName = bot.getName().getString();
-            if (!senderSleeping) {
-                LOGGER.info("[zzz] {} deadline reached but sender isn't sleeping — staying online", botName);
-                // Tell the user — otherwise the 20s wait just looks like nothing happened.
-                if (sender != null && !sender.isRemoved()) {
-                    ChatUtils.sendSystemMessage(sender.getCommandSource(),
-                            "§7" + botName + " couldn't sleep, and you're not in bed either, so they're staying online.§r");
-                }
-                continue;
+            boolean bedsWork = bot.getEntityWorld() instanceof ServerWorld bw && !isNoSleepDimension(bw);
+            boolean daytime = !(bot.getEntityWorld() instanceof ServerWorld tw)
+                    || BotSleepLogoffPolicy.isDaytime(tw.getTimeOfDay());
+            BotSleepLogoffPolicy.Decision decision = BotSleepLogoffPolicy.decide(
+                    isLogOffWhenCantSleepEnabled(),
+                    false,
+                    TaskService.isAbortRequested(botId),
+                    bot.isSleeping(),
+                    !bot.isAlive(),
+                    bedsWork,
+                    bot.hasVehicle(),
+                    TaskService.isServerStopping(),
+                    daytime,
+                    isDaylightCycleOn(server));
+            LOGGER.info("[zzz] {} failed to sleep, decision {}", botName, decision);
+            switch (decision) {
+                case LOG_OFF -> beginLogoff(server, bot, sender, true);
+                case STAY_SETTING_OFF -> tell(sender,
+                        botName + " couldn't find a bed. Logging off is turned off in settings, so they're staying online.");
+                case STAY_NO_DAYLIGHT_CYCLE -> tell(sender,
+                        botName + " couldn't find a bed, but the daylight cycle is off, so they're staying online. Logging off would mean never coming back.");
+                case STAY_SILENT -> { }
             }
-            beginLogoff(server, bot, sender);
+        }
+    }
+
+    /** Sends straight to the player. Routing through a command source can lose the recipient
+     *  (see the note in {@link #beginLogoff}). */
+    private static void tell(ServerPlayerEntity player, String message) {
+        if (player == null || player.isRemoved()) return;
+        player.sendMessage(Text.literal("§7" + message + "§r"), false);
+    }
+
+    private static boolean isDaylightCycleOn(MinecraftServer server) {
+        try {
+            return server.getOverworld().getGameRules().getValue(GameRules.ADVANCE_TIME);
+        } catch (Throwable t) {
+            return true;
         }
     }
 
     private static void beginLogoff(MinecraftServer server, ServerPlayerEntity bot,
-                                    ServerPlayerEntity sender) {
+                                    ServerPlayerEntity sender, boolean dawnOnly) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
         String name = bot.getName().getString();
         Vec3d pos = bot.getEntityPos();
@@ -373,8 +418,8 @@ public final class BotZzzSleepService {
         String dim = world.getRegistryKey().getValue().toString();
         String mode = bot.interactionManager.getGameMode().name();
 
-        LOGGER.info("[zzz] {} logging off at {} ({}); waiting for daytime or sleep cycle.",
-                name, pos, dim);
+        LOGGER.info("[zzz] {} logging off at {} ({}); back at {}.",
+                name, pos, dim, dawnOnly ? "dawn" : "daytime or when the sleep cycle ends");
 
         // Mirror the proven disconnect path used by NavigationArtifactService.
         try {
@@ -393,7 +438,8 @@ public final class BotZzzSleepService {
             LOGGER.warn("[zzz] discard failed for {}: {}", name, t.toString());
         }
 
-        LoggedOff entry = new LoggedOff(name, pos, yaw, pitch, dim, mode, server.getOverworld().getTime());
+        LoggedOff entry = new LoggedOff(name, pos, yaw, pitch, dim, mode, server.getOverworld().getTime(),
+                dawnOnly);
         LOGGED_OFF.put(name, entry);
         saveToDisk();
 
@@ -401,11 +447,7 @@ public final class BotZzzSleepService {
         // routing through server.getCommandSource() loses the recipient and silently
         // drops the message (verified in 1.1.132 latest.log audit: "No recipient
         // resolved for system message; dropping: '... went to sleep...'").
-        if (sender != null && !sender.isRemoved()) {
-            sender.sendMessage(net.minecraft.text.Text.literal(
-                    "§7" + name + " went to sleep. They'll be back when the cycle's done.§r"),
-                    false);
-        }
+        tell(sender, name + " couldn't find a bed, so they're logging off for the night. Back at dawn.");
     }
 
     private static void tickWakeMonitor(MinecraftServer server) {
@@ -414,8 +456,16 @@ public final class BotZzzSleepService {
             LoggedOff lo = e.getValue();
             ServerWorld targetWorld = resolveWorld(server, lo.dimensionId);
             if (targetWorld == null) continue;
-            if (!shouldWakeUp(targetWorld, server)) continue;
-            respawnBot(server, lo);
+            if (!shouldWakeUp(targetWorld, server, lo.dawnOnly)) continue;
+            boolean alreadyOnline = lo.botName != null
+                    && server.getPlayerManager().getPlayer(lo.botName) != null;
+            if (BotSleepLogoffPolicy.shouldRespawn(alreadyOnline)) {
+                respawnBot(server, lo);
+            } else {
+                // Respawned by hand while logged off: a second createFake would log in a
+                // duplicate (FakeClientConnection never fires the duplicate-login kick).
+                LOGGER.info("[zzz] {} is already online; dropping its logoff entry", lo.botName);
+            }
             LOGGED_OFF.remove(e.getKey());
             saveToDisk();
         }
@@ -423,12 +473,13 @@ public final class BotZzzSleepService {
 
     /** A logged-off bot wakes when:
      *  - it's daytime in its dimension (tod in [0, 12000)), OR
-     *  - no non-bot player in the SAME dimension is currently sleeping AND there
-     *    is at least one non-bot player in some world (so we don't immediately
-     *    respawn a bot when the lone player just logged off — wait for daytime). */
-    private static boolean shouldWakeUp(ServerWorld botWorld, MinecraftServer server) {
-        long tod = Math.floorMod(botWorld.getTimeOfDay(), DAY_TICKS);
-        if (tod < NIGHT_START) return true;
+     *  - (older entries, or the daylight cycle is off) no non-bot player in the SAME
+     *    dimension is currently sleeping AND there is at least one non-bot player in
+     *    that world (so we don't immediately respawn a bot when the lone player just
+     *    logged off — wait for daytime).
+     *  Entries from the immediate can't-sleep path ({@code dawnOnly}) wait for dawn. */
+    private static boolean shouldWakeUp(ServerWorld botWorld, MinecraftServer server, boolean dawnOnly) {
+        if (BotSleepLogoffPolicy.isDaytime(botWorld.getTimeOfDay())) return true;
 
         boolean anyHumanInWorld = false;
         boolean anyHumanSleepingInWorld = false;
@@ -441,7 +492,8 @@ public final class BotZzzSleepService {
         // It's nighttime in the bot's dim. If no human in this dim is asleep — nothing to wait for
         // here. But we should also wait for global state: if no humans are online at all, we'd loop
         // forever — accept that, the server time will tick to dawn eventually.
-        return anyHumanInWorld && !anyHumanSleepingInWorld;
+        return BotSleepLogoffPolicy.shouldWake(false, anyHumanInWorld, anyHumanSleepingInWorld,
+                dawnOnly, isDaylightCycleOn(server));
     }
 
     private static void respawnBot(MinecraftServer server, LoggedOff lo) {

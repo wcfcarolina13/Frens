@@ -37,7 +37,7 @@ class WakeUpDelayWiringTest {
         assertBefore(retry, "!BotEventHandler.isRegisteredBot(bot)", stamp);
         assertBefore(retry, "CompanionCommunicationPolicy.resolveController(server, bot)", stamp);
         assertBefore(retry, "!commander.getUuid().equals(retryPlayer.getUuid())", stamp);
-        assertTrue(stamp < retry.indexOf("scheduleCoSleep(server, bot)"));
+        assertTrue(stamp < retry.indexOf("scheduleCoSleep(server, bot, retryPlayer)"));
     }
 
     @Test
