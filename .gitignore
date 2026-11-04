@@ -140,3 +140,7 @@ docs/PRD-vanilla-movement-refactor.md
 /voices/
 /eula.txt
 /sqlite-vec-macos-aarch64.tar.gz
+
+# Private dev tooling: symlinks into the frens-dev repo on the Mac
+/tools/sandbox
+/docs/testing
