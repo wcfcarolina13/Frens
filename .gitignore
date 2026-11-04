@@ -101,9 +101,8 @@ screenshots/
 # Example mod (not part of main project)
 fabric-example-mod/
 
-# Claude Code project instructions
-CLAUDE.md
-AGENTS.md
+# Mac-only agent instructions
+CLAUDE.local.md
 
 # Release JARs (don't commit large binaries)
 releases/
