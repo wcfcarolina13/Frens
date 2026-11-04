@@ -134,3 +134,9 @@ rewriter.py
 Super Dialogue Audio Pack v1.zip
 docs/PRD-vanilla-movement-refactor.md
 /net/
+
+# Local run output and machine state (never tracked)
+/logs/
+/voices/
+/eula.txt
+/sqlite-vec-macos-aarch64.tar.gz
