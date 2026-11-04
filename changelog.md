@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Test for the voice engine restart ladder (2026-11-04)
+
+Added `VoiceBackoffPolicyTest`, 4 tests over the 1s, 5s, 15s ladder, the self-disable, the five-minute window and the reset on success (credit: Codex, the first job through the offload worktree). Claude read the diff and ran it. No main code changed, so no version bump. Tests 3853 → 3857.
+
 ## Bots stay in bed, can't-sleep logoff setting, placed beds usable; 1.1.298 (2026-10-23)
 
 From Bradley's Nirn report on 1.1.297 (a bot followed him out of its bed, bots could not log off so the night would skip, both co-sleep tries aborted at once). Two scopers, three implementers on disjoint files, one Fable review, one fix wave, a scoped re-review, a sandbox check (`docs/testing/FIELD_1_1_298_SANDBOX_2026-10-23.md`).
