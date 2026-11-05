@@ -142,6 +142,8 @@ final class SoulRelationOps {
                         Math.max(held.confidence(), incoming.confidence()), incoming.source(),
                         Math.max(held.day(), incoming.day()),
                         Math.max(held.salience(), incoming.salience())));
+                // A save from before the GOOD_AT/BAD_AT opposition can hold both; restating one clears the other.
+                removeOpposite(out, incoming);
                 return List.copyOf(out);
             }
         }

@@ -289,6 +289,17 @@ class SoulRelationOpsTest {
     }
 
     @Test
+    void restatingAFactClearsAnOppositeHeldFromAnOlderSave() {
+        SoulTypes.RelationFact good = fact("Bob", SoulTypes.Relation.GOOD_AT, "mining", 0.4d, 1, 6);
+        SoulTypes.RelationFact bad = fact("Bob", SoulTypes.Relation.BAD_AT, "mining", 0.4d, 1, 6);
+        SoulTypes.RelationFact badAgain = fact("Bob", SoulTypes.Relation.BAD_AT, "mining", 0.4d, 3, 6);
+        List<SoulTypes.RelationFact> merged = SoulRelationOps.merge(List.of(good, bad), badAgain);
+        assertEquals(1, merged.size());
+        assertEquals(SoulTypes.Relation.BAD_AT, merged.get(0).relation());
+        assertEquals(3, merged.get(0).day());
+    }
+
+    @Test
     void aWeakerBadAtThatIsDroppedLeavesGoodAtAlone() {
         SoulTypes.RelationFact strongBad = fact("Bob", SoulTypes.Relation.BAD_AT, "fishing", 0.9d, 1, 6);
         SoulTypes.RelationFact good = fact("Bob", SoulTypes.Relation.GOOD_AT, "mining", 0.4d, 1, 6);
