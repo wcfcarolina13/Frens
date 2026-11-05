@@ -6,21 +6,21 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 ## Session Handoff 2026-11-05 (cloud batch, unreleased) — next session starts here
 
-**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#33 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
+**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#34 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
 
 **Integration check (2026-11-05):** all 27 branches of this batch merged together onto main with no source conflict (only changelog.md, where keeping both sides is right); the combined tree builds and runs 4068 tests with only the root-container `SoulStoreTest.persistCursorFailure…` failing. Merging them in any order should need only changelog conflict resolution.
 
-**Merge order (stacked PRs):** #11 → #24 (place worker hop), #13 → #29 (blind-walk guard), #17 → #20 (more owner-only files). Retarget the second of each pair to `main` after the first merges.
+**Merge order (stacked PRs):** #11 → #24 (place worker hop), #13 → #29 (blind-walk guard), #17 → #20 (more owner-only files), #30 → #34 (combined chest ask wiring). Retarget the second of each pair to `main` after the first merges.
 
 **PRs by kind:**
 - Fixes with a sandbox check: #6 new-bots button on old servers, #7 End second exit, #10 skill start-up ticket leak, #11 `/bot place chest <n>`, #15 sunset "Returning to base." once, #16 furnace walk-back, #17/#20 store files 0600, #21 death soul respawn note, #23 despawned bots really removed in release builds (reflection matched `sendCommandTree`), #24 `/bot place` out of reach walks over, #27 follow no longer steers a bot during `/bot craft`, #32 the same for Quick Store / Quick Fetch, #33 `/bot follow stop` or `/bot stay` during a task is no longer undone when it ends, #28 hand-dig stair escape, #29 blind-walk guard.
 - Souls: #8 `threads.closed`, #9 BAD_AT from execution failures, #12 nickname addressing.
 - No behaviour change: #13 LeafClear types, #18 Fortify delegates, #19 SoulStore close test, #22 policy tests, #25 nav counter race, #26 guardrail (parallel Gradle memory).
-- Docs/design: #14 container fetch and organize options (new P2 backlog line), #30 combined chest ask policy layer (not wired). Independent reviews (Fable) covered every code PR (#6–#12, #15–#17, #20, #21, #23–#25, #27–#30, #32); their should-fix findings are fixed on the branches (#33 came out of one), minors are noted in each PR.
+- Docs/design: #14 container fetch and organize options (new P2 backlog line), #30 combined chest ask policy layer, and #34 wiring it into tool crafts (one prompt for the whole set; other crafts still ask per item). Independent reviews (Fable) covered every code PR (#6–#12, #15–#17, #20, #21, #23–#25, #27–#30, #32); their should-fix findings are fixed on the branches (#33 came out of one), minors are noted in each PR.
 
 **Rulings needed (each PR or doc has the detail and a recommended answer):**
 1. #14: the 10 container fetch/organize rulings in `docs/superpowers/specs/2026-11-05-container-fetch-and-organize-options.md`.
-2. #30: partly stocked chest asks for what it has; craft from own stock before asking; drop recently refused items; "Always" covers every allowed line.
+2. #30/#34: partly stocked chest asks for what it has; craft from own stock before asking; drop recently refused items; "Always" covers every allowed line; #34 also: a material no nearby chest can complete is skipped, table planks join the ask, the nearest chest that can supply everything wins, a declined bundle ends the tool craft.
 3. #28: stone by hand allowed (about 22 s a step), straight staircase, water refuses like lava.
 4. #9: allow-list of "stuck" failure phrasings; GOOD_AT needs completions >= failures; a model BAD_AT removes a SEEN GOOD_AT.
 5. #21: the death fallback still skips `AutoFaceEntity.handleBotRespawn`, `BotPersistenceService.onBotRespawn` (would run `onBotJoin` after a death) and `botSpawnCount++`: keep skipping?
