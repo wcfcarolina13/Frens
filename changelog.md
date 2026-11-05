@@ -2,6 +2,41 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Souls: TEASE peer stance rule (2026-11-05, unreleased)
+
+Conversation ontology Phase 3a deferred the TEASE row of the peer stance table (spec
+`2026-09-05-frens-soul-conversation-ontology-phase3-design.md`: "a TEASE-act scene delivered with
+≥2 lines → exasperation +1 and trust +1") because `GroupSceneTurn` did not carry the act its seed
+picked. It now does: `GroupSceneTurn.speechAct` (nullable; the banter director passes
+`seeded.act()`, every other turn passes nothing through the older constructors), and
+`SoulRuntime.notePeerStances` hands it to `SoulMindOps.notePeerScene`.
+
+Rule as built: a scene seeded as TEASE, delivered with at least two lines, gives exasperation +1
+toward the peer to each bot of every pair in which both bots spoke.
+
+Choices the spec left open:
+- **Who counts:** only pairs where both spoke. A roster bot that stayed silent is not part of the
+  teasing, and nothing is recorded toward or by it.
+- **Day guards:** exasperation uses the existing friction guard (`lastAskDay`). So a teasing scene
+  spends that pair's curiosity/friction budget for the Minecraft day, the same way the
+  unanswered-question rule and the 3c side channel already do. It never adds a second
+  exasperation step in a scene where the unanswered-question rule already fired.
+- **Trust:** the trust +1 half adds nothing. The existing "both spoke" trust rule already covers
+  every pair this rule reaches, under the same once-per-day guard, so the only visible change is
+  exasperation +1.
+
+Fix found in review: `SoulBanterSeed.buildSeed` picked an act even when no anchor gave the seed
+a subject, so no directive sentence was written but the act was still returned. That act would
+have triggered the TEASE rule on a scene never told to tease, and the director remembered it in
+its recent-acts rotation. A seed with no subject now carries no act. The only behaviour change
+outside the new rule: such a scene no longer counts toward act rotation.
+
+Limits: the rule trusts the seed's directive, not the delivered text. If the model ignores "gently
+tease" and writes something friendly, the pair still gets exasperation +1. Local chime-ins and
+player-addressed turns have no act and are unaffected. `GroupSceneTurn` is not persisted, so no
+save format changes. Tests: `SoulTeasePeerRuleTest` (10), `SoulBanterSeedTest.aSeedWithNoSubjectCarriesNoAct`. Needs a two-bot sandbox check: watch for
+`[souls] peer stance ... exasperation=1` after a teasing banter scene.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.

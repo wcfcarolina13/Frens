@@ -282,7 +282,11 @@ final class SoulBanterSeed {
         for (Anchor anchor : supportPicked) {
             supportTopics.add(anchor.topic());
         }
-        return new Seed(text, primary == null ? "" : primary.topic(), act, supportTopics);
+        // No primary means no directive sentence, so no act was asked of the model: report none,
+        // or the director would remember an act never spoken and the TEASE peer rule would fire
+        // on a scene that was never told to tease.
+        return new Seed(text, primary == null ? "" : primary.topic(), primary == null ? null : act,
+                supportTopics);
     }
 
     /**
