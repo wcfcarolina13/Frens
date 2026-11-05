@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Store files owner-only (0600) on POSIX (unreleased, 2026-11-05)
+
+- **Changed: soul store files are now created owner read/write only (`rw-------`) on Linux and macOS.** Closes the 1.1.291 review deferral "0600 store file mode". `soul.json`, `knowledge.json`, `mind.json`, trimmed `events.jsonl`, corrupt-tail rewrites and newly created transcripts (`active.jsonl`, `events.jsonl`) hold player UUIDs and owner data; their temp files were created by name at the umask default (usually 0644). `SoulStore.atomicReplace` now sets the mode on the temp file before the move, and `appendLine` sets it once when it creates a file. Decision and best-effort apply live in the new pure `StoreFileModePolicy` (POSIX view present → restrict; otherwise or on any error, DEBUG log and continue; a save never fails over permissions).
+- **Found: the eight fingerprinted registries were already 0600.** Furnaces, beehives, crafting/hunt history, hunt settings, fortifications, villages and bot world state write through `Files.createTempFile`, which the JDK creates `rw-------` on POSIX, and the atomic move keeps that mode, so they needed no change. A test now pins that JDK behaviour.
+- **Limits:** an existing transcript keeps its mode until it is rewritten (append does not touch an existing file; archives are renames). Soul directories keep the umask default, so bot UUIDs stay visible as folder names. Windows is unchanged. Not touched: `SupplyRequestService` and `GroupChatHint` (by-name temp files, not part of the 1.1.291 store set) and config files edited by hand.
+- **Tests:** 3857 → 3863 (`StoreFileModePolicyTest` 5, `SoulStoreTest` +1; POSIX cases skip elsewhere).
+- **Sandbox check needed:** on the Mac, start a save with a soul bot, talk to it, then `ls -l` its `frens/souls/v1/<bot>/soul.json` and `conversations/<player>/active.jsonl` in the world folder: both `-rw-------`. The game must still save and reload the soul normally.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
