@@ -24,6 +24,7 @@ import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
+import net.wcfcarolina13.GameAI.skills.LineOfSightRedirectPolicy;
 import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector;
 import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.Hazard;
 import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.DetectionResult;
@@ -210,26 +211,62 @@ public final class DirtShovelSkill implements Skill {
                 if (result == null) {
                     result = "Unknown shovel result";
                 }
-                if (player.getEntityWorld().getBlockState(detectedPos).getBlock() != Blocks.AIR) {
-                    LOGGER.warn("{} block {} still present after mining", label, detectedPos);
-                    if (excluded != null) {
-                        excluded.add(detectedPos);
+                // The target was hidden by another block. If that block is one the job wants, mine it
+                // instead: the target stays a candidate (no longer hidden) rather than being excluded.
+                BlockPos minedPos = detectedPos;
+                int[] blockerXyz = LineOfSightRedirectPolicy.blockerFrom(result);
+                if (blockerXyz != null) {
+                    BlockPos blocker = new BlockPos(blockerXyz[0], blockerXyz[1], blockerXyz[2]);
+                    BlockState blockerState = player.getEntityWorld().getBlockState(blocker);
+                    boolean wanted = allowAnyBlock ? !blockerState.isAir() : matchesTargetBlock(blockerState, targetBlocks);
+                    if (LineOfSightRedirectPolicy.shouldRedirect(
+                            !blocker.equals(detectedPos),
+                            wanted,
+                            blockerState.getBlock() instanceof BlockEntityProvider,
+                            excluded != null && excluded.contains(blocker),
+                            isWithinMiningReach(player, blocker))) {
+                        // Same hazard handling as the main target: a hazard found here is still a hazard.
+                        DetectionResult blockerDetection = MiningHazardDetector.detect(player, List.of(blocker), List.of());
+                        if (blockerDetection.blockingHazard().isPresent()) {
+                            Hazard hazard = blockerDetection.blockingHazard().get();
+                            if (isLavaHazard(hazard)) {
+                                LavaHazardService.respondToLava(player, source, hazard.location());
+                            }
+                            SkillResumeService.flagManualResume(player);
+                            ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
+                            return failure(context, hazard.failureMessage());
+                        }
+                        LOGGER.info("{} at {} is hidden by {}; mining that {} block instead", label, detectedPos, blocker, label);
+                        String blockerResult = mineWithTimeout(player, blocker);
+                        if (blockerResult != null && player.getEntityWorld().getBlockState(blocker).isAir()) {
+                            minedPos = blocker;
+                            result = blockerResult;
+                            wasTorch = false;
+                        }
                     }
-                    DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
+                }
+                if (player.getEntityWorld().getBlockState(minedPos).getBlock() != Blocks.AIR) {
+                    LOGGER.warn("{} block {} still present after mining", label, minedPos);
+                    // A hidden block depends on where the bot stands, so it is not excluded for the
+                    // rest of the job: it is demoted (record false, exposed-first ordering) instead.
+                    if (excluded != null && blockerXyz == null) {
+                        excluded.add(minedPos);
+                    }
+                    DirtNavigationPolicy.record(originBeforeMove, minedPos, false);
                     continue;
                 }
                 if (!result.toLowerCase().contains("complete")) {
-                    LOGGER.warn("Mining result for {} did not signal completion: {}", detectedPos, result);
+                    LOGGER.warn("Mining result for {} did not signal completion: {}", minedPos, result);
                     if (excluded != null) {
-                        excluded.add(detectedPos);
+                        excluded.add(minedPos);
                     }
-                    DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
+                    DirtNavigationPolicy.record(originBeforeMove, minedPos, false);
                     continue;
                 }
                 
                 // If we just mined a torch, replace it immediately to keep area lit
                 if (wasTorch) {
-                    TorchPlacer.replaceTorchAt(player, detectedPos);
+                    TorchPlacer.replaceTorchAt(player, minedPos);
                 }
                 
                 // Place torch if area is dark (for generic mining, not depth/stair modes)
@@ -242,19 +279,19 @@ public final class DirtShovelSkill implements Skill {
                         }
                         if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
                             // Just log, don't fail the job - torches are optional for generic mining
-                            LOGGER.info("Out of torches during generic mining at {}", detectedPos);
+                            LOGGER.info("Out of torches during generic mining at {}", minedPos);
                         }
                     }
                 }
 
                 if (context.sharedState() != null) {
-                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.pos", detectedPos);
-                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.x", detectedPos.getX());
-                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.y", detectedPos.getY());
-                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.z", detectedPos.getZ());
-                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.x", detectedPos.getX());
-                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.y", detectedPos.getY());
-                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.z", detectedPos.getZ());
+                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.pos", minedPos);
+                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.x", minedPos.getX());
+                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.y", minedPos.getY());
+                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.z", minedPos.getZ());
+                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.x", minedPos.getX());
+                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.y", minedPos.getY());
+                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.z", minedPos.getZ());
                     SharedStateUtils.setValue(context.sharedState(), "lastShovelStatus", "success");
                 }
                 return SkillExecutionResult.success(result);
@@ -413,8 +450,12 @@ public final class DirtShovelSkill implements Skill {
                 }
             }
         }
+        // Exposed blocks first: a buried block can't be seen, so trying it first only costs a walk
+        // and a line-of-sight refusal.
+        Map<BlockPos, Boolean> exposed = new HashMap<>();
         Comparator<BlockPos> comparator =
-                Comparator.<BlockPos>comparingDouble(pos -> -DirtNavigationPolicy.score(origin, pos))
+                Comparator.<BlockPos>comparingInt(pos -> exposed.computeIfAbsent(pos, p -> hasOpenFace(player, p)) ? 0 : 1)
+                        .thenComparingDouble(pos -> -DirtNavigationPolicy.score(origin, pos))
                         .thenComparingDouble(pos -> origin.getSquaredDistance(pos));
         if (diggingDown && allowAnyBlock) {
             comparator = Comparator.<BlockPos>comparingInt(BlockPos::getY)
@@ -913,12 +954,43 @@ public final class DirtShovelSkill implements Skill {
         return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
+    /** Mines {@code pos} with the same 10 s budget as the main loop; null on timeout or error. */
+    private String mineWithTimeout(ServerPlayerEntity player, BlockPos pos) {
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
+            try {
+                return MiningTool.mineBlock(player, pos).get();
+            } catch (Exception e) {
+                LOGGER.error("Error while mining {}", pos, e);
+                return null;
+            }
+        });
+        try {
+            return future.get(10, TimeUnit.SECONDS);
+        } catch (TimeoutException timeout) {
+            future.cancel(true);
+            LOGGER.warn("Mining {} timed out", pos);
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private boolean isWithinMiningReach(ServerPlayerEntity player, BlockPos blockPos) {
         if (player == null || blockPos == null) {
             return false;
         }
         Vec3d target = Vec3d.ofCenter(blockPos);
         return player.squaredDistanceTo(target.x, target.y, target.z) <= MAX_MINING_DISTANCE_SQ;
+    }
+
+    /** True when any face of {@code pos} touches a cell with no collision shape (air, water, plants). */
+    private boolean hasOpenFace(ServerPlayerEntity player, BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            if (isPassable(player, pos.offset(dir))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isPassable(ServerPlayerEntity player, BlockPos pos) {
