@@ -79,7 +79,7 @@ class ClientPacketGateWiringTest {
     @Test
     void saveBasePacketIsThrottledThenGatedBeforeTheApplyPath() throws IOException {
         String set = receiver(flatten(BASES), "BaseSetPayload");
-        int throttle = set.indexOf("if (!acquireWriteSlot(player)) return;");
+        int throttle = set.indexOf("if (player.isRemoved() || !acquireWriteSlot(player)) return;");
         int gate = set.indexOf("if (!BaseAccessPolicy.canMapVillage(ownsAnyBot(player), Frens.isOperator(player), BotAccessGate.isHost(player)))");
         int apply = set.indexOf("applyBaseSet(player.getCommandSource(), label);");
         assertTrue(throttle >= 0 && throttle < gate && gate < apply);
@@ -92,7 +92,7 @@ class ClientPacketGateWiringTest {
     @Test
     void mapVillagePacketIsThrottledAndKeepsItsGate() throws IOException {
         String village = receiver(flatten(BASES), "BaseMapVillagePayload");
-        int throttle = village.indexOf("if (!acquireWriteSlot(player)) return;");
+        int throttle = village.indexOf("if (player.isRemoved() || !acquireWriteSlot(player)) return;");
         int gate = village.indexOf("if (!BaseAccessPolicy.canMapVillage(ownsAnyBot(player), Frens.isOperator(player), BotAccessGate.isHost(player)))");
         int scan = village.indexOf("VillageFortificationLayoutService.generateLayout(");
         assertTrue(throttle >= 0 && throttle < gate && gate < scan);
@@ -115,10 +115,11 @@ class ClientPacketGateWiringTest {
     }
 
     @Test
-    void noPerPlayerBaseCountCapWasAdded() throws IOException {
+    void zoneRenameIsCappedAndBaseWritesSkipRemovedPlayers() throws IOException {
+        String zone = flatten(Path.of("src/main/java/net/wcfcarolina13/network/ZoneNetworkManager.java"));
+        assertTrue(zone.contains("String newName = BaseScreenLimitPolicy.capLabel(payload.newName());"));
         String bases = flatten(BASES);
-        assertFalse(bases.contains("MAX_BASES_PER_PLAYER"));
-        assertFalse(bases.contains("basesOwnedBy("));
+        assertTrue(bases.contains("if (player.isRemoved() || !acquireWriteSlot(player)) return;"));
     }
 
     // ── Finding 5: quest topic needs a bot the sender may act on ────────────

@@ -36,7 +36,10 @@ public final class BaseScreenLimitPolicy {
      */
     public static String capLabel(String label) {
         if (label == null || label.length() <= MAX_LABEL_CHARS) return label;
-        return label.substring(0, MAX_LABEL_CHARS);
+        int end = MAX_LABEL_CHARS;
+        // Never leave half a surrogate pair at the cut.
+        if (Character.isHighSurrogate(label.charAt(end - 1))) end--;
+        return label.substring(0, end);
     }
 
     /**

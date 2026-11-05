@@ -71,7 +71,8 @@ public final class BaseNetworkManager {
                     // Each base upserts a protected auto-zone that keeps other players' bots out,
                     // so the packet gets the map-village gate and the shared write throttle. The
                     // /bot base set command path (applyBaseSet) keeps its own permission.
-                    if (!acquireWriteSlot(player)) return;
+                    // A packet handled after disconnect must not recreate a throttle entry.
+                    if (player.isRemoved() || !acquireWriteSlot(player)) return;
                     String label = payload != null ? payload.label() : null;
                     if (!BaseAccessPolicy.canMapVillage(ownsAnyBot(player), Frens.isOperator(player), BotAccessGate.isHost(player))) {
                         warnDenied(player, "base_set", label, "not_bot_owner");
@@ -86,7 +87,8 @@ public final class BaseNetworkManager {
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
                     if (player == null) return;
-                    if (!acquireWriteSlot(player)) return;
+                    // A packet handled after disconnect must not recreate a throttle entry.
+                    if (player.isRemoved() || !acquireWriteSlot(player)) return;
                     if (!BaseAccessPolicy.canMapVillage(ownsAnyBot(player), Frens.isOperator(player), BotAccessGate.isHost(player))) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(),
                                 "Only a bot owner, an operator or the host can map a village.");

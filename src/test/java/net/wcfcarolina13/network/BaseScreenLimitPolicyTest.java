@@ -141,4 +141,12 @@ class BaseScreenLimitPolicyTest {
         assertFalse(t.tryAcquire(0L));
         assertTrue(t.tryAcquire(1L));
     }
+
+    @Test
+    void capNeverSplitsASurrogatePair() {
+        String label = "a".repeat(BaseScreenLimitPolicy.MAX_LABEL_CHARS - 1) + "\uD83D\uDE00tail";
+        String capped = BaseScreenLimitPolicy.capLabel(label);
+        org.junit.jupiter.api.Assertions.assertEquals(BaseScreenLimitPolicy.MAX_LABEL_CHARS - 1, capped.length());
+        org.junit.jupiter.api.Assertions.assertFalse(Character.isHighSurrogate(capped.charAt(capped.length() - 1)));
+    }
 }

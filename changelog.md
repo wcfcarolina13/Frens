@@ -16,6 +16,13 @@ Threat model: a non-op player with a modified client on a multiplayer server sen
 
 Tests: `BaseScreenLimitPolicyTest` (14), `CompanionQuestTopicPolicyTest` (4) and `ClientPacketGateWiringTest` (12, source wiring in the `RespawnHandlingWiringTest` style). 3857 to 3887. Full suite: 3887 run, one failure, the known root-container `SoulStoreTest.persistCursorFailureAfterSuccessfulAppendDoesNotProduceDuplicateSequenceOnNextTurn`. Field check still owed on the next two-account sandbox session: a non-op without a bot must get the "save a base" refusal, the "Slow down" notice on a fourth quick Map Village click, no home or lodestone rows when requesting the list with the op's bot alias, and an empty cookables list with no bot screen open.
 
+Review fixes:
+- Zone renames are capped at 32 characters too. That is the same bug the create path had, and the zone list goes to every op or host viewer.
+- A save-base or map-village packet handled after the player disconnected no longer recreates a throttle entry.
+- The label cap never splits a surrogate pair.
+- Policy statement: on a dedicated or LAN server, a non-op with no bot can no longer save a base. The Bases screen is only reachable from a bot's inventory screen, which already required owner, op or host.
+
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
