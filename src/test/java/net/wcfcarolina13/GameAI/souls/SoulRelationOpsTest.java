@@ -209,6 +209,104 @@ class SoulRelationOpsTest {
                 .stream().map(SoulTypes.RelationFact::object).toList());
     }
 
+    private static SoulTypes.SoulEvent failed(String task, boolean execution) {
+        int colon = task.indexOf(':');
+        String category = colon >= 0 ? task.substring(0, colon) : task;
+        Map<String, String> facts = execution
+                ? Map.of("task", task, "category", category, SoulTaskFailurePolicy.FACT_KEY,
+                        SoulTaskFailurePolicy.EXECUTION_VALUE)
+                : Map.of("task", task, "category", category);
+        return new SoulTypes.SoulEvent(UUID.randomUUID(), SoulTypes.EventType.TASK_FAILED,
+                UUID.randomUUID(), List.of(), "overworld", "forest", facts,
+                SoulTypes.Witness.SELF, 0L, Instant.EPOCH, SoulTypes.Salience.NORMAL);
+    }
+
+    private static List<SoulTypes.SoulEvent> times(int n, SoulTypes.SoulEvent... each) {
+        List<SoulTypes.SoulEvent> out = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            for (SoulTypes.SoulEvent e : each) {
+                out.add(e);
+            }
+        }
+        return out;
+    }
+
+    @Test
+    void badAtNeedsThreeExecutionFailures() {
+        assertTrue(SoulRelationOps.fromJournal(times(2, failed("skill:mining", true)), "Bob", 4).isEmpty());
+        List<SoulTypes.RelationFact> facts = SoulRelationOps.fromJournal(times(3, failed("skill:mining", true)), "Bob", 4);
+        assertEquals(1, facts.size());
+        assertEquals(SoulTypes.Relation.BAD_AT, facts.get(0).relation());
+        assertEquals("mining", facts.get(0).object());
+        assertEquals(SoulTypes.RelationSource.SEEN, facts.get(0).source());
+        assertEquals(0.4d, facts.get(0).confidence(), 1e-9);
+        assertEquals("Bob is bad at mining", SoulRelationOps.render(facts.get(0)));
+    }
+
+    @Test
+    void failuresThatAreNotTheBotsOwnNeverCount() {
+        assertTrue(SoulRelationOps.fromJournal(times(10, failed("skill:woodcut", false)), "Bob", 4).isEmpty());
+    }
+
+    @Test
+    void mixedEvidenceGivesOneBeliefPerTask() {
+        // 3 completions, 4 execution failures: bad at it, and no GOOD_AT for the same task.
+        List<SoulTypes.SoulEvent> worse = new ArrayList<>(times(3, completed("skill:mining")));
+        worse.addAll(times(4, failed("skill:mining", true)));
+        assertEquals(List.of(SoulTypes.Relation.BAD_AT),
+                SoulRelationOps.fromJournal(worse, "Bob", 4).stream().map(SoulTypes.RelationFact::relation).toList());
+        // 3 and 3: completions win the tie, good at it.
+        List<SoulTypes.SoulEvent> even = new ArrayList<>(times(3, completed("skill:mining")));
+        even.addAll(times(3, failed("skill:mining", true)));
+        assertEquals(List.of(SoulTypes.Relation.GOOD_AT),
+                SoulRelationOps.fromJournal(even, "Bob", 4).stream().map(SoulTypes.RelationFact::relation).toList());
+    }
+
+    @Test
+    void goodAtOneTaskAndBadAtAnotherInTheSameFold() {
+        List<SoulTypes.SoulEvent> events = new ArrayList<>(times(3, completed("skill:woodcut")));
+        events.addAll(times(3, failed("skill:fishing", true)));
+        List<SoulTypes.RelationFact> facts = SoulRelationOps.fromJournal(events, "Bob", 4);
+        assertEquals(2, facts.size());
+        assertEquals(SoulTypes.Relation.GOOD_AT, facts.get(0).relation());
+        assertEquals("woodcut", facts.get(0).object());
+        assertEquals(SoulTypes.Relation.BAD_AT, facts.get(1).relation());
+        assertEquals("fishing", facts.get(1).object());
+    }
+
+    @Test
+    void badAtClearsGoodAtForTheSameTaskAndBack() {
+        SoulTypes.RelationFact good = fact("Bob", SoulTypes.Relation.GOOD_AT, "mining", 0.4d, 1, 6);
+        SoulTypes.RelationFact bad = fact("Bob", SoulTypes.Relation.BAD_AT, "mining", 0.4d, 2, 6);
+        assertEquals(List.of(bad), SoulRelationOps.merge(List.of(good), bad));
+        assertEquals(List.of(good), SoulRelationOps.merge(List.of(bad), good));
+        // Replacing a held BAD_AT of another task still clears the opposite.
+        SoulTypes.RelationFact badFishing = fact("Bob", SoulTypes.Relation.BAD_AT, "fishing", 0.4d, 1, 6);
+        assertEquals(List.of(bad), SoulRelationOps.merge(List.of(badFishing, good), bad));
+        // A different task's GOOD_AT stays.
+        SoulTypes.RelationFact goodWoodcut = fact("Bob", SoulTypes.Relation.GOOD_AT, "woodcut", 0.4d, 1, 6);
+        assertEquals(List.of(goodWoodcut, bad), SoulRelationOps.merge(List.of(goodWoodcut), bad));
+    }
+
+    @Test
+    void restatingAFactClearsAnOppositeHeldFromAnOlderSave() {
+        SoulTypes.RelationFact good = fact("Bob", SoulTypes.Relation.GOOD_AT, "mining", 0.4d, 1, 6);
+        SoulTypes.RelationFact bad = fact("Bob", SoulTypes.Relation.BAD_AT, "mining", 0.4d, 1, 6);
+        SoulTypes.RelationFact badAgain = fact("Bob", SoulTypes.Relation.BAD_AT, "mining", 0.4d, 3, 6);
+        List<SoulTypes.RelationFact> merged = SoulRelationOps.merge(List.of(good, bad), badAgain);
+        assertEquals(1, merged.size());
+        assertEquals(SoulTypes.Relation.BAD_AT, merged.get(0).relation());
+        assertEquals(3, merged.get(0).day());
+    }
+
+    @Test
+    void aWeakerBadAtThatIsDroppedLeavesGoodAtAlone() {
+        SoulTypes.RelationFact strongBad = fact("Bob", SoulTypes.Relation.BAD_AT, "fishing", 0.9d, 1, 6);
+        SoulTypes.RelationFact good = fact("Bob", SoulTypes.Relation.GOOD_AT, "mining", 0.4d, 1, 6);
+        SoulTypes.RelationFact weakBad = fact("Bob", SoulTypes.Relation.BAD_AT, "mining", 0.4d, 2, 6);
+        assertEquals(List.of(strongBad, good), SoulRelationOps.merge(List.of(strongBad, good), weakBad));
+    }
+
     // === rendering ===
 
     @Test
