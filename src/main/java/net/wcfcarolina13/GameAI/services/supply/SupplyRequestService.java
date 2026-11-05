@@ -1129,6 +1129,16 @@ public final class SupplyRequestService {
     }
 
     /**
+     * Whether the owner's No for {@code itemId} at {@code chest} still silences {@code bot}
+     * ({@link SupplyRequestLedger#isRejectCoolingDown}); {@code false} when not running. Any
+     * thread: the ledger is synchronized.
+     */
+    static boolean isRejectCoolingDown(UUID bot, ChestKey chest, String itemId) {
+        SupplyRequestLedger book = ledger;
+        return book != null && book.isRejectCoolingDown(bot, chest, itemId);
+    }
+
+    /**
      * Whether {@code owner} has a standing permission for {@code chest}; {@code false} when not
      * running. Any thread: the ledger is synchronized.
      */

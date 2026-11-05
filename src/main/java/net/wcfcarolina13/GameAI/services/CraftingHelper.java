@@ -1769,11 +1769,13 @@ public final class CraftingHelper {
      * ({@link CraftSupplyNeedPolicy}) and the chest choice ({@link CraftBundleAskPolicy}) run on the
      * caller's thread; the one ask and the takes run through {@link SupplyWithdrawals#withdrawBundle}.
      *
-     * <p>Off the server thread the worker waits for the owner's answer ({@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED}),
+     * <p>Worker threads only. The worker waits for the owner's answer ({@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED}),
      * walks once when the answer is yes but the chest is out of reach, and converts taken logs to
-     * the planks the craft counted on. On the server thread nothing waits: an opened prompt ends
-     * this attempt quietly and the next attempt redeems it. Nothing to ask (no chest, nothing
-     * needed, nothing grantable) keeps today's per-item path.
+     * the planks the craft counted on. On the server thread (the idle stone upgrade from
+     * {@code onServerTick}) nothing is asked and the per-item pulls run as before the bundle: that
+     * caller cannot wait, and it retries no sooner than the grant lives, so a prompt it opened
+     * would never be redeemed and would reopen on every retry. Nothing to ask (no chest, nothing
+     * needed, nothing grantable) keeps today's per-item path too.
      *
      * @return what the craft does next; {@link CraftBundleAskPolicy.Next#STOP_WITH_LINE} has said
      *         its line (or left it in {@code shortfall} for a strict craft)
@@ -1793,16 +1795,18 @@ public final class CraftingHelper {
         if (server == null) {
             return CraftBundleAskPolicy.Next.CONTINUE;
         }
-        boolean onServerThread = server.isOnThread();
+        if (server.isOnThread()) {
+            // A server-thread craft cannot wait for the answer and would not be back before the
+            // grant expired: it keeps the per-item pulls, exactly as before the bundle.
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
         Item head = mat.headItem();
         boolean headIsPlanks = head.equals(Items.OAK_PLANKS);
         String headKey = headIsPlanks ? CraftBundleAskPolicy.PLANKS : Registries.ITEM.getId(head).toString();
         Predicate<ItemStack> match = s -> isPlank(s) || isLog(s) || s.isOf(Items.STICK) || (!headIsPlanks && s.isOf(head));
         boolean tableMustBeCrafted = !tableAvailableWithoutCrafting(bot, source);
-        BundleInput input = onServerThread
-                ? gatherBundleInput(world, bot, match, head, headIsPlanks, true)
-                : SupplyServerHop.call(server, () -> gatherBundleInput(world, bot, match, head, headIsPlanks, false),
-                        CHEST_PULL_SCAN_HOP_MS, null);
+        BundleInput input = SupplyServerHop.call(server, () -> gatherBundleInput(world, bot, match, head, headIsPlanks),
+                CHEST_PULL_SCAN_HOP_MS, null);
         if (input == null || input.chests().isEmpty()) {
             return CraftBundleAskPolicy.Next.CONTINUE;
         }
@@ -1861,14 +1865,14 @@ public final class CraftingHelper {
             missing.add(new SupplyBundlePromptPolicy.Shown(line.count(), poolDisplayName(line.item(), line.count())));
         }
         String purpose = CraftBundleAskPolicy.purposeText(toolLabel(kind, mat), amount, tableMustBeCrafted);
-        SupplyWithdrawals.WaitMode mode = onServerThread
-                ? SupplyWithdrawals.WaitMode.NONE : SupplyWithdrawals.WaitMode.UNTIL_ANSWERED;
+        // A worker (the only caller past the thread check above) waits for the one answer.
+        SupplyWithdrawals.WaitMode mode = SupplyWithdrawals.WaitMode.UNTIL_ANSWERED;
         // A /bot stop (or any abort of this bot's task) ends the worker's wait for the owner.
         UUID botId = bot.getUuid();
         java.util.function.BooleanSupplier abort = () -> TaskService.isAbortRequested(botId);
         SupplyWithdrawals.BundleResult result = SupplyWithdrawals.withdrawBundle(bot, chest.pos(), asks, purpose,
                 missing, mode, abort);
-        if (result.kind() == SupplyWithdrawals.Kind.READY && !onServerThread) {
+        if (result.kind() == SupplyWithdrawals.Kind.READY) {
             // Permitted but out of reach: walk there once, then take; the second call checks reach itself.
             moveNearBlock(bot, source, chest.pos(), STATION_REACH_SQ);
             result = SupplyWithdrawals.withdrawBundle(bot, chest.pos(), asks, purpose, missing, mode, abort);
@@ -1900,12 +1904,12 @@ public final class CraftingHelper {
 
     /**
      * Server thread only (chests read as absent anywhere else). The bot's own counts per pool and,
-     * per chest near it (nearest first; in reach only when {@code inReachOnly}), every stack of the
-     * pools this craft draws on with what the supply policy could grant of it
+     * per chest near it (nearest first, in reach or not: a worker walks once for a yes), every
+     * stack of the pools this craft draws on with what the supply policy could grant of it
      * ({@link SupplyWithdrawals#grantableEstimate}: allowlisted, above the reserve). Read-only.
      */
     private static BundleInput gatherBundleInput(ServerWorld world, ServerPlayerEntity bot, Predicate<ItemStack> match,
-                                                 Item head, boolean headIsPlanks, boolean inReachOnly) {
+                                                 Item head, boolean headIsPlanks) {
         Map<String, Integer> have = new HashMap<>();
         have.put(CraftBundleAskPolicy.PLANKS, countPlanks(bot));
         have.put(CraftBundleAskPolicy.LOGS, InventoryIterator.count(bot, CraftingHelper::isLog));
@@ -1914,7 +1918,7 @@ public final class CraftingHelper {
             have.put(Registries.ITEM.getId(head).toString(), countItem(bot, head));
         }
         Map<BlockPos, List<BundleStack>> byChest = new LinkedHashMap<>();
-        for (PullCandidate candidate : findPullCandidates(world, bot, match, inReachOnly)) {
+        for (PullCandidate candidate : findPullCandidates(world, bot, match, false)) {
             int grantable = SupplyWithdrawals.grantableEstimate(world, candidate.sample(), candidate.count());
             if (grantable <= 0) {
                 continue;

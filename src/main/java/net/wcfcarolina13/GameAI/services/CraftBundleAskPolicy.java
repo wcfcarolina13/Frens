@@ -188,7 +188,11 @@ public final class CraftBundleAskPolicy {
     public enum Next {
         /** Go on: the existing per-item path counts what the bot now has and crafts or says why. */
         CONTINUE,
-        /** A prompt is open and this thread cannot wait: stop quietly; the next attempt redeems it. */
+        /**
+         * A prompt is still open after the wait (the settle step had to ask again, or this call
+         * could not wait): stop quietly; a later attempt finds the ticket. Server-thread crafts
+         * never ask, so they never reach this.
+         */
         STOP_SILENT,
         /** The owner declined or never answered: stop this craft with one line. */
         STOP_WITH_LINE,

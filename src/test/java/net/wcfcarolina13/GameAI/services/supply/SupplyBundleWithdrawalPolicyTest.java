@@ -9,8 +9,13 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The facade's bundle decisions: one kind for the set, and why a refused set was refused. */
+/**
+ * The facade's bundle decisions: one kind for the set, why a refused set was refused, and which
+ * lines the step after the wait leaves alone.
+ */
 class SupplyBundleWithdrawalPolicyTest {
 
     @Test
@@ -45,13 +50,42 @@ class SupplyBundleWithdrawalPolicyTest {
     }
 
     @Test
-    void aDroppedTicketWasAnsweredNoOrLapsed() {
-        assertEquals(BundleWhy.OWNER_DECLINED, SupplyWithdrawalPolicy.bundleWhyOfTicket(TicketStep.DROP_NOT_PERMITTED));
+    void aDroppedTicketOnRejectCooldownWasAnsweredNo() {
+        assertEquals(BundleWhy.OWNER_DECLINED,
+                SupplyWithdrawalPolicy.bundleWhyOfTicket(TicketStep.DROP_NOT_PERMITTED, true));
+    }
+
+    @Test
+    void aDroppedTicketWithNoRejectCooldownLapsedUnanswered() {
+        // The ledger sets the reject cooldown on an explicit No only, so a dropped ticket without one
+        // is a prompt nobody answered: "No answer about …", not "Okay, I won't take …".
+        assertEquals(BundleWhy.NO_ANSWER,
+                SupplyWithdrawalPolicy.bundleWhyOfTicket(TicketStep.DROP_NOT_PERMITTED, false));
+    }
+
+    @Test
+    void theOtherTicketStepsAreNobodysDecisionEitherWay() {
         for (TicketStep step : TicketStep.values()) {
             if (step != TicketStep.DROP_NOT_PERMITTED) {
-                assertEquals(BundleWhy.OTHER, SupplyWithdrawalPolicy.bundleWhyOfTicket(step), step.name());
+                assertEquals(BundleWhy.OTHER, SupplyWithdrawalPolicy.bundleWhyOfTicket(step, true), step.name());
+                assertEquals(BundleWhy.OTHER, SupplyWithdrawalPolicy.bundleWhyOfTicket(step, false), step.name());
             }
         }
+    }
+
+    @Test
+    void aMovedOrRefusedLineIsSettledBeforeTheWaitAndNotRunAgain() {
+        // A line a live grant covered in the first step is already in the pack: the settle step
+        // must not ask for it again. A refused line was decided for this call.
+        assertTrue(SupplyWithdrawalPolicy.bundleLineSettled(Kind.MOVED));
+        assertTrue(SupplyWithdrawalPolicy.bundleLineSettled(Kind.REFUSED));
+    }
+
+    @Test
+    void aWaitingOrReadyLineIsWhatTheSettleStepIsFor() {
+        assertFalse(SupplyWithdrawalPolicy.bundleLineSettled(Kind.WAITING));
+        assertFalse(SupplyWithdrawalPolicy.bundleLineSettled(Kind.READY));
+        assertFalse(SupplyWithdrawalPolicy.bundleLineSettled(null));
     }
 
     @Test

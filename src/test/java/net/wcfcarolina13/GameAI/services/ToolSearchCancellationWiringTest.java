@@ -91,8 +91,9 @@ class ToolSearchCancellationWiringTest {
         assertTrue(loop.contains("SupplyWithdrawalPolicy.keepWaiting(aborted, pending,"));
         assertTrue(loop.contains("case ABORTED: return refused.apply(Refusal.ABORTED);"));
         String bundle = method("supply/SupplyWithdrawals.java", "withdrawBundle");
-        assertTrue(bundle.contains("Supplier<BundleResult> oneStep = () -> abort != null && abort.getAsBoolean()"));
-        assertTrue(bundle.contains("awaitAnswer(srv, bot, abort, () -> onServer(srv, oneStep, refused), refused)"));
+        assertTrue(bundle.contains("Function<BundleResult, BundleResult> oneStep = before -> abort != null && abort.getAsBoolean()"));
+        assertTrue(bundle.contains("awaitAnswer(srv, bot, abort, () -> onServer(srv, () -> oneStep.apply(before), refusedUnsettled),"
+                + " refusedUnsettled)"));
     }
 
     private static String method(String relative, String name) throws IOException {

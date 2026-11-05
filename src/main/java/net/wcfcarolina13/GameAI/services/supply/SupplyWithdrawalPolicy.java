@@ -633,9 +633,9 @@ public final class SupplyWithdrawalPolicy {
         NONE,
         /** Any other refusal: busy, no owner, chest unreadable, policy, not running. */
         OTHER,
-        /** The worker's wait ran out before the prompt settled. */
+        /** Nobody answered: the prompt lapsed, or the worker's wait ran out before it settled. */
         NO_ANSWER,
-        /** The owner said No, let the prompt lapse, or refused these items here recently. */
+        /** The owner said No, here or recently enough that the ledger still remembers it. */
         OWNER_DECLINED
     }
 
@@ -644,9 +644,29 @@ public final class SupplyWithdrawalPolicy {
         return status == RequestStatus.REJECT_COOLDOWN ? BundleWhy.OWNER_DECLINED : BundleWhy.OTHER;
     }
 
-    /** What a ticket step means for a bundle: a dropped ticket was answered No or lapsed. */
-    public static BundleWhy bundleWhyOfTicket(TicketStep step) {
-        return step == TicketStep.DROP_NOT_PERMITTED ? BundleWhy.OWNER_DECLINED : BundleWhy.OTHER;
+    /**
+     * What a ticket step means for a bundle. A dropped ticket ({@link TicketStep#DROP_NOT_PERMITTED})
+     * was either answered No or left to lapse, and only the first is the owner's decision: the ledger
+     * puts a line on its reject cooldown for an explicit No alone, so {@code rejectCooling} tells
+     * them apart. The other steps refuse nothing the owner decided.
+     *
+     * @param rejectCooling the ledger's reject cooldown for this bot, chest and item id is active
+     */
+    public static BundleWhy bundleWhyOfTicket(TicketStep step, boolean rejectCooling) {
+        if (step != TicketStep.DROP_NOT_PERMITTED) {
+            return BundleWhy.OTHER;
+        }
+        return rejectCooling ? BundleWhy.OWNER_DECLINED : BundleWhy.NO_ANSWER;
+    }
+
+    /**
+     * Whether a line's result from the step before the wait is final, so the step that settles the
+     * bundle keeps it instead of running the line again: a line already moved must not be asked
+     * for again (the bot holds the items; a new ask would open a new prompt), and a refused line
+     * was decided for this call. Waiting and ready lines are the ones the settle step is for.
+     */
+    public static boolean bundleLineSettled(Kind kind) {
+        return kind == Kind.MOVED || kind == Kind.REFUSED;
     }
 
     /** The one reason a bundle reports: the owner's decision outranks no answer, which outranks the rest. */

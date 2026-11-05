@@ -55,6 +55,34 @@ class SupplyRequestLedgerBundleTest {
         return new BundleLine(item, qty, PLENTY, qty);
     }
 
+    @Test
+    void anExplicitNoIsRememberedAsRejectCoolingDownAndALapsedPromptIsNot() {
+        // Lapsed: the prompt expired unanswered, so nothing silences these lines.
+        BundleOpenResult lapsed = openPickaxeSet();
+        now[0] += Timings.defaults().requestLifetimeMs();
+        ledger.sweep();
+        assertFalse(ledger.hasPending(BOT));
+        assertFalse(ledger.isRejectCoolingDown(BOT, CHEST, PLANKS.itemId()));
+        assertFalse(ledger.isRejectCoolingDown(BOT, CHEST, STICK.itemId()));
+        assertEquals(ResponseStatus.NOT_FOUND, ledger.respond(lapsed.requestId(), OWNER, false, Choice.NO).status());
+
+        // Answered No: every line of the set is silenced for the reject cooldown, no other item is.
+        now[0] += Timings.defaults().promptCooldownMs(); // the lapse extended the prompt cooldown
+        BundleOpenResult again = openPickaxeSet();
+        assertEquals(OpenStatus.OPENED, again.status());
+        assertEquals(ResponseStatus.REJECTED, ledger.respond(again.requestId(), OWNER, false, Choice.NO).status());
+        assertTrue(ledger.isRejectCoolingDown(BOT, CHEST, PLANKS.itemId()));
+        assertTrue(ledger.isRejectCoolingDown(BOT, CHEST, STICK.itemId()));
+        assertFalse(ledger.isRejectCoolingDown(BOT, CHEST, DIAMOND.itemId()));
+        assertFalse(ledger.isRejectCoolingDown(STRANGER, CHEST, PLANKS.itemId()));
+        assertFalse(ledger.isRejectCoolingDown(null, CHEST, PLANKS.itemId()));
+        assertFalse(ledger.isRejectCoolingDown(BOT, null, PLANKS.itemId()));
+        assertFalse(ledger.isRejectCoolingDown(BOT, CHEST, null));
+
+        now[0] += Timings.defaults().rejectCooldownMs();
+        assertFalse(ledger.isRejectCoolingDown(BOT, CHEST, PLANKS.itemId()), "the cooldown ends on its deadline");
+    }
+
     private BundleOpenResult openPickaxeSet() {
         return ledger.openBundle(OWNER, BOT, CHEST, List.of(line(PLANKS, 3), line(STICK, 2)));
     }

@@ -43,28 +43,36 @@ class CombinedChestAskWiringTest {
     }
 
     @Test
-    void theWorldIsReadOnTheServerThreadAndTheWorkerWaitsForTheAnswer() throws IOException {
+    void onlyAWorkerAsksAndItWaitsForTheAnswer() throws IOException {
         String body = block(crafting(), "private static CraftBundleAskPolicy.Next askChestForToolMaterials(");
-        assertTrue(body.contains("boolean onServerThread = server.isOnThread();"));
+        // A server-thread craft (the idle stone upgrade from onServerTick) cannot wait and would not
+        // be back before the 60 s grant expired, so an "Allow once" would never be spent and a new
+        // prompt would open on every retry: it keeps the per-item pulls, exactly as before the bundle.
+        assertTrue(body.contains("if (server.isOnThread()) {\n"
+                + "            // A server-thread craft cannot wait for the answer and would not be back before the\n"
+                + "            // grant expired: it keeps the per-item pulls, exactly as before the bundle.\n"
+                + "            return CraftBundleAskPolicy.Next.CONTINUE;\n"
+                + "        }"));
+        assertFalse(body.contains("WaitMode.NONE"), "no caller of the bundle runs without waiting");
+        assertFalse(body.contains("onServerThread"), "past the thread check there is one path, the worker's");
         // One hop gathers the bot's counts and every chest's grantable counts.
-        assertTrue(body.contains("? gatherBundleInput(world, bot, match, head, headIsPlanks, true)\n"
-                + "                : SupplyServerHop.call(server, () -> gatherBundleInput(world, bot, match, head, headIsPlanks, false),"));
+        assertTrue(body.contains("BundleInput input = SupplyServerHop.call(server, () -> gatherBundleInput(world, bot, match, head, headIsPlanks),"));
         // The plan is pure and runs on the caller's thread; the chest choice too.
         assertTrue(body.contains("CraftSupplyNeedPolicy.plan(CraftBundleAskPolicy.CRAFT_SET, 1, recipes, input.have(), chest.pools(),"));
         assertTrue(body.contains("CraftBundleAskPolicy.chooseChest(plans)"));
-        // Off the server thread the worker waits for the one answer; on it nothing waits.
-        assertTrue(body.contains("? SupplyWithdrawals.WaitMode.NONE : SupplyWithdrawals.WaitMode.UNTIL_ANSWERED;"));
+        // The worker waits for the one answer.
+        assertTrue(body.contains("SupplyWithdrawals.WaitMode mode = SupplyWithdrawals.WaitMode.UNTIL_ANSWERED;"));
         assertTrue(body.contains("SupplyWithdrawals.withdrawBundle(bot, chest.pos(), asks, purpose,\n"
                 + "                missing, mode, abort)"));
         assertTrue(body.contains("abort = () -> TaskService.isAbortRequested(botId);"), "/bot stop ends the wait");
-        // A permitted take out of reach walks once, off the server thread only.
-        assertTrue(body.contains("if (result.kind() == SupplyWithdrawals.Kind.READY && !onServerThread) {"));
+        // A permitted take out of reach walks once.
+        assertTrue(body.contains("if (result.kind() == SupplyWithdrawals.Kind.READY) {"));
         // Nothing to ask keeps today's path.
         assertTrue(body.contains("if (input == null || input.chests().isEmpty()) {\n"
                 + "            return CraftBundleAskPolicy.Next.CONTINUE;"));
         assertFalse(body.contains("Thread.sleep"), "the craft helper never sleeps itself; the facade's wait does");
         String gather = block(crafting(), "private static BundleInput gatherBundleInput(");
-        assertTrue(gather.contains("findPullCandidates(world, bot, match, inReachOnly)"));
+        assertTrue(gather.contains("findPullCandidates(world, bot, match, false)"));
         assertTrue(gather.contains("SupplyWithdrawals.grantableEstimate(world, candidate.sample(), candidate.count())"));
         assertFalse(Pattern.compile("\\.\\s*(?:removeStack|split|setStack|decrement|insertStack)\\s*\\(").matcher(gather).find(),
                 "the gather is read-only");
@@ -79,13 +87,34 @@ class CombinedChestAskWiringTest {
                 "each line keeps the single withdrawal's ticket logic");
         assertTrue(count(step, "redeem(bot, world, chestPos,") >= 3, "covered, taken and granted lines all redeem");
         assertTrue(step.contains("TICKETS.record(line.approved(), now)"));
-        assertTrue(step.contains("SupplyWithdrawalPolicy.aggregateKinds(kinds)"));
+        assertTrue(step.contains("return BundleResult.of(results, whys);"));
         assertFalse(step.contains("transferNow("), "the take stays in redeem");
+        // The step after the wait carries every line the first step settled (moved or refused): a
+        // line a live grant covered is in the pack and must not be asked for again.
+        assertTrue(step.contains("if (carried != null && SupplyWithdrawalPolicy.bundleLineSettled(carried.get(i).kind())) {"));
+        assertTrue(step.contains("results[i] = carried.get(i);\n"
+                + "                whys[i] = before.lineWhys().get(i);\n"
+                + "                continue;"));
+        // A dropped ticket is the owner's No only while the ledger's reject cooldown says so; else nobody answered.
+        assertTrue(step.contains("SupplyWithdrawalPolicy.bundleWhyOfTicket(ticketStep,\n"
+                + "                            SupplyRequestService.isRejectCoolingDown(botId, chestKey, item.itemId()))"));
+        // The service merges lines by exact item, so its outcomes are matched by item key, never by index.
+        assertTrue(step.contains("Map<ItemKey, LineOutcome> outcomes = new HashMap<>();"));
+        assertTrue(step.contains("LineOutcome line = outcomes.get(toRequestItems.get(n));"));
+        assertFalse(step.contains("outcomes.get(n)"));
+        String aggregate = block(facade, "static BundleResult of(Result[] results, BundleWhy[] whys)");
+        assertTrue(aggregate.contains("SupplyWithdrawalPolicy.aggregateKinds(kinds)"));
         String bundle = block(facade, "public static BundleResult withdrawBundle(");
         assertTrue(bundle.contains("SupplyWithdrawalPolicy.effectiveMode(mode, onServerThread)"));
         assertTrue(bundle.contains("if (effective == WaitMode.UNTIL_ANSWERED && outcome.kind() == Kind.WAITING) {"));
-        assertTrue(bundle.contains("awaitAnswer(srv, bot, abort, () -> onServer(srv, oneStep, refused), refused)"));
-        assertTrue(bundle.contains("r == Refusal.TIMEOUT ? BundleWhy.NO_ANSWER : BundleWhy.OTHER"));
+        assertTrue(bundle.contains("bundleStep(bot, chestPos, lines, purpose, stillMissing, before)"),
+                "the settle step is given the step before the wait");
+        assertTrue(bundle.contains("awaitAnswer(srv, bot, abort, () -> onServer(srv, () -> oneStep.apply(before), refusedUnsettled),\n"
+                + "                        refusedUnsettled)"));
+        String refusedAfter = block(facade, "private static BundleResult refusedAfter(");
+        assertTrue(refusedAfter.contains("refusal == Refusal.TIMEOUT ? BundleWhy.NO_ANSWER : BundleWhy.OTHER"));
+        assertTrue(refusedAfter.contains("BundleResult.unsettledRefused(before, refused, why)"),
+                "a timeout or abort after the first step refuses only the lines it left waiting");
         String wait = block(facade, "private static <T> T awaitAnswer(");
         assertTrue(wait.contains("SupplyRequestService.isPending(botId)"));
         assertTrue(wait.contains("Thread.sleep(POLL_INTERVAL_MS)"), "the worker polls; the server thread never waits");
