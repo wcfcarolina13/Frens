@@ -83,7 +83,7 @@ public class CollectDirtSkill implements Skill {
     private static final int HORIZONTAL_RADIUS_STEP = 2;
     private static final int MAX_VERTICAL_RANGE = 8;
     private static final int VERTICAL_RANGE_STEP = 1;
-    private static final int EXPLORATION_STEP_RADIUS = 6;
+    private static final int EXPLORATION_STEP_RADIUS = 8;
     private static final int EXPLORATION_STEP_VERTICAL = 2;
     private static final double DROP_SEARCH_RADIUS = 6.0;
     private static final int STRAIGHT_STAIR_HEADROOM = 4;
@@ -331,6 +331,9 @@ public class CollectDirtSkill implements Skill {
         // that left and came back, e.g. a zombie returning beside a caged mob).
         long engageStartMs = 0L;
         Set<UUID> engageableSeen = new HashSet<>();
+        // Ends the job when iterations stop adding to the count (see MiningStallPolicy).
+        int noGainStreak = 0;
+        int collectedAtLastIteration = -1;
 
         while (collected < targetCount
                 && failuresInRow < currentMaxFails
@@ -439,6 +442,18 @@ public class CollectDirtSkill implements Skill {
                 outcome = SkillExecutionResult.success("Collected " + collected + " " + harvestLabel + " blocks.");
                 break;
             }
+            if (collectedAtLastIteration >= 0) {
+                noGainStreak = net.wcfcarolina13.GameAI.skills.MiningStallPolicy.nextStreak(
+                        noGainStreak, collectedAtLastIteration, collected);
+                if (net.wcfcarolina13.GameAI.skills.MiningStallPolicy.exhausted(noGainStreak)) {
+                    LOGGER.warn("{} ending: {} iterations in a row collected nothing ({} / {}).",
+                            skillName, noGainStreak, collected, targetCount);
+                    outcome = SkillExecutionResult.failure("No more reachable " + harvestLabel + " nearby. Collected "
+                            + collected + " out of " + targetCount + ".");
+                    break;
+                }
+            }
+            collectedAtLastIteration = collected;
 
             attempt++;
             int effectiveHorizontal = Math.min(horizontalRadius + radiusBoost, MAX_HORIZONTAL_RADIUS);
@@ -544,7 +559,8 @@ public class CollectDirtSkill implements Skill {
                     BlockPos postExplorePos = null;
                     if (explorationSucceeded && source.getPlayer() != null && preExplorePos != null) {
                         postExplorePos = source.getPlayer().getBlockPos();
-                        botActuallyMoved = postExplorePos != null && postExplorePos.getSquaredDistance(preExplorePos) > 4;
+                        botActuallyMoved = postExplorePos != null && net.wcfcarolina13.GameAI.skills.ExplorationStepPolicy.moved(
+                                postExplorePos.getX() - preExplorePos.getX(), postExplorePos.getZ() - preExplorePos.getZ());
                     }
                     
                     if (botActuallyMoved) {
@@ -562,13 +578,12 @@ public class CollectDirtSkill implements Skill {
                         explorationAttempts = 0;
                         continue;
                     } else if (explorationSucceeded) {
-                        LOGGER.warn("{} exploration returned success but bot didn't move significantly - counting as failure", skillName);
-                        failuresInRow++; // Increment instead of reset since bot didn't actually relocate
+                        // The failed iteration above already counted toward failuresInRow; counting it
+                        // again here ended jobs after three iterations.
+                        LOGGER.warn("{} exploration returned success but bot didn't move significantly", skillName);
                     }
-                    
-                    if (!explorationSucceeded) {
-                        explorationAttempts++;
-                    }
+                    // Any exploration that did not relocate the bot uses up one of this cycle's attempts.
+                    explorationAttempts++;
                 }
 
                 boolean hitSearchCeiling = horizontalRadius + radiusBoost >= MAX_HORIZONTAL_RADIUS
@@ -901,11 +916,12 @@ public class CollectDirtSkill implements Skill {
         }
 
         Direction facing = player.getHorizontalFacing();
-        candidates.sort(
-                Comparator.<BlockPos>comparingDouble(pos -> -ExplorationMovePolicy.score(origin, pos))
-                        .thenComparingDouble(pos -> -forwardAlignment(origin, pos, facing))
-                        .thenComparingDouble(origin::getSquaredDistance)
-        );
+        // Facing first, then farthest first: the step exists to relocate the bot, and nearest-first
+        // picked the block straight ahead, which "succeeded" without a real move.
+        Comparator<net.wcfcarolina13.GameAI.skills.ExplorationStepPolicy.Candidate> order =
+                net.wcfcarolina13.GameAI.skills.ExplorationStepPolicy.order(facing.getOffsetX(), facing.getOffsetZ());
+        candidates.sort((a, b) -> order.compare(explorationCandidate(origin, a), explorationCandidate(origin, b)));
+        int tries = 0;
 
         if (sharedState != null) {
             SharedStateUtils.setValue(sharedState, "exploration.origin.x", origin.getX());
@@ -924,6 +940,11 @@ public class CollectDirtSkill implements Skill {
                 continue;
             }
 
+            if (tries >= net.wcfcarolina13.GameAI.skills.ExplorationStepPolicy.MAX_TRIES_PER_STEP) {
+                LOGGER.info("{} exploration: stopping after {} reposition attempts from {}", skillName, tries, origin);
+                break;
+            }
+            tries++;
             if (navigateWithPolicy(source, player, destination, skillName + " exploration", squareMode, squareCenter, squareRadius)) {
                 if (sharedState != null) {
                     SharedStateUtils.setValue(sharedState, "exploration.lastSuccess.pos", destination);
@@ -936,6 +957,11 @@ public class CollectDirtSkill implements Skill {
         }
 
         return false;
+    }
+
+    private static net.wcfcarolina13.GameAI.skills.ExplorationStepPolicy.Candidate explorationCandidate(BlockPos origin, BlockPos pos) {
+        return new net.wcfcarolina13.GameAI.skills.ExplorationStepPolicy.Candidate(
+                pos.getX() - origin.getX(), pos.getZ() - origin.getZ(), ExplorationMovePolicy.score(origin, pos));
     }
 
     private List<BlockPos> gatherExplorationTargets(ServerPlayerEntity player,
@@ -951,6 +977,10 @@ public class CollectDirtSkill implements Skill {
                     continue;
                 }
                 if (dx * dx + dz * dz > EXPLORATION_STEP_RADIUS * EXPLORATION_STEP_RADIUS) {
+                    continue;
+                }
+                if (!net.wcfcarolina13.GameAI.skills.ExplorationStepPolicy.farEnough(dx, dz)) {
+                    // A stand this close is "reached" without relocating the bot.
                     continue;
                 }
                 boolean addedForOffset = false;
@@ -1045,6 +1075,15 @@ public class CollectDirtSkill implements Skill {
             }
         }
 
+        BlockPos finalBlock = player.getBlockPos();
+        boolean relocated = net.wcfcarolina13.GameAI.skills.ExplorationStepPolicy.moved(
+                finalBlock.getX() - originBlock.getX(), finalBlock.getZ() - originBlock.getZ());
+        if (success && !relocated) {
+            // Arriving within 3 blocks of a nearby stand is not a relocation; the mining loop would count it
+            // as a failure, so record it as one and let the caller try the next stand.
+            LOGGER.info("{} ended at {}, within 2 blocks of the start {}; not a relocation.", logContext, finalBlock, originBlock);
+            success = false;
+        }
         ExplorationMovePolicy.record(originBlock, destination, success);
         if (success) {
             LOGGER.info("{} navigation success to {}: {}", logContext, destination, result);
@@ -1208,20 +1247,14 @@ public class CollectDirtSkill implements Skill {
         }
     }
 
-    private double forwardAlignment(BlockPos origin, BlockPos candidate, Direction facing) {
-        int dx = candidate.getX() - origin.getX();
-        int dz = candidate.getZ() - origin.getZ();
-        int fx = facing.getOffsetX();
-        int fz = facing.getOffsetZ();
-        double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
-        if (horizontalDistance == 0.0) {
-            return -1.0;
-        }
-        return (dx * fx + dz * fz) / horizontalDistance;
-    }
-
     private boolean isNavigableStand(ServerPlayerEntity player, BlockPos foot, BlockPos head) {
         if (!isStandable(player, foot, head)) {
+            return false;
+        }
+        // Water and lava have no collision shape, so isStandable alone accepts a stand inside them; the
+        // mining loop then stops with "water flooded the dig site" once the bot walks there.
+        if (!player.getEntityWorld().getFluidState(head).isEmpty()
+                || !player.getEntityWorld().getFluidState(head.up()).isEmpty()) {
             return false;
         }
         return player.getEntityWorld().getBlockState(head.up())
