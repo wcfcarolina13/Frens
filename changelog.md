@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## A shortened player name with a comma addresses that player (unreleased, 2026-11-05)
+
+1.1.219 addressee deferral "nicknames and prefix matching for human names". "Rob, want some bread?" with a player named Robert_99 online went to the bots' address rules (no bot named, so plain chat, but a later bot name in the line would have pulled the bots in). Only an exact name counted as another player's address.
+
+- `ChatAddressing.isNicknameOfAHuman`: a leading token with a trailing `,` or `:`, at least 3 letters, not on the common-word list, that starts another online player's normalized name, is that player's address (no bot reply, no overhear). A token that also starts a bot's name stays with the bots ("Jak," with a player Jakob and a bot Jake).
+- **Cost (rulings I made):** without the comma or colon nothing changes ("rob want bread" is plain chat), so a nickname written without punctuation still reaches the bots. Prefix only: "Bobby" for Robert does not match. Not run against the local addressee eval set (it lives on the Mac).
+- **Limits:** unit tests only (4 new, Tests 3857 → 3861). The other two 1.1.219 deferrals stay open: a mid-sentence third-person mention (conflicts with an existing test, needs a ruling) and "you and Bob" (needs the DM follow-up window's bot, which this stateless resolver does not have).
+- **Sandbox check:** with a second human online named e.g. Robert_99, "Rob, come here" gets no bot reply, and "Jake, come here" still does.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
