@@ -148,6 +148,57 @@ class HandDigStairPolicyTest {
     }
 
     @Test
+    void waterTreadIsNoTreadAndAnotherDirectionIsCut() {
+        // Water in front at tread height is not a step (and not a liquid refusal: the bot never
+        // mines it). That direction refuses NO_TREAD and the stair goes another way.
+        Grid g = stonePit(STONE_BY_HAND).set(1, 0, 0, Cell.water());
+        Refusal[] out = new Refusal[1];
+        assertNull(HandDigStairPolicy.planFor(g, Dir.EAST, out));
+        assertEquals(Refusal.NO_TREAD, out[0]);
+        Decision d = HandDigStairPolicy.decide(g, List.of(Dir.EAST), 0);
+        assertTrue(d.ok());
+        assertTrue(d.plan().dir() != Dir.EAST);
+        assertEquals(Refusal.NO_TREAD, d.perDirection().get(Dir.EAST));
+    }
+
+    @Test
+    void waterInAnyCutCellRefusesAsWater() {
+        Refusal[] out = new Refusal[1];
+        for (Offset cut : HandDigStairPolicy.cutCells(Dir.EAST)) {
+            Grid g = stonePit(STONE_BY_HAND).set(cut.dx(), cut.dy(), cut.dz(), Cell.water());
+            assertNull(HandDigStairPolicy.planFor(g, Dir.EAST, out), "cut cell " + cut);
+            assertEquals(Refusal.WATER_EXPOSED, out[0], "cut cell " + cut);
+        }
+        // The bot's own overhead cell is cut in every direction, so water there refuses them all.
+        Decision d = HandDigStairPolicy.decide(stonePit(STONE_BY_HAND).set(0, 2, 0, Cell.water()), List.of(Dir.EAST), 0);
+        assertFalse(d.ok());
+        assertFalse(d.walk());
+        assertEquals(Refusal.WATER_EXPOSED, d.refusal());
+        assertEquals(4, d.perDirection().size());
+        d.perDirection().values().forEach(r -> assertEquals(Refusal.WATER_EXPOSED, r));
+    }
+
+    @Test
+    void pocketWalkNeverStepsOntoAWaterFloor() {
+        // Water under the preferred cell: walk the next direction with a solid floor instead.
+        Grid waterFloor = pocket(1).set(1, -1, 0, Cell.water());
+        Decision d = HandDigStairPolicy.decide(waterFloor, List.of(Dir.EAST), 0);
+        assertTrue(d.walk());
+        assertEquals(Dir.NORTH, d.walkToward());
+        assertNull(HandDigStairPolicy.walkDirection(waterFloor, List.of(Dir.EAST)));
+
+        // Water under every neighbouring cell: refuse NO_TREAD rather than walk into the water.
+        Grid flooded = pocket(1);
+        for (Dir dir : Dir.values()) {
+            flooded.set(dir.dx, -1, dir.dz, Cell.water());
+        }
+        Decision none = HandDigStairPolicy.decide(flooded, List.of(Dir.EAST), 0);
+        assertFalse(none.ok());
+        assertFalse(none.walk());
+        assertEquals(Refusal.NO_TREAD, none.refusal());
+    }
+
+    @Test
     void lavaOutranksWaterWhenEveryDirectionRefuses() {
         Grid g = stonePit(STONE_BY_HAND).set(0, 3, 0, Cell.water()).set(1, 3, 0, Cell.lava());
         Decision d = HandDigStairPolicy.decide(g, List.of(Dir.EAST), 0);

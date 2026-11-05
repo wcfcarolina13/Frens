@@ -1655,7 +1655,7 @@ public class CollectDirtSkill implements Skill {
         // No scaffold blocks at all: the pillar below can only bare-jump in place. Cut a staircase
         // into the wall instead (HandDigStairPolicy), at most MAX_STEPS per ascent.
         if (HandDigStairPolicy.applies(countScaffoldBlocks(player), handDigSteps[0])) {
-            return executeHandDigStairStep(player, direction, handDigSteps);
+            return executeHandDigStairStep(player, direction, source, handDigSteps);
         }
 
         // Vertical-first ascent: mine straight up (always adjacent = always passes LoS),
@@ -1871,8 +1871,17 @@ public class CollectDirtSkill implements Skill {
      * waits). On a floor wider than one cell (no tread on any side) it walks one cell toward a wall
      * and reports no progress, so the no-progress cap still bounds it. A refusal ends the ascent:
      * without blocks no other move here can gain height.
+     *
+     * <p>Hazards are checked exactly as the pillar path does in {@link #executeUpwardStep}: before
+     * the first mine, {@link MiningHazardDetector#detect} runs over every planned cut cell (the
+     * policy only sees the six faces of each cell; the detector adds ores, chests, structures,
+     * protected zones and the drop scan), and a blocking hazard ends the step through the same
+     * pause-and-flag failure path. After the last mine and before the step-up,
+     * {@link FallingBlockStabilizer#stabilizeAndReclear} waits for sand or gravel to settle and
+     * re-clears any refill of the cut cells.</p>
      */
-    private SkillExecutionResult executeHandDigStairStep(ServerPlayerEntity player, Direction direction, int[] handDigSteps) {
+    private SkillExecutionResult executeHandDigStairStep(ServerPlayerEntity player, Direction direction,
+                                                         ServerCommandSource source, int[] handDigSteps) {
         if (TaskService.isAbortRequested(player.getUuid()) || SkillManager.shouldAbortSkill(player)) {
             return SkillExecutionResult.failure("Interrupted during ascent.");
         }
@@ -1920,10 +1929,43 @@ public class CollectDirtSkill implements Skill {
                     + decision.refusal().name().toLowerCase(Locale.ROOT).replace('_', ' ') + ".");
         }
         HandDigStairPolicy.Plan plan = decision.plan();
+        BlockPos stand = feet.add(plan.standAt().dx(), plan.standAt().dy(), plan.standAt().dz());
+        List<BlockPos> cutVolume = new ArrayList<>();
+        for (HandDigStairPolicy.Offset c : plan.cellsToMine()) {
+            BlockPos pos = feet.add(c.dx(), c.dy(), c.dz());
+            if (!isTorchBlock(world.getBlockState(pos))) {
+                cutVolume.add(pos);
+            }
+        }
+
+        // 1. Hazard check over the planned cut, same call and failure path as the pillar path's
+        //    step 1 (detect hops to the server thread itself). The policy only looked at the six
+        //    faces of each cell; this adds ores, chests, structures, protected zones and the drop
+        //    scan under the stand cell.
+        if (!cutVolume.isEmpty()) {
+            List<BlockPos> stepTargets = isTorchBlock(world.getBlockState(stand)) ? List.of() : List.of(stand);
+            DetectionResult hazardCheck = MiningHazardDetector.detect(player, cutVolume, stepTargets);
+            hazardCheck.adjacentWarnings().forEach(w ->
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(
+                            net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), w.chatMessage()));
+            if (hazardCheck.blockingHazard().isPresent()) {
+                Hazard hazard = hazardCheck.blockingHazard().get();
+                LOGGER.info("Hand-dig stair hazard for {} at {}: {} ({})", player.getName().getString(),
+                        feet.toShortString(), hazard.failureMessage(),
+                        hazard.location() == null ? "?" : hazard.location().toShortString());
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                SkillResumeService.flagManualResume(player);
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(
+                        net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
+                return SkillExecutionResult.failure(hazard.failureMessage());
+            }
+        }
+
         handDigSteps[0]++;
         LOGGER.info("Hand-dig stair step {}/{} for {} at {}: dir={} cells={} ticks={}",
                 handDigSteps[0], HandDigStairPolicy.MAX_STEPS, player.getName().getString(), feet.toShortString(),
                 plan.dir(), plan.cellsToMine().size(), plan.breakTicks());
+        // 2. Mine the cut, top-down per column.
         for (HandDigStairPolicy.Offset c : plan.cellsToMine()) {
             if (TaskService.isAbortRequested(player.getUuid())) {
                 return SkillExecutionResult.failure("Interrupted during ascent.");
@@ -1937,7 +1979,26 @@ public class CollectDirtSkill implements Skill {
                 return SkillExecutionResult.success("No progress - will retry");
             }
         }
-        BlockPos stand = feet.add(plan.standAt().dx(), plan.standAt().dy(), plan.standAt().dz());
+
+        // 3. Let sand or gravel settle and re-clear any refill of the cut before stepping into it
+        //    (the pillar path's step 3 does the same around its overhead cells). A refill it cannot
+        //    clear, or blocks still falling after the wait, is no progress: the next step snapshots
+        //    the cells again rather than jumping into them.
+        if (!cutVolume.isEmpty()) {
+            boolean settled = FallingBlockStabilizer.stabilizeAndReclear(
+                    player, source, stand, cutVolume,
+                    this::isPassableForStairs, this::isTorchBlock,
+                    pos -> mineStraightStairBlock(player, pos), true);
+            if (Thread.currentThread().isInterrupted()) {
+                return SkillExecutionResult.failure("Interrupted during ascent.");
+            }
+            if (!settled) {
+                LOGGER.info("Hand-dig stair: falling blocks not settled around {}", stand.toShortString());
+                return SkillExecutionResult.success("No progress - will retry");
+            }
+        }
+
+        // 4. Step up onto the tread.
         if (moveTowardCellBounded(player, stand, true, beforeY) == null) {
             return SkillExecutionResult.failure("Interrupted during ascent.");
         }
