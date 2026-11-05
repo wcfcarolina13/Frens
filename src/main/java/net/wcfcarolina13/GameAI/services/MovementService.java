@@ -5,6 +5,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.FireBlock;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.util.ActionResult;
@@ -15,8 +16,10 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.world.World;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
@@ -3188,13 +3191,21 @@ public final class MovementService {
         return snapshot;
     }
 
+    /** How far inside a cell the blind-walk guard measures a collision shape's height (block-local). */
+    private static final double BLIND_WALK_EDGE_INSET = 0.05D;
+
     /**
      * Server thread only. Walks the XZ cells {@link BlindLineSampler} picks on the line from the
      * bot's exact position to {@code destination} (up to {@link #BLIND_WALK_SAMPLE_CELLS} cells,
-     * ending at the destination cell, never past it), following the terrain: a one-block rise
-     * raises the tracked feet level, a drop lowers it to the landing cell. Stops at the first
-     * non-passable cell (two-high wall), which it records as a wall. With {@code startInWater}
-     * deep water is not a hazard, so the scan carries on past it.
+     * ending at the destination cell, never past it), following the terrain: a full-height rise
+     * raises the tracked feet level, a partial-height block (bottom slab, stair front, campfire)
+     * is a half step that keeps the feet level and records the standing height
+     * ({@link BlindWalkGuardPolicy#stepKind(double)}), a drop lowers it to the landing cell.
+     * Stops at the first non-passable cell (two-high wall), which it records as a wall; only a
+     * wall that hurts on side contact ({@link #hurtsOnSideContact(BlockState)}) is a hazardous
+     * one. A drop that ends in water is flagged {@code waterLanding} so the policy does not count
+     * it as a fall. With {@code startInWater} deep water is not a hazard, so the scan carries on
+     * past it.
      */
     private static void sampleBlindLine(ServerWorld world,
                                         ServerPlayerEntity player,
@@ -3205,23 +3216,57 @@ public final class MovementService {
         List<BlindLineSampler.Cell> line = BlindLineSampler.cells(player.getX(), player.getZ(),
                 destination.getX(), destination.getZ(), BLIND_WALK_SAMPLE_CELLS);
         int feetY = player.getBlockPos().getY();
-        for (BlindLineSampler.Cell cell : line) {
+        // Height within the tracked feet cell the bot stands at when it leaves the cell: 0 on
+        // plain ground, 0.5 on a bottom slab, 1.0 on the back of a stair. Feeds effectiveDrop.
+        double standing = 0.0D;
+        double prevX = player.getX();
+        double prevZ = player.getZ();
+        for (int i = 0; i < line.size(); i++) {
+            BlindLineSampler.Cell cell = line.get(i);
             int x = cell.x();
             int z = cell.z();
             BlockPos feet = new BlockPos(x, feetY, z);
+            BlockState feetState = world.getBlockState(feet);
             if (!isBlindPassable(world, feet)) {
-                BlockPos stepUp = feet.up();
-                if (isBlindPassable(world, stepUp) && isBlindPassable(world, stepUp.up())) {
-                    feetY++;
-                    feet = stepUp;
-                } else {
-                    BlockState foot = world.getBlockState(feet);
-                    boolean lava = foot.getFluidState().isIn(FluidTags.LAVA);
-                    boolean fire = !lava && BotHazardService.isDeadlyBlock(foot);
+                VoxelShape feetShape = feetState.getCollisionShape(world, feet);
+                List<BlindLineSampler.ShapeBox> boxes = shapeBoxes(feetShape);
+                BlindLineSampler.LocalPoint entry = BlindLineSampler.edgePoint(prevX, prevZ, x, z, BLIND_WALK_EDGE_INSET);
+                double entryHeight = BlindWalkGuardPolicy.entryHeight(
+                        BlindLineSampler.heightAt(boxes, entry.x(), entry.z()),
+                        feetShape.isEmpty() ? 0.0D : feetShape.getMax(Direction.Axis.Y));
+                BlindWalkGuardPolicy.StepKind kind = BlindWalkGuardPolicy.stepKind(entryHeight);
+                BlockPos head = feet.up();
+                if (!isBlindPassable(world, head) || !isBlindPassable(world, head.up())) {
+                    // Neither a step up nor a half step fits under the ceiling: a wall.
                     cells.add(feet);
-                    facts.add(new BlindWalkGuardPolicy.CellFact(false, 0, lava, fire, false));
+                    facts.add(BlindWalkGuardPolicy.CellFact.wallFact(hurtsOnSideContact(feetState)));
                     return;
                 }
+                if (kind == BlindWalkGuardPolicy.StepKind.HALF_STEP) {
+                    // Walked onto without a jump: the feet cell stays, the standing height is
+                    // where the bot leaves the block (a stair's back is 1.0, its front 0.5).
+                    double nextX = i + 1 < line.size() ? line.get(i + 1).x() + 0.5D : x + 0.5D;
+                    double nextZ = i + 1 < line.size() ? line.get(i + 1).z() + 0.5D : z + 0.5D;
+                    BlindLineSampler.LocalPoint exit = BlindLineSampler.edgePoint(nextX, nextZ, x, z, BLIND_WALK_EDGE_INSET);
+                    double exitHeight = BlindLineSampler.heightAt(boxes, exit.x(), exit.z());
+                    standing = exitHeight > 0.0D ? exitHeight : entryHeight;
+                    // The partial block is the floor the bot stands on (campfire, dripstone ...).
+                    boolean fire = BotHazardService.isDeadlyBlock(feetState);
+                    BlindWalkGuardPolicy.CellFact fact = new BlindWalkGuardPolicy.CellFact(true, 0, false, fire, false);
+                    cells.add(feet);
+                    facts.add(fact);
+                    if (BlindWalkGuardPolicy.hazardOf(fact, BlindWalkGuardPolicy.MAX_SAFE_DROP, startInWater) != null) {
+                        return;
+                    }
+                    prevX = x + 0.5D;
+                    prevZ = z + 0.5D;
+                    continue;
+                }
+                // Full-height rise: step up one block.
+                feetY++;
+                feet = head;
+                feetState = world.getBlockState(feet);
+                standing = 0.0D;
             } else if (!isBlindPassable(world, feet.up())) {
                 // Feet free but head blocked: a low overhang the bot cannot walk under.
                 cells.add(feet);
@@ -3231,7 +3276,7 @@ public final class MovementService {
             boolean lava = false;
             boolean fire = false;
             boolean deepWater = false;
-            BlockState feetState = world.getBlockState(feet);
+            boolean waterLanding = false;
             if (feetState.getFluidState().isIn(FluidTags.LAVA)) {
                 lava = true;
             } else if (BotHazardService.isDeadlyBlock(feetState)) {
@@ -3250,10 +3295,13 @@ public final class MovementService {
                         break;
                     }
                     if (fluid.isIn(FluidTags.WATER)) {
+                        // Landing in water of any depth negates fall damage (minecraft.wiki Damage).
+                        waterLanding = true;
                         deepWater = world.getFluidState(below.down()).isIn(FluidTags.WATER);
                         break;
                     }
                     if (!state.getCollisionShape(world, below).isEmpty()) {
+                        // Magma and friends hurt only as the floor the bot would stand on.
                         if (BotHazardService.isDeadlyBlock(state)) {
                             fire = true;
                         }
@@ -3267,13 +3315,48 @@ public final class MovementService {
                     feet = new BlockPos(x, feetY, z);
                 }
             }
+            int floorDrop = BlindWalkGuardPolicy.effectiveDrop(drop, standing);
+            standing = 0.0D;
+            BlindWalkGuardPolicy.CellFact fact =
+                    new BlindWalkGuardPolicy.CellFact(true, floorDrop, lava, fire, deepWater, waterLanding);
             cells.add(feet);
-            facts.add(new BlindWalkGuardPolicy.CellFact(true, drop, lava, fire, deepWater));
-            if (lava || fire || (deepWater && !startInWater) || drop > BlindWalkGuardPolicy.MAX_SAFE_DROP) {
+            facts.add(fact);
+            if (BlindWalkGuardPolicy.hazardOf(fact, BlindWalkGuardPolicy.MAX_SAFE_DROP, startInWater) != null) {
                 // The policy stops at the first hazard; nothing past it changes the verdict.
                 return;
             }
+            prevX = x + 0.5D;
+            prevZ = z + 0.5D;
         }
+    }
+
+    /** The collision shape's boxes in block-local coordinates for {@link BlindLineSampler#heightAt}. */
+    private static List<BlindLineSampler.ShapeBox> shapeBoxes(VoxelShape shape) {
+        if (shape == null || shape.isEmpty()) {
+            return List.of();
+        }
+        List<BlindLineSampler.ShapeBox> boxes = new ArrayList<>();
+        for (Box box : shape.getBoundingBoxes()) {
+            boxes.add(new BlindLineSampler.ShapeBox(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ));
+        }
+        return boxes;
+    }
+
+    /**
+     * Blocks that damage a bot walking into their side, so a wall made of them is a blind-walk
+     * hazard: cactus (damages on touch, minecraft.wiki Cactus), sweet berry bush (damages
+     * entities moving in its hitbox, minecraft.wiki Sweet Berry Bush) and fire. Magma is not one
+     * ("Walking into the side of a magma block doesn't cause damage", minecraft.wiki Magma Block):
+     * it counts only as a floor, via the drop scan. Fire and the bush normally have no collision
+     * shape and so never form a wall; they are listed in case a variant ever does.
+     */
+    private static boolean hurtsOnSideContact(BlockState state) {
+        if (state == null || state.isAir()) {
+            return false;
+        }
+        return state.isOf(Blocks.CACTUS)
+                || state.isOf(Blocks.SWEET_BERRY_BUSH)
+                || state.getBlock() instanceof FireBlock;
     }
 
     /** Enterable for a blind walk: empty collision shape, or a door/gate/trapdoor the bot can open. */

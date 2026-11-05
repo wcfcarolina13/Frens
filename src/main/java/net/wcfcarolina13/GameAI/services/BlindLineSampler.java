@@ -86,4 +86,60 @@ public final class BlindLineSampler {
         }
         return out;
     }
+
+    // --- where on a cell's collision shape the bot stands ---
+
+    /** A point inside a cell in block-local XZ coordinates (0..1). */
+    public record LocalPoint(double x, double z) {
+    }
+
+    /** One axis-aligned box of a block's collision shape, in block-local coordinates (0..1). */
+    public record ShapeBox(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
+    }
+
+    /**
+     * Block-local point where the line from {@code (fromX, fromZ)} (the previous cell's centre,
+     * the bot's exact position, or the next cell's centre when looking for the exit) crosses into
+     * cell {@code (cellX, cellZ)}: the midpoint of {@code from} and the cell centre, clamped at
+     * least {@code inset} inside the cell. For a cardinal neighbour the midpoint lies on the
+     * shared face, so the clamp pulls it just inside; for a diagonal neighbour it is the shared
+     * corner. Measuring a collision shape here (rather than at the cell centre, which for a stair
+     * sits exactly on the 0.5/1.0 split) gives the height the bot actually meets first.
+     */
+    public static LocalPoint edgePoint(double fromX, double fromZ, int cellX, int cellZ, double inset) {
+        double in = Math.max(0.0D, Math.min(0.5D, inset));
+        double midX = (fromX + cellX + 0.5D) / 2.0D - cellX;
+        double midZ = (fromZ + cellZ + 0.5D) / 2.0D - cellZ;
+        return new LocalPoint(clamp(midX, in, 1.0D - in), clamp(midZ, in, 1.0D - in));
+    }
+
+    /**
+     * Height (block-local, 0..1 or more) of the collision shape at XZ point
+     * {@code (localX, localZ)}: the highest top among the boxes whose XZ footprint contains the
+     * point, or zero when no box does (the column there is open). A bottom slab gives 0.5
+     * everywhere; a bottom stair gives 0.5 over its front half and 1.0 over its back half; a
+     * full block gives 1.0.
+     */
+    public static double heightAt(List<ShapeBox> boxes, double localX, double localZ) {
+        if (boxes == null || boxes.isEmpty()) {
+            return 0.0D;
+        }
+        double top = 0.0D;
+        for (ShapeBox box : boxes) {
+            if (box == null) {
+                continue;
+            }
+            if (localX >= box.minX() && localX <= box.maxX() && localZ >= box.minZ() && localZ <= box.maxZ()) {
+                top = Math.max(top, box.maxY());
+            }
+        }
+        return top;
+    }
+
+    private static double clamp(double value, double min, double max) {
+        if (Double.isNaN(value)) {
+            return min;
+        }
+        return Math.max(min, Math.min(max, value));
+    }
 }

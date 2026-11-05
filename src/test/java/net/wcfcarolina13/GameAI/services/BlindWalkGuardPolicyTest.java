@@ -314,6 +314,157 @@ class BlindWalkGuardPolicyTest {
         assertEquals(12, d.safeCells());
     }
 
+    // --- a drop into water is no fall (minecraft.wiki Damage: water of any depth negates fall damage) ---
+
+    @Test
+    void dropOfFourOrMoreIntoShallowWaterIsNotAHazard() {
+        // A 1-deep landing pool: any depth of water cancels the fall, so the drop is allowed.
+        assertNull(BlindWalkGuardPolicy.hazardOf(CellFact.dropIntoWater(4, false), 3));
+        assertNull(BlindWalkGuardPolicy.hazardOf(CellFact.dropIntoWater(9, false), 3));
+        Decision d = BlindWalkGuardPolicy.decide(flatThen(0, CellFact.dropIntoWater(6, false), CellFact.flat()));
+        assertEquals(Verdict.ALLOW, d.verdict());
+        assertEquals(2, d.safeCells());
+        assertNull(d.reason());
+    }
+
+    @Test
+    void sameDropOntoGroundStillRefuses() {
+        // The 5-arg constructor means a solid landing: the control for the test above.
+        CellFact ground = new CellFact(true, 6, false, false, false);
+        assertFalse(ground.waterLanding());
+        assertEquals("drop of 6+", BlindWalkGuardPolicy.hazardOf(ground, 3));
+        assertEquals(Verdict.REFUSE, BlindWalkGuardPolicy.decide(flatThen(0, ground, CellFact.flat())).verdict());
+    }
+
+    @Test
+    void waterLandingStaysSubjectToTheDeepWaterRule() {
+        // Not deep-water-safe: a 2+ deep landing pool is still deep water for a dry bot ...
+        CellFact deepPool = CellFact.dropIntoWater(6, true);
+        assertTrue(deepPool.deepWater());
+        assertTrue(deepPool.waterLanding());
+        Decision dry = BlindWalkGuardPolicy.decide(flatThen(0, deepPool));
+        assertEquals(Verdict.REFUSE, dry.verdict());
+        assertEquals("deep water 1 block ahead", dry.reason());
+        // ... and plain ground for a bot already swimming, with no drop hazard left over.
+        Decision wet = BlindWalkGuardPolicy.decide(flatThen(0, deepPool), true);
+        assertEquals(Verdict.ALLOW, wet.verdict());
+        assertNull(wet.reason());
+    }
+
+    @Test
+    void waterLandingBeyondHorizonDoesNotCap() {
+        Decision d = BlindWalkGuardPolicy.decide(flatThen(8, CellFact.dropIntoWater(5, false), CellFact.flat()));
+        assertEquals(Verdict.ALLOW, d.verdict());
+        assertEquals(10, d.safeCells());
+    }
+
+    @Test
+    void lavaAndFireStillWinOverAWaterLanding() {
+        assertEquals("lava", BlindWalkGuardPolicy.hazardOf(new CellFact(true, 5, true, false, false, true), 3));
+        assertEquals("fire/deadly block", BlindWalkGuardPolicy.hazardOf(new CellFact(true, 5, false, true, false, true), 3));
+    }
+
+    // --- walls: only side-contact damage makes a wall hazardous ---
+
+    @Test
+    void magmaClassWallIsAPlainWall() {
+        // Magma hurts only when stood on (minecraft.wiki Magma Block), so a magma wall ends the
+        // inspection like stone does. wallFact(false) == wall().
+        assertEquals(CellFact.wall(), CellFact.wallFact(false));
+        Decision d = BlindWalkGuardPolicy.decide(flatThen(1, CellFact.wallFact(false), CellFact.lavaCell()));
+        assertEquals(Verdict.ALLOW, d.verdict());
+        assertEquals(1, d.safeCells());
+        assertNull(d.reason());
+    }
+
+    @Test
+    void cactusClassWallWithinHorizonRefuses() {
+        CellFact cactus = CellFact.hazardousWall();
+        assertFalse(cactus.passable());
+        assertFalse(cactus.lava());
+        assertTrue(cactus.fire());
+        Decision d = BlindWalkGuardPolicy.decide(flatThen(2, cactus));
+        assertEquals(Verdict.REFUSE, d.verdict());
+        assertEquals("fire/deadly block 3 blocks ahead", d.reason());
+    }
+
+    @Test
+    void cactusClassWallBeyondHorizonJustEndsInspection() {
+        Decision d = BlindWalkGuardPolicy.decide(flatThen(3, CellFact.hazardousWall()));
+        assertEquals(Verdict.ALLOW, d.verdict());
+        assertEquals(3, d.safeCells());
+    }
+
+    @Test
+    void wallFactNeverCarriesLavaOrWater() {
+        // Lava and fire have empty collision shapes, so no wall cell can hold them.
+        for (boolean hurts : new boolean[] {false, true}) {
+            CellFact wall = CellFact.wallFact(hurts);
+            assertFalse(wall.lava());
+            assertFalse(wall.deepWater());
+            assertFalse(wall.waterLanding());
+            assertEquals(0, wall.floorDrop());
+            assertEquals(hurts, wall.fire());
+        }
+    }
+
+    // --- step rule: slabs and stairs are half steps, not a block of rise ---
+
+    @Test
+    void stepKindSplitsOpenHalfAndFull() {
+        assertEquals(BlindWalkGuardPolicy.StepKind.OPEN, BlindWalkGuardPolicy.stepKind(0.0));
+        assertEquals(BlindWalkGuardPolicy.StepKind.OPEN, BlindWalkGuardPolicy.stepKind(-1.0));
+        assertEquals(BlindWalkGuardPolicy.StepKind.OPEN, BlindWalkGuardPolicy.stepKind(Double.NaN));
+        assertEquals(BlindWalkGuardPolicy.StepKind.OPEN, BlindWalkGuardPolicy.stepKind(Double.NEGATIVE_INFINITY));
+        assertEquals(BlindWalkGuardPolicy.StepKind.HALF_STEP, BlindWalkGuardPolicy.stepKind(0.5)); // bottom slab, stair front
+        assertEquals(BlindWalkGuardPolicy.StepKind.HALF_STEP, BlindWalkGuardPolicy.stepKind(0.4375)); // campfire
+        assertEquals(BlindWalkGuardPolicy.StepKind.HALF_STEP, BlindWalkGuardPolicy.stepKind(0.125)); // snow layer
+        // The player's step height is 0.6 (minecraft.wiki Slab): anything taller is a jump.
+        assertEquals(0.6, BlindWalkGuardPolicy.MAX_STEP_HEIGHT);
+        assertEquals(BlindWalkGuardPolicy.StepKind.HALF_STEP, BlindWalkGuardPolicy.stepKind(BlindWalkGuardPolicy.MAX_STEP_HEIGHT));
+        assertEquals(BlindWalkGuardPolicy.StepKind.STEP_UP, BlindWalkGuardPolicy.stepKind(0.61));
+        assertEquals(BlindWalkGuardPolicy.StepKind.STEP_UP, BlindWalkGuardPolicy.stepKind(0.9375)); // cactus (15/16): jumped onto, then a deadly floor
+        assertEquals(BlindWalkGuardPolicy.StepKind.STEP_UP, BlindWalkGuardPolicy.stepKind(1.0)); // full block, top slab, stair back
+        assertEquals(BlindWalkGuardPolicy.StepKind.STEP_UP, BlindWalkGuardPolicy.stepKind(1.0 - BlindWalkGuardPolicy.FULL_HEIGHT_TOLERANCE / 2));
+        assertEquals(BlindWalkGuardPolicy.StepKind.STEP_UP, BlindWalkGuardPolicy.stepKind(1.5)); // fence
+    }
+
+    @Test
+    void entryHeightFallsBackToTheShapeTopWhenTheEntryColumnIsOpen() {
+        assertEquals(0.5, BlindWalkGuardPolicy.entryHeight(0.5, 1.0));
+        assertEquals(1.0, BlindWalkGuardPolicy.entryHeight(1.0, 1.0));
+        assertEquals(1.5, BlindWalkGuardPolicy.entryHeight(0.0, 1.5)); // fence post off the line
+        assertEquals(0.5, BlindWalkGuardPolicy.entryHeight(Double.NEGATIVE_INFINITY, 0.5));
+        assertEquals(0.0, BlindWalkGuardPolicy.entryHeight(0.0, 0.0));
+        assertEquals(0.0, BlindWalkGuardPolicy.entryHeight(-1.0, -1.0));
+    }
+
+    @Test
+    void effectiveDropFollowsVanillaFallDamageThreshold() {
+        // damage = floor(fall - 3) > 0 iff floor(fall) >= 4
+        assertEquals(3, BlindWalkGuardPolicy.effectiveDrop(3, 0.0)); // 3.0: safe
+        assertEquals(3, BlindWalkGuardPolicy.effectiveDrop(3, 0.5)); // 3.5 from a slab: safe
+        assertEquals(4, BlindWalkGuardPolicy.effectiveDrop(3, 1.0)); // 4.0 from a stair's back: hazard
+        assertEquals(4, BlindWalkGuardPolicy.effectiveDrop(4, 0.0));
+        assertEquals(4, BlindWalkGuardPolicy.effectiveDrop(4, 0.5));
+        assertEquals(0, BlindWalkGuardPolicy.effectiveDrop(0, 0.5));
+        assertEquals(1, BlindWalkGuardPolicy.effectiveDrop(0, 1.0));
+        assertEquals(0, BlindWalkGuardPolicy.effectiveDrop(-2, Double.NaN));
+        assertEquals(4, BlindWalkGuardPolicy.effectiveDrop(3, 7.0)); // standing height clamped to 1
+        assertEquals(2, BlindWalkGuardPolicy.effectiveDrop(2, -0.5));
+    }
+
+    @Test
+    void slabBeforeALegalDropNoLongerInflatesIt() {
+        // Old sampler: slab -> feetY+1 -> the 3-block drop read as 4 and refused.
+        int inflated = BlindWalkGuardPolicy.effectiveDrop(3, 0.0) + 1;
+        assertEquals(Verdict.REFUSE, BlindWalkGuardPolicy.decide(flatThen(0, CellFact.flat(), CellFact.drop(inflated))).verdict());
+        int measured = BlindWalkGuardPolicy.effectiveDrop(3, 0.5);
+        Decision d = BlindWalkGuardPolicy.decide(flatThen(0, CellFact.flat(), CellFact.drop(measured)));
+        assertEquals(Verdict.ALLOW, d.verdict());
+        assertEquals(2, d.safeCells());
+    }
+
     @Test
     void decisionFactoriesClampAndFlag() {
         assertEquals(0, Decision.allow(-3).safeCells());
