@@ -2635,10 +2635,10 @@ public class modCommandRegistry {
             boolean success = false;
             // Like SkillManager.runSkill: the follow tick would otherwise keep steering (and stop or
             // teleport) the bot while CraftingHelper walks it to a table or furnace.
-            TaskService.attachExecutingThread(ticket, Thread.currentThread());
-            net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume =
-                    net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
+            net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume = null;
             try {
+                TaskService.attachExecutingThread(ticket, Thread.currentThread());
+                followResume = net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
                 crafted = CraftingHelper.craftGenericForPlayer(source, bot, commander, item, amount, material);
                 success = crafted > 0 && !TaskService.isAbortRequested(botUuid);
                 if (crafted > 0) {
