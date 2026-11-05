@@ -1028,6 +1028,19 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] **P3 (S)** Tamed-animal defense "Manual verification checklist (15 items) is in the spec" (`docs/superpowers/specs/2026-04-11-tamed-animal-defense-design.md`), not in the field checklist (Tamed-animal defense notes, 2026-04-11)
 - [x] fabric.mod.json still declares ~1.21.10 though the 1.21.10 instances were removed 2026-10-11 (audit side finding) — ✅ 1.1.288
 
+## Community feedback 2026-11-04 (Backlogged 2026-11-04)
+
+From the first read of the Frens Discord and the solace #diy-and-tech thread. Reports and causes are hypotheses until a sandbox run. Record: `docs/community/feedback-ledger.md`.
+
+- [ ] **Add a LAN guest toggle (Bradley, 2026-11-04):** an admin setting, off by default, that lets LAN guests spawn and command bots. Jackster asked as host, which meets the 2026-10-23 "only if an admin asks" condition. Jackster's friend reportedly had "all permissions" and still failed; if that meant op, `hasBotCommandPermission` should have passed, so ask and check for a bug first.
+- [ ] **Reword the AI-chat-off notice:** `AiChatOffHintPolicy.NOTICE` sends a player who names a bot to AI setup only. Name `/bot` and the Guide first, AI setup second. Core bots work without a model (Dev).
+- [ ] **Test the Guide against real player questions:** how to confirm a job, let a friend use bots, stop bots talking, change bot speed. The Stripmine card covers length but not the `-` confirm key (Jackster, Kegg).
+- [ ] **Hide `/bot mine_block` behind `/bot debug`:** it sits under the normal admin gate (`modCommandRegistry`), ignores `block_type`, and mines one set of coordinates. Check for similar leftover commands. `tools/` and `docs/testing` did not use it on 2026-11-04 (Dev).
+- [ ] **Choose which mobs a bot attacks (guy):** per-type setting, separate from the global Attack Named Mobs toggle. Needs a ruling first: does a filtered mob still get hit in self-defense?
+- [ ] **Sandbox test, custom skin URLs (Dev):** the check accepts any http or https host, but `BotSkinService` says the client trusts `textures.minecraft.net`. Hypothesis: other hosts fail with no message. Waiting on Dev's URL.
+- [ ] **Sandbox test, mining a cobblestone generator (Dev):** "No stone block detected within radius 8. Collected 7 out of 1000 requested." (`DirtShovelSkill`). Hypothesis: one empty scan ends the job. Any wait needs a time limit.
+- [ ] **Sandbox test, modded recipes and Polymer (Vance, 2026-04):** bots reportedly ignored a changed stone tool recipe, and Polymer reportedly stopped bots spawning. Retest on the current build, the report may be stale. Where ingredient lists come from is unverified.
+
 ## Backlog Lineup 2026-09-03
 
 **Where things stood on 2026-09-03 (historical lineup, kept for its open lines; current state is the handoff at the top):** main at 1.1.199, deployed to all three Prism instances, 240 commits
