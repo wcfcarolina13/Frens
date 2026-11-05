@@ -110,9 +110,7 @@ public final class ZoneNetworkManager {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "\u00A7cZone name cannot be empty.");
                         return;
                     }
-                    if (name.length() > 32) {
-                        name = name.substring(0, 32);
-                    }
+                    name = BaseScreenLimitPolicy.capLabel(name);
 
                     ServerWorld world = player.getCommandSource().getWorld();
                     BlockPos corner1 = new BlockPos(payload.x1(), payload.y1(), payload.z1());
