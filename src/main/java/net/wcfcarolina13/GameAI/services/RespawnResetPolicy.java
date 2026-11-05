@@ -47,18 +47,17 @@ public final class RespawnResetPolicy {
      * @param regroupChat        say "has regrouped and is ready to re-engage."
      * @param clearLeash         forget the saved leash target and held-lead record
      * @param noteSoulRespawn    record the respawn in the soul observer
-     * @param sleepBeforeRestart the auto-face restart's 100 ms pause
      * @param taskAbortMessage   the abort message for the running task
      * @param lateAbortMessage   the second abort latched after relocation, or null for none
      */
     public record Plan(boolean clearTargets, boolean resetMode, boolean relocate, boolean regroupChat,
-                       boolean clearLeash, boolean noteSoulRespawn, boolean sleepBeforeRestart,
+                       boolean clearLeash, boolean noteSoulRespawn,
                        String taskAbortMessage, String lateAbortMessage) {
     }
 
-    private static final Plan DEATH_PLAN = new Plan(true, true, true, true, true, true, true,
+    private static final Plan DEATH_PLAN = new Plan(true, true, true, true, true, true,
             DEATH_TASK_ABORT, DEATH_LATE_ABORT);
-    private static final Plan DIMENSION_EXIT_PLAN = new Plan(false, false, false, false, true, false, false,
+    private static final Plan DIMENSION_EXIT_PLAN = new Plan(false, false, false, false, true, false,
             DIMENSION_TASK_ABORT, null);
 
     private RespawnResetPolicy() {

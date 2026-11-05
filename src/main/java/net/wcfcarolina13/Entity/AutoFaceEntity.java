@@ -454,15 +454,10 @@ public class AutoFaceEntity {
         stopAutoFace(bot);
         isWorldTickListenerActive = true;
 
-        // Wait briefly to ensure cleanup is complete
-        if (plan.sleepBeforeRestart()) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-
+        // No pause before the restart: this runs on the server thread (AFTER_RESPAWN), where the
+        // old 100 ms sleep froze every player's tick and let no cleanup run meanwhile. stopAutoFace
+        // already waits for the old executor to end, and the new loop's first tick is posted with
+        // server.execute, so it runs after this event returns.
         startAutoFace(bot);
         LOGGER.info("Bot {} respawned and initialized.", bot.getName().getString());
     }
