@@ -90,7 +90,7 @@ public final class GroupChatHint {
                         }
                     });
                 }));
-        ServerTickEvents.END_SERVER_TICK.register(GroupChatHint::tick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.TickGuard.endTick("GroupChatHint::tick", GroupChatHint::tick));
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             // DISCONNECT can fire on a Netty IO thread while tick() iterates these plain
             // collections on the server thread — hop over so only the server thread touches them.

@@ -2,6 +2,36 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## One failing handler no longer crashes the server (2026-11-05, unreleased)
+
+Fabric does not catch exceptions in event handlers. One escaping an END_SERVER_TICK handler, or
+the damage or death callbacks, ends `MinecraftServer.tick` and crashes the server (a "Ticking
+entity" crash for damage). An audit found about 60 such handlers registered by the mod and only
+about 9 that caught anything. No live crash was found, but any latent null or removed-entity bug
+in, say, hazard rescue, hunger, mutual aid or idle hobbies would have taken the whole server
+down.
+
+All of them now go through `TickGuard`. A RuntimeException is logged, with its stack trace the
+first time and then at most once a minute per handler with a count (`TickGuardLogPolicy`), and the
+server keeps ticking. This covers:
+- the 59 END_SERVER_TICK handlers in Frens.java;
+- the group chat hint and supply request ticks;
+- ALLOW_DAMAGE (falls back to vanilla: the damage goes ahead);
+- AFTER_DEATH;
+- UseEntityCallback (falls back to PASS).
+
+A test fails if a new END_SERVER_TICK registration skips the guard.
+
+Costs and limits:
+- A failing handler skips the rest of its own work for that tick: every bot after the failing
+  one in that handler's loop. That is not one bot only. Per-bot isolation inside the larger loops
+  (hazards, hunger, persistence autosave) is a follow-up.
+- A handler that keeps failing logs one ERROR a minute rather than crashing, so watch for
+  `frens-tick-guard` lines.
+- Errors such as OutOfMemoryError still propagate.
+
+Tests: `TickGuardTest` (3).
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
