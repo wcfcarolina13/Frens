@@ -413,7 +413,8 @@ public final class SmeltingService {
      */
     private static boolean tryWalkBack(ServerPlayerEntity bot, BlockPos approachPos, boolean allowTeleport,
                                        boolean sameWorld, int walkBacksUsed, BlockPos furnacePos) {
-        boolean stop = Thread.currentThread().isInterrupted() || TaskService.isServerStopping();
+        boolean stop = Thread.currentThread().isInterrupted() || TaskService.isServerStopping()
+                || TaskService.isAbortRequested(bot.getUuid());
         if (FurnaceReachRecoveryPolicy.onReachLost(sameWorld, walkBacksUsed, stop)
                 != FurnaceReachRecoveryPolicy.Decision.WALK_BACK) {
             return false;
