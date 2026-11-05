@@ -331,6 +331,9 @@ public class CollectDirtSkill implements Skill {
         // that left and came back, e.g. a zombie returning beside a caged mob).
         long engageStartMs = 0L;
         Set<UUID> engageableSeen = new HashSet<>();
+        // Ends the job when iterations stop adding to the count (see MiningStallPolicy).
+        int noGainStreak = 0;
+        int collectedAtLastIteration = -1;
 
         while (collected < targetCount
                 && failuresInRow < currentMaxFails
@@ -439,6 +442,18 @@ public class CollectDirtSkill implements Skill {
                 outcome = SkillExecutionResult.success("Collected " + collected + " " + harvestLabel + " blocks.");
                 break;
             }
+            if (collectedAtLastIteration >= 0) {
+                noGainStreak = net.wcfcarolina13.GameAI.skills.MiningStallPolicy.nextStreak(
+                        noGainStreak, collectedAtLastIteration, collected);
+                if (net.wcfcarolina13.GameAI.skills.MiningStallPolicy.exhausted(noGainStreak)) {
+                    LOGGER.warn("{} ending: {} iterations in a row collected nothing ({} / {}).",
+                            skillName, noGainStreak, collected, targetCount);
+                    outcome = SkillExecutionResult.failure("No more reachable " + harvestLabel + " nearby. Collected "
+                            + collected + " out of " + targetCount + ".");
+                    break;
+                }
+            }
+            collectedAtLastIteration = collected;
 
             attempt++;
             int effectiveHorizontal = Math.min(horizontalRadius + radiusBoost, MAX_HORIZONTAL_RADIUS);
