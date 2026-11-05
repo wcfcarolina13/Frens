@@ -351,6 +351,8 @@ public final class SupplyRequestService {
             Files.createDirectories(file.getParent());
             Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
             Files.writeString(temporary, json, StandardCharsets.UTF_8);
+            // Owner UUIDs and chest grants: owner-only where the file system allows (never fails the save).
+            net.wcfcarolina13.GameAI.services.StoreFileModePolicy.restrictToOwner(temporary);
             try {
                 Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException notAtomic) {

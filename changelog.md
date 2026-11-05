@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Supply grants and chat-hint receipts are owner-only too (unreleased, 2026-11-05)
+
+Follow-up to the soul store 0600 change: `SupplyRequestService` (the supply "Always" grants: owner UUIDs per chest) and `GroupChatHint` (player UUIDs that saw the group-chat hint) also named their temp files and wrote them at the umask default. Both now call `StoreFileModePolicy.restrictToOwner` on the temp file before the move. Same limits: existing files switch on their next save, Windows unchanged, never fails a save. No new tests (the policy's own tests cover the call); Tests unchanged.
+
 ## Store files owner-only (0600) on POSIX (unreleased, 2026-11-05)
 
 - **Changed: soul store files are now created owner read/write only (`rw-------`) on Linux and macOS.** Closes the 1.1.291 review deferral "0600 store file mode". `soul.json`, `knowledge.json`, `mind.json`, trimmed `events.jsonl`, corrupt-tail rewrites and newly created transcripts (`active.jsonl`, `events.jsonl`) hold player UUIDs and owner data; their temp files were created by name at the umask default (usually 0644). `SoulStore.atomicReplace` now sets the mode on the temp file before the move, and `appendLine` sets it once when it creates a file. Decision and best-effort apply live in the new pure `StoreFileModePolicy` (POSIX view present → restrict; otherwise or on any error, DEBUG log and continue; a save never fails over permissions).

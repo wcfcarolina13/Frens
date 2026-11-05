@@ -83,6 +83,8 @@ public final class GroupChatHint {
                             Files.createDirectories(destination.getParent());
                             Path temporary = destination.resolveSibling(destination.getFileName() + ".tmp");
                             Files.write(temporary, snapshot);
+                            // Player UUIDs: owner-only where the file system allows (never fails the save).
+                            net.wcfcarolina13.GameAI.services.StoreFileModePolicy.restrictToOwner(temporary);
                             Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                                     java.nio.file.StandardCopyOption.ATOMIC_MOVE);
                         } catch (java.io.IOException ex) {
