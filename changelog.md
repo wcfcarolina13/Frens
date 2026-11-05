@@ -2,12 +2,6 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
-## A private party scene's owner line no longer becomes a public memory (unreleased, cloud PR, 2026-11-05)
-
-Deferred in the 1.1.296 handoff (the "cursor split"). The 1.1.296 fix gives a party HEARD line the privacy of its scene's marked lines at read time, but only within one digest batch. A digest that ran while a privately seeded scene was still being answered read the owner's HEARD line before the private SPOKEN or FAILURE lines existed, made a PUBLIC memory from it, and moved its cursor past it, so the line was never read again. The digest now holds back an open party scene (`SoulMemoryDigestOps.openSceneHoldFrom`: every record of the scene so far is HEARD, the newest within 10 minutes): the batch and the cursor both stop at that scene's first record, and a later digest reads it, and everything after it, whole. DM digests are unchanged (their memories are private by channel). Unit tests only.
-
-Costs and limits: while a scene is open, every party line after it waits for the next digest too (normally the next sleep). A party scene with no reply at all for 10 minutes is digested as it stands, as before, so the cursor can not stall. The privacy-conflict exit (two owners) still leaves its HEARD unmarked; not touched here.
-
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
