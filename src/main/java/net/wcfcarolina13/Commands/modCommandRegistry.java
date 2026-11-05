@@ -5913,7 +5913,8 @@ public class modCommandRegistry {
                 ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(alias, worldKey);
                 ctrl.setAutoSpawnOnLoad(false);
             }
-            BotEventHandler.unregisterBot(bot);
+            // Save first: removal alone lost everything since the last autosave.
+            BotEventHandler.unregisterBot(bot, true);
             successes++;
         }
         if (!sessionOnly && !targets.isEmpty()) {

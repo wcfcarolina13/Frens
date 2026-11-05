@@ -660,6 +660,15 @@ public final class BotPersistenceService {
     }
 
     public static void removeBot(ServerPlayerEntity bot) {
+        removeBot(bot, false);
+    }
+
+    /**
+     * @param saveFirst save player data, inventory and world state after the dismount and before
+     *                  the bot is removed (see {@link DespawnSavePolicy}); {@code /bot despawn}
+     *                  passes true
+     */
+    public static void removeBot(ServerPlayerEntity bot, boolean saveFirst) {
         MinecraftServer server = extractServer(bot);
         if (server == null) {
             LOGGER.warn("Unable to remove fakeplayer '{}': bot not attached to a server.", bot.getName().getString());
@@ -676,6 +685,14 @@ public final class BotPersistenceService {
             MountPersistenceService.recordMount(bot, vehicle, false);
         } else {
             RideSyncService.secureLeashedMountOnDisconnect(bot);
+        }
+
+        if (DespawnSavePolicy.shouldSave(saveFirst, bot instanceof createFakePlayer, bot.isAlive(), bot.isRemoved())) {
+            if (persistViaPlayerManager(server, bot, "despawn")) {
+                BotInventoryStorageService.save(bot);
+            }
+            BotWorldStateService.saveState(bot);
+            LAST_SAVE_TICK.remove(bot.getUuid());
         }
 
         // Fake players can leave "ghosts" client-side if they aren't explicitly disconnected.

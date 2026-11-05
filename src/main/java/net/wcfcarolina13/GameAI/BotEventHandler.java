@@ -745,6 +745,11 @@ public class BotEventHandler {
     }
 
     public static void unregisterBot(ServerPlayerEntity bot) {
+        unregisterBot(bot, false);
+    }
+
+    /** @param saveFirst save the bot before removing it ({@code /bot despawn}); see DespawnSavePolicy */
+    public static void unregisterBot(ServerPlayerEntity bot, boolean saveFirst) {
         if (bot == null) {
             return;
         }
@@ -755,7 +760,7 @@ public class BotEventHandler {
         net.wcfcarolina13.PlayerUtils.CombatInventoryManager.forgetBot(uuid);
         net.wcfcarolina13.PlayerUtils.ToolSelector.forgetBot(uuid);
         RESPAWN_HANDLING.forget(uuid);
-        BotPersistenceService.removeBot(bot);
+        BotPersistenceService.removeBot(bot, saveFirst);
         clearState(bot);
         LAST_JOIN_ENCLOSURE_CHECK_TICK.remove(uuid);
         LAST_ARMOR_AUDIT_TICK.remove(uuid);
