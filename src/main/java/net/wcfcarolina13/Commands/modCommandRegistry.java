@@ -5764,6 +5764,10 @@ public class modCommandRegistry {
 
     private static int executeFollowStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow stop.");
+        // A running task has follow suspended and would hand it back when it ends: veto that.
+        if (net.wcfcarolina13.GameAI.services.FollowResumeVeto.shouldVeto(TaskService.hasActiveTask(bot.getUuid()))) {
+            net.wcfcarolina13.GameAI.services.FollowResumeVeto.veto(bot.getUuid());
+        }
         // Commands already emit a system summary; avoid redundant bot-authored chat acks.
         BotEventHandler.stopFollowing(bot, false);
         CompanionContextReactionService.playStopAck(bot);
@@ -5789,6 +5793,9 @@ public class modCommandRegistry {
     static int executeStay(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
         rememberTarget(context.getSource(), bot);
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot stay.");
+        if (net.wcfcarolina13.GameAI.services.FollowResumeVeto.shouldVeto(TaskService.hasActiveTask(bot.getUuid()))) {
+            net.wcfcarolina13.GameAI.services.FollowResumeVeto.veto(bot.getUuid());
+        }
         String result = BotEventHandler.setStayMode(bot);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         CompanionContextReactionService.playStopAck(bot);

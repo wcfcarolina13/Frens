@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## "/bot follow stop" or "/bot stay" during a task is no longer undone when the task ends (unreleased, 2026-11-05)
+
+Found by the independent review of the craft/Quick Store follow fixes, pre-existing for every skill: a task takes the bot out of FOLLOW when it starts (`SkillManager.suspendFollowMode`) and restores follow when it ends (`resumeFollowMode`). During the task the bot is not in FOLLOW, so `/bot follow stop` found nothing to stop, and the resume then restarted follow against the player's instruction.
+
+- New `FollowResumeVeto` (pure, per bot). `/bot follow stop` and `/bot stay` record a veto while a task holds the bot; `resumeFollowMode` consumes it and stays idle (log `task-resume skipped ... reason=player-stopped-follow-during-task`); each new suspend clears a stale veto. `/bot stop` already aborts the task, and the follow toggle already aborts and sets follow itself, so neither needed it.
+- **Cost:** none expected; a veto is only recorded while a task runs and applies to that task's resume.
+- Tests 3857 → 3861 (`FollowResumeVetoTest`, including source-reading wiring). **Sandbox check:** the bot following you, start a skill (e.g. woodcut), `/bot follow stop` mid-task: when the task ends the bot stays put.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
