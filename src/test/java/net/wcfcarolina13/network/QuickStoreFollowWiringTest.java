@@ -18,7 +18,7 @@ class QuickStoreFollowWiringTest {
     @Test
     void quickStoreWorkerSuspendsFollowAndResumesAfterCompleting() throws IOException {
         String src = Files.readString(Path.of("src/main/java/net/wcfcarolina13/network/ChestRegistryNetworkManager.java"));
-        int start = src.indexOf("CompletableFuture.runAsync(() -> {", src.indexOf("\"quick-store\""));
+        int start = src.indexOf("QUICK_TRANSFER_EXECUTOR.execute(() -> {", src.indexOf("\"quick-store\""));
         assertTrue(start >= 0, "quick store worker not found");
         String body = src.substring(start);
         int attach = body.indexOf("TaskService.attachExecutingThread(ticket, Thread.currentThread())");
