@@ -87,15 +87,15 @@ public final class ProtectedStructureBlockHelper {
         Box scanBox = new Box(pos).expand(2.5);
         var paintings = world.getEntitiesByClass(PaintingEntity.class, scanBox, p -> true);
         for (PaintingEntity painting : paintings) {
-            // The painting's attachment block is one step opposite its facing from the
-            // painting position. We over-approximate: if the target block is along the
-            // painting's facing axis behind the painting bounding box, treat as attached.
+            // The painting's box is 1/16 deep and flush against its wall, so moved one block
+            // opposite its facing it lies inside exactly the blocks that hold it up.
             Direction facing = painting.getHorizontalFacing();
             if (facing == null) continue;
             Box paintBox = painting.getBoundingBox();
             // Walk one block behind the painting (opposite of facing) and check overlap.
             Box behind = paintBox.offset(-facing.getOffsetX(), -facing.getOffsetY(), -facing.getOffsetZ());
-            if (behind.intersects(new Box(pos).expand(0.01))) return true;
+            if (PaintingSupportPolicy.supports(behind.minX, behind.minY, behind.minZ,
+                    behind.maxX, behind.maxY, behind.maxZ, pos.getX(), pos.getY(), pos.getZ())) return true;
         }
         return false;
     }
