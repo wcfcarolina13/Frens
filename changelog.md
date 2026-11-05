@@ -2,6 +2,42 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Static maps shared across threads made safe (2026-11-05, unreleased)
+
+An audit of the 102 static `HashMap`/`HashSet`/`ArrayList` fields found four that more than one
+thread writes. Skills run on per-bot worker threads, so two bots on the same skill write these
+at once. The rest are filled once at class load, client-only, server-thread-only or already
+locked.
+- `HotbarLockService`: the ride-sync tick (server thread) locks a bot's hotbar slot while skills
+  read the lock from workers (`FarmSkill`, `BotActions.selectHotbarSlot` from dirt, hunt and
+  woodcut), and an expired lock was cleared from the worker. It had three problems:
+  - a server-thread `put` raced a worker `remove` on a plain map;
+  - slot, expiry and reason sat in three maps, so a worker could see a lock with no slot yet;
+  - expiry cleared unconditionally, which could delete a fresh lock set in between.
+  The state now lives in a new pure `HotbarLockTable`: one immutable record per bot in a
+  `ConcurrentHashMap`, removed on expiry only if it is still the record that was read.
+- `WoolSkill` (`LAST_SEEN_SHEEP`, `EXPLORED_ZONES`), `CollectDirtSkill`
+  (`LAST_INVENTORY_FULL_MESSAGE`, `LAST_ESCAPE_ATTEMPT`) and `RoofAccessService.roofPillars`
+  (build worker) are now `ConcurrentHashMap`s. Keys are per bot and each bot runs one skill at a
+  time, so the swap is enough for the outer maps. No key or value is ever null (checked at
+  every call). Inner collections were made safe too: `/bot stop` interrupts a worker and a new
+  skill can start for the same bot while the old one unwinds. The wool explored-zones map is a
+  `ConcurrentHashMap`, and the roof-pillar list is a `CopyOnWriteArrayList` (a handful of
+  entries).
+
+Left as is (cosmetic): two log-cooldown races can let one extra "HotbarLock: blocked" line through
+inside 40 ticks, or hold back the first one for up to 40 ticks. Roof descent now reads the last
+pillar from a snapshot, so a pillar removed by the old worker can't make it throw.
+
+Costs and limits: the failure was rare (two bots on the same skill at the same moment, or a hotbar
+lock expiring as ride sync re-locks it), so no field report maps to it. Its symptom would have
+been a lost lock, a lost cooldown, or a corrupted map throwing from a skill. Tests:
+`HotbarLockTableTest` (7, including a source check that the five fields are concurrent). No
+sandbox check needed beyond the usual: hotbar lock behaviour is unchanged when only one thread
+touches it.
+
+Also: the hotbar lock map is cleared at SERVER_STOPPED (`HotbarLockService.resetSession`). A singleplayer quit keeps it while the next world's ticks restart at 0, so a lock taken late in one world held a bot's slot for hours in the next.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.

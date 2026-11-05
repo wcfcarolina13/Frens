@@ -91,8 +91,8 @@ public class CollectDirtSkill implements Skill {
     private static final long INVENTORY_MESSAGE_COOLDOWN_MS = 5000; // 5 seconds between messages
     private static final long ESCAPE_COOLDOWN_MS = 15_000L;
     
-    private static final Map<UUID, Long> LAST_INVENTORY_FULL_MESSAGE = new HashMap<>();
-    private static final Map<UUID, Long> LAST_ESCAPE_ATTEMPT = new HashMap<>();
+    private static final Map<UUID, Long> LAST_INVENTORY_FULL_MESSAGE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_ESCAPE_ATTEMPT = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-collect-dirt");
     // Finding 44: the hostile line prints once per change in count, and the "still fighting"
     // line at most every 10 s, per bot. Entries are removed when the mining loop exits.
