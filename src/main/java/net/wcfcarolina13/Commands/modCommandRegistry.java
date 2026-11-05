@@ -2689,14 +2689,23 @@ public class modCommandRegistry {
         MinecraftServer server = source.getServer();
         skillExecutor.submit(() -> {
             boolean success = false;
+            // Attach so /bot stop interrupts the walk, not only latches the abort.
+            TaskService.attachExecutingThread(ticket, Thread.currentThread());
+            // Like SkillManager.runSkill: nothing in the follow tick checks for a task, so follow
+            // would keep steering (or teleport) the bot while the worker walks it to the spot.
+            net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume =
+                    net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
             try {
-                // Attach so /bot stop interrupts the walk, not only latches the abort.
-                TaskService.attachExecutingThread(ticket, Thread.currentThread());
                 PlaceRun rest = runPlaceLoop(bot, target, item, placeItem, count, first.placed(), first.lastPlaced());
                 success = rest.stop() == PlacePosPolicy.Stop.DONE;
                 server.execute(() -> reportPlacement(source, rest, item));
             } finally {
+                // Abort read before complete() drops the ticket; complete before resuming.
+                boolean abortRequested = TaskService.isAbortRequested(botUuid);
                 TaskService.complete(ticket, success);
+                if (!abortRequested) {
+                    net.wcfcarolina13.GameAI.skills.SkillManager.resumeFollowMode(bot, server, followResume);
+                }
             }
         });
         return 1;
