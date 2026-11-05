@@ -113,4 +113,12 @@ class LineOfSightRedirectPolicyTest {
         int log = shovel.indexOf("Too far from {} after approach preparation", check);
         assertTrue(check >= 0 && log > check);
     }
+
+    @Test
+    void approachClearingRefusalLogIsThrottledPerBlock() throws IOException {
+        String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
+        assertTrue(shovel.contains("logUnexpectedResult(blockPos, result);"));
+        assertFalse(shovel.contains("            if (result == null || !result.toLowerCase().contains(\"complete\")) {\n                LOGGER.warn(\"Mining {} returned unexpected result"));
+        assertTrue(shovel.contains("LogThrottle.due(UNEXPECTED_RESULT_LOG, blockPos.toImmutable()"));
+    }
 }

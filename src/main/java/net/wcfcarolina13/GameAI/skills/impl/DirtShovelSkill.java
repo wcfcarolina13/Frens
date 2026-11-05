@@ -868,6 +868,27 @@ public final class DirtShovelSkill implements Skill {
         return player.getBlockPos().getSquaredDistance(destination) <= 4.0D;
     }
 
+    /** Last warn time per block for repeated approach-clearing refusals (log only, behaviour unchanged). */
+    private static final Map<BlockPos, Long> UNEXPECTED_RESULT_LOG = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long UNEXPECTED_RESULT_LOG_INTERVAL_MS = 30_000L;
+
+    /**
+     * The same hidden block can be tried as an approach step for many candidates in a row (a sandbox
+     * run logged 42 "no line of sight" lines for one cell between two mined blocks). The first line
+     * per block per 30 s is a warning; repeats go to debug.
+     */
+    private static void logUnexpectedResult(BlockPos blockPos, String result) {
+        if (UNEXPECTED_RESULT_LOG.size() > 512) {
+            UNEXPECTED_RESULT_LOG.clear();
+        }
+        if (net.wcfcarolina13.GameAI.services.LogThrottle.due(UNEXPECTED_RESULT_LOG, blockPos.toImmutable(),
+                System.currentTimeMillis(), UNEXPECTED_RESULT_LOG_INTERVAL_MS)) {
+            LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
+        } else {
+            LOGGER.debug("Mining {} returned unexpected result again: {}", blockPos, result);
+        }
+    }
+
     private boolean mineWithinReach(ServerPlayerEntity player, BlockPos blockPos) {
         if (blockPos == null || player == null) {
             return true;
@@ -884,7 +905,7 @@ public final class DirtShovelSkill implements Skill {
         try {
             String result = future.get(6, TimeUnit.SECONDS);
             if (result == null || !result.toLowerCase().contains("complete")) {
-                LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
+                logUnexpectedResult(blockPos, result);
                 return false;
             }
             if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {
