@@ -20,6 +20,8 @@ Loads mirror `FortificationPersistenceService`: catch `IOException | RuntimeExce
 
 Costs and limits: one `fsync` per save (milliseconds on an SSD; these stores save on debounce, on change or at shutdown, not per tick). A crash during a write can leave an orphaned `<name>.<random>.tmp` beside the store, harmless. A corrupt file is kept as `.bad-<stamp>` and the admin join notice lists it; the store does start empty for that session. Not touched: `BotZzzSleepService` (owned by another open PR) and the low-stakes stores (BotDeathRecord, Shelter, PlayerAlliance, WoodcutKnowledge, PassageAnchor, NavHazardCache). Tests: `AtomicStoreWriterTest` (replace, no `.tmp` left on success or failure, target never truncated, backup ordering) and `AtomicStoreWiringTest` (each store saves through the writer, catches `RuntimeException`, quarantines, gates saves). The sandbox runs as root, so the failure tests use a directory in the target's place rather than an unwritable directory.
 
+Review fix: the inventory `.bak` is refreshed only from a primary that can be read. Otherwise a save made after restoring from `.bak` would first copy the unreadable primary over the good backup, and a crash before the rename would leave no readable copy. The cost is one extra read of the small primary file per save.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.

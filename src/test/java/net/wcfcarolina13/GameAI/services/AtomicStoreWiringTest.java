@@ -134,4 +134,13 @@ class AtomicStoreWiringTest {
         }
         throw new AssertionError("Unclosed scope: " + marker);
     }
+
+    @Test
+    void anUnreadableInventoryPrimaryNeverReplacesTheBackup() throws java.io.IOException {
+        String src = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "src/main/java/net/wcfcarolina13/GameAI/services/BotInventoryStorageService.java"));
+        int backup = src.indexOf("Path backup = Files.exists(path) && snapshotItemCount(path) >= 0");
+        org.junit.jupiter.api.Assertions.assertTrue(backup >= 0
+                && backup < src.indexOf("AtomicStoreWriter.writeWithBackup(path, backup,"));
+    }
 }

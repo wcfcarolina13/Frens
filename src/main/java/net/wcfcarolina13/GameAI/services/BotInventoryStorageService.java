@@ -147,7 +147,12 @@ public final class BotInventoryStorageService {
             // primary. A failed or interrupted write therefore leaves both the primary and the
             // .bak as they were (the old in-place write could truncate the primary, and two
             // failures in a row then destroyed both copies).
-            Path backup = path.resolveSibling(path.getFileName().toString() + ".bak");
+            // Only a readable primary becomes the .bak: after a restore from .bak (unreadable
+            // primary), copying the bad primary over the good .bak and then crashing before the
+            // rename would leave no readable copy at all.
+            Path backup = Files.exists(path) && snapshotItemCount(path) >= 0
+                    ? path.resolveSibling(path.getFileName().toString() + ".bak")
+                    : null;
             AtomicStoreWriter.writeWithBackup(path, backup,
                     out -> net.minecraft.nbt.NbtIo.writeCompressed(root, out),
                     bakErr -> LOGGER.warn("Failed to create backup for '{}': {}", bot.getName().getString(), bakErr.getMessage()));
