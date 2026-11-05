@@ -2,6 +2,12 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Fortify: inline single-caller carve delegates (unreleased, 2026-11-05)
+
+- `FortifyVillageSkill`: inlined the single-caller wrappers `isCarveEligibleForBreakAttempt` and `attemptFinalizeCarveTransaction` (call sites now call `carveHelper.*` directly) and deleted the 3-arg `tryBreakThroughObstacle` overload, which had no callers (1.1.210 review Minor 3).
+- Kept the 4-arg `tryBreakThroughObstacle(bot, world, target, causeContext)`: it has four callers (patch-start preflight, breakthrough fallback, two in the stuck-recovery loop), so the backlog's "single-caller" note did not hold for it. None of the four are `FortifySkillOps` interface methods.
+- Pure refactor, no behaviour change. Tests 3857 before and after (only the known root-container `SoulStoreTest.persistCursorFailure…` failure; `closeShutsDown…` flaked once under memory pressure and passed on rerun).
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
