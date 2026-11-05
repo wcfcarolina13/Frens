@@ -2633,7 +2633,12 @@ public class modCommandRegistry {
         skillExecutor.submit(() -> {
             int crafted = 0;
             boolean success = false;
+            // Like SkillManager.runSkill: the follow tick would otherwise keep steering (and stop or
+            // teleport) the bot while CraftingHelper walks it to a table or furnace.
+            net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume = null;
             try {
+                TaskService.attachExecutingThread(ticket, Thread.currentThread());
+                followResume = net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
                 crafted = CraftingHelper.craftGenericForPlayer(source, bot, commander, item, amount, material);
                 success = crafted > 0 && !TaskService.isAbortRequested(botUuid);
                 if (crafted > 0) {
@@ -2645,7 +2650,13 @@ public class modCommandRegistry {
                 LOGGER.error("Unexpected error in /bot craft {}", item, e);
                 source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, "An unexpected error occurred trying to craft that."));
             } finally {
+                // Read the abort before complete() drops the ticket; complete before resuming,
+                // since resumeFollowMode skips while a task is still active.
+                boolean abortRequested = TaskService.isAbortRequested(botUuid);
                 TaskService.complete(ticket, success);
+                if (!abortRequested) {
+                    net.wcfcarolina13.GameAI.skills.SkillManager.resumeFollowMode(bot, source.getServer(), followResume);
+                }
             }
         });
 
