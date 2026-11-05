@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Despawn really removes the bot from PlayerManager (2026-11-05)
+
+Fixes the 1.1.296 deferral "Fakeplayer still present after removal attempt on every despawn". The warning was true, not a check that ran too early.
+
+- **Cause.** `BotPersistenceService` looked up `PlayerManager#remove` by reflection with the names `remove`, `removePlayer`, `method_2984`, `method_14576`. `remove` only exists in the dev (yarn) runtime. In a release jar the lookup matched `method_14576`, which in 1.21.11 is `sendCommandTree`; `remove` is `method_14611` (checked in the loom `mappings.tiny`). `createFakePlayer.kill()` does not help: it schedules `networkHandler.disconnect`, which ends in `connection.handleDisconnection()`, and `FakeClientConnection` overrides that as a no-op, so `ServerPlayNetworkHandler.onDisconnected` → `cleanUp` → `PlayerManager.remove` never runs (read with javap). The fallback then took the bot out of the `players` list by hand but left it in `playerMap`, so `getPlayer(uuid)` still returned it and the WARN fired. Each despawn, logoff, sleep logoff and travel left a stale `playerMap`, stats and advancement entry and sent no tab-list removal packet.
+- **Change.** Call `server.getPlayerManager().remove(bot)` directly (Loom remaps it), only while this exact entity is still in the map or the list. Presence is judged by identity, so a newer same-UUID entity (travel respawn) is no longer read as "still present". The hand list removal and the method-name scan are gone. Decision in the new pure `BotRemovalPolicy`.
+- **Cost.** Release builds now do what dev builds already did: vanilla `remove` saves the bot's `.dat`, counts a leave stat and sends `PlayerRemoveS2CPacket`.
+- **Limits.** On the death path with auto-respawn off, `onBotDeath` deletes the `.dat` and the following `unregisterBot` now writes it again (post-drop inventory, death position), as in dev. Not changed here; check whether that matters for respawn-on-yes.
+- **Tests** 3857 → 3861 (`BotRemovalPolicyTest`, 4). Known `SoulStoreTest.persistCursorFailure…` failure unchanged.
+- **Sandbox check needed:** `/bot despawn`, sleep logoff and a travel in a release jar: no WARN, the bot leaves the tab list, `/bot spawn` of the same name works, inventory survives.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
