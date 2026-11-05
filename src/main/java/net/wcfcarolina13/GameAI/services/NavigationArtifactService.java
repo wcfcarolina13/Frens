@@ -1883,9 +1883,11 @@ public final class NavigationArtifactService {
             if (!Files.exists(file)) {
                 return;
             }
+            boolean parsedOk = false;
             try (Reader reader = Files.newBufferedReader(file)) {
                 Type listType = new TypeToken<List<SavedTravel>>() {}.getType();
                 List<SavedTravel> list = GSON.fromJson(reader, listType);
+                parsedOk = true; // a later failure is not a corrupt file
                 if (list == null || list.isEmpty()) {
                     return;
                 }
@@ -1937,9 +1939,14 @@ public final class NavigationArtifactService {
                 // RuntimeException: Gson's JsonSyntaxException on a truncated file. This runs in
                 // the SERVER_STARTED hook, so it must not escape. A corrupt file is moved to
                 // .bad-<stamp>; an unreadable one is left in place and saves are refused.
-                LOGGER.warn("Failed to load pending travels: {}", e.getMessage());
-                Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "pending travels");
-                travelsLoadFailed = backup == null;
+                if (parsedOk) {
+                    // Read fine; restoring an entry failed. Keep what was restored, keep saving.
+                    LOGGER.error("Restoring pending travels failed after the file was read", e);
+                } else {
+                    LOGGER.warn("Failed to load pending travels: {}", e.getMessage());
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "pending travels");
+                    travelsLoadFailed = backup == null;
+                }
             }
         }
     }

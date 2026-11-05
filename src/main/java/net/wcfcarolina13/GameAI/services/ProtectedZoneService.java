@@ -477,9 +477,11 @@ public class ProtectedZoneService {
 
         if (fileToRead == null) return;
 
+        boolean parsedOk = false;
         try {
             String json = Files.readString(fileToRead);
             List<ZoneData> zoneDataList = GSON.fromJson(json, new TypeToken<List<ZoneData>>(){}.getType());
+            parsedOk = true; // a later failure is not a corrupt file
             if (zoneDataList == null) zoneDataList = List.of();
 
             Map<String, ProtectedZone> worldZones = zones.computeIfAbsent(worldId, k -> new ConcurrentHashMap<>());
@@ -535,10 +537,15 @@ public class ProtectedZoneService {
             // SERVER_STARTED hook, so it must not escape. A corrupt file is moved to .bad-<stamp>
             // and the world starts without zones; an unreadable one is left in place and saves
             // for that world are refused, so a later createZone cannot overwrite it.
-            LOGGER.error("Failed to load protected zones for world {}", worldId, e);
-            Path backup = UnreadableStoreFile.quarantineIfCorrupt(fileToRead, e, java.time.LocalDateTime.now(), LOGGER,
-                    "protected zones (" + worldId + ")");
-            if (backup == null) LOAD_FAILED_WORLDS.add(worldId);
+            if (parsedOk) {
+                // Read fine; a migration re-save or claim write failed (e.g. disk full). Not corrupt.
+                LOGGER.error("Protected zones for world {} loaded, but a follow-up write failed", worldId, e);
+            } else {
+                LOGGER.error("Failed to load protected zones for world {}", worldId, e);
+                Path backup = UnreadableStoreFile.quarantineIfCorrupt(fileToRead, e, java.time.LocalDateTime.now(), LOGGER,
+                        "protected zones (" + worldId + ")");
+                if (backup == null) LOAD_FAILED_WORLDS.add(worldId);
+            }
         }
     }
 

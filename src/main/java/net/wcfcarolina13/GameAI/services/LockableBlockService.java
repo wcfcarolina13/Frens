@@ -209,11 +209,13 @@ public final class LockableBlockService {
                         worldId, WorldZoneStore.fingerprint(server), adoption);
             }
         }
+        boolean parsedOk = false;
         try {
             Set<BlockPos> locks = ConcurrentHashMap.newKeySet();
             if (fileToRead != null) {
                 String json = Files.readString(fileToRead);
                 List<int[]> positions = GSON.fromJson(json, new TypeToken<List<int[]>>(){}.getType());
+                parsedOk = true; // a later failure is not a corrupt file
                 if (positions != null) {
                     for (int[] coords : positions) {
                         if (coords != null && coords.length >= 3) {
@@ -238,10 +240,15 @@ public final class LockableBlockService {
             // SERVER_STARTED hook, so it must not escape. A corrupt file is moved to .bad-<stamp>;
             // an unreadable one is left in place and saves for that world are refused, so the
             // shutdown saveAllWorlds cannot write [] over it.
-            LOGGER.error("Failed to load locked blocks for world {}", worldId, e);
-            Path backup = UnreadableStoreFile.quarantineIfCorrupt(fileToRead, e, java.time.LocalDateTime.now(), LOGGER,
-                    "locked blocks (" + worldId + ")");
-            if (backup == null) LOAD_FAILED_WORLDS.add(worldId);
+            if (parsedOk || fileToRead == null) {
+                // Read fine (or nothing to read); the adoption write or claim failed. Not corrupt.
+                LOGGER.error("Locked blocks for world {} loaded, but a follow-up write failed", worldId, e);
+            } else {
+                LOGGER.error("Failed to load locked blocks for world {}", worldId, e);
+                Path backup = UnreadableStoreFile.quarantineIfCorrupt(fileToRead, e, java.time.LocalDateTime.now(), LOGGER,
+                        "locked blocks (" + worldId + ")");
+                if (backup == null) LOAD_FAILED_WORLDS.add(worldId);
+            }
         }
     }
 

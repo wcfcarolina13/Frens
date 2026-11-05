@@ -321,6 +321,7 @@ public class ManualConfig {
             return defaultConfig;
         }
 
+        ManualConfig parsed;
         try (FileReader reader = new FileReader(file)) {
             Gson gson = new Gson();
             Type type = new TypeToken<ManualConfig>(){}.getType();
@@ -329,6 +330,31 @@ public class ManualConfig {
                 // An empty file (a crash during a pre-atomic in-place write) parses to null.
                 throw new IllegalStateException("settings file is empty");
             }
+            parsed = loadedConfig;
+        } catch (IOException | RuntimeException e) {
+            // RuntimeException covers Gson's JsonSyntaxException on a truncated file and the
+            // empty-file case above. This runs from Frens.CONFIG's static initializer, so nothing
+            // may escape: a corrupt file is moved to settings.json5.bad-<stamp> and the game
+            // starts from defaults; an unreadable (locked) file is left in place and saves are
+            // refused for the session so it is never overwritten by those defaults.
+            LOGGER.error("Failed to load config file {}. Using default config.", file.getAbsolutePath(), e);
+            java.nio.file.Path backup = net.wcfcarolina13.GameAI.services.UnreadableStoreFile.quarantineIfCorrupt(
+                    file.toPath(), e, java.time.LocalDateTime.now(), LOGGER, "settings");
+            loadFailed = backup == null;
+            if (backup != null) {
+                LOGGER.error("The unreadable settings file was moved to {}; bot ownership, profiles, spawn points and controls start from defaults.",
+                        backup.getFileName());
+            }
+            ManualConfig fallback = new ManualConfig();
+            fallback.baritoneDefaultMigrated = true; // already on the new default; never flip a later classic pick
+            fallback.unifiedDefaultMigrated = true;
+            fallback.syncLegacyPathfinderFlag();
+            return fallback;
+        }
+        // Post-load steps run outside the quarantine catch: a failure here is not a corrupt file,
+        // so the parsed settings are kept rather than moved aside.
+        ManualConfig loadedConfig = parsed;
+        try {
             if (loadedConfig.botQuestMemory == null) {
                 loadedConfig.botQuestMemory = new ConcurrentHashMap<>();
             }
@@ -361,27 +387,11 @@ public class ManualConfig {
             if (migrated) {
                 loadedConfig.save();
             }
-            return loadedConfig;
-        } catch (IOException | RuntimeException e) {
-            // RuntimeException covers Gson's JsonSyntaxException on a truncated file and the
-            // empty-file case above. This runs from Frens.CONFIG's static initializer, so nothing
-            // may escape: a corrupt file is moved to settings.json5.bad-<stamp> and the game
-            // starts from defaults; an unreadable (locked) file is left in place and saves are
-            // refused for the session so it is never overwritten by those defaults.
-            LOGGER.error("Failed to load config file {}. Using default config.", file.getAbsolutePath(), e);
-            java.nio.file.Path backup = net.wcfcarolina13.GameAI.services.UnreadableStoreFile.quarantineIfCorrupt(
-                    file.toPath(), e, java.time.LocalDateTime.now(), LOGGER, "settings");
-            loadFailed = backup == null;
-            if (backup != null) {
-                LOGGER.error("The unreadable settings file was moved to {}; bot ownership, profiles, spawn points and controls start from defaults.",
-                        backup.getFileName());
-            }
-            ManualConfig fallback = new ManualConfig();
-            fallback.baritoneDefaultMigrated = true; // already on the new default; never flip a later classic pick
-            fallback.unifiedDefaultMigrated = true;
-            fallback.syncLegacyPathfinderFlag();
-            return fallback;
+        } catch (RuntimeException e) {
+            LOGGER.error("A settings post-load step failed for {}; continuing with the settings as read.",
+                    file.getAbsolutePath(), e);
         }
+        return loadedConfig;
     }
 
     public String getOllamaBaseUrl() {

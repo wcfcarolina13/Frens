@@ -142,4 +142,19 @@ class AtomicStoreWriterTest {
             return stream.map(p -> p.getFileName().toString()).sorted().toList();
         }
     }
+
+    @Test
+    void aReplacedFileKeepsItsPosixPermissions(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws java.io.IOException {
+        java.nio.file.Path target = dir.resolve("perm.json");
+        java.nio.file.Files.writeString(target, "old");
+        try {
+            java.nio.file.Files.setPosixFilePermissions(target, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+        } catch (UnsupportedOperationException e) {
+            return; // not a POSIX file system
+        }
+        AtomicStoreWriter.writeString(target, "new");
+        org.junit.jupiter.api.Assertions.assertEquals("new", java.nio.file.Files.readString(target));
+        org.junit.jupiter.api.Assertions.assertEquals("rw-r--r--",
+                java.nio.file.attribute.PosixFilePermissions.toString(java.nio.file.Files.getPosixFilePermissions(target)));
+    }
 }

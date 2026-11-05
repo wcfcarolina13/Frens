@@ -143,4 +143,23 @@ class AtomicStoreWiringTest {
         org.junit.jupiter.api.Assertions.assertTrue(backup >= 0
                 && backup < src.indexOf("AtomicStoreWriter.writeWithBackup(path, backup,"));
     }
+
+    @Test
+    void onlyAParseFailureQuarantines() throws java.io.IOException {
+        for (String f : new String[]{"NavigationArtifactService", "ProtectedZoneService", "LockableBlockService"}) {
+            String src = java.nio.file.Files.readString(java.nio.file.Path.of(
+                    "src/main/java/net/wcfcarolina13/GameAI/services/" + f + ".java"));
+            int set = src.indexOf("parsedOk = true; // a later failure is not a corrupt file");
+            org.junit.jupiter.api.Assertions.assertTrue(set > src.indexOf("GSON.fromJson("), f + " sets the flag after the parse");
+            int gate = src.indexOf("if (parsedOk", set);
+            org.junit.jupiter.api.Assertions.assertTrue(gate > set
+                    && src.indexOf("quarantineIfCorrupt(", gate) > gate, f + " quarantines only on the parse path");
+        }
+        String config = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "src/main/java/net/wcfcarolina13/FilingSystem/ManualConfig.java"));
+        int quarantine = config.indexOf("quarantineIfCorrupt(");
+        int migrate = config.indexOf("loadedConfig.migrateLegacyToPerWorld();");
+        org.junit.jupiter.api.Assertions.assertTrue(migrate > quarantine, "migrations run after, outside the quarantine catch");
+        org.junit.jupiter.api.Assertions.assertTrue(config.contains("A settings post-load step failed"));
+    }
 }

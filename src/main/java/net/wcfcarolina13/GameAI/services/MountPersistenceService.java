@@ -428,7 +428,9 @@ public final class MountPersistenceService {
                                 for (Map.Entry<?, ?> worldEntry : innerMap.entrySet()) {
                                     String worldKey = worldEntry.getKey().toString();
                                     MountState st = GSON.fromJson(GSON.toJson(worldEntry.getValue()), MountState.class);
-                                    worldMap.put(worldKey, st);
+                                    if (st != null) { // a JSON null would be refused by the concurrent map
+                                        worldMap.put(worldKey, st);
+                                    }
                                 }
                                 STATE.put(alias, worldMap);
                             }

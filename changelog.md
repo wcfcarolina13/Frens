@@ -22,6 +22,15 @@ Costs and limits: one `fsync` per save (milliseconds on an SSD; these stores sav
 
 Review fix: the inventory `.bak` is refreshed only from a primary that can be read. Otherwise a save made after restoring from `.bak` would first copy the unreadable primary over the good backup, and a crash before the rename would leave no readable copy. The cost is one extra read of the small primary file per save.
 
+Review fixes:
+- *Only a parse failure quarantines.* In `ManualConfig`, `NavigationArtifactService`, `ProtectedZoneService` and `LockableBlockService`, the catch also covered migrations, world reads and the adoption-path write. A disk-full error on that write, or an exception after a good parse, would have quarantined a good file, or refused saves for the session with a misleading "could not read" notice. Now only the read and parse go to quarantine. A later step logs an ERROR and keeps what was read.
+- *The Windows fallback keeps the new content.* A non-atomic replace deletes the target before renaming. If the delete succeeds (an antivirus holding the file with share-delete) and the rename fails, neither file would have existed. The temp is now kept and its path is named in the error.
+- *Replaced files keep their POSIX permissions.* `createTempFile` makes the temp 0600, which would have silently dropped group/world read bits.
+- `MountPersistenceService` skips a JSON-null entry instead of refusing saves for the session.
+
+Costs noted in review: each save now forces the temp file to disk on the calling thread. Inventory autosave runs about every 30 s per bot on the server thread, so that is a few ms per bot per save on a slow disk. The inventory save also reads the small primary once to decide on the backup.
+
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.

@@ -67,7 +67,9 @@ public final class AtomicStoreWriter {
         if (dir == null) throw new IOException("Target has no parent directory: " + target);
         Files.createDirectories(dir);
         Path temporary = Files.createTempFile(dir, target.getFileName() + ".", ".tmp");
+        boolean keepTemporary = false;
         try {
+            copyPosixPermissions(target, temporary);
             try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
                 // Bodies such as NbtIo.writeCompressed close the stream they are handed; the
                 // wrapper keeps the channel open so it can still be forced afterwards.
@@ -96,14 +98,40 @@ public final class AtomicStoreWriter {
             try {
                 Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException | AccessDeniedException e) {
-                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+                try {
+                    Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException fallback) {
+                    // A non-atomic replace deletes the target before renaming: on Windows the delete
+                    // can succeed (a reader holding the file with share-delete) while the rename
+                    // fails, leaving no target. The temp is then the only copy, so it is kept.
+                    keepTemporary = true;
+                    fallback.addSuppressed(e);
+                    throw new IOException("Could not replace " + target + ". The new content is kept in " + temporary, fallback);
+                }
             }
         } finally {
-            try {
-                Files.deleteIfExists(temporary);
-            } catch (IOException ignored) {
-                // The move already succeeded or the original failure is being thrown.
+            if (!keepTemporary) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException ignored) {
+                    // The move already succeeded or the original failure is being thrown.
+                }
             }
+        }
+    }
+
+    /**
+     * createTempFile makes the temp owner-only (0600) on POSIX; a replaced store keeps the
+     * target's own permissions instead (best effort: non-POSIX file systems and a missing target
+     * leave the temp as created).
+     */
+    private static void copyPosixPermissions(Path target, Path temporary) {
+        try {
+            if (Files.exists(target)) {
+                Files.setPosixFilePermissions(temporary, Files.getPosixFilePermissions(target));
+            }
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // Windows or a target we cannot stat: keep the temp's defaults.
         }
     }
 }
