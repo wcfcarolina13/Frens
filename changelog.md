@@ -30,13 +30,18 @@ which runs inline when already there:
 
 Costs and limits:
 - Each hop waits for the server thread for up to 0.75–1.5 s. If the tick is that late, the call
-  reports failure (no flare, `FAILED` torch, `FAIL` interaction, 0 planks), but the queued work
-  still runs afterwards. So a skill might, for example, retry a torch it then places twice. That
-  needs a server stalled for over a second.
+  reports failure (no flare, `FAILED` torch, `FAIL` interaction, 0 planks). The queued task is
+  cancelled if it has not started (`ServerThreadCallPolicy`), so only work already running at
+  that moment completes after the failure. Worst case: a flare launches while the skill reports
+  it could not. A late hovel pillar snap is retried once. If it misses again, the bot carries on
+  uncentred, as it already does when no perch resolves.
+- `ShelterSkill.ensurePickupSlot` uses `BotActions.callOnServerThread` rather than the skill's
+  own `callOnServer`. The latter gave up after 200 ms without cancelling, so a late tick could
+  drop build blocks after the skill had moved on.
 - Hotbar selection before these calls (`selectHotbarSlot`, `ensureHotbarItem`, `selectBestTool`)
   still runs on the worker. That is the recorded inventory-swap deferral, unchanged.
 
-Tests: `OffThreadMutationWiringTest` (5, source wiring). Needs a sandbox smoke test: `/bot skill
+Tests: `OffThreadMutationWiringTest` (6, source wiring, including no sleep inside the new hops). Needs a sandbox smoke test: `/bot skill
 flare`; dirt or strip-mine in the dark (torches go up); farm and harvest (seeds planted,
 replanted); a hovel build with a roof pillar; woodcut needing scaffold planks with a nearly full
 inventory (watch for `Scaffold planks: inventory full, dropped`).

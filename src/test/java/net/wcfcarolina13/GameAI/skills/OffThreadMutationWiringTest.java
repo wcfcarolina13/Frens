@@ -50,9 +50,9 @@ class OffThreadMutationWiringTest {
     void hovelSnapTeleportsOnlyInsideTheHop() throws IOException {
         String src = read("skills/impl/shelter/HovelPerimeterBuilder.java");
         assertEquals(1, count(src, "bot.teleport("));
-        String helper = after(src, "private static void snapToOnServer(");
+        String helper = after(src, "private static boolean snapToOnServer(");
         assertTrue(helper.indexOf("BotActions.callOnServerThread(bot, () ->") < helper.indexOf("bot.teleport("));
-        assertEquals(2, count(src, "snapToOnServer(bot, world, snap);"));
+        assertEquals(2, count(src, "snapWithRetry(bot, world, snap);"));
     }
 
     @Test
@@ -60,10 +60,32 @@ class OffThreadMutationWiringTest {
         String hunt = after(read("skills/impl/HuntSkill.java"), "private static void jettisonDisposables(");
         assertTrue(hunt.indexOf("BotActions.callOnServerThread(bot, () ->") < hunt.indexOf("bot.dropItem("));
         String shelter = read("skills/impl/ShelterSkill.java");
-        assertTrue(shelter.replaceAll("\\s+", " ").contains("callOnServer(world, () -> { ensurePickupSlot(bot); return Boolean.TRUE; });"));
+        int pickup = shelter.indexOf("ensurePickupSlot(bot);");
+        assertTrue(shelter.lastIndexOf("BotActions.callOnServerThread(bot, () ->", pickup) > pickup - 120,
+                "ensurePickupSlot runs inside the cancelling hop");
         String planks = after(read("skills/impl/WoodcutSkill.java"), "private int craftPlanksForScaffold(");
         assertTrue(planks.indexOf("BotActions.callOnServerThread(bot, () ->") < planks.indexOf("stack.decrement(use)"));
         assertTrue(planks.indexOf("bot.dropItem(planks, false)") > 0, "overflow planks are dropped, not lost");
+    }
+
+    @Test
+    void noSleepInsideTheNewHops() throws IOException {
+        // A sleep inside a server-thread lambda would stall the whole server tick.
+        String[][] lambdas = {
+                {"skills/impl/FlareSkill.java", "BotActions.callOnServerThread(bot, () ->", "}, 1500L, false);"},
+                {"skills/impl/WoodcutSkill.java", "return BotActions.callOnServerThread(bot, () ->", "}, 1000L, 0);"},
+                {"skills/impl/shelter/HovelPerimeterBuilder.java", "return BotActions.callOnServerThread(bot, () ->", "}, 750L, false);"},
+                {"BotActions.java", "net.minecraft.util.ActionResult result = bot.interactionManager", "}, 1000L, net.minecraft.util.ActionResult.FAIL);"},
+        };
+        for (String[] l : lambdas) {
+            String src = read(l[0]);
+            int start = src.indexOf(l[1]);
+            int end = src.indexOf(l[2], start);
+            assertTrue(start >= 0 && end > start, l[0]);
+            String body = src.substring(start, end);
+            assertFalse(body.contains("sleep(") || body.contains("sleepQuiet(") || body.contains("Thread.sleep"),
+                    l[0] + " sleeps on the server thread");
+        }
     }
 
     private static String read(String rel) throws IOException {
