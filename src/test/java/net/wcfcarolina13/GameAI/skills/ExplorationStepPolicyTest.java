@@ -66,5 +66,11 @@ class ExplorationStepPolicyTest {
         assertTrue(src.contains("ExplorationStepPolicy.MAX_TRIES_PER_STEP"), "tries capped");
         assertTrue(src.contains("boolean relocated = net.wcfcarolina13.GameAI.skills.ExplorationStepPolicy.moved("), "navigation success requires a move");
         assertFalse(src.contains("failuresInRow++; // Increment instead of reset"), "no double failure count");
+        int stand = src.indexOf("private boolean isNavigableStand(");
+        assertTrue(stand >= 0);
+        String standBody = src.substring(stand, src.indexOf("private boolean isStandable(", stand));
+        assertTrue(standBody.contains("getFluidState(head).isEmpty()")
+                        && standBody.contains("getFluidState(head.up()).isEmpty()"),
+                "exploration never picks a stand inside water or lava");
     }
 }

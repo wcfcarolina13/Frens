@@ -1236,6 +1236,12 @@ public class CollectDirtSkill implements Skill {
         if (!isStandable(player, foot, head)) {
             return false;
         }
+        // Water and lava have no collision shape, so isStandable alone accepts a stand inside them; the
+        // mining loop then stops with "water flooded the dig site" once the bot walks there.
+        if (!player.getEntityWorld().getFluidState(head).isEmpty()
+                || !player.getEntityWorld().getFluidState(head.up()).isEmpty()) {
+            return false;
+        }
         return player.getEntityWorld().getBlockState(head.up())
                 .getCollisionShape(player.getEntityWorld(), head.up()).isEmpty();
     }
