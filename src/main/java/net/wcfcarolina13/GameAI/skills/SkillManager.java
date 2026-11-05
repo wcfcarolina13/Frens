@@ -294,6 +294,10 @@ public final class SkillManager {
                 botPlayer.setPitch(0);
             }
             boolean success = result != null && result.success() && !abortRequested;
+            if (!success && !abortRequested && result != null) {
+                // Read by the soul observer to tell "got stuck" from "no trees here" (BAD_AT).
+                ticket.noteFailureMessage(result.message());
+            }
             // Complete before resuming follow: setFollowMode refuses while this ticket is still
             // active, which used to chat "Busy with another task right now." and drop the follow.
             TaskService.complete(ticket, success);

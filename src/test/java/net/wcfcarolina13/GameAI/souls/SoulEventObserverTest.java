@@ -435,6 +435,14 @@ class SoulEventObserverTest {
         observer.noteTaskFinished(bot, "skill:woodcut", "skill", TASK_COMPLETED, "", 40L);
         assertEquals(List.of(TASK_STARTED, TASK_COMPLETED),
                 sink.events().stream().map(SoulTypes.SoulEvent::type).toList());
+        assertFalse(sink.events().get(1).facts().containsKey(SoulTaskFailurePolicy.FACT_KEY));
+
+        observer.noteTaskFinished(bot, "skill:mining", "skill", SoulTypes.EventType.TASK_FAILED, "",
+                SoulTaskFailurePolicy.factValue("Stripmine aborted: failed to advance tunnel."), 50L);
+        assertEquals("execution", sink.events().get(2).facts().get(SoulTaskFailurePolicy.FACT_KEY));
+        observer.noteTaskFinished(bot, "skill:woodcut", "skill", SoulTypes.EventType.TASK_FAILED, "",
+                SoulTaskFailurePolicy.factValue("No valid trees nearby."), 60L);
+        assertFalse(sink.events().get(3).facts().containsKey(SoulTaskFailurePolicy.FACT_KEY));
         assertTrue(SoulEventObserver.isSleepTask("sleep"));
         assertTrue(SoulEventObserver.isSleepTask("SKILL:SLEEP"));
         assertFalse(SoulEventObserver.isSleepTask("skill:woodcut"));

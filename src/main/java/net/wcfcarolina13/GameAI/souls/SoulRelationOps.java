@@ -37,6 +37,8 @@ final class SoulRelationOps {
     static final int MAX_BELIEFS_CHARS = 240;
     /** Completions of one task category before the bot concludes it is good at that category. */
     static final int SEEN_MIN_COMPLETIONS = 3;
+    /** Execution failures of one task in one fold before it becomes BAD_AT. */
+    static final int SEEN_MIN_FAILURES = 3;
     /** A watched-it-happen conclusion is held loosely. */
     static final double SEEN_CONFIDENCE = 0.4d;
     static final int SEEN_SALIENCE = 6;
@@ -119,8 +121,8 @@ final class SoulRelationOps {
      *       take the max, the day the newer;</li>
      *   <li>a single-valued relation (GOOD_AT / BAD_AT / CALLS) with a different object replaces
      *       the held one when the incoming confidence is at least as high, else is dropped;</li>
-     *   <li>LIKES and DISLIKES are opposites: writing one removes the other for that
-     *       (subject, object);</li>
+     *   <li>LIKES and DISLIKES, and GOOD_AT and BAD_AT, are opposites: writing one removes the
+     *       other for that (subject, object);</li>
      *   <li>everything else accumulates, capped at {@link #MAX_RELATIONS} by evicting the lowest
      *       salience, ties broken by the oldest day.</li>
      * </ul>
@@ -151,19 +153,15 @@ final class SoulRelationOps {
                         && held.subject().equalsIgnoreCase(incoming.subject())) {
                     if (incoming.confidence() >= held.confidence()) {
                         out.set(i, incoming);
+                        removeOpposite(out, incoming);
                         return List.copyOf(out);
                     }
                     return List.copyOf(out);
                 }
             }
         }
-        // 3. LIKES/DISLIKES opposition → the other one goes.
-        SoulTypes.Relation opposite = opposite(incoming.relation());
-        if (opposite != null) {
-            out.removeIf(held -> held.relation() == opposite
-                    && held.subject().equalsIgnoreCase(incoming.subject())
-                    && held.object().equalsIgnoreCase(incoming.object()));
-        }
+        // 3. LIKES/DISLIKES and GOOD_AT/BAD_AT opposition → the other one goes.
+        removeOpposite(out, incoming);
         out.add(incoming);
         while (out.size() > MAX_RELATIONS) {
             int weakest = 0;
@@ -189,8 +187,20 @@ final class SoulRelationOps {
         return switch (relation) {
             case LIKES -> SoulTypes.Relation.DISLIKES;
             case DISLIKES -> SoulTypes.Relation.LIKES;
+            case GOOD_AT -> SoulTypes.Relation.BAD_AT;
+            case BAD_AT -> SoulTypes.Relation.GOOD_AT;
             default -> null;
         };
+    }
+
+    /** Drops the held opposite of {@code incoming} for the same subject and object. */
+    private static void removeOpposite(List<SoulTypes.RelationFact> out, SoulTypes.RelationFact incoming) {
+        SoulTypes.Relation opposite = opposite(incoming.relation());
+        if (opposite != null) {
+            out.removeIf(held -> held.relation() == opposite
+                    && held.subject().equalsIgnoreCase(incoming.subject())
+                    && held.object().equalsIgnoreCase(incoming.object()));
+        }
     }
 
     // === salience lifecycle ===
@@ -243,44 +253,79 @@ final class SoulRelationOps {
      * {@code TASK_COMPLETED} event in {@code events} (already this bot's own journal) is counted by
      * its task bucket (see {@link #bucketOf}), and the single most-completed bucket at or above
      * {@link #SEEN_MIN_COMPLETIONS} becomes {@code <bot> GOOD_AT <bucket>} at
-     * {@link #SEEN_CONFIDENCE}. Exactly one fact per fold: GOOD_AT is single-valued and every SEEN
+     * {@link #SEEN_CONFIDENCE}. Exactly one GOOD_AT per fold: GOOD_AT is single-valued and every SEEN
      * fact shares one confidence, so two qualifying buckets in one day would just overwrite each
      * other and make the belief flap. Ties go to the alphabetically first bucket for determinism.
-     * BAD_AT is deliberately not produced — failure counting needs a failure event this journal
-     * does not carry.
+     *
+     * <p>BAD_AT the same way from {@code TASK_FAILED} events marked as the bot's own execution
+     * failure ({@link SoulTaskFailurePolicy}): at least {@link #SEEN_MIN_FAILURES} in the fold and
+     * more of them than completions of that task. Mixed evidence: a task with as many or more
+     * completions than execution failures can only become GOOD_AT, one with more failures only
+     * BAD_AT, never both. At most one of each per fold, GOOD_AT first.
      */
     static List<SoulTypes.RelationFact> fromJournal(List<SoulTypes.SoulEvent> events, String botName, int day) {
         if (events == null || events.isEmpty() || botName == null || botName.isBlank()) {
             return List.of();
         }
-        Map<String, Integer> counts = new LinkedHashMap<>();
+        Map<String, Integer> completions = new LinkedHashMap<>();
+        Map<String, Integer> failures = new LinkedHashMap<>();
         for (SoulTypes.SoulEvent event : events) {
-            if (event == null || event.type() != SoulTypes.EventType.TASK_COMPLETED) {
+            if (event == null) {
+                continue;
+            }
+            boolean completed = event.type() == SoulTypes.EventType.TASK_COMPLETED;
+            boolean executionFailure = event.type() == SoulTypes.EventType.TASK_FAILED
+                    && SoulTaskFailurePolicy.EXECUTION_VALUE.equals(
+                            event.facts().get(SoulTaskFailurePolicy.FACT_KEY));
+            if (!completed && !executionFailure) {
                 continue;
             }
             String bucket = bucketOf(event);
             if (bucket == null || bucket.contains("|")) {
                 continue;
             }
-            counts.merge(bucket, 1, Integer::sum);
+            (completed ? completions : failures).merge(bucket, 1, Integer::sum);
         }
+        Map<String, Integer> goodCandidates = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : completions.entrySet()) {
+            if (entry.getValue() >= SEEN_MIN_COMPLETIONS
+                    && entry.getValue() >= failures.getOrDefault(entry.getKey(), 0)) {
+                goodCandidates.put(entry.getKey(), entry.getValue());
+            }
+        }
+        Map<String, Integer> badCandidates = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : failures.entrySet()) {
+            if (entry.getValue() >= SEEN_MIN_FAILURES
+                    && entry.getValue() > completions.getOrDefault(entry.getKey(), 0)) {
+                badCandidates.put(entry.getKey(), entry.getValue());
+            }
+        }
+        List<SoulTypes.RelationFact> out = new ArrayList<>(2);
+        String good = mostCounted(goodCandidates);
+        if (good != null) {
+            out.add(new SoulTypes.RelationFact(botName.trim(), SoulTypes.Relation.GOOD_AT,
+                    good, SEEN_CONFIDENCE, SoulTypes.RelationSource.SEEN, day, SEEN_SALIENCE));
+        }
+        String bad = mostCounted(badCandidates);
+        if (bad != null) {
+            out.add(new SoulTypes.RelationFact(botName.trim(), SoulTypes.Relation.BAD_AT,
+                    bad, SEEN_CONFIDENCE, SoulTypes.RelationSource.SEEN, day, SEEN_SALIENCE));
+        }
+        return List.copyOf(out);
+    }
+
+    /** The bucket with the highest count; ties go to the alphabetically first. Null when empty. */
+    private static String mostCounted(Map<String, Integer> counts) {
         String best = null;
         int bestCount = 0;
         for (Map.Entry<String, Integer> entry : counts.entrySet()) {
             int count = entry.getValue();
-            if (count < SEEN_MIN_COMPLETIONS) {
-                continue;
-            }
             if (count > bestCount || (count == bestCount && best != null && entry.getKey().compareTo(best) < 0)) {
                 best = entry.getKey();
                 bestCount = count;
             }
         }
-        if (best == null) {
-            return List.of();
-        }
-        return List.of(new SoulTypes.RelationFact(botName.trim(), SoulTypes.Relation.GOOD_AT,
-                best, SEEN_CONFIDENCE, SoulTypes.RelationSource.SEEN, day, SEEN_SALIENCE));
+        return best;
     }
 
     /**
