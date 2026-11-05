@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## A bot's second End exit comes back like the first (unreleased, 2026-11-05)
+
+1.1.295 deferral: since 1.1.295 a bot that walks into the End exit portal answers vanilla's credits path itself, but vanilla then marks it `seenCredits`, so its second exit took the ordinary portal teleport. That reaches `teleportTo`, which reads as an external teleport: follow cleared and the task ended with "External teleport detected."
+
+- Checked against the 1.21.11 yarn jar first: `ServerPlayerEntity.seenCredits` is a public field; `EndPortalBlock.onEntityCollision` detaches only while it is false; `detachForDimensionChange` sets it; `copyFrom` carries it to the respawned entity; the player save keeps it.
+- `createFakePlayer` resets it to false after `detachForDimensionChange` (before the self-respawn, so `copyFrom` carries false) and after `readCustomData` (saves from 1.1.295-1.1.298 can hold true). The decision is `EndCreditsPolicy` (5 tests, Tests 3857 → 3862). Carpet's and real players untouched.
+- **Chosen over** the deferral's suggestion (reset on the cross-dimension `teleportTo` path): resetting there still lets the second exit take the teleport path and only fixes the third, so every other exit would still fail.
+- **Cost:** none in play, since a bot has no client to show credits. The saved `seenCredits` for Frens bots now always reads false.
+- **Limits:** unit tests only, not run in game. Needs a sandbox check: one bot exits the End twice (and once more after a world reload); each exit keeps follow, shows "Task ended: changed dimension." once when a task ran, and never logs "External teleport detected."
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
