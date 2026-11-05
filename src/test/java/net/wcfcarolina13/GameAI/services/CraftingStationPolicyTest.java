@@ -537,8 +537,8 @@ class CraftingStationPolicyTest {
         assertFalse(body.contains("say("), "the sub-step table craft has no lines of its own");
         // Review I1: a hard-coded quiet lost the planks line for a non-strict craft, which then
         // only said it needed a table. The planks line comes from craftWithPlanks when not quiet.
-        assertTrue(body.contains("Items.CRAFTING_TABLE, amountRequested, quiet);"),
-                "the table craft passes the station's quiet through to craftWithPlanks");
+        assertTrue(body.contains("Items.CRAFTING_TABLE, amountRequested, quiet, false);"),
+                "the table craft passes the station's quiet through to craftWithPlanks (and never asks the chest itself)");
         String station = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
         assertTrue(station.contains("craftCraftingTable(source, bot, source.getPlayer(), 1, quiet)"),
                 "the station hands its own quiet to the table sub-step");
