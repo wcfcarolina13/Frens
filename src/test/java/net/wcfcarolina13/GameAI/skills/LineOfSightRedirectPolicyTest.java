@@ -85,14 +85,24 @@ class LineOfSightRedirectPolicyTest {
     @Test
     void hiddenBlockerCountsTowardTheRetryLimit() throws IOException {
         assertTrue(source("GameAI/skills/impl/DirtShovelSkill.java")
-                .contains("LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, blocker))"));
+                .contains("LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, blocker, player.getBlockPos()))"));
+    }
+
+    @Test
+    void hiddenBlocksAreReleasedAfterEachMinedBlock() throws IOException {
+        String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
+        int release = shovel.indexOf("releaseHidden(context, excluded);");
+        int success = shovel.indexOf("return SkillExecutionResult.success(result);", release);
+        assertTrue(release >= 0 && success > release, "release runs right before the success return");
+        assertTrue(shovel.contains("excludeHidden(context, excluded, minedPos);"));
+        assertTrue(shovel.contains("excludeHidden(context, excluded, blocker);"));
     }
 
     @Test
     void hiddenTargetExclusionUsesTheJobCounter() throws IOException {
         String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
         int stillPresent = shovel.indexOf("getBlockState(minedPos).getBlock() != Blocks.AIR");
-        int rule = shovel.indexOf("LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, minedPos))", stillPresent);
+        int rule = shovel.indexOf("LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, minedPos, player.getBlockPos()))", stillPresent);
         assertTrue(rule > stillPresent);
     }
 
