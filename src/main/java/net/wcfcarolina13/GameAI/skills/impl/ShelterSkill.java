@@ -92,7 +92,11 @@ public final class ShelterSkill implements Skill {
             }
             BlockPos chamberCenter = bot.getBlockPos();
             depositCheapLoot(world, bot, chamberCenter);
-            ensurePickupSlot(bot);
+            // dropItem spawns an item entity: server thread, not this skill worker.
+            callOnServer(world, () -> {
+                ensurePickupSlot(bot);
+                return Boolean.TRUE;
+            });
             if (!inventoryFull(bot)) {
                 sweepDrops(source, 12.0, 5.0, 24, 12_000L);
             } else {

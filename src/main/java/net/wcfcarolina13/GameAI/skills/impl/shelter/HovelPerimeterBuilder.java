@@ -310,6 +310,23 @@ public final class HovelPerimeterBuilder {
         int noMaterials = 0;
     }
 
+    /** Centres the bot on {@code snap}'s top face. Teleport and velocity run on the server thread:
+     *  this builder runs on the shelter worker. */
+    private static void snapToOnServer(ServerPlayerEntity bot, ServerWorld world, BlockPos snap) {
+        BotActions.callOnServerThread(bot, () -> {
+            bot.teleport(world,
+                    snap.getX() + 0.5D,
+                    snap.getY(),
+                    snap.getZ() + 0.5D,
+                    EnumSet.noneOf(PositionFlag.class),
+                    bot.getYaw(),
+                    bot.getPitch(),
+                    true);
+            bot.setVelocity(Vec3d.ZERO);
+            return true;
+        }, 750L, false);
+    }
+
     private void withSneakLock(ServerPlayerEntity bot, Runnable body) {
         if (bot == null || body == null) {
             return;
@@ -960,15 +977,7 @@ public final class HovelPerimeterBuilder {
             withSneakLock(bot, () -> {
                 BotActions.stop(bot);
                 BotActions.sneak(bot, true);
-                bot.teleport(world,
-                        snap.getX() + 0.5D,
-                        snap.getY(),
-                        snap.getZ() + 0.5D,
-                        EnumSet.noneOf(PositionFlag.class),
-                        bot.getYaw(),
-                        bot.getPitch(),
-                        true);
-                bot.setVelocity(Vec3d.ZERO);
+                snapToOnServer(bot, world, snap);
                 sleepQuiet(80L);
             });
 
@@ -1574,15 +1583,7 @@ public final class HovelPerimeterBuilder {
             if (snap != null && !isOnPillarTop(bot, snap)) {
                 BotActions.stop(bot);
                 BotActions.sneak(bot, true);
-                bot.teleport(world,
-                        snap.getX() + 0.5D,
-                        snap.getY(),
-                        snap.getZ() + 0.5D,
-                        EnumSet.noneOf(PositionFlag.class),
-                        bot.getYaw(),
-                        bot.getPitch(),
-                        true);
-                bot.setVelocity(Vec3d.ZERO);
+                snapToOnServer(bot, world, snap);
                 sleepQuiet(80L);
             }
 

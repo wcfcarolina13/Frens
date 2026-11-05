@@ -2245,16 +2245,9 @@ public class FarmSkill implements Skill {
                 continue;
                 }
 
-            ActionResult result = bot.interactionManager.interactBlock(
-                    bot,
-                    world,
-                    bot.getMainHandStack(),
-                    Hand.MAIN_HAND,
-                    hit
-            );
+            ActionResult result = BotActions.interactBlockAndSwing(bot, world, hit);
 
             if (result.isAccepted()) {
-                bot.swingHand(Hand.MAIN_HAND, true);
                 planted++;
                 sleep(120);
             }
@@ -3931,9 +3924,8 @@ public class FarmSkill implements Skill {
                 if (!isMutationAuthorized(bot, world, plot.up())) {
                     continue;
                 }
-                ActionResult result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
+                ActionResult result = BotActions.interactBlockAndSwing(bot, world, hit);
                 if (result.isAccepted()) {
-                    bot.swingHand(Hand.MAIN_HAND, true);
                     replanted++;
                     sleep(60);
                 }
@@ -4242,20 +4234,24 @@ public class FarmSkill implements Skill {
         }
         selectHotbarSlot(bot, bucketSlot);
         BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(pos), Direction.UP, pos, false);
-        ActionResult result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
-        LOGGER.info("pickupWater at {} result={} hand={}", pos, result, bot.getMainHandStack().getItem());
-        if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            return true;
-        }
-        result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
-        LOGGER.info("pickupWater interactItem at {} result={} hand={}", pos, result, bot.getMainHandStack().getItem());
-        if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            return true;
-        }
-        return false;
+        // Scooping replaces the bucket stack and drains the block: server thread, not this worker.
+        return BotActions.callOnServerThread(bot, () -> {
+            ActionResult result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
+            LOGGER.info("pickupWater at {} result={} hand={}", pos, result, bot.getMainHandStack().getItem());
+            if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+                return true;
+            }
+            result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
+            LOGGER.info("pickupWater interactItem at {} result={} hand={}", pos, result, bot.getMainHandStack().getItem());
+            if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+                return true;
+            }
+            return false;
+        }, 1000L, false);
     }
+
 
     private static boolean hasHoe(PlayerInventory inventory) {
         for (int i = 0; i < inventory.size(); i++) {

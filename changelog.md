@@ -2,6 +2,45 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Skill workers no longer spawn entities, set blocks or teleport off-thread (2026-11-05, unreleased)
+
+An audit of skill code for world, inventory and entity changes made straight from a skill worker
+found these, none of them on the existing "pre-existing deferred" list (`MovementService` tool
+swaps, desperate eat, `CraftingHelper`/`BotActions` inventory swaps, `rescueFromBurial`,
+`moveRelative`). Each now runs on the server thread through `BotActions.callOnServerThread`,
+which runs inline when already there:
+- **`FlareSkill`** spawned the firework entity and split its stack on the worker, the same
+  off-thread `spawnEntity` class as the C2ME `ConcurrentModificationException` crash fixed
+  earlier. The slot is now re-checked on the server thread (the walk to open sky took time).
+- **`TorchPlacer.placeTorch` / `replaceTorchAt`** set the torch block, swapped the hotbar and
+  decremented the stack from the dirt, strip-mine and shovel workers. Both now hop, which covers
+  all 9 call sites.
+- **Planting:** `FarmSkill` (plant, repair replant, water pickup), `HarvestCropSkill` (replant,
+  plant empty farmland) and `PlantSeedsSkill` called `interactBlock` from the worker. That call
+  sets blocks and shrinks the held stack. A new `BotActions.interactBlockAndSwing` does the use
+  and the swing on the server thread. The water pickup runs as one hop.
+- **`HovelPerimeterBuilder`** teleported the bot onto a pillar top from the shelter worker (two
+  sites). This is now `snapToOnServer`.
+- **Drops:** `HuntSkill.jettisonDisposables` and `ShelterSkill.ensurePickupSlot` spawn item
+  entities. Both now hop, synchronously, because the callers check free space right after.
+- **`WoodcutSkill.craftPlanksForScaffold`** edited the inventory on the worker. It also lost
+  planks when the inventory was full: logs were taken, and the planks `insertStack` could not fit
+  were discarded. It now hops, drops any leftover planks at the bot's feet with a warn
+  line, and counts only planks that went in.
+
+Costs and limits:
+- Each hop waits for the server thread for up to 0.75–1.5 s. If the tick is that late, the call
+  reports failure (no flare, `FAILED` torch, `FAIL` interaction, 0 planks), but the queued work
+  still runs afterwards. So a skill might, for example, retry a torch it then places twice. That
+  needs a server stalled for over a second.
+- Hotbar selection before these calls (`selectHotbarSlot`, `ensureHotbarItem`, `selectBestTool`)
+  still runs on the worker. That is the recorded inventory-swap deferral, unchanged.
+
+Tests: `OffThreadMutationWiringTest` (5, source wiring). Needs a sandbox smoke test: `/bot skill
+flare`; dirt or strip-mine in the dark (torches go up); farm and harvest (seeds planted,
+replanted); a hovel build with a roof pillar; woodcut needing scaffold planks with a nearly full
+inventory (watch for `Scaffold planks: inventory full, dropped`).
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
