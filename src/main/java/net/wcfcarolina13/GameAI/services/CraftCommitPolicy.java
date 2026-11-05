@@ -28,7 +28,8 @@ public final class CraftCommitPolicy {
         CRAFTED,
         /** A consume fell short (or threw): the pack is restored as it was and no output was made. */
         ABORTED,
-        /** The server did not run the hop in time; the pack is untouched. */
+        /** The hop did not complete: normally it never ran and the pack is untouched; if it was still
+         *  running (SupplyServerHop UNFINISHED) it may yet finish, and the craft still reports 0. */
         TIMED_OUT
     }
 

@@ -3718,7 +3718,8 @@ public final class CraftingHelper {
      * throws, restores it, so an aborted craft takes nothing (not even an earlier ingredient of the
      * same recipe) and makes nothing ({@link CraftCommitPolicy.Outcome#ABORTED}). A hop that did not
      * complete ({@link SupplyServerHop.Status}) reports {@link CraftCommitPolicy.Outcome#TIMED_OUT}
-     * and the craft made nothing; the log names the status.
+     * and the craft reports nothing made: true unless the hop was still running (UNFINISHED), which
+     * the log names.
      *
      * @param consumes server thread only: the takes, true when every one had enough
      */
@@ -3769,7 +3770,8 @@ public final class CraftingHelper {
     /**
      * Makes room on the caller's thread, then inserts {@code leftover} of {@code output} in one hop;
      * {@code forced} also drops what still does not fit. Returns what is left to place (0 when
-     * forced). A hop that did not complete loses that remainder (the ingredients are spent): ERROR.
+     * forced). A normal pass whose hop never ran hands the whole leftover to the forced pass; any
+     * other hop that did not complete loses that remainder (the ingredients are spent): ERROR.
      */
     private static int placeLeftoverOutput(ServerPlayerEntity bot, net.minecraft.server.MinecraftServer server,
                                            Item output, int leftover, boolean forced) {
@@ -3786,6 +3788,15 @@ public final class CraftingHelper {
             return stack.getCount();
         }, CraftCommitPolicy.HOP_TIMEOUT_MS);
         if (hop.status() != SupplyServerHop.Status.DONE) {
+            boolean neverRan = hop.status() == SupplyServerHop.Status.TIMED_OUT
+                    || hop.status() == SupplyServerHop.Status.NOT_RUNNING
+                    || hop.status() == SupplyServerHop.Status.INTERRUPTED;
+            if (neverRan && !forced) {
+                // The insert provably did not run: hand the whole leftover to the forced pass.
+                LOGGER.warn("craft commit: placing {}'s leftover {}x {} did not run (hop {}); trying the forced pass",
+                        bot.getName().getString(), leftover, output.getName().getString(), hop.status());
+                return leftover;
+            }
             LOGGER.error("craft commit: placing {}'s leftover {}x {} did not complete (hop {}); that output is lost",
                     bot.getName().getString(), leftover, output.getName().getString(), hop.status());
             return 0;
@@ -3845,7 +3856,7 @@ public final class CraftingHelper {
      * places one) as before and always lets the craft go on. On the server thread
      * ({@link CraftingStationPolicy#mayOffloadToChest}) it never walks, places or fills a chest: it
      * drops one cheap stack that is not one of the craft's reserves, and with none it returns false.
-     * {@code afterCraft}: called from {@link #distributeOutput} once the ingredients are spent, so no
+     * {@code afterCraft}: called from {@link #placeLeftoverOutput} once the ingredients are spent, so no
      * refusal line (the caller drops the output that does not fit). {@code quiet}: a sub-craft whose
      * caller answers for it, so a refusal logs but sends no chat line. Any refusal before a craft sets
      * {@link #LAST_CRAFT_REFUSED_FULL_PACK} so the caller does not report missing ingredients.
