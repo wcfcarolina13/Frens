@@ -975,7 +975,7 @@ public final class SoulRuntime {
                     new java.util.concurrent.atomic.AtomicReference<>();
             store.updateMind(botId, m -> {
                 before.set(m);
-                return SoulMindOps.notePeerScene(m, selfIndex, names, ids, delivered, day);
+                return SoulMindOps.notePeerScene(m, selfIndex, names, ids, delivered, day, turn.speechAct());
             }).thenAccept(next -> {
                 SoulTypes.SoulMind prev = before.get();
                 if (prev != null && prev != next) {
