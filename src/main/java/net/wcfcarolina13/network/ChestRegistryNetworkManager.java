@@ -372,6 +372,11 @@ public final class ChestRegistryNetworkManager {
             final boolean isKeepGear = keepGear;
             final String finalAction = action;
             java.util.concurrent.CompletableFuture.runAsync(() -> {
+                // Like SkillManager.runSkill: attach so /bot stop interrupts the walk, and take the
+                // bot out of FOLLOW so the follow tick does not steer it while it walks to the chest.
+                net.wcfcarolina13.GameAI.services.TaskService.attachExecutingThread(ticket, Thread.currentThread());
+                net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume =
+                        net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
                 try {
                     int moved = 0;
                     int maxAttempts = 3; // initial + 2 retries
@@ -454,7 +459,13 @@ public final class ChestRegistryNetworkManager {
                             player.getCommandSource(),
                             "\u00A7c" + botName + " failed to " + finalAction + " items: " + e.getMessage() + "\u00A7r"));
                 } finally {
+                    // Abort read before complete() drops the ticket; complete before resuming,
+                    // since resumeFollowMode skips while a task is still active.
+                    boolean abortRequested = net.wcfcarolina13.GameAI.services.TaskService.isAbortRequested(bot.getUuid());
                     net.wcfcarolina13.GameAI.services.TaskService.complete(ticket, true);
+                    if (!abortRequested) {
+                        net.wcfcarolina13.GameAI.skills.SkillManager.resumeFollowMode(bot, server, followResume);
+                    }
                 }
             });
 

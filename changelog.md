@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Quick Store / Quick Fetch: follow no longer steers the bot, `/bot stop` interrupts the walk (unreleased, 2026-11-05)
+
+Same gap as the `/bot craft` fix: the Quick Store / Quick Fetch worker (`ChestRegistryNetworkManager`, on `CompletableFuture.runAsync`) takes a task ticket but runs outside `SkillManager.runSkill`, so a following bot was steered by the follow tick while `ChestStoreService` walked it to the chest, and the ticket had no executing thread, so `/bot stop` only latched the abort.
+
+- The worker now attaches its thread to the ticket, suspends follow, and after the ticket completes resumes follow unless the task was aborted (the `runAmbient` order).
+- **Cost:** a following bot stops following for the trip and picks it up after; an aborted trip leaves follow off.
+- **Not changed:** `SurfaceRecoveryService` (runs from flee; a different case).
+- Tests 3857 → 3858 (`QuickStoreFollowWiringTest`, source-reading). **Sandbox check:** with the bot following, Quick Store into a chest 10 blocks away: it walks there without snapping back, stores, follows again; `/bot stop` mid-walk stops it.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
