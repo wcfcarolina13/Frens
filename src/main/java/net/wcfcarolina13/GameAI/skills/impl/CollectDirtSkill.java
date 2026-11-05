@@ -32,6 +32,8 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
+import net.wcfcarolina13.GameAI.services.HandDigStairPolicy;
+import net.wcfcarolina13.GameAI.services.ObstructionMinePolicy;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.LavaHazardService;
 import net.wcfcarolina13.GameAI.services.LogThrottle;
@@ -1546,7 +1548,8 @@ public class CollectDirtSkill implements Skill {
             int steps = 0;
             int maxSteps = Math.abs(targetY - player.getBlockY()) * 5; // Generous limit
             int consecutiveNoProgressSteps = 0;
-            
+            int[] handDigSteps = {0};
+
             while ((player.getBlockY() < targetY || (stopAtSurface && !isOnSurface(player))) &&
                    System.currentTimeMillis() - startTime < MAX_RUNTIME_MILLIS && 
                    steps < maxSteps) {
@@ -1570,7 +1573,7 @@ public class CollectDirtSkill implements Skill {
                 }
             
             // Execute one upward step
-            SkillExecutionResult stepResult = executeUpwardStep(player, direction, source);
+            SkillExecutionResult stepResult = executeUpwardStep(player, direction, source, handDigSteps);
             if (!stepResult.success()) {
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 return stepResult;
@@ -1644,9 +1647,16 @@ public class CollectDirtSkill implements Skill {
                 && consecutiveNoProgressSteps >= maxNoProgressSteps;
     }
     
-    private SkillExecutionResult executeUpwardStep(ServerPlayerEntity player, Direction direction, ServerCommandSource source) {
+    private SkillExecutionResult executeUpwardStep(ServerPlayerEntity player, Direction direction, ServerCommandSource source,
+                                                   int[] handDigSteps) {
         ServerWorld world = (ServerWorld) player.getEntityWorld();
         int beforeY = player.getBlockY();
+
+        // No scaffold blocks at all: the pillar below can only bare-jump in place. Cut a staircase
+        // into the wall instead (HandDigStairPolicy), at most MAX_STEPS per ascent.
+        if (HandDigStairPolicy.applies(countScaffoldBlocks(player), handDigSteps[0])) {
+            return executeHandDigStairStep(player, direction, handDigSteps);
+        }
 
         // Vertical-first ascent: mine straight up (always adjacent = always passes LoS),
         // then pillar-up one step. Avoids the LoS-through-terrain problem of forward mining.
@@ -1748,6 +1758,161 @@ public class CollectDirtSkill implements Skill {
             return SkillExecutionResult.failure("Interrupted during ascent.");
         }
 
+        return SkillExecutionResult.success("No progress - will retry");
+    }
+
+    /** Bound on the hand-dig step-up walk (worker thread only). */
+    private static final long HAND_DIG_STEP_UP_MILLIS = 2_500L;
+
+    private static int countScaffoldBlocks(ServerPlayerEntity player) {
+        PlayerInventory inventory = player.getInventory();
+        int count = 0;
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (!stack.isEmpty() && ScaffoldService.SCAFFOLD_BLOCKS.contains(stack.getItem())) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    private static HandDigStairPolicy.Dir toPolicyDir(Direction direction) {
+        if (direction == null) {
+            return null;
+        }
+        return switch (direction) {
+            case NORTH -> HandDigStairPolicy.Dir.NORTH;
+            case SOUTH -> HandDigStairPolicy.Dir.SOUTH;
+            case WEST -> HandDigStairPolicy.Dir.WEST;
+            case EAST -> HandDigStairPolicy.Dir.EAST;
+            default -> null;
+        };
+    }
+
+    /** Fastest on-ground break with hand or any carried item (the mining helper may pull it from the main inventory). */
+    private static int bestGroundBreakTicks(ServerPlayerEntity player, ServerWorld world, BlockPos pos, BlockState state) {
+        float hardness = state.getHardness(world, pos);
+        boolean requiresTool = state.isToolRequired();
+        int best = ObstructionMinePolicy.groundBreakTicks(1.0F, hardness, ObstructionMinePolicy.canHarvest(requiresTool, false));
+        PlayerInventory inventory = player.getInventory();
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            best = Math.min(best, ObstructionMinePolicy.groundBreakTicks(stack.getMiningSpeedMultiplier(state), hardness,
+                    ObstructionMinePolicy.canHarvest(requiresTool, stack.isSuitableFor(state))));
+        }
+        return best;
+    }
+
+    /** Server thread only: classify one cell for {@link HandDigStairPolicy}. */
+    private static HandDigStairPolicy.Cell classifyHandDigCell(ServerPlayerEntity player, ServerWorld world, BlockPos pos) {
+        var fluid = world.getFluidState(pos);
+        if (!fluid.isEmpty()) {
+            return fluid.isIn(net.minecraft.registry.tag.FluidTags.LAVA)
+                    ? HandDigStairPolicy.Cell.lava() : HandDigStairPolicy.Cell.water();
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.getCollisionShape(world, pos).isEmpty()) {
+            return HandDigStairPolicy.Cell.air();
+        }
+        if (state.getHardness(world, pos) < 0.0F || CompanionSafeZoneService.isProtected(world, pos, null)) {
+            return HandDigStairPolicy.Cell.unbreakable();
+        }
+        int ticks = bestGroundBreakTicks(player, world, pos, state);
+        return FallingBlockStabilizer.isFallingBlock(state)
+                ? HandDigStairPolicy.Cell.falling(ticks) : HandDigStairPolicy.Cell.solid(ticks);
+    }
+
+    /**
+     * One hand-dig stair step for a bot with no scaffold blocks: snapshot the cells around the bot on
+     * the server thread, let {@link HandDigStairPolicy} pick the direction and cells, mine them
+     * (MiningTool breaks on the server thread) and step up onto the tread. Worker thread only (it
+     * waits). A refusal ends the ascent: without blocks no other move here can gain height.
+     */
+    private SkillExecutionResult executeHandDigStairStep(ServerPlayerEntity player, Direction direction, int[] handDigSteps) {
+        if (TaskService.isAbortRequested(player.getUuid()) || SkillManager.shouldAbortSkill(player)) {
+            return SkillExecutionResult.failure("Interrupted during ascent.");
+        }
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return SkillExecutionResult.failure("No world for hand-dig stair.");
+        }
+        int beforeY = player.getBlockY();
+        BlockPos feet = player.getBlockPos();
+        Map<HandDigStairPolicy.Offset, HandDigStairPolicy.Cell> snapshot = new ConcurrentHashMap<>();
+        runOnServerThread(player, () -> {
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dy = 0; dy <= 3; dy++) {
+                    for (int dz = -2; dz <= 2; dz++) {
+                        snapshot.put(new HandDigStairPolicy.Offset(dx, dy, dz),
+                                classifyHandDigCell(player, world, feet.add(dx, dy, dz)));
+                    }
+                }
+            }
+        });
+        HandDigStairPolicy.Dir preferred = toPolicyDir(direction);
+        HandDigStairPolicy.Decision decision = HandDigStairPolicy.decide(
+                (dx, dy, dz) -> snapshot.getOrDefault(new HandDigStairPolicy.Offset(dx, dy, dz),
+                        HandDigStairPolicy.Cell.unbreakable()),
+                preferred == null ? List.of() : List.of(preferred),
+                handDigSteps[0]);
+        if (!decision.ok()) {
+            LOGGER.info("Hand-dig stair refused for {} at {}: {} (per direction {})",
+                    player.getName().getString(), feet.toShortString(), decision.refusal(), decision.perDirection());
+            return SkillExecutionResult.failure("Hand-dig stair refused: "
+                    + decision.refusal().name().toLowerCase(Locale.ROOT).replace('_', ' ') + ".");
+        }
+        HandDigStairPolicy.Plan plan = decision.plan();
+        handDigSteps[0]++;
+        LOGGER.info("Hand-dig stair step {}/{} for {} at {}: dir={} cells={} ticks={}",
+                handDigSteps[0], HandDigStairPolicy.MAX_STEPS, player.getName().getString(), feet.toShortString(),
+                plan.dir(), plan.cellsToMine().size(), plan.breakTicks());
+        for (HandDigStairPolicy.Offset c : plan.cellsToMine()) {
+            if (TaskService.isAbortRequested(player.getUuid())) {
+                return SkillExecutionResult.failure("Interrupted during ascent.");
+            }
+            BlockPos pos = feet.add(c.dx(), c.dy(), c.dz());
+            if (!mineStraightStairBlock(player, pos)) {
+                if (Thread.currentThread().isInterrupted()) {
+                    return SkillExecutionResult.failure("Interrupted during ascent.");
+                }
+                LOGGER.info("Hand-dig stair: could not clear {}", pos.toShortString());
+                return SkillExecutionResult.success("No progress - will retry");
+            }
+        }
+        BlockPos stand = feet.add(plan.standAt().dx(), plan.standAt().dy(), plan.standAt().dz());
+        Vec3d target = new Vec3d(stand.getX() + 0.5D, stand.getY(), stand.getZ() + 0.5D);
+        long deadline = System.currentTimeMillis() + HAND_DIG_STEP_UP_MILLIS;
+        while (System.currentTimeMillis() < deadline) {
+            if (TaskService.isAbortRequested(player.getUuid()) || SkillManager.shouldAbortSkill(player)) {
+                return SkillExecutionResult.failure("Interrupted during ascent.");
+            }
+            double dx = player.getX() - target.x;
+            double dz = player.getZ() - target.z;
+            if (player.isOnGround() && player.getBlockY() > beforeY && dx * dx + dz * dz <= 0.16D) {
+                break;
+            }
+            runOnServerThread(player, () -> LookController.faceBlock(player, stand));
+            if (player.isOnGround() && player.getBlockY() <= beforeY) {
+                BotActions.jump(player);
+            }
+            BotActions.moveToward(player, target, 0.45D);
+            try {
+                Thread.sleep(80L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return SkillExecutionResult.failure("Interrupted during ascent.");
+            }
+        }
+        if (waitForLanding(player, LANDING_WAIT_MAX_MILLIS) && player.getBlockY() > beforeY) {
+            LOGGER.info("Hand-dig stair: climbed from Y={} to Y={}", beforeY, player.getBlockY());
+            return SkillExecutionResult.success("Hand-dig stair climb");
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            return SkillExecutionResult.failure("Interrupted during ascent.");
+        }
+        LOGGER.info("Hand-dig stair: no climb (Y={})", player.getBlockY());
         return SkillExecutionResult.success("No progress - will retry");
     }
 
