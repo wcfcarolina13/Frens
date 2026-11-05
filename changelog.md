@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Sunset return says "Returning to base." once per session (unreleased, 2026-11-05)
+
+- **Cause:** a sunset session drops the bot out of return mode and back several times (starving/food detours and the local-reassess cooldown call `stopFollowing`; flee and surface recovery interrupt too). Each resume (`tickSunsetSession` -> `startOrResumeReturn` -> `primeReturnState`) called `BotEventHandler.setReturnToBaseSegmented`, which always announced. `ReturnEpisodePolicy` only skips the line when the bot is still returning, which it no longer is after `stopFollowing`, so every resume repeated "Returning to base." (text and voice).
+- **Not causes:** the duplicate `EXACT_MAP` entry in `DialogueTextMapper` (lines 239 and 439) maps the same text to the same sound, so the second put is a no-op; one `sendChatMessages` call gives one text line plus one voice clip; same-base re-plans (`ReturnBaseStuckService` panic-flee resume, segment refreshes) already return early at the episode guard.
+- **Change:** new pure `SunsetReturnAnnouncePolicy`; `SunsetSession.returnAnnounced`; `setReturnToBaseSegmented(bot, base, announce)` overload. The first start of a session announces; later resumes in the same session start quietly. The flag is set only when the start actually began a return (`RETURN_STARTED_RESULT`), so a refused start (questing compass) does not use up the line.
+- **Cost:** one boolean per session; no extra ticks or messages.
+- **Limits:** a new session (next day, or after the session is cleared by stop/rescue/toggle) announces again, as intended. "Arrived at base." still plays the `mode_return_returning` clip (no arrival clip exists), so the voice can sound like a second "returning" on arrival; not changed here.
+- **Tests:** +7 (`SunsetReturnAnnouncePolicyTest`).
+- **Sandbox check:** sunset return with a forced interruption (low food so the bot detours to eat, or a hostile to trigger flee), then confirm one "Returning to base." in chat for the whole trip.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
