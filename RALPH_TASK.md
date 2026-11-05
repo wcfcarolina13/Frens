@@ -20,7 +20,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 **Rulings needed (each PR or doc has the detail and a recommended answer):**
 1. #14: the 10 container fetch/organize rulings in `docs/superpowers/specs/2026-11-05-container-fetch-and-organize-options.md`.
-2. #30/#34: partly stocked chest asks for what it has; craft from own stock before asking; drop recently refused items; "Always" covers every allowed line; #34 also: a material no nearby chest can complete is skipped, table planks join the ask, the nearest chest that can supply everything wins, a declined bundle ends the tool craft.
+2. #30/#34: partly stocked chest asks for what it has; craft from own stock before asking; drop recently refused items; "Always" covers every allowed line; #34 also: a material no nearby chest can complete is skipped, table planks join the ask, the nearest chest that can supply everything wins, a declined bundle ends the tool craft; #39 also: skills that need torches or ladders mid-task (dig, strip-mine, collect dirt) now wait up to 30 s for your answer instead of failing at once, and a bed whose wool and planks sit in different chests skips the combined ask (per-item path) rather than taking a partial set.
 3. #28: stone by hand allowed (about 22 s a step), straight staircase, water refuses like lava.
 4. #9: allow-list of "stuck" failure phrasings; GOOD_AT needs completions >= failures; a model BAD_AT removes a SEEN GOOD_AT.
 5. #21: the death fallback still skips `AutoFaceEntity.handleBotRespawn`, `BotPersistenceService.onBotRespawn` (would run `onBotJoin` after a death) and `botSpawnCount++`: keep skipping?
