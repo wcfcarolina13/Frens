@@ -6,11 +6,11 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 ## Session Handoff 2026-11-05 (cloud batch, unreleased) — next session starts here
 
-**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#34 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
+**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#34 and #39 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
 
 **Integration check (2026-11-05):** all 29 branches of this batch (through #34) merged together onto main with no source conflict (only changelog.md, where keeping both sides is right); the combined tree builds and runs 4108 tests with only the root-container `SoulStoreTest.persistCursorFailure…` failing. Merging them in any order should need only changelog conflict resolution.
 
-**Merge order (stacked PRs):** #11 → #24 (place worker hop), #13 → #29 (blind-walk guard), #17 → #20 (more owner-only files), #30 → #34 (combined chest ask wiring). Retarget the second of each pair to `main` after the first merges.
+**Merge order (stacked PRs):** #11 → #24 (place worker hop), #13 → #29 (blind-walk guard), #17 → #20 (more owner-only files), #30 → #34 → #39 (combined chest ask: pure layer, tool crafts, then ladders/torches/beds/shields/buckets/shears/furnace/chest/table). Retarget the second of each pair to `main` after the first merges.
 
 **PRs by kind:**
 - Fixes with a sandbox check: #6 new-bots button on old servers, #7 End second exit, #10 skill start-up ticket leak, #11 `/bot place chest <n>`, #15 sunset "Returning to base." once, #16 furnace walk-back, #17/#20 store files 0600, #21 death soul respawn note, #23 despawned bots really removed in release builds (reflection matched `sendCommandTree`), #24 `/bot place` out of reach walks over, #27 follow no longer steers a bot during `/bot craft`, #32 the same for Quick Store / Quick Fetch, #33 `/bot follow stop` or `/bot stay` during a task is no longer undone when it ends, #28 hand-dig stair escape, #29 blind-walk guard.
@@ -33,6 +33,8 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 **Found wrong as written (no change):** `TaskService.resetAll` worker ticket (every worker clears its own in a `finally`); weird-portal edge "re-rolls each tick" (the edge is consumed at the end of the 4 s scan).
 
 **Review of PRs #2–#5 (read-only, not posted):** #2 should-fix: `BotWakeUpDialogueService` :205 and :275 still call the world-agnostic `isLoggedOff`, so a bot logged off in world A is skipped as "already in zzz-cycle" in world B (use `isLoggedOffIn`); minors: the logoff sidecar is keyed by name only, and an entry whose dimension no longer resolves is now skipped for good. #3 looks right (door left open, as the village exit does). #4 minor: a hop that finishes as the 2 s timeout fires is retried and can read NOT_SWITCHED with the tool in hand. #5 minor: a private line whose reply is cancelled without SPOKEN or FAILURE (server stop) can still become a public memory at the next rollover.
+
+**Other open PRs from another session (#35–#38, not this batch):** #35 (save before `/bot despawn`) overlaps #23 (despawn really calls `PlayerManager.remove`, which also saves): they merge cleanly together and do not contradict, the save just happens twice.
 
 **Not done:** Piper Linux x64 install check (downloading and running the pinned binary was blocked by the cloud permission check; run it on the Mac or approve it). Everything that needs the game.
 
