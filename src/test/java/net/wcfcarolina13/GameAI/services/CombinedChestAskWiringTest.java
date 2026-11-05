@@ -71,7 +71,14 @@ class CombinedChestAskWiringTest {
                 "a recipe the bot may not craft is never asked for");
         String torches = block(src, "private static int craftTorches(");
         assertOrder(torches, "askChestForKnownCraft(bot, source, Items.TORCH, targetTorches, CraftingHelper::isTorchFuel, false)",
-                "ensureSticks(bot, source, craftsNeeded)", "ensureItemAvailable(bot, source, Items.COAL, craftsNeeded)");
+                "ensureSticks(bot, source, craftsNeeded)",
+                "int fuelShort = CraftBundleAskPolicy.torchFuelShortfall(craftsNeeded, coal, charcoal);",
+                "ensureItemAvailable(bot, source, Items.COAL, coal + fuelShort);",
+                "ensureItemAvailable(bot, source, Items.CHARCOAL, charcoal + fuelShort);");
+        assertFalse(torches.contains("ensureItemAvailable(bot, source, Items.COAL, craftsNeeded)"),
+                "charcoal the bundle granted must not open a second prompt for coal");
+        assertTrue(torches.indexOf("hasRecipePermission(") < torches.indexOf("askChestForKnownCraft("),
+                "a recipe the bot may not craft is never asked for");
         assertFalse(torches.contains("ensureCraftingStation("), "a torch is a 2x2 recipe: no table in its ask");
         String shield = block(src, "private static int craftShield(");
         assertOrder(shield, "askChestForKnownCraft(bot, source, Items.SHIELD, amount, s -> s.isOf(Items.IRON_INGOT), true)",
@@ -83,9 +90,11 @@ class CombinedChestAskWiringTest {
         assertOrder(cobble, "askChestForKnownCraft(bot, source, output, amount, CraftingHelper::isStoneCraftingMaterial,",
                 "ensureCraftingStation(bot, source)", "ensureCobbleAvailable(bot, source, per * amount)");
         String planks = block(src, "private static int craftWithPlanks(");
-        assertOrder(planks, "if (askChest) {", "askChestForKnownCraft(bot, source, output, amountRequested, s -> false,\n"
+        assertOrder(planks, "hasRecipePermission(commander, source.getServer(), recipeId)", "if (askChest) {",
+                "askChestForKnownCraft(bot, source, output, amountRequested, s -> false,\n"
                 + "                    !output.equals(Items.CRAFTING_TABLE))", "ensureCraftingStation(bot, source, quiet)",
                 "ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)");
+        assertEquals(1, count(planks, "hasRecipePermission("), "the permission check runs once, before the ask");
         // The station sub-step's table never asks; /bot craft chest|crafting_table do.
         String table = block(src, "public static boolean craftCraftingTable(");
         assertTrue(table.contains("Items.CRAFTING_TABLE, amountRequested, quiet, false)"));
@@ -95,8 +104,11 @@ class CombinedChestAskWiringTest {
         String bed = block(src, "private static int craftBed(");
         assertTrue(bed.contains("CraftBundleAskPolicy.chooseBedWool(woolIds, input.have(), input.chestPools(), 3 * bedAmount)"));
         assertTrue(bed.contains("return CraftBundleAskPolicy.bedCraft(Registries.ITEM.getId(recipe.bed()).toString(), wool);"));
-        assertOrder(bed, "askChestForCraftMaterials(bot, source, bedAsk, null)", "BedRecipe chosen = null;",
+        assertOrder(bed, ".filter(r -> hasRecipePermission(commander, source.getServer(), r.recipeId()))",
+                "askChestForCraftMaterials(bot, source, bedAsk, null)", "BedRecipe chosen = null;",
                 "ensureCraftingStation(bot, source)", "withdrawFromNearbyChests(bot, source, s -> s.isOf(woolItem)");
+        assertEquals(1, count(bed, "hasRecipePermission("),
+                "the colours are filtered by permission once, before the ask; no check after the withdrawal");
         // A declined or unanswered ask ends each craft after the one stop line; everything else goes on.
         for (String body : List.of(ladders, torches, shield, simple, cobble, planks, bed)) {
             assertTrue(body.contains("case STOP_SILENT, STOP_WITH_LINE -> {\n"), "stop after a No");
@@ -131,7 +143,8 @@ class CombinedChestAskWiringTest {
         // The recipe lookup, the plan and the chest choice are pure and run on the caller's thread.
         assertTrue(body.contains("CraftBundleAskPolicy.craftRecipes(\n                craft, amount, tableMustBeCrafted)"));
         assertTrue(body.contains("CraftSupplyNeedPolicy.plan(CraftBundleAskPolicy.CRAFT_SET, 1, recipes, input.have(), chest.pools(),"));
-        assertTrue(body.contains("CraftBundleAskPolicy.chooseChest(plans)"));
+        assertTrue(body.contains("CraftBundleAskPolicy.chooseChest(plans, craft.mustComplete())"),
+                "a bed's wool must come whole from the one chest asked");
         // Only a 3x3 craft adds the table; taken logs become the planks the plan counted on.
         assertTrue(body.contains("boolean tableMustBeCrafted = ask.needsTable() && !tableAvailableWithoutCrafting(bot, source);"));
         assertTrue(body.contains("ensurePlanksFromLogs(bot, CraftBundleAskPolicy.planksWanted(craft.recipe(), amount,"));

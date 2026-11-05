@@ -397,6 +397,50 @@ class CraftBundleAskPolicyTest {
     }
 
     @Test
+    void aBedIsAskedOfTheOneChestThatCompletesItsWoolAndItsPlanksOrOfNone() {
+        // Chest A (nearer) has planks only, chest B has the 3 blue wool chooseBedWool picked: the
+        // plain rule would ask A as the first chest with anything, and the bot would hold A's
+        // planks while the wool stays in B. Neither half is a bed: nothing is asked.
+        KnownCraft bed = CraftBundleAskPolicy.bedCraft("minecraft:blue_bed", "minecraft:blue_wool");
+        assertEquals("minecraft:blue_wool", bed.mustComplete());
+        assertNull(CraftBundleAskPolicy.known(LADDER).mustComplete(), "only a bed has a line one chest must complete");
+        Function<String, Recipe> recipes = CraftBundleAskPolicy.craftRecipes(bed, 1, false);
+        Plan planksOnly = plan(recipes, Map.of(), Map.of(PLANKS, 10));
+        Plan woolOnly = plan(recipes, Map.of(), Map.of("minecraft:blue_wool", 3));
+        assertEquals(List.of(new Line("minecraft:blue_wool", 3)), planksOnly.missing());
+        assertEquals(List.of(new Line(LOGS, 1)), woolOnly.missing(), "planks short of logs miss as logs");
+        assertEquals(0, CraftBundleAskPolicy.chooseChest(List.of(planksOnly, woolOnly)), "the plain rule: nearest with anything");
+        assertEquals(-1, CraftBundleAskPolicy.chooseChest(List.of(planksOnly, woolOnly), bed.mustComplete()),
+                "no single chest completes both: the per-item path runs, no partial set is taken");
+        assertEquals(-1, CraftBundleAskPolicy.chooseChest(List.of(woolOnly, planksOnly), bed.mustComplete()),
+                "nor when the wool chest is the nearer one");
+        // A chest that completes both wins over a nearer one with the planks alone.
+        Plan both = plan(recipes, Map.of(), Map.of("minecraft:blue_wool", 3, LOGS, 5));
+        assertTrue(both.complete());
+        assertEquals(1, CraftBundleAskPolicy.chooseChest(List.of(planksOnly, both), bed.mustComplete()));
+        // Wool the bot already holds counts: a planks-only chest then completes the bed.
+        Plan held = plan(recipes, Map.of("minecraft:blue_wool", 3), Map.of(PLANKS, 10));
+        assertTrue(held.complete());
+        assertEquals(0, CraftBundleAskPolicy.chooseChest(List.of(held), bed.mustComplete()));
+        // A null line is the plain rule; nothing and no plans stay -1.
+        assertEquals(0, CraftBundleAskPolicy.chooseChest(List.of(planksOnly, woolOnly), null));
+        assertEquals(-1, CraftBundleAskPolicy.chooseChest(List.of(plan(recipes, Map.of(), Map.of())), bed.mustComplete()));
+        assertEquals(-1, CraftBundleAskPolicy.chooseChest(null, bed.mustComplete()));
+    }
+
+    @Test
+    void aTorchCraftPullsOnlyTheFuelStillShortCountingCharcoalTheBundleGranted() {
+        // The bundle granted 2 charcoal from the coal-or-charcoal pool: no coal is asked for.
+        assertEquals(0, CraftBundleAskPolicy.torchFuelShortfall(2, 0, 2));
+        assertEquals(0, CraftBundleAskPolicy.torchFuelShortfall(2, 1, 1), "coal and charcoal add up");
+        assertEquals(1, CraftBundleAskPolicy.torchFuelShortfall(3, 1, 1));
+        assertEquals(2, CraftBundleAskPolicy.torchFuelShortfall(2, 0, 0), "nothing held: the whole need, coal first as before");
+        assertEquals(0, CraftBundleAskPolicy.torchFuelShortfall(2, 5, 0), "spare coal is no shortfall");
+        assertEquals(0, CraftBundleAskPolicy.torchFuelShortfall(0, 0, 0));
+        assertEquals(2, CraftBundleAskPolicy.torchFuelShortfall(2, -1, -4), "bad counts read as none held");
+    }
+
+    @Test
     void aBedPlanAsksForTheWoolAndThePlanksTogether() {
         KnownCraft bed = CraftBundleAskPolicy.bedCraft("minecraft:white_bed", "minecraft:white_wool");
         Plan plan = plan(CraftBundleAskPolicy.craftRecipes(bed, 1, true), Map.of(),

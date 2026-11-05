@@ -33,7 +33,10 @@ import java.util.function.Function;
  * still missing after the chest) is skipped without asking for its sticks, so a bare
  * {@code /bot craft pickaxe} does not ask for sticks "to make a diamond pickaxe"; with several
  * chests near, the first chest whose plan is complete is asked, else the nearest chest that has
- * anything to give (the partial ruling of {@link SupplyBundlePromptPolicy}).
+ * anything to give (the partial ruling of {@link SupplyBundlePromptPolicy}); a craft with a line
+ * one chest must complete whole (a bed's matching wool, {@link KnownCraft#mustComplete()}) is
+ * asked of a complete chest only, never for the planks of a bed whose wool is elsewhere
+ * ({@link #chooseChest(List, String)}).
  */
 public final class CraftBundleAskPolicy {
 
@@ -65,10 +68,15 @@ public final class CraftBundleAskPolicy {
 
     /**
      * One craft the helper knows how to make: the item, its recipe (a pool or an exact item per
-     * ingredient, in the order the prompt lists them) and the words the purpose uses ("a shield",
-     * "2 shields").
+     * ingredient, in the order the prompt lists them), the words the purpose uses ("a shield",
+     * "2 shields") and, for a craft whose one chest must complete a line whole, that line's key
+     * ({@code mustComplete}: a bed's matching wool; {@code null} for every other craft, whose
+     * partial chest is asked for what it has). See {@link #chooseChest(List, String)}.
      */
-    public record KnownCraft(String itemId, Recipe recipe, String singular, String plural) {
+    public record KnownCraft(String itemId, Recipe recipe, String singular, String plural, String mustComplete) {
+        public KnownCraft(String itemId, Recipe recipe, String singular, String plural) {
+            this(itemId, recipe, singular, plural, null);
+        }
     }
 
     /**
@@ -122,12 +130,24 @@ public final class CraftBundleAskPolicy {
     /**
      * A bed of one colour: 3 wool of that colour + 3 planks → 1 bed (3×3; recipe data
      * {@code <colour>_bed.json}, wiki page Bed: "the wool color must match, the planks can differ").
+     * The wool is the line one chest must complete ({@link KnownCraft#mustComplete()}): planks
+     * can be made from logs or pulled per item afterwards, matching wool cannot.
      */
     public static KnownCraft bedCraft(String bedId, String woolId) {
         Map<String, Integer> bed = new LinkedHashMap<>();
         bed.put(woolId, 3);
         bed.put(PLANKS, 3);
-        return new KnownCraft(bedId, new Recipe(1, bed), "bed", "beds");
+        return new KnownCraft(bedId, new Recipe(1, bed), "bed", "beds", woolId);
+    }
+
+    /**
+     * How much coal or charcoal a torch craft still has to pull after the bundle, counting both
+     * fuels the bot holds: the bundle grants either (the {@link #TORCH_FUEL} pool), so charcoal in
+     * the pack must not open a second prompt for coal. The craft pulls this coal first, then
+     * charcoal for what coal could not cover, as it did before the bundle when nothing was held.
+     */
+    public static int torchFuelShortfall(int craftsNeeded, int coalHeld, int charcoalHeld) {
+        return Math.max(0, craftsNeeded - Math.max(0, coalHeld) - Math.max(0, charcoalHeld));
     }
 
     /**
@@ -281,6 +301,35 @@ public final class CraftBundleAskPolicy {
         for (int i = 0; i < plans.size(); i++) {
             Plan plan = plans.get(i);
             if (plan != null && !plan.fromChest().isEmpty()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * {@link #chooseChest(List)} for a craft with a line one chest must complete whole
+     * ({@code mustComplete}, a bed's matching wool; {@code null} is the plain rule). A chest whose
+     * plan still misses that line is never asked: taking its planks would leave the bot holding
+     * half a bed while the wool stays in another chest (the colour was picked by whichever chest
+     * completes the wool, the chest by whichever is nearest with anything to give). And since no
+     * single chest then completes both the wool and the planks, nothing is asked at all ({@code -1},
+     * today's per-item path) rather than a partial set: only a complete plan is taken, the first
+     * one in nearest-first order.
+     */
+    public static int chooseChest(List<Plan> plans, String mustComplete) {
+        if (mustComplete == null) {
+            return chooseChest(plans);
+        }
+        if (plans == null) {
+            return -1;
+        }
+        for (int i = 0; i < plans.size(); i++) {
+            Plan plan = plans.get(i);
+            if (plan == null || plan.fromChest().isEmpty() || missingIncludesAny(plan, List.of(mustComplete))) {
+                continue;
+            }
+            if (plan.complete()) {
                 return i;
             }
         }

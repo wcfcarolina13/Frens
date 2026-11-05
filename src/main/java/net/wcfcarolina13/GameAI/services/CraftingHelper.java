@@ -700,7 +700,7 @@ public final class CraftingHelper {
         // are 2x2 recipes, and a table placed for a bed the bot cannot make is litter.
         // Choose a color based on available wool stacks (3 required per bed).
         record BedRecipe(net.minecraft.item.Item wool, net.minecraft.item.Item bed, Identifier recipeId) {}
-        List<BedRecipe> recipes = List.of(
+        List<BedRecipe> allRecipes = List.of(
                 new BedRecipe(Items.WHITE_WOOL, Items.WHITE_BED, Identifier.of("minecraft", "white_bed")),
                 new BedRecipe(Items.BLACK_WOOL, Items.BLACK_BED, Identifier.of("minecraft", "black_bed")),
                 new BedRecipe(Items.BLUE_WOOL, Items.BLUE_BED, Identifier.of("minecraft", "blue_bed")),
@@ -718,6 +718,16 @@ public final class CraftingHelper {
                 new BedRecipe(Items.RED_WOOL, Items.RED_BED, Identifier.of("minecraft", "red_bed")),
                 new BedRecipe(Items.YELLOW_WOOL, Items.YELLOW_BED, Identifier.of("minecraft", "yellow_bed"))
         );
+        // The recipe-permission check runs before the ask (as ladders do): a bed the bot may not
+        // craft (a datapack removed the recipe) never takes its wool and planks from the chest
+        // first. Only the permitted colours are chosen from, before and after the ask.
+        List<BedRecipe> recipes = allRecipes.stream()
+                .filter(r -> hasRecipePermission(commander, source.getServer(), r.recipeId()))
+                .toList();
+        if (recipes.isEmpty()) {
+            say(source, "I don't know how to craft that yet.");
+            return 0;
+        }
 
         // One combined chest ask for the wool and the planks (and the table's planks): the colour
         // is the first the bot holds enough of, else the first one chest completes. Off the
@@ -777,10 +787,6 @@ public final class CraftingHelper {
                     Map.of("matching wool", 3 * Math.max(1, amount)),
                     Map.of("matching wool", bestWool),
                     "Beds need 3 matching wool or enough string to make it, plus 3 planks per bed.");
-            return 0;
-        }
-        if (!hasRecipePermission(commander, source.getServer(), chosen.recipeId())) {
-            say(source, "I don't know how to craft that yet.");
             return 0;
         }
 
@@ -947,6 +953,12 @@ public final class CraftingHelper {
                                        int amountRequested,
                                        boolean quiet,
                                        boolean askChest) {
+        // The recipe-permission check comes before the ask: a craft the bot may not make never
+        // takes its planks from the chest and then says it does not know the recipe.
+        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
+            if (!quiet) say(source, "I don't know how to craft that yet.");
+            return 0;
+        }
         if (askChest) {
             // One combined chest ask for the planks (or the logs they come from) and, for a 3x3
             // output, the table's planks. The station sub-step (a table made for another craft)
@@ -965,10 +977,6 @@ public final class CraftingHelper {
                 if (!quiet) sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
                 return 0;
             }
-        }
-        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            if (!quiet) say(source, "I don't know how to craft that yet.");
-            return 0;
         }
         if (!ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)) {
             if (!quiet) sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft.");
@@ -1069,13 +1077,21 @@ public final class CraftingHelper {
                     "Torches need sticks, and I don't have enough.");
             return 0;
         }
-        ensureItemAvailable(bot, source, Items.COAL, craftsNeeded);
+        // The bundle may have granted charcoal (TORCH_FUEL is coal or charcoal), so only the fuel
+        // still short is pulled, coal first and then charcoal, as before the bundle when nothing
+        // was held: held charcoal must not open a second prompt for coal.
         int coal = countItem(bot, Items.COAL);
-        int remaining = Math.max(0, craftsNeeded - coal);
-        if (remaining > 0) {
-            ensureItemAvailable(bot, source, Items.CHARCOAL, remaining);
-        }
         int charcoal = countItem(bot, Items.CHARCOAL);
+        int fuelShort = CraftBundleAskPolicy.torchFuelShortfall(craftsNeeded, coal, charcoal);
+        if (fuelShort > 0) {
+            ensureItemAvailable(bot, source, Items.COAL, coal + fuelShort);
+            coal = countItem(bot, Items.COAL);
+            fuelShort = CraftBundleAskPolicy.torchFuelShortfall(craftsNeeded, coal, charcoal);
+            if (fuelShort > 0) {
+                ensureItemAvailable(bot, source, Items.CHARCOAL, charcoal + fuelShort);
+                charcoal = countItem(bot, Items.CHARCOAL);
+            }
+        }
         int sticks = countItem(bot, Items.STICK);
         int fuel = coal + charcoal;
         int crafts = Math.min(craftsNeeded, Math.min(sticks, fuel));
@@ -1955,8 +1971,14 @@ public final class CraftingHelper {
                     bot.getName().getString(), craft.singular(), ask.headKeys());
             return CraftBundleAskPolicy.Next.SKIP_MATERIAL;
         }
-        int chosen = CraftBundleAskPolicy.chooseChest(plans);
+        // A bed's wool must come whole from the one chest asked: a chest with the planks alone is
+        // never asked (nor is one with the wool but not the planks: today's path runs instead).
+        int chosen = CraftBundleAskPolicy.chooseChest(plans, craft.mustComplete());
         if (chosen < 0) {
+            if (craft.mustComplete() != null) {
+                LOGGER.info("Craft bundle: no one chest near {} completes {} ({} must come whole); keeping the per-item path",
+                        bot.getName().getString(), craft.singular(), craft.mustComplete());
+            }
             return CraftBundleAskPolicy.Next.CONTINUE;
         }
         CraftSupplyNeedPolicy.Plan plan = plans.get(chosen);
