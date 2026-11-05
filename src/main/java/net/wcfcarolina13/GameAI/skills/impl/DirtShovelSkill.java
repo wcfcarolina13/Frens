@@ -158,7 +158,16 @@ public final class DirtShovelSkill implements Skill {
 
                 LookController.faceBlock(player, detectedPos);
 
-                if (!prepareApproach(source, player, approachPlan)) {
+                // A block the approach would have to clear was already refused (painting guard, claim):
+                // it will be refused again, so don't walk over just to fail on it.
+                if (excluded != null && approachClearsAny(approachPlan, excluded)) {
+                    LOGGER.debug("Skipping {}: its approach clears a refused block", detectedPos);
+                    excluded.add(detectedPos);
+                    DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
+                    continue;
+                }
+
+                if (!prepareApproach(source, player, approachPlan, excluded)) {
                     LOGGER.warn("Failed to prepare approach toward {}", detectedPos);
                     if (excluded != null) {
                         excluded.add(detectedPos);
@@ -263,7 +272,12 @@ public final class DirtShovelSkill implements Skill {
                                 minedPos = blocker;
                                 result = blockerResult;
                                 wasTorch = false;
-                            } else if (excluded != null && LineOfSightRedirectPolicy.blockerFrom(blockerResult) == null) {
+                            } else if (excluded != null && LineOfSightRedirectPolicy.blockerFrom(blockerResult) != null) {
+                                // The blocker is itself hidden: it counts toward the same retry limit.
+                                if (LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, blocker))) {
+                                    excluded.add(blocker);
+                                }
+                            } else if (excluded != null) {
                                 // Refused for a reason other than sight (painting guard, claim, tool): it
                                 // will be refused again, so never pick it as a redirect again.
                                 LOGGER.info("Redirect to {} refused ({}); excluding it", blocker, blockerResult);
@@ -742,9 +756,20 @@ public final class DirtShovelSkill implements Skill {
         return new ObstructionStep(block, head, stand, clearance);
     }
 
+    private static boolean approachClearsAny(ApproachPlan plan, Set<BlockPos> blocks) {
+        for (ObstructionStep step : plan.steps()) {
+            if ((step.blockToClear() != null && blocks.contains(step.blockToClear()))
+                    || (step.headToClear() != null && blocks.contains(step.headToClear()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean prepareApproach(ServerCommandSource source,
                                     ServerPlayerEntity player,
-                                    ApproachPlan plan) {
+                                    ApproachPlan plan,
+                                    Set<BlockPos> refused) {
         if (plan == null || player == null) {
             return false;
         }
@@ -754,10 +779,10 @@ public final class DirtShovelSkill implements Skill {
         }
 
         for (ObstructionStep step : plan.steps()) {
-            if (step.blockToClear() != null && !mineWithinReach(player, step.blockToClear())) {
+            if (step.blockToClear() != null && !mineWithinReach(player, step.blockToClear(), refused)) {
                 return false;
             }
-            if (step.headToClear() != null && !mineWithinReach(player, step.headToClear())) {
+            if (step.headToClear() != null && !mineWithinReach(player, step.headToClear(), refused)) {
                 return false;
             }
             if (!moveToPosition(source, player, step.destinationStand())) {
@@ -866,6 +891,11 @@ public final class DirtShovelSkill implements Skill {
     }
 
     private boolean mineWithinReach(ServerPlayerEntity player, BlockPos blockPos) {
+        return mineWithinReach(player, blockPos, null);
+    }
+
+    /** @param refused when non-null, a block MiningTool refuses as protected is added to it */
+    private boolean mineWithinReach(ServerPlayerEntity player, BlockPos blockPos, Set<BlockPos> refused) {
         if (blockPos == null || player == null) {
             return true;
         }
@@ -882,6 +912,9 @@ public final class DirtShovelSkill implements Skill {
             String result = future.get(6, TimeUnit.SECONDS);
             if (result == null || !result.toLowerCase().contains("complete")) {
                 LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
+                if (refused != null && LineOfSightRedirectPolicy.isProtectedRefusal(result)) {
+                    refused.add(blockPos.toImmutable());
+                }
                 return false;
             }
             if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {

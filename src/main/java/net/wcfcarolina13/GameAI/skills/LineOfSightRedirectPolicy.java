@@ -45,6 +45,11 @@ public final class LineOfSightRedirectPolicy {
         }
     }
 
+    /** True for MiningTool's protected-block refusal, which will repeat for the same block. */
+    public static boolean isProtectedRefusal(String miningResult) {
+        return miningResult != null && miningResult.contains("Refusing to mine a protected block");
+    }
+
     /**
      * Mine the hiding block instead only when it is a different block, one the job wants, has no
      * block entity (never break a chest or furnace to see past it), is not already excluded, and

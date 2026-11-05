@@ -62,6 +62,33 @@ class LineOfSightRedirectPolicyTest {
     }
 
     @Test
+    void recognisesProtectedRefusal() {
+        assertTrue(LineOfSightRedirectPolicy.isProtectedRefusal("⚠️ Refusing to mine a protected block."));
+        assertFalse(LineOfSightRedirectPolicy.isProtectedRefusal("⚠️ Cannot mine: out of reach."));
+        assertFalse(LineOfSightRedirectPolicy.isProtectedRefusal(null));
+    }
+
+    @Test
+    void miningToolStillWritesTheProtectedRefusal() throws IOException {
+        assertTrue(source("PlayerUtils/MiningTool.java").contains("\"⚠️ Refusing to mine a protected block.\""));
+    }
+
+    @Test
+    void approachSkipsAndRecordsRefusedBlocks() throws IOException {
+        String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
+        int skip = shovel.indexOf("if (excluded != null && approachClearsAny(approachPlan, excluded)) {");
+        int prepare = shovel.indexOf("if (!prepareApproach(source, player, approachPlan, excluded)) {");
+        assertTrue(skip >= 0 && prepare > skip);
+        assertTrue(shovel.contains("if (refused != null && LineOfSightRedirectPolicy.isProtectedRefusal(result)) {"));
+    }
+
+    @Test
+    void hiddenBlockerCountsTowardTheRetryLimit() throws IOException {
+        assertTrue(source("GameAI/skills/impl/DirtShovelSkill.java")
+                .contains("LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, blocker))"));
+    }
+
+    @Test
     void hiddenTargetExclusionUsesTheJobCounter() throws IOException {
         String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
         int stillPresent = shovel.indexOf("getBlockState(minedPos).getBlock() != Blocks.AIR");
