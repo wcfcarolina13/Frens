@@ -2,6 +2,13 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Tests for 2 untested policies (unreleased, 2026-11-05)
+
+- Audit: 185 `*Policy.java` (plus `*Ops.java` in `GameAI/souls`) classes; 4 had no real test. `DirtNavigationPolicy` and `ExplorationMovePolicy` take `BlockPos` in every method, so they stay untested under the no-`net.minecraft` test rule.
+- New `ExecutionPolicyTest` (8 tests): defaults, smallest and largest accepted values, each guard field rejecting zero and negative values, and which field is reported first.
+- New `BotSleepProximityPolicyTest` (6 tests): the 16-block co-sleep radius is inclusive at 256 squared, is measured on squared distance, and treats NaN and infinity as out of range. It was only checked as a source string in `WakeUpDelayWiringTest` before.
+- Tests: 3857 before, 3871 after. No suspected bugs. Every `ExecutionPolicy` call site passes a positive time budget (the FortifyVillageSkill segment budget is checked for `<= 0` first).
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
