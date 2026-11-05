@@ -237,7 +237,7 @@ public final class SkillManager {
                 }
             }
             followResume = suspendFollowMode(botPlayer);
-        } catch (RuntimeException startFailure) {
+        } catch (Throwable startFailure) {
             LOGGER.error("Skill '{}' failed to start for bot {}: {}", name, botName, startFailure.toString(), startFailure);
             TaskService.complete(ticket, false);
             return SkillExecutionResult.failure("Skill '" + name + "' could not start.");
