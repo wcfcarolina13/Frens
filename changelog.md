@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## A bot's death is noted in its soul journal as a respawn (unreleased, 2026-11-05)
+
+From the 1.1.295 deferral "`AFTER_RESPAWN` does not fire for real deaths or `/kill` (worth knowing why)". Why, from the code and the Fabric jar: Fabric fires `AFTER_RESPAWN` only at the end of `PlayerManager.respawnPlayer`, and a dead Frens bot never goes there. `createFakePlayer.onDeath` revives the same entity (health 20, then `kill` schedules a disconnect that `FakeClientConnection` ignores), and `BotEventHandler.ensureRespawnHandled` runs the reset 5 ticks later and logs "AFTER_RESPAWN did not fire". So the WARN is the normal death path, not a fault. Only the End exit reaches `respawnPlayer` (through the self-sent PERFORM_RESPAWN).
+
+- The fallback skipped the soul respawn note the listener makes (`RespawnResetPolicy.plan(false).noteSoulRespawn()` is true for a death). It now makes it, after the reset, behind the same flag.
+- **Left alone, needs a ruling:** the fallback also skips `AutoFaceEntity.handleBotRespawn` (task abort, auto-face restart: deaths already stop the task since 1.1.295, and the same entity keeps its loop), `BotPersistenceService.onBotRespawn` (on a death it calls `onBotJoin`, which restores saved state: running it after a real death could restore items the bot just dropped), and `botSpawnCount++`. The WARN text stays because `RespawnHandlingWiringTest` (also edited by open PR #4) matches it.
+- Tests 3857 → 3859 (`DeathSoulRespawnWiringTest`, source-reading). **Sandbox check:** with souls on, kill a bot; its journal (`events.jsonl`) gets a RESPAWN event after the DEATH one.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
