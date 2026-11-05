@@ -29,6 +29,14 @@ public final class HotbarLockService {
         LOCKS.lock(bot.getUuid(), slot, server.getTicks(), ttlTicks, reason);
     }
 
+    /**
+     * SERVER_STOPPED: a singleplayer quit keeps this map while the next world's ticks restart at
+     * 0, so a lock taken late in one world would hold a bot's slot for hours in the next.
+     */
+    public static void resetSession() {
+        LOCKS.clearAll();
+    }
+
     public static void clear(ServerPlayerEntity bot) {
         if (bot == null) {
             return;

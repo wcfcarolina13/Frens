@@ -52,6 +52,16 @@ class HotbarLockTableTest {
     }
 
     @Test
+    void clearAllDropsLocksAndCooldowns() {
+        HotbarLockTable table = new HotbarLockTable();
+        table.lock(BOT, 3, 1_000_000, 100, "late in world A");
+        assertTrue(table.logDue(BOT, 1_000_000, 40));
+        table.clearAll();
+        assertNull(table.active(BOT, 5), "world B tick 5 sees no lock");
+        assertTrue(table.logDue(BOT, 5, 40));
+    }
+
+    @Test
     void logIsDueOncePerCooldown() {
         HotbarLockTable table = new HotbarLockTable();
         assertTrue(table.logDue(BOT, 0, 40));

@@ -35,6 +35,12 @@ final class HotbarLockTable {
         lastLogTick.remove(id);
     }
 
+    /** Drops every lock and log cooldown (a world change: the next server's ticks restart at 0). */
+    void clearAll() {
+        locks.clear();
+        lastLogTick.clear();
+    }
+
     /** The live lock at {@code nowTick}, or null; an expired lock is dropped on the way. */
     Lock active(UUID id, long nowTick) {
         if (id == null) {

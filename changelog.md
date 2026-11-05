@@ -36,6 +36,8 @@ been a lost lock, a lost cooldown, or a corrupted map throwing from a skill. Tes
 sandbox check needed beyond the usual: hotbar lock behaviour is unchanged when only one thread
 touches it.
 
+Also: the hotbar lock map is cleared at SERVER_STOPPED (`HotbarLockService.resetSession`). A singleplayer quit keeps it while the next world's ticks restart at 0, so a lock taken late in one world held a bot's slot for hours in the next.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
