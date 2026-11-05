@@ -73,7 +73,11 @@ public final class SurfaceRecoveryService {
         AutoFaceEntity.setBotExecutingTask(true);
 
         SkillExecutionResult result = SkillExecutionResult.failure("Surface recovery ended unexpectedly.");
+        // The skill runs here directly, not through SkillManager.runSkill, so nothing else stops the
+        // follow tick from steering the bot (back toward its commander) while the ascent walks it.
+        net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume = null;
         try {
+            followResume = net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
             LOGGER.info("Surface recovery starting for bot {} on thread {}", bot.getName().getString(), Thread.currentThread().getName());
             Map<String, Object> params = new HashMap<>();
             params.put("_origin", "system");
@@ -117,6 +121,11 @@ public final class SurfaceRecoveryService {
             AutoFaceEntity.setBotExecutingTask(false);
             boolean success = succeeded && !abortRequested;
             TaskService.complete(ticket, success);
+            // After complete: resumeFollowMode skips while a task is still active. Not after an
+            // abort, which belongs to whoever requested it (stop, death, a new command).
+            if (!abortRequested) {
+                net.wcfcarolina13.GameAI.skills.SkillManager.resumeFollowMode(bot, source.getServer(), followResume);
+            }
         }
     }
 }
