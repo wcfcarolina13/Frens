@@ -104,4 +104,13 @@ class LineOfSightRedirectPolicyTest {
         int success = collect.indexOf("collected = Math.max(collected, inventoryCollected);\n                lastProgressMs = System.currentTimeMillis();");
         assertTrue(success >= 0, "a successful iteration resets the progress clock");
     }
+
+    @Test
+    void postApproachCheckUsesMiningReachNotThreeBlocks() throws IOException {
+        String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
+        assertFalse(shovel.contains("currentPos.getSquaredDistance(detectedPos) > 9.0D"));
+        int check = shovel.indexOf("if (!isWithinMiningReach(player, detectedPos)) {");
+        int log = shovel.indexOf("Too far from {} after approach preparation", check);
+        assertTrue(check >= 0 && log > check);
+    }
 }

@@ -168,7 +168,10 @@ public final class DirtShovelSkill implements Skill {
                 }
 
                 BlockPos currentPos = player.getBlockPos();
-                if (currentPos.getSquaredDistance(detectedPos) > 9.0D) {
+                // Was an integer corner-to-corner check of 3 blocks: any top-row block of a wall seen
+                // from the ground (dy = 3) failed it as soon as dx or dz was non-zero and was excluded
+                // for the whole job, although MiningTool's reach allows it. Use the reach check.
+                if (!isWithinMiningReach(player, detectedPos)) {
                     LOGGER.warn("Too far from {} after approach preparation (player at {})", detectedPos, currentPos);
                     if (excluded != null) {
                         excluded.add(detectedPos);
