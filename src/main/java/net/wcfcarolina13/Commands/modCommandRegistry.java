@@ -2690,6 +2690,8 @@ public class modCommandRegistry {
         skillExecutor.submit(() -> {
             boolean success = false;
             try {
+                // Attach so /bot stop interrupts the walk, not only latches the abort.
+                TaskService.attachExecutingThread(ticket, Thread.currentThread());
                 PlaceRun rest = runPlaceLoop(bot, target, item, placeItem, count, first.placed(), first.lastPlaced());
                 success = rest.stop() == PlacePosPolicy.Stop.DONE;
                 server.execute(() -> reportPlacement(source, rest, item));
