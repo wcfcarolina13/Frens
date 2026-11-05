@@ -69,7 +69,6 @@ public final class AtomicStoreWriter {
         Path temporary = Files.createTempFile(dir, target.getFileName() + ".", ".tmp");
         boolean keepTemporary = false;
         try {
-            copyPosixPermissions(target, temporary);
             try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
                 // Bodies such as NbtIo.writeCompressed close the stream they are handed; the
                 // wrapper keeps the channel open so it can still be forced afterwards.
@@ -88,6 +87,9 @@ public final class AtomicStoreWriter {
                 out.flush();
                 channel.force(true);
             }
+            // After the write (a read-only target's mode on the temp would have refused it) and
+            // before the move, so the replaced file keeps its own permissions.
+            copyPosixPermissions(target, temporary);
             if (backup != null && Files.exists(target)) {
                 try {
                     Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);

@@ -27,6 +27,8 @@ Review fixes:
 - *The Windows fallback keeps the new content.* A non-atomic replace deletes the target before renaming. If the delete succeeds (an antivirus holding the file with share-delete) and the rename fails, neither file would have existed. The temp is now kept and its path is named in the error.
 - *Replaced files keep their POSIX permissions.* `createTempFile` makes the temp 0600, which would have silently dropped group/world read bits.
 - `MountPersistenceService` skips a JSON-null entry instead of refusing saves for the session.
+- Pending travels: each entry's post-arrival restore has its own try. A restore that still fails part-way refuses saves for the session, so the file is never rewritten without the entries that were not restored.
+- Permissions are copied to the temp after the write. Copying a read-only target's mode first made the write itself fail.
 
 Costs noted in review: each save now forces the temp file to disk on the calling thread. Inventory autosave runs about every 30 s per bot on the server thread, so that is a few ms per bot per save on a slow disk. The inventory save also reads the small primary once to decide on the backup.
 

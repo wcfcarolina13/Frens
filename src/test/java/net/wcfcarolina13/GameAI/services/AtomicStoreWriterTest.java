@@ -157,4 +157,29 @@ class AtomicStoreWriterTest {
         org.junit.jupiter.api.Assertions.assertEquals("rw-r--r--",
                 java.nio.file.attribute.PosixFilePermissions.toString(java.nio.file.Files.getPosixFilePermissions(target)));
     }
+
+    @Test
+    void aReadOnlyTargetIsStillReplacedAndStaysReadOnly(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws java.io.IOException {
+        java.nio.file.Path target = dir.resolve("ro.json");
+        java.nio.file.Files.writeString(target, "old");
+        try {
+            java.nio.file.Files.setPosixFilePermissions(target, java.nio.file.attribute.PosixFilePermissions.fromString("r--r--r--"));
+        } catch (UnsupportedOperationException e) {
+            return;
+        }
+        AtomicStoreWriter.writeString(target, "new");
+        org.junit.jupiter.api.Assertions.assertEquals("new", java.nio.file.Files.readString(target));
+        org.junit.jupiter.api.Assertions.assertEquals("r--r--r--",
+                java.nio.file.attribute.PosixFilePermissions.toString(java.nio.file.Files.getPosixFilePermissions(target)));
+    }
+
+    @Test
+    void permissionsAreCopiedAfterTheWrite() throws java.io.IOException {
+        String src = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "src/main/java/net/wcfcarolina13/GameAI/services/AtomicStoreWriter.java"));
+        int write = src.indexOf("body.writeTo(out);");
+        int copy = src.indexOf("copyPosixPermissions(target, temporary);");
+        int move = src.indexOf("Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE");
+        org.junit.jupiter.api.Assertions.assertTrue(write < copy && copy < move);
+    }
 }

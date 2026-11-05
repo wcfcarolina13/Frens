@@ -1933,15 +1933,21 @@ public final class NavigationArtifactService {
                         LOGGER.warn("Skipping malformed saved travel entry for '{}': {}",
                                 s.botAlias, e.getMessage());
                     }
-                    restorePostArrival(s, currentWorld, travelRestored);
+                    try {
+                        restorePostArrival(s, currentWorld, travelRestored);
+                    } catch (RuntimeException e) {
+                        LOGGER.warn("Could not restore the post-arrival action for '{}': {}", s.botAlias, e.getMessage());
+                    }
                 }
             } catch (IOException | RuntimeException e) {
                 // RuntimeException: Gson's JsonSyntaxException on a truncated file. This runs in
                 // the SERVER_STARTED hook, so it must not escape. A corrupt file is moved to
                 // .bad-<stamp>; an unreadable one is left in place and saves are refused.
                 if (parsedOk) {
-                    // Read fine; restoring an entry failed. Keep what was restored, keep saving.
-                    LOGGER.error("Restoring pending travels failed after the file was read", e);
+                    // Read fine, but restoring stopped part-way: entries after the failure are in
+                    // neither map, so a save now would drop them. Keep the file as it is for the session.
+                    LOGGER.error("Restoring pending travels failed after the file was read; the file is kept and not saved over this session", e);
+                    travelsLoadFailed = true;
                 } else {
                     LOGGER.warn("Failed to load pending travels: {}", e.getMessage());
                     Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "pending travels");
