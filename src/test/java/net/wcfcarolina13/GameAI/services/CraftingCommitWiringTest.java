@@ -120,16 +120,16 @@ class CraftingCommitWiringTest {
         assertNoWaits(block(source, "private static void reachForItem("), "reachForItem");
         // The commit helper's own hops: the make-room calls stay outside them.
         String commit = block(source, "private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot,\n");
-        for (String hop : callArguments(commit, "BotActions.callOnServerThread(")) {
+        for (String hop : callArguments(commit, "SupplyServerHop.call(")) {
             assertNoWaits(hop, "commitCraft hop");
         }
-        assertEquals(2, callArguments(commit, "BotActions.callOnServerThread(").size(), "one hop, plus the leftover's");
+        assertEquals(2, callArguments(commit, "SupplyServerHop.call(").size(), "one hop, plus the leftover's");
         assertTrue(commit.contains("CraftCommitPolicy.HOP_TIMEOUT_MS, null)"), "a timed-out first hop reads as null");
-        assertTrue(commit.indexOf("makeRoomForOutput(") < commit.indexOf("BotActions.callOnServerThread("),
+        assertTrue(commit.indexOf("makeRoomForOutput(") < commit.indexOf("SupplyServerHop.call("),
                 "room is made on the caller's thread before the hop");
         // The bundle reach in ensurePlanksFromLogs is its own hop and holds nothing else.
         for (String hop : callArguments(block(source, "private static void ensurePlanksFromLogs("),
-                "BotActions.callOnServerThread(")) {
+                "SupplyServerHop.call(")) {
             assertNoWaits(hop, "ensurePlanksFromLogs reach hop");
             assertTrue(hop.contains("reachForItem("));
         }

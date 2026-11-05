@@ -3701,6 +3701,12 @@ public final class CraftingHelper {
         return commitCraft(bot, output, count, true, consumes);
     }
 
+    /** The bot's server, for {@link SupplyServerHop}: abandon-safe, so a commit the caller gave up
+     *  on never runs late, and one already running is waited for rather than reported as failed. */
+    private static net.minecraft.server.MinecraftServer serverOf(ServerPlayerEntity bot) {
+        return bot != null && bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+    }
+
     /**
      * The one inventory step of a craft: {@code consumes} (the ingredient takes, which may reach
      * into bundles but never walk) and the output's insert run together in ONE server-thread hop,
@@ -3737,7 +3743,7 @@ public final class CraftingHelper {
         if (roomFirst) {
             makeRoomForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of(), false, true, true);
         }
-        CraftCommitPolicy.HopResult hop = BotActions.callOnServerThread(bot, () -> {
+        CraftCommitPolicy.HopResult hop = SupplyServerHop.call(serverOf(bot), () -> {
             if (!consumes.getAsBoolean()) {
                 return CraftCommitPolicy.HopResult.ABORTED;
             }
@@ -3758,7 +3764,7 @@ public final class CraftingHelper {
         int leftover = hop.leftover();
         debugChest("InsertStack failed; retrying after offload. leftover=" + leftover);
         makeRoomForOutput(bot, bot.getCommandSource(), output, leftover, 0, 0, Map.of(), true, true, true);
-        boolean placed = BotActions.callOnServerThread(bot, () -> {
+        boolean placed = SupplyServerHop.call(serverOf(bot), () -> {
             ItemStack stack = new ItemStack(output, leftover);
             boolean retryAdded = bot.getInventory().insertStack(stack);
             debugChest("InsertStack retry added=" + retryAdded + " remaining=" + stack.getCount());
@@ -4714,7 +4720,7 @@ public final class CraftingHelper {
         // place — pull them into real slots first (a bundle extraction is an inventory write: server
         // thread; it moves nothing but bundle contents, so it is its own small hop).
         int reach = logsNeeded;
-        if (!BotActions.callOnServerThread(bot, () -> {
+        if (!SupplyServerHop.call(serverOf(bot), () -> {
             reachForItem(bot, s -> !s.isEmpty() && s.isIn(net.minecraft.registry.tag.ItemTags.LOGS), reach);
             return true;
         }, CraftCommitPolicy.HOP_TIMEOUT_MS, false)) {
