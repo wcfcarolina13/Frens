@@ -53,7 +53,21 @@ class SoulSideChannelOpsTest {
         assertEquals("Jake", fx.stanceDeltas().get(0).peerName());
         assertEquals(SoulSideChannelOps.Axis.WARMTH, fx.stanceDeltas().get(0).axis());
         assertEquals(0, fx.droppedStance(), "an unknown axis key is ignored, not counted as dropped");
-        assertTrue(fx.facts().isEmpty(), "threads.closed is parsed and deliberately ignored");
+        assertTrue(fx.facts().isEmpty());
+        assertEquals(List.of("Did you find the iron?"), fx.closedThreads());
+    }
+
+    @Test
+    void closedThreadsAreCappedAndBlankOrNonTextDropped() {
+        SoulSideChannelOps.SideEffects fx = parse("{\"threads\":{\"closed\":"
+                + "[\"  \", 7, \"one?\", \"two?\", \"three?\", \"four?\"]}}");
+        assertEquals(List.of("one?", "two?", "three?"), fx.closedThreads());
+        assertFalse(fx.isEmpty(), "a close alone is worth applying");
+        assertTrue(parse("{\"threads\":{\"closed\":\"one?\"}}").closedThreads().isEmpty(), "not an array");
+        assertTrue(parse("{\"threads\":[\"one?\"]}").closedThreads().isEmpty(), "not an object");
+        String longQ = "q".repeat(SoulMindOps.MAX_QUESTION_CHARS + 30);
+        assertEquals(SoulMindOps.MAX_QUESTION_CHARS,
+                parse("{\"threads\":{\"closed\":[\"" + longQ + "\"]}}").closedThreads().get(0).length());
     }
 
     @Test

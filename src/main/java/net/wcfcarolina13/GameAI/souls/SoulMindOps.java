@@ -97,6 +97,15 @@ final class SoulMindOps {
         return withThreads(mind, stance, List.of());
     }
 
+    /**
+     * The per-question close: removes the open threads the side channel says were answered
+     * ({@link SoulThreadClosePolicy}). No stance move, unlike {@link #markAnswered(SoulTypes.SoulMind)}.
+     */
+    static SoulTypes.SoulMind closeThreads(SoulTypes.SoulMind mind, List<String> claims) {
+        List<SoulTypes.OpenThread> left = SoulThreadClosePolicy.remaining(mind.threads(), claims);
+        return left == mind.threads() ? mind : withThreads(mind, mind.playerStance(), left);
+    }
+
     /** Open threads older than {@link #THREAD_TTL_MS} flip to expired; exasperation +1 for each. */
     static SoulTypes.SoulMind expireThreads(SoulTypes.SoulMind mind, long nowMs) {
         List<SoulTypes.OpenThread> threads = new ArrayList<>(mind.threads().size());
