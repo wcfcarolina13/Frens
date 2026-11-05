@@ -27,6 +27,20 @@ jobs:
       - name: Build
         run: ./gradlew build -x test
 
+      # The JUnit suite (pure policy, wiring and file-system tests; no game needed). Run as its own
+      # step so a red test is told apart from a compile failure. The runner is not root, so the
+      # root-only SoulStore permission test passes here.
+      - name: Test
+        run: ./gradlew test
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: build/reports/tests/test
+          if-no-files-found: ignore
+
       - name: Locate distributable jar
         id: jar
         shell: bash
