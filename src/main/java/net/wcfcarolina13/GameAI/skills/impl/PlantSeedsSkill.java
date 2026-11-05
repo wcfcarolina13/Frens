@@ -230,6 +230,12 @@ public class PlantSeedsSkill implements Skill {
     }
 
     private static int ensureAnySeedHotbar(ServerPlayerEntity bot) {
+        // Moves a stack into the hotbar: server thread (inline when already there), not the worker.
+        // Retried once on a timeout: callers end their planting pass on -1.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThreadRetrying(bot, () -> ensureAnySeedHotbarOnServer(bot), 750L, -1);
+    }
+
+    private static int ensureAnySeedHotbarOnServer(ServerPlayerEntity bot) {
         PlayerInventory inv = bot.getInventory();
         // Check hotbar first
         for (Item seed : PLANTABLE_SEEDS) {
@@ -268,6 +274,14 @@ public class PlantSeedsSkill implements Skill {
     }
 
     private static void selectHotbarSlot(ServerPlayerEntity bot, int slot) {
+        // Selected slot, hand stack and screen sync: server thread (inline when already there).
+        net.wcfcarolina13.GameAI.BotActions.callOnServerThread(bot, () -> {
+            selectHotbarSlotOnServer(bot, slot);
+            return Boolean.TRUE;
+        }, 750L, Boolean.FALSE);
+    }
+
+    private static void selectHotbarSlotOnServer(ServerPlayerEntity bot, int slot) {
         if (slot < 0 || slot >= 9) return;
         PlayerInventory inventory = bot.getInventory();
         inventory.setSelectedSlot(slot);
