@@ -15,16 +15,19 @@ import java.util.Map;
 import java.util.function.Function;
 
 /**
- * Pure decisions behind {@code CraftingHelper}'s one combined chest ask before a tool craft
+ * Pure decisions behind {@code CraftingHelper}'s one combined chest ask before a craft
  * (Bradley's ruling of 2026-10-23: the bot works out everything the craft needs and asks the chest
  * once). No Minecraft types: items are the pool keys below or plain item ids, and the chest is a
  * list of what each exact stack could grant.
  *
- * <p>The recipe lookup is the one {@code CraftingHelper} already hard-codes for tools: a tool is
- * its head items plus sticks, a stick craft turns 2 planks into 4, a plank craft turns 1 log into
- * 4, a crafting table takes 4 planks. Planks and logs are pools ({@link #PLANKS}, {@link #LOGS}):
- * any plank makes a stick or a tool, and the ask names the pool's actual stacks
- * ({@link #splitLine}).
+ * <p>The recipe lookup is the one {@code CraftingHelper} already hard-codes: a tool is its head
+ * items plus sticks, a stick craft turns 2 planks into 4, a plank craft turns 1 log into 4, a
+ * crafting table takes 4 planks, and the other crafts the helper makes are in {@link #known}
+ * (ladder, torch, shield, bucket, shears, furnace, chest, crafting table; a bed through
+ * {@link #bedCraft}), each checked against the vanilla 1.21.11 recipe data. Planks and logs are
+ * pools ({@link #PLANKS}, {@link #LOGS}), as are a torch's coal-or-charcoal ({@link #TORCH_FUEL})
+ * and a furnace's cobblestone-like blocks ({@link #STONE_CRAFTING}): any member makes the craft,
+ * and the ask names the pool's actual stacks ({@link #splitLine}).
  *
  * <p><b>Rulings made here (to confirm):</b> a material the chest cannot complete (its head is
  * still missing after the chest) is skipped without asking for its sticks, so a bare
@@ -38,8 +41,20 @@ public final class CraftBundleAskPolicy {
     public static final String PLANKS = "#minecraft:planks";
     /** Pool key for any log. */
     public static final String LOGS = "#minecraft:logs";
+    /** Pool key for a torch's fuel: coal or charcoal. */
+    public static final String TORCH_FUEL = "#frens:torch_fuel";
+    /** Pool key for a furnace's blocks: the vanilla {@code stone_crafting_materials} tag (cobblestone, cobbled deepslate, blackstone). */
+    public static final String STONE_CRAFTING = "#minecraft:stone_crafting_materials";
     public static final String STICK = "minecraft:stick";
     public static final String CRAFTING_TABLE = "minecraft:crafting_table";
+    public static final String IRON_INGOT = "minecraft:iron_ingot";
+    public static final String LADDER = "minecraft:ladder";
+    public static final String TORCH = "minecraft:torch";
+    public static final String SHIELD = "minecraft:shield";
+    public static final String BUCKET = "minecraft:bucket";
+    public static final String SHEARS = "minecraft:shears";
+    public static final String FURNACE = "minecraft:furnace";
+    public static final String CHEST = "minecraft:chest";
     /** The synthetic target of one craft: the tools asked for, plus a table when one must be made. */
     public static final String CRAFT_SET = "frens:craft_set";
 
@@ -47,6 +62,137 @@ public final class CraftBundleAskPolicy {
     }
 
     // ── Recipes ──────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * One craft the helper knows how to make: the item, its recipe (a pool or an exact item per
+     * ingredient, in the order the prompt lists them) and the words the purpose uses ("a shield",
+     * "2 shields").
+     */
+    public record KnownCraft(String itemId, Recipe recipe, String singular, String plural) {
+    }
+
+    /**
+     * The crafts {@code CraftingHelper} makes besides tools, with the vanilla 1.21.11 recipe facts
+     * (recipe data {@code data/minecraft/recipe/<id>.json}; minecraft.wiki pages Ladder, Torch,
+     * Shield, Bucket, Shears, Furnace, Chest, Crafting Table):
+     * <ul>
+     *   <li>ladder: 7 sticks → 3 ladders (3×3);</li>
+     *   <li>torch: 1 coal or charcoal + 1 stick → 4 torches (2×2);</li>
+     *   <li>shield: 6 planks (the {@code wooden_tool_materials} tag) + 1 iron ingot (3×3);</li>
+     *   <li>bucket: 3 iron ingots (3×3); shears: 2 iron ingots (2×2);</li>
+     *   <li>furnace: 8 {@code stone_crafting_materials} (3×3);</li>
+     *   <li>chest: 8 planks (3×3); crafting table: 4 planks (2×2).</li>
+     * </ul>
+     */
+    private static final Map<String, KnownCraft> KNOWN = knownCrafts();
+
+    private static Map<String, KnownCraft> knownCrafts() {
+        Map<String, KnownCraft> known = new LinkedHashMap<>();
+        put(known, LADDER, new Recipe(3, Map.of(STICK, 7)), "ladder", "ladders");
+        Map<String, Integer> torch = new LinkedHashMap<>();
+        torch.put(TORCH_FUEL, 1);
+        torch.put(STICK, 1);
+        put(known, TORCH, new Recipe(4, torch), "torch", "torches");
+        Map<String, Integer> shield = new LinkedHashMap<>();
+        shield.put(PLANKS, 6);
+        shield.put(IRON_INGOT, 1);
+        put(known, SHIELD, new Recipe(1, shield), "shield", "shields");
+        put(known, BUCKET, new Recipe(1, Map.of(IRON_INGOT, 3)), "bucket", "buckets");
+        put(known, SHEARS, new Recipe(1, Map.of(IRON_INGOT, 2)), "pair of shears", "pairs of shears");
+        put(known, FURNACE, new Recipe(1, Map.of(STONE_CRAFTING, 8)), "furnace", "furnaces");
+        put(known, CHEST, new Recipe(1, Map.of(PLANKS, 8)), "chest", "chests");
+        put(known, CRAFTING_TABLE, new Recipe(1, Map.of(PLANKS, 4)), "crafting table", "crafting tables");
+        return known;
+    }
+
+    private static void put(Map<String, KnownCraft> known, String id, Recipe recipe, String singular, String plural) {
+        known.put(id, new KnownCraft(id, recipe, singular, plural));
+    }
+
+    /** The known craft for an item id, or {@code null}: the craft then keeps today's per-item path. */
+    public static KnownCraft known(String itemId) {
+        return itemId == null ? null : KNOWN.get(itemId);
+    }
+
+    /** Every known craft's item id, in table order (for tests and logs). */
+    public static List<String> knownIds() {
+        return List.copyOf(KNOWN.keySet());
+    }
+
+    /**
+     * A bed of one colour: 3 wool of that colour + 3 planks → 1 bed (3×3; recipe data
+     * {@code <colour>_bed.json}, wiki page Bed: "the wool color must match, the planks can differ").
+     */
+    public static KnownCraft bedCraft(String bedId, String woolId) {
+        Map<String, Integer> bed = new LinkedHashMap<>();
+        bed.put(woolId, 3);
+        bed.put(PLANKS, 3);
+        return new KnownCraft(bedId, new Recipe(1, bed), "bed", "beds");
+    }
+
+    /**
+     * Which wool a bed craft should use, given what the bot holds and what each chest could grant
+     * per wool id (nearest chest first): the first colour the bot already has enough of, else the
+     * first colour the bot plus one chest cover; {@code null} when no colour can be completed (the
+     * craft then keeps today's path, which also tries string). Beds need matching wool, so a
+     * colour split across two chests does not count.
+     */
+    public static String chooseBedWool(List<String> woolIds, Map<String, Integer> have,
+                                       List<Map<String, Integer>> chestPools, int needed) {
+        if (woolIds == null || woolIds.isEmpty()) {
+            return null;
+        }
+        for (String wool : woolIds) {
+            if (count(have, wool) >= needed) {
+                return wool;
+            }
+        }
+        if (chestPools != null) {
+            for (String wool : woolIds) {
+                int held = count(have, wool);
+                for (Map<String, Integer> chest : chestPools) {
+                    if (held + count(chest, wool) >= needed) {
+                        return wool;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static int count(Map<String, Integer> pool, String key) {
+        if (pool == null || key == null) {
+            return 0;
+        }
+        Integer n = pool.get(key);
+        return n == null ? 0 : Math.max(0, n);
+    }
+
+    /**
+     * The recipe function for {@code amount} of one craft: the synthetic set ({@link #CRAFT_SET}:
+     * the target, plus a crafting table when one must be made), the target's own recipe, and the
+     * wood sub-crafts (2 planks → 4 sticks, 1 log → 4 planks, 4 planks → table). Anything else is
+     * raw and comes from the chest as it is.
+     */
+    public static Function<String, Recipe> craftRecipes(String targetId, Recipe target, int amount, boolean withTable) {
+        Map<String, Recipe> recipes = new LinkedHashMap<>();
+        Map<String, Integer> set = new LinkedHashMap<>();
+        set.put(targetId, Math.max(1, amount));
+        if (withTable && !CRAFTING_TABLE.equals(targetId)) {
+            set.put(CRAFTING_TABLE, 1);
+        }
+        recipes.put(CRAFT_SET, new Recipe(1, set));
+        recipes.put(targetId, target);
+        recipes.put(STICK, new Recipe(4, Map.of(PLANKS, 2)));
+        recipes.put(PLANKS, new Recipe(4, Map.of(LOGS, 1)));
+        recipes.putIfAbsent(CRAFTING_TABLE, new Recipe(1, Map.of(PLANKS, 4)));
+        return recipes::get;
+    }
+
+    /** {@link #craftRecipes} for a known craft. */
+    public static Function<String, Recipe> craftRecipes(KnownCraft craft, int amount, boolean withTable) {
+        return craftRecipes(craft.itemId(), craft.recipe(), amount, withTable);
+    }
 
     /**
      * The recipe function for {@code amount} tools of one material.
@@ -59,13 +205,11 @@ public final class CraftBundleAskPolicy {
      */
     public static Function<String, Recipe> toolRecipes(String toolId, String headKey, int headCount,
                                                        int stickCount, int amount, boolean withTable) {
-        Map<String, Recipe> recipes = new LinkedHashMap<>();
-        Map<String, Integer> set = new LinkedHashMap<>();
-        set.put(toolId, Math.max(1, amount));
-        if (withTable) {
-            set.put(CRAFTING_TABLE, 1);
-        }
-        recipes.put(CRAFT_SET, new Recipe(1, set));
+        return craftRecipes(toolId, toolRecipe(headKey, headCount, stickCount), amount, withTable);
+    }
+
+    /** One tool: its head items plus its sticks. */
+    public static Recipe toolRecipe(String headKey, int headCount, int stickCount) {
         Map<String, Integer> tool = new LinkedHashMap<>();
         if (headCount > 0) {
             tool.put(headKey, headCount);
@@ -73,20 +217,46 @@ public final class CraftBundleAskPolicy {
         if (stickCount > 0) {
             tool.merge(STICK, stickCount, Integer::sum);
         }
-        recipes.put(toolId, new Recipe(1, tool));
-        recipes.put(STICK, new Recipe(4, Map.of(PLANKS, 2)));
-        recipes.put(PLANKS, new Recipe(4, Map.of(LOGS, 1)));
-        recipes.put(CRAFTING_TABLE, new Recipe(1, Map.of(PLANKS, 4)));
-        return recipes::get;
+        return new Recipe(1, tool);
+    }
+
+    /**
+     * How many planks the craft counted on having after a bundle moved, so taken logs are turned
+     * into exactly those (as the per-item path would): the target's planks over its batches, the
+     * table's 4, and 2 per stick craft still short.
+     */
+    public static int planksWanted(Recipe target, int amount, int sticksHeld, boolean withTable) {
+        if (target == null || target.outputCount() <= 0) {
+            return withTable ? 4 : 0;
+        }
+        int batches = (Math.max(1, amount) + target.outputCount() - 1) / target.outputCount();
+        int planks = count(target.inputs(), PLANKS) * batches;
+        int sticksShort = Math.max(0, count(target.inputs(), STICK) * batches - Math.max(0, sticksHeld));
+        return planks + (withTable ? 4 : 0) + 2 * ((sticksShort + 3) / 4);
     }
 
     /** The pool an exact item counts toward: planks and logs pool, anything else is itself. */
     public static String poolKey(String itemId, boolean isPlank, boolean isLog) {
+        return poolKey(itemId, isPlank, isLog, false, false);
+    }
+
+    /**
+     * The pool an exact item counts toward: planks, logs, torch fuel (coal or charcoal) and the
+     * furnace's stone blocks pool; anything else is itself.
+     */
+    public static String poolKey(String itemId, boolean isPlank, boolean isLog, boolean isTorchFuel,
+                                 boolean isStoneCrafting) {
         if (isPlank) {
             return PLANKS;
         }
         if (isLog) {
             return LOGS;
+        }
+        if (isTorchFuel) {
+            return TORCH_FUEL;
+        }
+        if (isStoneCrafting) {
+            return STONE_CRAFTING;
         }
         return itemId;
     }
@@ -171,13 +341,19 @@ public final class CraftBundleAskPolicy {
         return takes;
     }
 
-    /** "planks"/"plank", "logs"/"log" for the pools; anything else is left to the adapter. */
+    /** "planks"/"plank", "logs"/"log", "coal or charcoal", "cobblestone or similar" for the pools; anything else is left to the adapter. */
     public static String poolDisplayName(String key, int count) {
         if (PLANKS.equals(key)) {
             return count == 1 ? "plank" : "planks";
         }
         if (LOGS.equals(key)) {
             return count == 1 ? "log" : "logs";
+        }
+        if (TORCH_FUEL.equals(key)) {
+            return "coal or charcoal";
+        }
+        if (STONE_CRAFTING.equals(key)) {
+            return "cobblestone or similar";
         }
         return null;
     }
@@ -212,8 +388,14 @@ public final class CraftBundleAskPolicy {
 
     /** "a wooden pickaxe", "2 wooden pickaxes", "a wooden pickaxe and a crafting table". */
     public static String purposeText(String toolLabel, int amount, boolean withTable) {
-        boolean blank = toolLabel == null || toolLabel.isBlank();
-        String what = blank ? "that" : amount > 1 ? amount + " " + toolLabel.strip() + "s" : "a " + toolLabel.strip();
+        return purposeText(toolLabel, null, amount, withTable);
+    }
+
+    /** "a torch", "4 torches", "a pair of shears", "a chest and a crafting table"; a blank plural adds an "s". */
+    public static String purposeText(String singular, String plural, int amount, boolean withTable) {
+        boolean blank = singular == null || singular.isBlank();
+        String many = plural == null || plural.isBlank() ? (blank ? null : singular.strip() + "s") : plural.strip();
+        String what = blank ? "that" : amount > 1 ? amount + " " + many : "a " + singular.strip();
         return withTable ? what + " and a crafting table" : what;
     }
 
