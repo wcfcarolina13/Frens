@@ -52,6 +52,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 /**
@@ -601,10 +602,11 @@ public final class CraftingHelper {
             return 0;
         }
         int needed = Math.max(1, amount);
-        int planksPerLog = 4;
-        int logsNeeded = (int) Math.ceil(needed / (double) planksPerLog);
+        int logsNeeded = (int) Math.ceil(needed / (double) PLANKS_PER_LOG);
         int crafted = 0;
 
+        // The scan reads slots on the caller's thread; each conversion (those logs out, their
+        // planks in) is one commit, which checks the slot again on the server thread.
         for (int i = 0; i < bot.getInventory().size() && logsNeeded > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty() || !stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) {
@@ -618,14 +620,15 @@ public final class CraftingHelper {
             if (plankItem == null || plankItem == Items.AIR) {
                 continue;
             }
-            stack.decrement(use);
-            if (stack.isEmpty()) {
-                bot.getInventory().setStack(i, ItemStack.EMPTY);
+            CraftCommitPolicy.Outcome outcome = commitLogsToPlanks(bot, i, stack.getItem(), stack.getCount(), use, plankItem);
+            if (!CraftCommitPolicy.continueScan(outcome)) {
+                break;
             }
-            int produced = use * planksPerLog;
-            distributeOutput(bot, plankItem, produced);
+            if (outcome != CraftCommitPolicy.Outcome.CRAFTED) {
+                continue;
+            }
             recordCraftHistory(commander, plankItem);
-            crafted += produced;
+            crafted += use * PLANKS_PER_LOG;
             logsNeeded -= use;
         }
 
@@ -686,8 +689,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.LADDER, crafts * 3, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STICK, crafts * 7);
-        distributeOutput(bot, Items.LADDER, crafts * 3);
+        if (commitCraft(bot, Items.LADDER, crafts * 3,
+                () -> consumeItemOnServer(bot, Items.STICK, crafts * 7)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, Identifier.of("minecraft", "ladder"));
         return crafts * 3;
     }
@@ -845,13 +850,17 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, chosen.bed(), crafts, crafts * 3, 0, reserveItems)) {
             return 0;
         }
-        if (!consumePlanks(bot, crafts * 3)) {
+        BedRecipe bed = chosen;
+        CraftCommitPolicy.Outcome committed = commitCraft(bot, bed.bed(), crafts,
+                () -> consumePlanksOnServer(bot, crafts * 3) && consumeItemOnServer(bot, bed.wool(), crafts * 3));
+        if (committed == CraftCommitPolicy.Outcome.ABORTED) {
             say(source, "I couldn't reserve planks for beds.");
             return 0;
         }
-        consumeItem(bot, chosen.wool(), crafts * 3);
-        distributeOutput(bot, chosen.bed(), crafts);
-        recordCraftHistory(commander, chosen.recipeId());
+        if (committed != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
+        recordCraftHistory(commander, bed.recipeId());
         return crafts;
     }
 
@@ -884,8 +893,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.WHITE_WOOL, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STRING, crafts * 4);
-        distributeOutput(bot, Items.WHITE_WOOL, crafts);
+        if (commitCraft(bot, Items.WHITE_WOOL, crafts,
+                () -> consumeItemOnServer(bot, Items.STRING, crafts * 4)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, WHITE_WOOL_RECIPE_ID);
         LOGGER.info("Crafted {} white wool from string for {} while preparing bed materials.",
                 crafts,
@@ -909,7 +920,11 @@ public final class CraftingHelper {
         return InventoryIterator.count(bot, CraftingHelper::isPlank);
     }
 
-    private static boolean consumePlanks(ServerPlayerEntity bot, int needed) {
+    /**
+     * Server thread only, from inside a {@link #commitCraft} lambda: {@link #consumeItemOnServer}
+     * for any planks. False means too few: the commit stops before any output.
+     */
+    private static boolean consumePlanksOnServer(ServerPlayerEntity bot, int needed) {
         // Bundle-aware counts feed the "can I craft this?" gate, but decrementing a bundled view is a
         // no-op — pull the shortfall into real slots before touching any stack.
         reachForItem(bot, CraftingHelper::isPlank, needed);
@@ -926,7 +941,7 @@ public final class CraftingHelper {
                 bot.getInventory().setStack(i, ItemStack.EMPTY);
             }
         }
-        return remaining == 0;
+        return reportConsumeShortfall(bot, "planks", needed, remaining);
     }
 
     private static boolean hasRecipePermission(ServerPlayerEntity commander, MinecraftServer server, Identifier recipeId) {
@@ -992,11 +1007,15 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForSubCraft(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of(), quiet)) {
             return 0;
         }
-        if (!consumePlanks(bot, crafts * planksPerItem)) {
+        CraftCommitPolicy.Outcome committed = commitCraft(bot, output, crafts,
+                () -> consumePlanksOnServer(bot, crafts * planksPerItem));
+        if (committed == CraftCommitPolicy.Outcome.ABORTED) {
             if (!quiet) say(source, "I couldn't reserve planks for crafting.");
             return 0;
         }
-        distributeOutput(bot, output, crafts);
+        if (committed != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1037,13 +1056,17 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForSubCraft(bot, source, Items.STICK, crafts * 4, crafts * 2, 0, Map.of(), quiet)) {
             return 0;
         }
-        if (!consumePlanks(bot, crafts * 2)) {
+        CraftCommitPolicy.Outcome committed = commitCraft(bot, Items.STICK, crafts * 4,
+                () -> consumePlanksOnServer(bot, crafts * 2));
+        if (committed == CraftCommitPolicy.Outcome.ABORTED) {
             if (!quiet) {
                 say(source, "I couldn't reserve planks for sticks.");
             }
             return 0;
         }
-        distributeOutput(bot, Items.STICK, crafts * 4);
+        if (committed != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, Identifier.of("minecraft", "stick"));
         return crafts * 4;
     }
@@ -1117,16 +1140,19 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.TORCH, crafts * 4, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STICK, crafts);
         int useCoal = Math.min(crafts, coal);
-        if (useCoal > 0) {
-            consumeItem(bot, Items.COAL, useCoal);
-        }
         int useCharcoal = crafts - useCoal;
-        if (useCharcoal > 0) {
-            consumeItem(bot, Items.CHARCOAL, useCharcoal);
+        if (commitCraft(bot, Items.TORCH, crafts * 4, () -> {
+            if (!consumeItemOnServer(bot, Items.STICK, crafts)) {
+                return false;
+            }
+            if (useCoal > 0 && !consumeItemOnServer(bot, Items.COAL, useCoal)) {
+                return false;
+            }
+            return useCharcoal <= 0 || consumeItemOnServer(bot, Items.CHARCOAL, useCharcoal);
+        }) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
         }
-        distributeOutput(bot, Items.TORCH, crafts * 4);
         recordCraftHistory(commander, recipeId);
         return crafts * 4;
     }
@@ -1207,9 +1233,12 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, best.door(), crafts * 3, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, best.plank(), crafts * 6);
-        distributeOutput(bot, best.door(), crafts * 3);
-        recordCraftHistory(commander, best.recipeId());
+        DoorRecipe door = best;
+        if (commitCraft(bot, door.door(), crafts * 3,
+                () -> consumeItemOnServer(bot, door.plank(), crafts * 6)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
+        recordCraftHistory(commander, door.recipeId());
         return crafts * 3;
     }
 
@@ -1303,10 +1332,13 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, best.fence(), crafts * 3, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, best.plank(), crafts * 4);
-        consumeItem(bot, Items.STICK, crafts * 2);
-        distributeOutput(bot, best.fence(), crafts * 3);
-        recordCraftHistory(commander, best.recipeId());
+        FenceRecipe fence = best;
+        if (commitCraft(bot, fence.fence(), crafts * 3,
+                () -> consumeItemOnServer(bot, fence.plank(), crafts * 4)
+                        && consumeItemOnServer(bot, Items.STICK, crafts * 2)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
+        recordCraftHistory(commander, fence.recipeId());
         return crafts * 3;
     }
 
@@ -1339,9 +1371,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.LEAD, crafts * 2, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STRING, crafts * 4);
-        consumeItem(bot, Items.SLIME_BALL, crafts);
-        distributeOutput(bot, Items.LEAD, crafts * 2);
+        if (commitCraft(bot, Items.LEAD, crafts * 2,
+                () -> consumeItemOnServer(bot, Items.STRING, crafts * 4)
+                        && consumeItemOnServer(bot, Items.SLIME_BALL, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts * 2;
     }
@@ -1375,9 +1409,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.BUNDLE, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.LEATHER, crafts);
-        consumeItem(bot, Items.STRING, crafts);
-        distributeOutput(bot, Items.BUNDLE, crafts);
+        if (commitCraft(bot, Items.BUNDLE, crafts,
+                () -> consumeItemOnServer(bot, Items.LEATHER, crafts)
+                        && consumeItemOnServer(bot, Items.STRING, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1404,8 +1440,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.LEATHER, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.RABBIT_HIDE, crafts * 4);
-        distributeOutput(bot, Items.LEATHER, crafts);
+        if (commitCraft(bot, Items.LEATHER, crafts,
+                () -> consumeItemOnServer(bot, Items.RABBIT_HIDE, crafts * 4)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1439,9 +1477,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.SADDLE, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.LEATHER, crafts * 3);
-        consumeItem(bot, Items.IRON_INGOT, crafts);
-        distributeOutput(bot, Items.SADDLE, crafts);
+        if (commitCraft(bot, Items.SADDLE, crafts,
+                () -> consumeItemOnServer(bot, Items.LEATHER, crafts * 3)
+                        && consumeItemOnServer(bot, Items.IRON_INGOT, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1477,9 +1517,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.CARROT_ON_A_STICK, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.CARROT, crafts);
-        consumeItem(bot, Items.FISHING_ROD, crafts);
-        distributeOutput(bot, Items.CARROT_ON_A_STICK, crafts);
+        if (commitCraft(bot, Items.CARROT_ON_A_STICK, crafts,
+                () -> consumeItemOnServer(bot, Items.CARROT, crafts)
+                        && consumeItemOnServer(bot, Items.FISHING_ROD, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1515,9 +1557,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.WARPED_FUNGUS_ON_A_STICK, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.WARPED_FUNGUS, crafts);
-        consumeItem(bot, Items.FISHING_ROD, crafts);
-        distributeOutput(bot, Items.WARPED_FUNGUS_ON_A_STICK, crafts);
+        if (commitCraft(bot, Items.WARPED_FUNGUS_ON_A_STICK, crafts,
+                () -> consumeItemOnServer(bot, Items.WARPED_FUNGUS, crafts)
+                        && consumeItemOnServer(bot, Items.FISHING_ROD, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1787,11 +1831,16 @@ public final class CraftingHelper {
             }
         }
 
-        consumeItem(bot, Items.STICK, crafts * stickCount);
-        if (mat.headItem().equals(Items.OAK_PLANKS)) {
-            consumePlanks(bot, crafts * headCount);
-        } else {
-            consumeItem(bot, mat.headItem(), crafts * headCount);
+        boolean woodHead = mat.headItem().equals(Items.OAK_PLANKS);
+        if (commitCraft(bot, output, crafts, () -> {
+            if (!consumeItemOnServer(bot, Items.STICK, crafts * stickCount)) {
+                return false;
+            }
+            return woodHead
+                    ? consumePlanksOnServer(bot, crafts * headCount)
+                    : consumeItemOnServer(bot, mat.headItem(), crafts * headCount);
+        }) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
         }
 
         LOGGER.info("Crafted {} {}(s) using {} (sticks {} each, heads {}x {})",
@@ -1801,7 +1850,6 @@ public final class CraftingHelper {
                 stickCount,
                 headCount,
                 mat.headItem().getName().getString());
-        distributeOutput(bot, output, crafts);
         recordCraftHistory(commander, output);
         return crafts;
     }
@@ -2179,9 +2227,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.SHIELD, crafts, crafts * 6, 0, reserveItems)) {
             return 0;
         }
-        consumePlanks(bot, crafts * 6);
-        consumeItem(bot, Items.IRON_INGOT, crafts);
-        distributeOutput(bot, Items.SHIELD, crafts);
+        if (commitCraft(bot, Items.SHIELD, crafts,
+                () -> consumePlanksOnServer(bot, crafts * 6)
+                        && consumeItemOnServer(bot, Items.IRON_INGOT, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, Items.SHIELD);
         return crafts;
     }
@@ -3436,8 +3486,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, input, crafts * per);
-        distributeOutput(bot, output, crafts);
+        if (commitCraft(bot, output, crafts,
+                () -> consumeItemOnServer(bot, input, crafts * per)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, output);
         return crafts;
     }
@@ -3462,8 +3514,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.LEATHER, crafts * leatherPer);
-        distributeOutput(bot, output, crafts);
+        if (commitCraft(bot, output, crafts,
+                () -> consumeItemOnServer(bot, Items.LEATHER, crafts * leatherPer)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, output);
         return crafts;
     }
@@ -3503,8 +3557,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeCobble(bot, crafts * per);
-        distributeOutput(bot, output, crafts);
+        if (commitCraft(bot, output, crafts,
+                () -> consumeCobbleOnServer(bot, crafts * per)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, output);
         return crafts;
     }
@@ -3536,9 +3592,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.FISHING_ROD, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STICK, crafts * 3);
-        consumeItem(bot, Items.STRING, crafts * 2);
-        distributeOutput(bot, Items.FISHING_ROD, crafts);
+        if (commitCraft(bot, Items.FISHING_ROD, crafts,
+                () -> consumeItemOnServer(bot, Items.STICK, crafts * 3)
+                        && consumeItemOnServer(bot, Items.STRING, crafts * 2)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, Items.FISHING_ROD);
         return crafts;
     }
@@ -3555,8 +3613,9 @@ public final class CraftingHelper {
      * Pulls bundled copies of {@code match} into direct inventory slots until the direct supply covers
      * {@code needed} (or the bundles run dry).
      *
-     * <p>Mutation path — <b>server thread only</b>, same as its callers ({@code consumeItem} /
-     * {@code consumePlanks} decrement live stacks, so they are already server-thread bound).
+     * <p>Mutation path — <b>server thread only</b>, same as its callers ({@code consumeItemOnServer}
+     * / {@code consumePlanksOnServer} decrement live stacks inside a {@link #commitCraft} hop).
+     * Only extracts from bundles into slots: no walking, no chest, no wait.
      */
     private static void reachForItem(ServerPlayerEntity bot,
                                      java.util.function.Predicate<ItemStack> match,
@@ -3577,8 +3636,14 @@ public final class CraftingHelper {
         }
     }
 
-    private static void consumeItem(ServerPlayerEntity bot, net.minecraft.item.Item item, int needed) {
-        // See consumePlanks: bundled stacks are read-only views, so reach for them before decrementing.
+    /**
+     * Server thread only, from inside a {@link #commitCraft} lambda. Takes {@code needed} of
+     * {@code item} from the pack, bundled copies first pulled into real slots ({@link #reachForItem}:
+     * bundled stacks are read-only views, so a decrement on one is a no-op).
+     *
+     * @return false when the pack held too few: the commit then stops before any output
+     */
+    private static boolean consumeItemOnServer(ServerPlayerEntity bot, net.minecraft.item.Item item, int needed) {
         reachForItem(bot, stack -> stack.isOf(item), needed);
         int remaining = needed;
         for (int i = 0; i < bot.getInventory().size() && remaining > 0; i++) {
@@ -3593,28 +3658,121 @@ public final class CraftingHelper {
                 bot.getInventory().setStack(i, ItemStack.EMPTY);
             }
         }
+        return reportConsumeShortfall(bot, item.getName().getString(), needed, remaining);
     }
 
-    private static void distributeOutput(ServerPlayerEntity bot, net.minecraft.item.Item output, int count) {
-        debugChest("Distribute output item=" + output.getName().getString() + " count=" + count
-                + " emptySlot=" + bot.getInventory().getEmptySlot());
-        // After the craft: on the server thread this only drops a cheap stack, and an output that
-        // still does not fit is dropped below rather than walking to a chest. No per-craft reserve
-        // here (the ingredients are spent), but keepsStackForCraft still keeps an idle batch's
-        // BATCH_RESERVE in both calls, the forced retry included (finding 57).
-        makeRoomForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of(), false, true, true);
-        ItemStack stack = new ItemStack(output, count);
-        boolean added = bot.getInventory().insertStack(stack);
-        debugChest("InsertStack result added=" + added + " remaining=" + stack.getCount());
-        if (!added && !stack.isEmpty()) {
-            debugChest("InsertStack failed; retrying after offload.");
-            makeRoomForOutput(bot, bot.getCommandSource(), output, stack.getCount(), 0, 0, Map.of(), true, true, true);
+    /**
+     * Server thread only, from inside a {@link #commitCraft} lambda. Takes {@code count} from the
+     * one slot a caller's scan chose, only while it still holds at least that many of {@code item}
+     * (the scan ran on the caller's thread, so the slot is checked again here).
+     */
+    private static boolean consumeSlotOnServer(ServerPlayerEntity bot, int slot, Item item, int count) {
+        if (slot < 0 || slot >= bot.getInventory().size() || count <= 0) {
+            return false;
+        }
+        ItemStack stack = bot.getInventory().getStack(slot);
+        if (stack.isEmpty() || !stack.isOf(item) || stack.getCount() < count) {
+            LOGGER.warn("craft commit: slot {} of {} no longer holds {}x {}; this conversion is skipped",
+                    slot, bot.getName().getString(), count, item.getName().getString());
+            return false;
+        }
+        stack.decrement(count);
+        if (stack.isEmpty()) {
+            bot.getInventory().setStack(slot, ItemStack.EMPTY);
+        }
+        return true;
+    }
+
+    /** One WARN for a consume that came up short; its {@code remaining == 0} answer is the consume's. */
+    private static boolean reportConsumeShortfall(ServerPlayerEntity bot, String what, int needed, int remaining) {
+        if (remaining > 0) {
+            LOGGER.warn("craft commit: {} held only {} of the {} {} the craft counted on; no output is made",
+                    bot.getName().getString(), needed - remaining, needed, what);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * {@link #commitCraft(ServerPlayerEntity, Item, int, boolean, BooleanSupplier)} with the
+     * make-room call before the hop, as every recipe craft wants it.
+     */
+    private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot, Item output, int count, BooleanSupplier consumes) {
+        return commitCraft(bot, output, count, true, consumes);
+    }
+
+    /**
+     * The one inventory step of a craft: {@code consumes} (the ingredient takes, which may reach
+     * into bundles but never walk) and the output's insert run together in ONE server-thread hop,
+     * so a worker's craft can never leave the output without its ingredients taken, or the
+     * ingredients taken without the output (the deferral "off-thread inventory mutation in
+     * CraftingHelper"). Making room stays on the caller's thread, before the hop, exactly as the
+     * output hand-out did before: off the server thread {@link #makeRoomForOutput} may walk to a
+     * chest to offload, on it only a cheap stack is dropped, and an output that still does not fit
+     * is dropped at the bot's feet rather than walked anywhere. No per-craft reserve here (the
+     * ingredients are about to be spent), but keepsStackForCraft still keeps an idle batch's
+     * BATCH_RESERVE in both calls, the forced retry included (finding 57).
+     *
+     * <p>A consume that reports too few ingredients ends the hop before the insert
+     * ({@link CraftCommitPolicy.Outcome#ABORTED}). A worker whose wait for the server runs out
+     * ({@link CraftCommitPolicy#HOP_TIMEOUT_MS}) gets {@link CraftCommitPolicy.Outcome#TIMED_OUT}:
+     * the queued hop is cancelled before it starts, so the pack is untouched and the craft made
+     * nothing. Separate hops for the consumes and the insert would let a stall cancel the first and
+     * still run the second: output with no ingredients, a duplication bug.
+     *
+     * @param roomFirst whether the make-room call runs before the hop; a log-to-plank conversion
+     *                  that frees its own slot skips it ({@link CraftCommitPolicy#roomNeededBeforeHop})
+     * @param consumes  server thread only: the takes, true when every one had enough
+     */
+    private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot,
+                                                         Item output,
+                                                         int count,
+                                                         boolean roomFirst,
+                                                         BooleanSupplier consumes) {
+        if (bot == null || output == null || consumes == null || count <= 0) {
+            return CraftCommitPolicy.Outcome.ABORTED;
+        }
+        debugChest("Commit craft output=" + output.getName().getString() + " count=" + count
+                + " emptySlot=" + bot.getInventory().getEmptySlot() + " roomFirst=" + roomFirst);
+        if (roomFirst) {
+            makeRoomForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of(), false, true, true);
+        }
+        CraftCommitPolicy.HopResult hop = BotActions.callOnServerThread(bot, () -> {
+            if (!consumes.getAsBoolean()) {
+                return CraftCommitPolicy.HopResult.ABORTED;
+            }
+            ItemStack stack = new ItemStack(output, count);
+            boolean added = bot.getInventory().insertStack(stack);
+            debugChest("InsertStack result added=" + added + " remaining=" + stack.getCount());
+            return CraftCommitPolicy.HopResult.done(stack.getCount());
+        }, CraftCommitPolicy.HOP_TIMEOUT_MS, null);
+        CraftCommitPolicy.Outcome outcome = CraftCommitPolicy.outcome(hop);
+        if (outcome == CraftCommitPolicy.Outcome.TIMED_OUT) {
+            LOGGER.warn("craft commit: the server did not run {}'s {}x {} within {} ms; nothing was taken or made",
+                    bot.getName().getString(), count, output.getName().getString(), CraftCommitPolicy.HOP_TIMEOUT_MS);
+            return outcome;
+        }
+        if (!CraftCommitPolicy.needsSecondHop(hop)) {
+            return outcome;
+        }
+        int leftover = hop.leftover();
+        debugChest("InsertStack failed; retrying after offload. leftover=" + leftover);
+        makeRoomForOutput(bot, bot.getCommandSource(), output, leftover, 0, 0, Map.of(), true, true, true);
+        boolean placed = BotActions.callOnServerThread(bot, () -> {
+            ItemStack stack = new ItemStack(output, leftover);
             boolean retryAdded = bot.getInventory().insertStack(stack);
             debugChest("InsertStack retry added=" + retryAdded + " remaining=" + stack.getCount());
             if (!retryAdded && !stack.isEmpty()) {
                 bot.dropItem(stack, false, false);
             }
+            return true;
+        }, CraftCommitPolicy.HOP_TIMEOUT_MS, false);
+        if (!placed) {
+            // The ingredients are spent and the first hop placed what fit; only this remainder is gone.
+            LOGGER.error("craft commit: the server did not take {}'s leftover {}x {} within {} ms; that output is lost",
+                    bot.getName().getString(), leftover, output.getName().getString(), CraftCommitPolicy.HOP_TIMEOUT_MS);
         }
+        return outcome;
     }
 
     /**
@@ -4058,7 +4216,11 @@ public final class CraftingHelper {
         return total;
     }
 
-    private static void consumeCobble(ServerPlayerEntity bot, int needed) {
+    /**
+     * Server thread only, from inside a {@link #commitCraft} lambda: {@link #consumeItemOnServer}
+     * for the stone pool ({@link #countCobble}). False means too few: no output is made.
+     */
+    private static boolean consumeCobbleOnServer(ServerPlayerEntity bot, int needed) {
         int remaining = needed;
         for (int i = 0; i < bot.getInventory().size() && remaining > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
@@ -4073,6 +4235,7 @@ public final class CraftingHelper {
                 bot.getInventory().setStack(i, ItemStack.EMPTY);
             }
         }
+        return reportConsumeShortfall(bot, "cobblestone", needed, remaining);
     }
 
     private static int findItemInInventory(ServerPlayerEntity bot, net.minecraft.item.Item item) {
@@ -4537,19 +4700,30 @@ public final class CraftingHelper {
         return res.success() || bot.getBlockPos().getSquaredDistance(target) <= reachSq;
     }
 
+    private static final int PLANKS_PER_LOG = 4;
+
     private static void ensurePlanksFromLogs(ServerPlayerEntity bot, int neededExtra) {
         int planks = countPlanks(bot);
         if (planks >= neededExtra) {
             return;
         }
         int missing = neededExtra - planks;
-        int planksPerLog = 4;
-        int logsNeeded = (int) Math.ceil(missing / (double) planksPerLog);
+        int logsNeeded = (int) Math.ceil(missing / (double) PLANKS_PER_LOG);
 
         // Logs stashed in a bundle are invisible to the slot loop below and cannot be decremented in
-        // place — pull them into real slots first.
-        reachForItem(bot, s -> !s.isEmpty() && s.isIn(net.minecraft.registry.tag.ItemTags.LOGS), logsNeeded);
+        // place — pull them into real slots first (a bundle extraction is an inventory write: server
+        // thread; it moves nothing but bundle contents, so it is its own small hop).
+        int reach = logsNeeded;
+        if (!BotActions.callOnServerThread(bot, () -> {
+            reachForItem(bot, s -> !s.isEmpty() && s.isIn(net.minecraft.registry.tag.ItemTags.LOGS), reach);
+            return true;
+        }, CraftCommitPolicy.HOP_TIMEOUT_MS, false)) {
+            LOGGER.warn("ensurePlanksFromLogs: the server did not reach into {}'s bundles in time; no logs converted",
+                    bot.getName().getString());
+            return;
+        }
 
+        // Each conversion (those logs out, their planks in) is one commit; see craftPlanks.
         for (int i = 0; i < bot.getInventory().size() && logsNeeded > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty() || !stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) {
@@ -4557,14 +4731,32 @@ public final class CraftingHelper {
             }
             int convert = Math.min(stack.getCount(), logsNeeded);
             Item plankItem = mapLogToPlank(stack.getItem());
-            stack.decrement(convert);
-            if (stack.isEmpty()) {
-                bot.getInventory().setStack(i, ItemStack.EMPTY);
+            CraftCommitPolicy.Outcome outcome = commitLogsToPlanks(bot, i, stack.getItem(), stack.getCount(), convert, plankItem);
+            if (!CraftCommitPolicy.continueScan(outcome)) {
+                break;
             }
-            int produced = convert * planksPerLog;
-            distributeOutput(bot, plankItem, produced);
+            if (outcome != CraftCommitPolicy.Outcome.CRAFTED) {
+                continue;
+            }
             logsNeeded -= convert;
         }
+    }
+
+    /**
+     * One log-to-plank conversion as one commit: {@code use} of {@code log} out of slot {@code slot}
+     * (checked again on the server thread) and the planks they make in. A take that empties the slot
+     * leaves room for planks that fit one stack, so the make-room call is skipped then, as it was
+     * when the planks were handed out after the decrement.
+     */
+    private static CraftCommitPolicy.Outcome commitLogsToPlanks(ServerPlayerEntity bot,
+                                                                int slot,
+                                                                Item log,
+                                                                int held,
+                                                                int use,
+                                                                Item plankItem) {
+        int produced = use * PLANKS_PER_LOG;
+        boolean roomFirst = CraftCommitPolicy.roomNeededBeforeHop(held, use, produced, new ItemStack(plankItem).getMaxCount());
+        return commitCraft(bot, plankItem, produced, roomFirst, () -> consumeSlotOnServer(bot, slot, log, use));
     }
 
     private static List<BlockPos> findStandableOptions(ServerWorld world, BlockPos center, int radius) {

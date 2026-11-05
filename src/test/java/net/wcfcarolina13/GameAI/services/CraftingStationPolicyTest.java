@@ -143,7 +143,8 @@ class CraftingStationPolicyTest {
                 .contains("ensureInventorySpaceForSubCraft("), "the pre-craft entry shares the sub-craft entry");
         assertTrue(bodyOf(source, "private static boolean ensureInventorySpaceForSubCraft(")
                 .contains("makeRoomForOutput("), "the pre-craft entry goes through the gated method");
-        String distribute = bodyOf(source, "private static void distributeOutput(");
+        // The output hand-out lives in the commit helper's full form (the four-argument one delegates).
+        String distribute = bodyOf(source, "private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot,\n");
         assertEquals(2, count(distribute, "makeRoomForOutput("), "both output make-room calls are gated");
         assertEquals(2, count(distribute, "true, true);") + count(distribute, "false, true);"),
                 "both are marked afterCraft");
