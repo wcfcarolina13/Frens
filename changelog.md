@@ -2,6 +2,31 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Hunt and fishing sessions belong to their world (2026-11-05, unreleased)
+
+`config/frens/hunt_sessions.json` and `fishing_sessions.json` hold one entry per bot for every
+save, keyed by the bot's UUID alone. So a hunt paused at sunset in world A showed up in world B
+(same bot names, same UUIDs):
+- `SkillResumeService.isHeldForSunrise` kept resume records alive;
+- the sunset service tried an auto-resume every sunrise;
+- the soul snapshot reported a hunt from another world;
+- a resumed hunt walked to world A's hunt origin.
+
+Saving in B also overwrote A's session.
+
+Entries are now keyed `worldKey|botId` (`SessionWorldKeyPolicy`, the save fingerprint from
+`BotWorldStateService.currentWorldKey`). Lookups use only this world's entry. The file format is
+unchanged otherwise.
+
+Costs and limits:
+- Entries written before this change are keyed by the bot id alone. They still match in any world
+  (the old behaviour) until that bot's next save replaces them with this world's key, so a stale
+  legacy session can appear once more after the upgrade. Sessions also expire after 24 h.
+- Before a server is up (no current world), the bare id is used.
+
+Tests: `SessionWorldKeyPolicyTest` (4). Needs a sandbox check: start a hunt in world A, let sunset
+pause it, quit, open world B. No resume at B's sunrise. Return to A: it resumes there.
+
 ## Save files written atomically; corrupt ones quarantined instead of wiped or crashing (2026-11-05, unreleased)
 
 A read-only audit of the stores under `config/frens/` and the per-world inventory snapshots found three loss paths: files were rewritten in place (a crash or a full disk mid-write left a truncated file), a truncated file then threw Gson's `JsonSyntaxException` out of a load that caught only `IOException`, and several loads reset their in-memory state on any failure so the next save wrote an empty store over the file that had failed to load. `settings.json5` (bot ownership, profiles, spawn points, controls, quest memory) was the worst case: its parse error escaped `Frens.CONFIG`'s static initialiser and the game would not launch, and an empty file made `fromJson` return null and NPE the same way.
