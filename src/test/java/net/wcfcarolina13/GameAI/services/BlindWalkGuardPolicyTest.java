@@ -172,6 +172,68 @@ class BlindWalkGuardPolicyTest {
         assertNull(BlindWalkGuardPolicy.hazardOf(CellFact.drop(3), 3));
     }
 
+    // --- a bot already in water may swim through deep water ---
+
+    @Test
+    void swimmingBotIgnoresDeepWaterOnItsOwnFirstCell() {
+        // Pursuit / no-path walk toward shore from a pond 2+ deep: the first cell is deep water.
+        List<CellFact> line = flatThen(0, CellFact.deepWaterCell(), CellFact.deepWaterCell(), CellFact.flat());
+        assertEquals(Verdict.REFUSE, BlindWalkGuardPolicy.decide(line).verdict());
+        assertEquals(Verdict.REFUSE, BlindWalkGuardPolicy.decide(line, false).verdict());
+        Decision swimming = BlindWalkGuardPolicy.decide(line, true);
+        assertEquals(Verdict.ALLOW, swimming.verdict());
+        assertEquals(3, swimming.safeCells());
+        assertNull(swimming.reason());
+    }
+
+    @Test
+    void swimmingBotIsNotCappedByDeepWaterFurtherOut() {
+        Decision dry = BlindWalkGuardPolicy.decide(flatThen(8, CellFact.deepWaterCell(), CellFact.flat()), false);
+        assertEquals(Verdict.ALLOW_UP_TO, dry.verdict());
+        Decision wet = BlindWalkGuardPolicy.decide(flatThen(8, CellFact.deepWaterCell(), CellFact.flat()), true);
+        assertEquals(Verdict.ALLOW, wet.verdict());
+        assertEquals(10, wet.safeCells());
+    }
+
+    @Test
+    void swimmingBotStillRefusesLavaFireAndDrops() {
+        assertEquals(Verdict.REFUSE, BlindWalkGuardPolicy.decide(flatThen(0, CellFact.deepWaterCell(), CellFact.lavaCell()), true).verdict());
+        assertEquals(Verdict.REFUSE, BlindWalkGuardPolicy.decide(flatThen(0, CellFact.deepWaterCell(), CellFact.fireCell()), true).verdict());
+        Decision drop = BlindWalkGuardPolicy.decide(flatThen(0, CellFact.deepWaterCell(), CellFact.drop(4)), true);
+        assertEquals(Verdict.REFUSE, drop.verdict());
+        assertEquals("drop of 4+ 2 blocks ahead", drop.reason());
+        Decision far = BlindWalkGuardPolicy.decide(flatThen(6, CellFact.deepWaterCell(), CellFact.lavaCell()), true);
+        assertEquals(Verdict.ALLOW_UP_TO, far.verdict());
+        assertEquals(6, far.safeCells());
+        assertEquals("lava 8 blocks ahead", far.reason());
+    }
+
+    @Test
+    void startInWaterFlagThreadsThroughHazardOfAndCustomThresholds() {
+        CellFact water = CellFact.deepWaterCell();
+        assertEquals("deep water", BlindWalkGuardPolicy.hazardOf(water, 3));
+        assertEquals("deep water", BlindWalkGuardPolicy.hazardOf(water, 3, false));
+        assertNull(BlindWalkGuardPolicy.hazardOf(water, 3, true));
+        // Deadlier hazards still win when swimming.
+        assertEquals("lava", BlindWalkGuardPolicy.hazardOf(new CellFact(true, 0, true, false, true), 3, true));
+        assertEquals("drop of 5+", BlindWalkGuardPolicy.hazardOf(new CellFact(true, 5, false, false, true), 3, true));
+        // 4-arg decide honours the flag with custom thresholds; 3-arg decide is the dry default.
+        List<CellFact> line = flatThen(0, water);
+        assertEquals(Verdict.REFUSE, BlindWalkGuardPolicy.decide(line, 1, 1).verdict());
+        assertEquals(Verdict.REFUSE, BlindWalkGuardPolicy.decide(line, 1, 1, false).verdict());
+        assertEquals(Verdict.ALLOW, BlindWalkGuardPolicy.decide(line, 1, 1, true).verdict());
+    }
+
+    @Test
+    void swimmingBotWithDeepWaterAgainstAWallAllows() {
+        // Deep water at the foot of a rise is fine when already swimming; lava there is not.
+        CellFact waterWall = new CellFact(false, 0, false, false, true);
+        Decision d = BlindWalkGuardPolicy.decide(flatThen(1, waterWall), true);
+        assertEquals(Verdict.ALLOW, d.verdict());
+        assertEquals(1, d.safeCells());
+        assertEquals(Verdict.REFUSE, BlindWalkGuardPolicy.decide(flatThen(1, waterWall), false).verdict());
+    }
+
     // --- walls end the inspection without refusing ---
 
     @Test

@@ -3130,9 +3130,13 @@ public final class MovementService {
      * One server-thread snapshot of the straight line from the bot toward {@code destination}
      * plus the policy's verdict. {@code cells} holds the feet position the sampler expects the
      * bot to occupy at each line cell (it follows one-block steps up and down), parallel to the
-     * facts handed to {@link BlindWalkGuardPolicy}.
+     * facts handed to {@link BlindWalkGuardPolicy}. {@code startInWater} is the bot's
+     * {@code isTouchingWater()} read in the same server-thread call: a bot already swimming may
+     * cross deep water on this walk (its own first cell would otherwise refuse the swim to shore).
      */
-    private record BlindLineSnapshot(List<BlockPos> cells, BlindWalkGuardPolicy.Decision decision) {
+    private record BlindLineSnapshot(List<BlockPos> cells,
+                                     boolean startInWater,
+                                     BlindWalkGuardPolicy.Decision decision) {
 
         /** Where a blind walk may aim: the goal itself, or the last safe line cell when capped. */
         BlockPos walkTarget(BlockPos destination) {
@@ -3151,7 +3155,7 @@ public final class MovementService {
      * of its own.
      */
     private static BlindLineSnapshot guardBlindWalk(ServerPlayerEntity player, BlockPos destination, String label) {
-        BlindLineSnapshot none = new BlindLineSnapshot(List.of(), BlindWalkGuardPolicy.Decision.allow(0));
+        BlindLineSnapshot none = new BlindLineSnapshot(List.of(), false, BlindWalkGuardPolicy.Decision.allow(0));
         if (player == null || destination == null) {
             return none;
         }
@@ -3160,10 +3164,11 @@ public final class MovementService {
             if (world == null) {
                 return null;
             }
+            boolean startInWater = player.isTouchingWater();
             List<BlockPos> cells = new ArrayList<>();
             List<BlindWalkGuardPolicy.CellFact> facts = new ArrayList<>();
-            sampleBlindLine(world, player, destination, cells, facts);
-            return new BlindLineSnapshot(cells, BlindWalkGuardPolicy.decide(facts));
+            sampleBlindLine(world, player, destination, startInWater, cells, facts);
+            return new BlindLineSnapshot(cells, startInWater, BlindWalkGuardPolicy.decide(facts, startInWater));
         }, 750L, null);
         if (snapshot == null) {
             LOGGER.debug("blind-walk guard [{}]: no snapshot for {} -> {}, allowing as before",
@@ -3172,9 +3177,9 @@ public final class MovementService {
         }
         BlindWalkGuardPolicy.Decision decision = snapshot.decision();
         if (!decision.allowed()) {
-            LOGGER.info("blind-walk guard refused [{}]: bot={} from={} to={} reason={}",
+            LOGGER.info("blind-walk guard refused [{}]: bot={} from={} to={} inWater={} reason={}",
                     label, player.getName().getString(), player.getBlockPos().toShortString(),
-                    destination.toShortString(), decision.reason());
+                    destination.toShortString(), snapshot.startInWater(), decision.reason());
         } else if (decision.capped()) {
             LOGGER.debug("blind-walk guard capped [{}]: bot={} to={} safeCells={} reason={}",
                     label, player.getName().getString(), destination.toShortString(),
@@ -3184,38 +3189,25 @@ public final class MovementService {
     }
 
     /**
-     * Server thread only. Steps ~1 block at a time along the normalized XZ vector from the bot's
-     * feet toward {@code destination}, up to {@link #BLIND_WALK_SAMPLE_CELLS} cells, following the
-     * terrain: a one-block rise raises the tracked feet level, a drop lowers it to the landing
-     * cell. Stops at the first non-passable cell (two-high wall), which it records as a wall.
+     * Server thread only. Walks the XZ cells {@link BlindLineSampler} picks on the line from the
+     * bot's exact position to {@code destination} (up to {@link #BLIND_WALK_SAMPLE_CELLS} cells,
+     * ending at the destination cell, never past it), following the terrain: a one-block rise
+     * raises the tracked feet level, a drop lowers it to the landing cell. Stops at the first
+     * non-passable cell (two-high wall), which it records as a wall. With {@code startInWater}
+     * deep water is not a hazard, so the scan carries on past it.
      */
     private static void sampleBlindLine(ServerWorld world,
                                         ServerPlayerEntity player,
                                         BlockPos destination,
+                                        boolean startInWater,
                                         List<BlockPos> cells,
                                         List<BlindWalkGuardPolicy.CellFact> facts) {
-        double startX = player.getX();
-        double startZ = player.getZ();
-        double dx = destination.getX() + 0.5 - startX;
-        double dz = destination.getZ() + 0.5 - startZ;
-        double horizontal = Math.sqrt(dx * dx + dz * dz);
-        if (horizontal < 1.0D) {
-            return;
-        }
-        double ux = dx / horizontal;
-        double uz = dz / horizontal;
-        int steps = Math.min(BLIND_WALK_SAMPLE_CELLS, (int) Math.ceil(horizontal));
+        List<BlindLineSampler.Cell> line = BlindLineSampler.cells(player.getX(), player.getZ(),
+                destination.getX(), destination.getZ(), BLIND_WALK_SAMPLE_CELLS);
         int feetY = player.getBlockPos().getY();
-        int lastX = player.getBlockPos().getX();
-        int lastZ = player.getBlockPos().getZ();
-        for (int k = 1; k <= steps; k++) {
-            int x = (int) Math.floor(startX + ux * k);
-            int z = (int) Math.floor(startZ + uz * k);
-            if (x == lastX && z == lastZ) {
-                continue;
-            }
-            lastX = x;
-            lastZ = z;
+        for (BlindLineSampler.Cell cell : line) {
+            int x = cell.x();
+            int z = cell.z();
             BlockPos feet = new BlockPos(x, feetY, z);
             if (!isBlindPassable(world, feet)) {
                 BlockPos stepUp = feet.up();
@@ -3277,7 +3269,7 @@ public final class MovementService {
             }
             cells.add(feet);
             facts.add(new BlindWalkGuardPolicy.CellFact(true, drop, lava, fire, deepWater));
-            if (lava || fire || deepWater || drop > BlindWalkGuardPolicy.MAX_SAFE_DROP) {
+            if (lava || fire || (deepWater && !startInWater) || drop > BlindWalkGuardPolicy.MAX_SAFE_DROP) {
                 // The policy stops at the first hazard; nothing past it changes the verdict.
                 return;
             }

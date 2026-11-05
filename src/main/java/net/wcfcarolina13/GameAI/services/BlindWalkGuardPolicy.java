@@ -14,7 +14,9 @@ import java.util.Objects;
  * <p>Vanilla fall damage starts once a fall exceeds 3 blocks (minecraft.wiki Damage, "Fall
  * damage": {@code max(0, floor((fallDistance - 3) * multiplier))}), so a drop of 4 or more
  * below a cell on the line is a hazard; lava, fire-class or otherwise deadly blocks, and water
- * two or more cells deep are hazards regardless of depth.</p>
+ * two or more cells deep are hazards regardless of depth. A bot that already stands in water
+ * (swimming after a failed plan) treats deep water as plain ground for that walk, else the
+ * walks toward shore would refuse on the bot's very first cell.</p>
  *
  * <p>No Minecraft types here so the decision stays unit-testable over plain lists.</p>
  */
@@ -112,9 +114,25 @@ public final class BlindWalkGuardPolicy {
     private BlindWalkGuardPolicy() {
     }
 
-    /** {@link #decide(List, int, int)} with the vanilla fall threshold and the default horizon. */
+    /** {@link #decide(List, int, int, boolean)} with the vanilla fall threshold, the default horizon and a dry start. */
     public static Decision decide(List<CellFact> line) {
-        return decide(line, MAX_SAFE_DROP, DEFAULT_REFUSE_HORIZON);
+        return decide(line, MAX_SAFE_DROP, DEFAULT_REFUSE_HORIZON, false);
+    }
+
+    /**
+     * {@link #decide(List, int, int, boolean)} with the vanilla fall threshold and the default
+     * horizon.
+     *
+     * @param startInWater the bot is touching water where it stands, so deep water on the line is
+     *                     not a hazard for this walk (lava, fire and drops still are)
+     */
+    public static Decision decide(List<CellFact> line, boolean startInWater) {
+        return decide(line, MAX_SAFE_DROP, DEFAULT_REFUSE_HORIZON, startInWater);
+    }
+
+    /** {@link #decide(List, int, int, boolean)} for a bot starting on dry ground. */
+    public static Decision decide(List<CellFact> line, int maxSafeDrop, int refuseHorizon) {
+        return decide(line, maxSafeDrop, refuseHorizon, false);
     }
 
     /**
@@ -127,8 +145,10 @@ public final class BlindWalkGuardPolicy {
      * @param line          cells along the straight line, nearest first, the bot's own cell excluded
      * @param maxSafeDrop   drops deeper than this are hazards (3 in vanilla)
      * @param refuseHorizon hazards at index below this refuse instead of capping
+     * @param startInWater  the bot is already touching water, so {@link CellFact#deepWater()} is
+     *                      ignored for this walk (the swim toward shore must be allowed)
      */
-    public static Decision decide(List<CellFact> line, int maxSafeDrop, int refuseHorizon) {
+    public static Decision decide(List<CellFact> line, int maxSafeDrop, int refuseHorizon, boolean startInWater) {
         if (line == null || line.isEmpty()) {
             return Decision.allow(0);
         }
@@ -140,13 +160,13 @@ public final class BlindWalkGuardPolicy {
             }
             if (!cell.passable()) {
                 // Hazards on a wall cell still count (lava or fire at the feet of a rise).
-                String wallHazard = hazardOf(cell, maxSafeDrop);
+                String wallHazard = hazardOf(cell, maxSafeDrop, startInWater);
                 if (wallHazard != null && i < horizon) {
                     return Decision.refuse(describe(wallHazard, i));
                 }
                 return Decision.allow(i);
             }
-            String hazard = hazardOf(cell, maxSafeDrop);
+            String hazard = hazardOf(cell, maxSafeDrop, startInWater);
             if (hazard == null) {
                 continue;
             }
@@ -162,11 +182,17 @@ public final class BlindWalkGuardPolicy {
         return Decision.allow(line.size());
     }
 
+    /** {@link #hazardOf(CellFact, int, boolean)} for a bot starting on dry ground. */
+    public static String hazardOf(CellFact cell, int maxSafeDrop) {
+        return hazardOf(cell, maxSafeDrop, false);
+    }
+
     /**
      * Names the hazard in one cell, or {@code null} when it is safe to step into. Lava wins over
-     * fire wins over deep water wins over the drop, so the log names the deadliest thing.
+     * fire wins over deep water wins over the drop, so the log names the deadliest thing. With
+     * {@code startInWater} deep water is never a hazard.
      */
-    public static String hazardOf(CellFact cell, int maxSafeDrop) {
+    public static String hazardOf(CellFact cell, int maxSafeDrop, boolean startInWater) {
         Objects.requireNonNull(cell, "cell");
         if (cell.lava()) {
             return "lava";
@@ -174,7 +200,7 @@ public final class BlindWalkGuardPolicy {
         if (cell.fire()) {
             return "fire/deadly block";
         }
-        if (cell.deepWater()) {
+        if (cell.deepWater() && !startInWater) {
             return "deep water";
         }
         if (cell.floorDrop() > maxSafeDrop) {
