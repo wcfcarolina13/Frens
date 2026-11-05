@@ -68,6 +68,16 @@ public final class ProtectedStructureBlockHelper {
      * attached such that the target is the painting's support face, refuse.
      */
     public static boolean isNeverBreakAt(World world, BlockPos pos) {
+        return isNeverBreakAt(world, pos, true);
+    }
+
+    /**
+     * @param scanEntities include the painting scan. It is a world entity query, which is only safe
+     *                     on the server thread (off-thread it threw ConcurrentModificationException in
+     *                     the entity lookup). A worker-thread caller passes false and must repeat the
+     *                     full check on the server thread before the block can break.
+     */
+    public static boolean isNeverBreakAt(World world, BlockPos pos, boolean scanEntities) {
         if (world == null || pos == null) return false;
         BlockState state = world.getBlockState(pos);
         if (isNeverBreakBlock(state)) return true;
@@ -77,7 +87,7 @@ public final class ProtectedStructureBlockHelper {
             if (isRedstoneComponent(neighbor)) return true;
             if (isChainOrLantern(neighbor)) return true;
         }
-        if (hasPaintingAttachedTo(world, pos)) return true;
+        if (scanEntities && hasPaintingAttachedTo(world, pos)) return true;
         return false;
     }
 
