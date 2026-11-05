@@ -2,6 +2,12 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Auto-spawn leaves bots that logged off for the night alone (unreleased, cloud PR, 2026-11-05)
+
+Deferred in the 1.1.298 handoff. A bot that logged off because it had no bed came back at night when the world restarted or the host rejoined: `BotControlApplier.scheduleAutoSpawns` never checked the logoff sidecar, and on a dedicated server the sidecar only loaded on the first tick, after the start-time auto-spawn. Each queued auto-spawn now checks, when it runs, `AutoSpawnPolicy.skipReason` (already online, logged off for the night, in transit) and leaves a logged-off bot to the dawn wake monitor, which brings it back at its logoff spot. `BotZzzSleepService.ensureLoaded()` loads the sidecar before auto-spawn. `isLoggedOff` now ignores case, because an auto-spawn alias can differ in case from the saved name. Unit tests only; needs a sandbox run (log off a bot at night with no bed, restart, expect `Auto-spawn skipped for <bot>: logged off for the night`, then the bot back at dawn).
+
+Costs and limits: during the day a logged-off bot now returns on the wake monitor's next pass (within 2 s) at the spot where it logged off, not at its saved spawn point. The logoff sidecar is one file for every world, keyed by bot name. New entries now record their save (`worldKey`), and both auto-spawn and the wake monitor ignore another save's entries; without this, holding auto-spawn back would have let the wake monitor drop a bot into a second world at the first world's coordinates. Entries written by 1.1.298 have no key and keep the old any-world behaviour. Two worlds with a logged-off bot of the same name still share one entry (the later logoff wins); not fixed here.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
