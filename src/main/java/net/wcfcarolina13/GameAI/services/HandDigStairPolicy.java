@@ -24,13 +24,23 @@ import java.util.Set;
  * neighbour outside the open space (bot body + cut cells), exposes liquid; a falling block
  * (sand, gravel, concrete powder, ...) directly above a mined cell that is not itself cut would fall
  * into the bot's head space; a cut cell that is unbreakable (bedrock, protected) or slower than
- * {@link #MAX_CELL_BREAK_TICKS} with the bot's best tool; a tread that is not solid. Lava in the tread
- * cell refuses as lava. The step count is capped at {@link #MAX_STEPS} per ascent.</p>
+ * {@link #MAX_CELL_BREAK_TICKS} with the bot's best tool; a tread that is not a usable step. A tread
+ * is usable only when it collides and its collision top is a full cube face at y=1.0
+ * ({@link Cell#fullTop()}): a fence or wall (1.5 high), a bottom slab or an open trapdoor collide
+ * but cannot be stepped onto, so they refuse as {@link Refusal#NO_TREAD}. Lava in the tread cell
+ * refuses as lava. The step count is capped at {@link #MAX_STEPS} per ascent.</p>
  *
  * <p>Direction choice: the first preferred direction that is valid keeps the staircase straight;
  * if it is not valid, the cheapest valid direction by total break ticks wins, ties in preference
  * order. When none is valid the most severe reason across directions is reported
  * (lava, water, falling block, unbreakable, too slow, no tread).</p>
+ *
+ * <p>Wide floors: when every direction refuses only for {@link Refusal#NO_TREAD} (the bot stands
+ * on a floor wider than one cell, such as a 3x3 pocket or a ravine bottom, with nothing in front to
+ * cut a step into), the decision is to <em>walk</em> one cell toward the first direction in
+ * preference order whose feet and head cells are air and whose floor cell collides
+ * ({@link Decision#walkToward()}), so the next step finds a wall. With no such direction (fenced in,
+ * water or a drop on every side) it refuses with NO_TREAD as before.</p>
  *
  * <p>No {@code net.minecraft.*} types.</p>
  */
@@ -59,17 +69,34 @@ public final class HandDigStairPolicy {
         UNBREAKABLE
     }
 
-    /** One cell: its kind and, for SOLID/FALLING, the on-ground break ticks with the bot's best tool. */
-    public record Cell(Kind kind, int breakTicks) {
-        public static Cell air() { return new Cell(Kind.AIR, 0); }
-        public static Cell solid(int ticks) { return new Cell(Kind.SOLID, ticks); }
-        public static Cell falling(int ticks) { return new Cell(Kind.FALLING, ticks); }
-        public static Cell water() { return new Cell(Kind.WATER, 0); }
-        public static Cell lava() { return new Cell(Kind.LAVA, 0); }
-        public static Cell unbreakable() { return new Cell(Kind.UNBREAKABLE, Integer.MAX_VALUE); }
+    /**
+     * One cell: its kind, for SOLID/FALLING/UNBREAKABLE the on-ground break ticks with the bot's best
+     * tool, and whether its collision shape's top is a full cube face at y=1.0 ({@code fullTop}: a
+     * full block, a top slab, an upside-down stair, a closed top trapdoor; not a fence, wall, bottom
+     * slab or open trapdoor). Only a {@code fullTop} collider is a usable tread. Non-colliding kinds
+     * always carry {@code fullTop == false}.
+     */
+    public record Cell(Kind kind, int breakTicks, boolean fullTop) {
+        public static Cell air() { return new Cell(Kind.AIR, 0, false); }
+        /** A full-cube breakable block (stone, dirt, planks). */
+        public static Cell solid(int ticks) { return new Cell(Kind.SOLID, ticks, true); }
+        public static Cell solid(int ticks, boolean fullTop) { return new Cell(Kind.SOLID, ticks, fullTop); }
+        /** A breakable collider without a full top face (fence, wall, bottom slab, open trapdoor). */
+        public static Cell partial(int ticks) { return new Cell(Kind.SOLID, ticks, false); }
+        public static Cell falling(int ticks) { return new Cell(Kind.FALLING, ticks, true); }
+        public static Cell falling(int ticks, boolean fullTop) { return new Cell(Kind.FALLING, ticks, fullTop); }
+        public static Cell water() { return new Cell(Kind.WATER, 0, false); }
+        public static Cell lava() { return new Cell(Kind.LAVA, 0, false); }
+        public static Cell unbreakable() { return new Cell(Kind.UNBREAKABLE, Integer.MAX_VALUE, true); }
+        public static Cell unbreakable(boolean fullTop) { return new Cell(Kind.UNBREAKABLE, Integer.MAX_VALUE, fullTop); }
 
         boolean collides() {
             return kind == Kind.SOLID || kind == Kind.FALLING || kind == Kind.UNBREAKABLE;
+        }
+
+        /** A step the bot can stand on: collides and presents a full cube top face at y=1.0. */
+        boolean usableTread() {
+            return collides() && fullTop;
         }
 
         boolean liquid() {
@@ -114,10 +141,18 @@ public final class HandDigStairPolicy {
      */
     public record Plan(Dir dir, List<Offset> cellsToMine, long breakTicks, Offset standAt) {}
 
-    /** Exactly one of {@code plan} / {@code refusal} is non-null. */
-    public record Decision(Plan plan, Refusal refusal, Map<Dir, Refusal> perDirection) {
+    /**
+     * Exactly one of {@code plan} / {@code refusal} / {@code walkToward} is non-null. A
+     * {@code walkToward} decision asks the caller to walk one cell in that direction (no height is
+     * gained; it counts as a no-progress step) and decide again from there.
+     */
+    public record Decision(Plan plan, Refusal refusal, Dir walkToward, Map<Dir, Refusal> perDirection) {
         public boolean ok() {
             return plan != null;
+        }
+
+        public boolean walk() {
+            return walkToward != null;
         }
     }
 
@@ -140,7 +175,7 @@ public final class HandDigStairPolicy {
             out[0] = Refusal.LAVA_EXPOSED;
             return null;
         }
-        if (!tread.collides()) {
+        if (!tread.usableTread()) {
             out[0] = Refusal.NO_TREAD;
             return null;
         }
@@ -205,7 +240,7 @@ public final class HandDigStairPolicy {
     public static Decision decide(CellView view, List<Dir> preference, int stepsTaken) {
         Map<Dir, Refusal> per = new EnumMap<>(Dir.class);
         if (stepsTaken >= MAX_STEPS) {
-            return new Decision(null, Refusal.STEP_LIMIT, per);
+            return new Decision(null, Refusal.STEP_LIMIT, null, per);
         }
         List<Dir> order = new ArrayList<>();
         if (preference != null) {
@@ -231,20 +266,44 @@ public final class HandDigStairPolicy {
             }
             if (i == 0) {
                 // The preferred direction is valid: keep the staircase straight.
-                return new Decision(p, null, per);
+                return new Decision(p, null, null, per);
             }
             if (best == null || p.breakTicks() < best.breakTicks()) {
                 best = p;
             }
         }
         if (best != null) {
-            return new Decision(best, null, per);
+            return new Decision(best, null, null, per);
         }
         Refusal worst = null;
         for (Refusal r : per.values()) {
             worst = worse(worst, r);
         }
-        return new Decision(null, worst == null ? Refusal.NO_TREAD : worst, per);
+        if (worst == Refusal.NO_TREAD) {
+            // NO_TREAD is the least severe refusal, so every direction refused only for it: a floor
+            // wider than one cell. Walk toward a wall rather than fail the ascent.
+            Dir walk = walkDirection(view, order);
+            if (walk != null) {
+                return new Decision(null, null, walk, per);
+            }
+        }
+        return new Decision(null, worst == null ? Refusal.NO_TREAD : worst, null, per);
+    }
+
+    /**
+     * The first direction in {@code order} the bot can walk one cell into: feet and head cells air
+     * (no fence, no water) and a colliding floor under the destination (no drop, no liquid), or
+     * {@code null} when there is none.
+     */
+    static Dir walkDirection(CellView view, List<Dir> order) {
+        for (Dir d : order) {
+            if (view.at(d.dx, 0, d.dz).kind() == Kind.AIR
+                    && view.at(d.dx, 1, d.dz).kind() == Kind.AIR
+                    && view.at(d.dx, -1, d.dz).collides()) {
+                return d;
+            }
+        }
+        return null;
     }
 
     private static Refusal worse(Refusal a, Refusal b) {

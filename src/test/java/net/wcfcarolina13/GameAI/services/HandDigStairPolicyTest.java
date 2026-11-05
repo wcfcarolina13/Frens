@@ -224,6 +224,187 @@ class HandDigStairPolicyTest {
     }
 
     @Test
+    void fenceOrWallTreadIsNotAStep() {
+        // A fence (collision top at 1.5) collides but cannot be stepped onto: the bot used to jump at
+        // it until "No progress". It refuses as NO_TREAD and another direction is cut instead.
+        Grid g = stonePit(STONE_BY_HAND).set(1, 0, 0, Cell.partial(DIRT_BY_HAND));
+        Refusal[] out = new Refusal[1];
+        assertNull(HandDigStairPolicy.planFor(g, Dir.EAST, out));
+        assertEquals(Refusal.NO_TREAD, out[0]);
+        Decision d = HandDigStairPolicy.decide(g, List.of(Dir.EAST), 0);
+        assertTrue(d.ok());
+        assertTrue(d.plan().dir() != Dir.EAST);
+        assertEquals(Refusal.NO_TREAD, d.perDirection().get(Dir.EAST));
+    }
+
+    @Test
+    void bottomSlabAndOpenTrapdoorTreadsAreNotSteps() {
+        Refusal[] out = new Refusal[1];
+        Grid slab = stonePit(STONE_BY_HAND).set(0, 0, 1, Cell.solid(STONE_BY_HAND, false));
+        assertNull(HandDigStairPolicy.planFor(slab, Dir.SOUTH, out));
+        assertEquals(Refusal.NO_TREAD, out[0]);
+
+        Grid trapdoor = stonePit(STONE_BY_HAND).set(0, 0, -1, Cell.falling(DIRT_BY_HAND, false));
+        assertNull(HandDigStairPolicy.planFor(trapdoor, Dir.NORTH, out));
+        assertEquals(Refusal.NO_TREAD, out[0]);
+
+        Grid partialBedrock = stonePit(STONE_BY_HAND).set(-1, 0, 0, Cell.unbreakable(false));
+        assertNull(HandDigStairPolicy.planFor(partialBedrock, Dir.WEST, out));
+        assertEquals(Refusal.NO_TREAD, out[0]);
+    }
+
+    @Test
+    void fullTopTreadsAreSteps() {
+        // A full block, a top slab or an upside-down stair (full top face at y=1.0), bedrock included.
+        assertTrue(HandDigStairPolicy.decide(stonePit(STONE_BY_HAND).set(1, 0, 0, Cell.solid(STONE_BY_HAND, true)),
+                List.of(Dir.EAST), 0).plan().dir() == Dir.EAST);
+        assertTrue(HandDigStairPolicy.decide(stonePit(STONE_BY_HAND).set(1, 0, 0, Cell.unbreakable()),
+                List.of(Dir.EAST), 0).plan().dir() == Dir.EAST);
+        assertTrue(HandDigStairPolicy.decide(stonePit(STONE_BY_HAND).set(1, 0, 0, Cell.falling(DIRT_BY_HAND, true)),
+                List.of(Dir.EAST), 0).plan().dir() == Dir.EAST);
+    }
+
+    @Test
+    void partialBlockInTheCutIsStillMined() {
+        // A fence at the front head cell is not a tread problem: it is mined like any solid cell.
+        Grid g = stonePit(STONE_BY_HAND).set(1, 1, 0, Cell.partial(DIRT_BY_HAND));
+        Decision d = HandDigStairPolicy.decide(g, List.of(Dir.EAST), 0);
+        assertTrue(d.ok());
+        assertEquals(Dir.EAST, d.plan().dir());
+        assertTrue(d.plan().cellsToMine().contains(new Offset(1, 1, 0)));
+        assertEquals(2L * STONE_BY_HAND + DIRT_BY_HAND, d.plan().breakTicks());
+    }
+
+    @Test
+    void cellFactoriesCarryFullTop() {
+        assertTrue(Cell.solid(1).fullTop());
+        assertTrue(Cell.falling(1).fullTop());
+        assertTrue(Cell.unbreakable().fullTop());
+        assertFalse(Cell.partial(1).fullTop());
+        assertFalse(Cell.air().fullTop());
+        assertFalse(Cell.water().fullTop());
+        assertFalse(Cell.lava().fullTop());
+        assertEquals(HandDigStairPolicy.Kind.SOLID, Cell.partial(1).kind());
+    }
+
+    /** A pocket: open air in a (2r+1)-wide square around the bot, solid floor under it, stone beyond. */
+    private static Grid pocket(int radius) {
+        Grid g = stonePit(STONE_BY_HAND);
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                g.set(dx, 0, dz, Cell.air());
+                g.set(dx, 1, dz, Cell.air());
+                g.set(dx, -1, dz, Cell.solid(STONE_BY_HAND));
+            }
+        }
+        return g;
+    }
+
+    @Test
+    void wideFloorWalksTowardThePreferredDirection() {
+        Decision d = HandDigStairPolicy.decide(pocket(1), List.of(Dir.EAST), 0);
+        assertFalse(d.ok());
+        assertTrue(d.walk());
+        assertNull(d.refusal());
+        assertEquals(Dir.EAST, d.walkToward());
+        assertEquals(4, d.perDirection().size());
+        d.perDirection().values().forEach(r -> assertEquals(Refusal.NO_TREAD, r));
+    }
+
+    @Test
+    void wideFloorWithoutPreferenceWalksInDirOrder() {
+        assertEquals(Dir.NORTH, HandDigStairPolicy.decide(pocket(1), null, 0).walkToward());
+    }
+
+    @Test
+    void walkSkipsAFenceAnOverhangAndWaterInThePreferredDirection() {
+        Grid fence = pocket(1).set(1, 0, 0, Cell.partial(DIRT_BY_HAND));
+        assertEquals(Dir.NORTH, HandDigStairPolicy.decide(fence, List.of(Dir.EAST, Dir.NORTH), 0).walkToward());
+
+        Grid overhang = pocket(1).set(1, 1, 0, Cell.solid(STONE_BY_HAND));
+        assertEquals(Dir.SOUTH, HandDigStairPolicy.decide(overhang, List.of(Dir.EAST, Dir.SOUTH), 0).walkToward());
+
+        Grid water = pocket(1).set(1, 0, 0, Cell.water());
+        assertEquals(Dir.WEST, HandDigStairPolicy.decide(water, List.of(Dir.EAST, Dir.WEST), 0).walkToward());
+    }
+
+    @Test
+    void walkNeverStepsOverADropOrLiquidFloor() {
+        Grid drop = pocket(1).set(1, -1, 0, Cell.air());
+        assertEquals(Dir.NORTH, HandDigStairPolicy.decide(drop, List.of(Dir.EAST), 0).walkToward());
+
+        Grid lavaFloor = pocket(1).set(1, -1, 0, Cell.lava());
+        assertEquals(Dir.NORTH, HandDigStairPolicy.decide(lavaFloor, List.of(Dir.EAST), 0).walkToward());
+
+        // Floor missing on every side (the old open-floor case): refuse, do not walk.
+        Decision none = HandDigStairPolicy.decide(new Grid(Cell.air()), List.of(Dir.EAST), 0);
+        assertFalse(none.walk());
+        assertEquals(Refusal.NO_TREAD, none.refusal());
+    }
+
+    @Test
+    void fencedInOnEverySideRefusesNoTread() {
+        Grid g = pocket(1);
+        for (Dir dir : Dir.values()) {
+            g.set(dir.dx, 0, dir.dz, Cell.partial(DIRT_BY_HAND));
+        }
+        Decision d = HandDigStairPolicy.decide(g, List.of(Dir.EAST), 0);
+        assertFalse(d.ok());
+        assertFalse(d.walk());
+        assertEquals(Refusal.NO_TREAD, d.refusal());
+    }
+
+    @Test
+    void walkOnlyWhenEveryDirectionRefusedForNoTread() {
+        // East has a tread but lava above the front cut: that refusal is more severe than NO_TREAD on
+        // the other sides, so the decision refuses as before instead of wandering.
+        Grid g = pocket(1).set(1, 0, 0, Cell.solid(STONE_BY_HAND)).set(1, 3, 0, Cell.lava());
+        Decision d = HandDigStairPolicy.decide(g, List.of(Dir.EAST), 0);
+        assertFalse(d.ok());
+        assertFalse(d.walk());
+        assertEquals(Refusal.LAVA_EXPOSED, d.refusal());
+    }
+
+    @Test
+    void stepLimitOutranksTheWalk() {
+        Decision d = HandDigStairPolicy.decide(pocket(1), List.of(Dir.EAST), HandDigStairPolicy.MAX_STEPS);
+        assertFalse(d.walk());
+        assertEquals(Refusal.STEP_LIMIT, d.refusal());
+    }
+
+    @Test
+    void walkDirectionHelperFollowsOrder() {
+        assertEquals(Dir.SOUTH, HandDigStairPolicy.walkDirection(pocket(1), List.of(Dir.SOUTH, Dir.EAST)));
+        assertNull(HandDigStairPolicy.walkDirection(stonePit(STONE_BY_HAND), List.of(Dir.values())));
+    }
+
+    @Test
+    void threeByThreePocketWalksOnceThenDigs() {
+        // Bot at the centre of a 3x3 pocket in stone, floor solid. Step 0: walk east to the wall.
+        // Step 1 (from the new feet cell): the east tread is stone, so a stair plan follows.
+        Map<Offset, Cell> world = new HashMap<>();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                world.put(new Offset(dx, 0, dz), Cell.air());
+                world.put(new Offset(dx, 1, dz), Cell.air());
+            }
+        }
+        int feetX = 0;
+        CellView first = (dx, dy, dz) -> world.getOrDefault(new Offset(dx, dy, dz), Cell.solid(STONE_BY_HAND));
+        Decision walk = HandDigStairPolicy.decide(first, List.of(Dir.EAST), 0);
+        assertTrue(walk.walk());
+        assertEquals(Dir.EAST, walk.walkToward());
+        feetX += walk.walkToward().dx;
+
+        final int fx = feetX;
+        CellView second = (dx, dy, dz) -> world.getOrDefault(new Offset(fx + dx, dy, dz), Cell.solid(STONE_BY_HAND));
+        Decision dig = HandDigStairPolicy.decide(second, List.of(Dir.EAST), 0);
+        assertTrue(dig.ok(), "expected a stair plan, got " + dig.refusal());
+        assertEquals(Dir.EAST, dig.plan().dir());
+        assertEquals(new Offset(1, 1, 0), dig.plan().standAt());
+    }
+
+    @Test
     void cannotStepBackDownTheStairWayItCame() {
         // After a step east, the west cell at feet level is the old head cell: air, no tread.
         Grid g = stonePit(STONE_BY_HAND).set(-1, 0, 0, Cell.air()).set(-1, 1, 0, Cell.air());
