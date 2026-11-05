@@ -128,11 +128,9 @@ public class PlantSeedsSkill implements Skill {
                         false
                 );
 
-                ActionResult result = bot.interactionManager.interactBlock(
-                        bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
+                ActionResult result = net.wcfcarolina13.GameAI.BotActions.interactBlockAndSwing(bot, world, hit);
 
                 if (result.isAccepted()) {
-                    bot.swingHand(Hand.MAIN_HAND, true);
                     planted++;
                     sleep(120);
                 }
