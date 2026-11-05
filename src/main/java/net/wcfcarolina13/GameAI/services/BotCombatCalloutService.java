@@ -83,6 +83,19 @@ public final class BotCombatCalloutService {
     /** Death positions of mobs killed by this bot during the current combat session (max 12, FIFO). */
     private static final ConcurrentHashMap<UUID, java.util.List<net.minecraft.util.math.Vec3d>> RECENT_KILL_POSITIONS = new ConcurrentHashMap<>();
 
+    /**
+     * Post-combat state: old-world positions a sweep could otherwise target.
+     * Called at SERVER_STOPPED: a singleplayer quit keeps static state, the next world's server
+     * restarts its tick counter at 0 and the same bots keep their UUIDs, so tick-based gates from
+     * the old world would hold back behaviour for as long as that world had run.
+     */
+    public static void resetSession() {
+        LAST_HOSTILES_PRESENT_TICK.clear();
+        LAST_COMBAT_CENTER.clear();
+        RECENT_KILL_POSITIONS.clear();
+    }
+
+
     private static final class CombatMetadata {
         int maxDangerousMobCount = 0;
         boolean explosionSeen = false;

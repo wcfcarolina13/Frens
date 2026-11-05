@@ -61,6 +61,18 @@ public final class BotAutoReturnSunsetService {
     private static final Map<UUID, Long> LAST_TRIGGERED_DAY = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_RESUMED_DAY = new ConcurrentHashMap<>();
 
+    /**
+     * Day gates per bot: world A at day 40 would suppress sunset return and sunrise resume in world B until day 40.
+     * Called at SERVER_STOPPED: a singleplayer quit keeps static state, the next world's server
+     * restarts its tick counter at 0 and the same bots keep their UUIDs, so tick-based gates from
+     * the old world would hold back behaviour for as long as that world had run.
+     */
+    public static void resetSession() {
+        LAST_TRIGGERED_DAY.clear();
+        LAST_RESUMED_DAY.clear();
+    }
+
+
     private record PendingSleep(Vec3d target, long triggeredServerTick, long day, long nextAttemptServerTick) {}
 
     private static final Map<UUID, PendingSleep> PENDING_SLEEP = new ConcurrentHashMap<>();

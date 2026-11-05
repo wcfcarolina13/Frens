@@ -126,6 +126,27 @@ public final class BotMutualAidService {
      * ({@link #advanceEngagements}). Replaces the blocking nudge that froze the server thread. Server thread.
      */
     private static final Map<UUID, Engagement> ENGAGEMENTS = new ConcurrentHashMap<>();
+
+    /**
+     * Mutual-aid gates, the asked food chest (an old-world position), pending hand-offs and engagements.
+     * Called at SERVER_STOPPED: a singleplayer quit keeps static state, the next world's server
+     * restarts its tick counter at 0 and the same bots keep their UUIDs, so tick-based gates from
+     * the old world would hold back behaviour for as long as that world had run.
+     */
+    public static void resetSession() {
+        NEXT_CHEST_TICK.clear();
+        ASKED_FOOD_CHEST.clear();
+        CHEST_FOOD_WITHHELD_UNTIL.clear();
+        NEXT_SHARE_TICK.clear();
+        NEXT_SEEK_AID_TICK.clear();
+        NEXT_REGROUP_TICK.clear();
+        NEXT_DEFENSE_TICK.clear();
+        NEXT_FLOWER_TICK.clear();
+        NEXT_MAKE_ROOM_TICK.clear();
+        PENDING_HANDOFFS.clear();
+        ENGAGEMENTS.clear();
+    }
+
     private static final double DEFENSE_IMPULSE = 0.20D;
     private static final double APPROACH_BOT_IMPULSE = 0.18D;
     private static final double JUMP_RISE = 0.6D;
