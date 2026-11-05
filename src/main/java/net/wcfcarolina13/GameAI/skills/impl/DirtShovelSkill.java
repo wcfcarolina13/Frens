@@ -73,6 +73,23 @@ public final class DirtShovelSkill implements Skill {
         return "dirt_shovel";
     }
 
+    private static final String TARGET_REACHED_KEY = "targetReached";
+    /**
+     * The running job's stop check, set for the duration of {@link #execute} on the calling thread.
+     * Thread-local because one skill instance is shared and approach clearing is several calls deep.
+     */
+    private static final ThreadLocal<java.util.function.BooleanSupplier> TARGET_REACHED = new ThreadLocal<>();
+
+    private static boolean targetReached() {
+        java.util.function.BooleanSupplier stop = TARGET_REACHED.get();
+        try {
+            return stop != null && stop.getAsBoolean();
+        } catch (RuntimeException e) {
+            LOGGER.debug("targetReached check failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
     @Override
     public SkillExecutionResult execute(SkillContext context) {
         ServerCommandSource source = context.botSource();
@@ -98,6 +115,8 @@ public final class DirtShovelSkill implements Skill {
         boolean spiralMode = getBooleanParameter(context, "spiralMode", false);
 
         String label = harvestLabel != null ? harvestLabel : "target";
+        java.util.function.BooleanSupplier previousStop = TARGET_REACHED.get();
+        TARGET_REACHED.set(context.parameters().get(TARGET_REACHED_KEY) instanceof java.util.function.BooleanSupplier stop ? stop : null);
         try {
             List<BlockPos> candidates = gatherCandidateDirt(player, horizontalRadius, verticalRange, excluded, squareCenter, squareRadius, targetBlocks, diggingDown, allowAnyBlock);
             if (candidates.isEmpty()) {
@@ -106,6 +125,11 @@ public final class DirtShovelSkill implements Skill {
 
             boolean stairFailure = false;
             for (BlockPos detectedPos : candidates) {
+                if (targetReached()) {
+                    // Approach clearing or a loot pickup already brought in the requested amount.
+                    LOGGER.info("{}: requested amount reached; stopping before {}", label, detectedPos);
+                    return SkillExecutionResult.success("Requested amount of " + label + " reached.");
+                }
                 if (SkillManager.shouldAbortSkill(player)) {
                     LOGGER.warn("dirt_shovel interrupted before targeting {} due to cancellation request.", detectedPos);
                     return failure(context, "dirt_shovel paused due to nearby threat.");
@@ -336,6 +360,8 @@ public final class DirtShovelSkill implements Skill {
         } catch (Exception e) {
             LOGGER.error("Dirt shovel skill failed", e);
             return failure(context, "Error while shoveling " + label + ": " + e.getMessage());
+        } finally {
+            TARGET_REACHED.set(previousStop);
         }
     }
 
@@ -893,6 +919,12 @@ public final class DirtShovelSkill implements Skill {
         if (blockPos == null || player == null) {
             return true;
         }
+        if (targetReached()) {
+            // Approach clearing and walkway carving mine real blocks whose drops count toward the
+            // request; once it is met, stop digging (the candidate loop then ends the run).
+            LOGGER.debug("Not clearing {}: requested amount already collected", blockPos);
+            return false;
+        }
         if (!isWithinMiningReach(player, blockPos)) {
             Vec3d target = Vec3d.ofCenter(blockPos);
             double distance = Math.sqrt(player.squaredDistanceTo(target.x, target.y, target.z));
@@ -1177,7 +1209,35 @@ public final class DirtShovelSkill implements Skill {
                                         boolean stairMode,
                                         boolean spiralMode,
                                         boolean preserveHazardMemory) {
+        return perform(source, sharedState, horizontalRadius, verticalRange, excluded, squareCenter, squareRadius,
+                targetBlocks, harvestLabel, preferredTool, diggingDown, allowAnyBlock, stairMode, spiralMode,
+                preserveHazardMemory, null);
+    }
+
+    /**
+     * @param targetReached when it returns true, the run stops mining: no more approach clearing and no
+     *                      further candidates (the caller's requested amount is already in the inventory)
+     */
+    public SkillExecutionResult perform(ServerCommandSource source,
+                                        Map<String, Object> sharedState,
+                                        int horizontalRadius,
+                                        int verticalRange,
+                                        Set<BlockPos> excluded,
+                                        BlockPos squareCenter,
+                                        Integer squareRadius,
+                                        Set<Identifier> targetBlocks,
+                                        String harvestLabel,
+                                        String preferredTool,
+                                        boolean diggingDown,
+                                        boolean allowAnyBlock,
+                                        boolean stairMode,
+                                        boolean spiralMode,
+                                        boolean preserveHazardMemory,
+                                        java.util.function.BooleanSupplier targetReached) {
         Map<String, Object> params = new java.util.HashMap<>();
+        if (targetReached != null) {
+            params.put(TARGET_REACHED_KEY, targetReached);
+        }
         params.put("searchRadius", horizontalRadius);
         params.put("verticalRange", verticalRange);
         if (excluded != null) {

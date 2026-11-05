@@ -453,6 +453,10 @@ public class CollectDirtSkill implements Skill {
 
             BlockPos activeSquareCenter = (squareMode && squareCenter != null) ? squareCenter : null;
 
+            final int stopAtCount = targetCount;
+            final int stopBaseline = baselineHarvestCount;
+            final boolean stopUntilMode = untilMode;
+            final ServerPlayerEntity stopPlayer = loopPlayer;
             SkillExecutionResult result = shovelSkill.perform(
                     source,
                     context.sharedState(),
@@ -468,7 +472,12 @@ public class CollectDirtSkill implements Skill {
                     false, // depthMode - not used in main loop anymore  
                     false, // stairMode - not used in main loop anymore
                     spiralMode,
-                    resumeRequested
+                    resumeRequested,
+                    // Stop digging once the inventory holds the requested amount, so approach clearing
+                    // does not overshoot it (a sandbox run collected 114 of 80).
+                    () -> stopPlayer != null && net.wcfcarolina13.GameAI.skills.CollectTargetPolicy.reached(
+                            countInventoryItems(stopPlayer, effectiveTrackedItems),
+                            stopBaseline, stopUntilMode, stopAtCount)
             );
 
             lastMessage = result.message();
