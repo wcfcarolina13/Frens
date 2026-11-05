@@ -89,22 +89,7 @@ public final class SmeltingService {
         boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
 
         // Move to furnace synchronously (we are on a worker thread)
-        boolean moved = false;
-        try {
-            MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                    MovementService.Mode.DIRECT,
-                    approachPos, approachPos, null, null, bot.getHorizontalFacing());
-            MovementService.MovementResult moveRes = MovementService.execute(
-                    bot.getCommandSource(), bot, plan, allowTeleport, true);
-            moved = moveRes.success() || bot.getBlockPos().getSquaredDistance(approachPos) <= STATION_REACH_SQ;
-            if (!moved) {
-                MovementService.clearRecentWalkAttempt(botId);
-                moved = MovementService.nudgeTowardUntilClose(
-                        bot, approachPos, STATION_REACH_SQ, 2600L, 0.15, "cook-sync-nudge");
-            }
-        } catch (Exception e) {
-            LOGGER.warn("cookAllFoodSync: movement failed for {}: {}", bot.getName().getString(), e.getMessage());
-        }
+        boolean moved = walkToFurnaceApproach(bot, approachPos, allowTeleport, "cook-sync-nudge");
         if (!moved) {
             LOGGER.info("cookAllFoodSync: {} couldn't reach furnace at {}", bot.getName().getString(), furnacePos.toShortString());
             return false;
@@ -113,6 +98,8 @@ public final class SmeltingService {
         LOGGER.info("cookAllFoodSync: {} starting cook cycle at furnace {}", bot.getName().getString(), furnacePos.toShortString());
         long totalStartMs = System.currentTimeMillis();
         boolean anyCooked = false;
+        // Walk-backs after losing furnace reach mid-cycle (FurnaceReachRecoveryPolicy budget).
+        int walkBacksUsed = 0;
 
         // Gather distinct raw food item types that are cookable
         var furnaceState = world.getBlockState(furnacePos);
@@ -248,6 +235,7 @@ public final class SmeltingService {
 
                 // Check furnace state + refuel + eat on server thread
                 CompletableFuture<Boolean> pollResult = new CompletableFuture<>();
+                java.util.concurrent.atomic.AtomicBoolean pollSameWorld = new java.util.concurrent.atomic.AtomicBoolean(true);
                 server.execute(() -> {
                     try {
                         ServerWorld liveWorld = server.getWorld(worldKey);
@@ -264,6 +252,7 @@ public final class SmeltingService {
 
                         if (liveBot.getEntityWorld() != liveWorld
                                 || !ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
+                            pollSameWorld.set(liveBot.getEntityWorld() == liveWorld);
                             pollResult.cancel(false);
                             return;
                         }
@@ -307,6 +296,10 @@ public final class SmeltingService {
                     LOGGER.warn("cookAllFoodSync: poll future timed out");
                     break;
                 } catch (java.util.concurrent.CancellationException e) {
+                    if (tryWalkBack(bot, approachPos, allowTeleport, pollSameWorld.get(), walkBacksUsed, furnacePos)) {
+                        walkBacksUsed++;
+                        continue;
+                    }
                     LOGGER.info("cookAllFoodSync: {} can no longer interact with furnace at {}",
                             bot.getName().getString(), furnacePos.toShortString());
                     break;
@@ -320,43 +313,64 @@ public final class SmeltingService {
                 }
             }
 
-            // Evacuate final output for this batch
-            CompletableFuture<Void> evacuateFuture = new CompletableFuture<>();
-            server.execute(() -> {
-                try {
-                    ServerWorld liveWorld = server.getWorld(worldKey);
-                    ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
-                    if (liveWorld == null || liveBot == null || liveBot.isRemoved()
-                            || liveBot.getEntityWorld() != liveWorld
-                            || !ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
-                        evacuateFuture.complete(null);
-                        return;
-                    }
-                    var be = liveWorld.getBlockEntity(furnacePos);
-                    if (be instanceof AbstractFurnaceBlockEntity furnace) {
-                        ItemStack output = furnace.getStack(2);
-                        if (!output.isEmpty()) {
-                            ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
-                            if (remaining != null && remaining.isEmpty()) {
-                                furnace.setStack(2, ItemStack.EMPTY);
-                            } else if (remaining != null && remaining.getCount() < output.getCount()) {
-                                furnace.setStack(2, remaining);
-                            }
+            // Evacuate final output for this batch. A bot pushed out of reach since the last poll
+            // walks back (within the cycle's budget) and tries again rather than leaving it behind.
+            while (true) {
+                CompletableFuture<Void> evacuateFuture = new CompletableFuture<>();
+                // null = evacuated or nothing to do; TRUE/FALSE = out of reach, in the furnace's world or not.
+                java.util.concurrent.atomic.AtomicReference<Boolean> evacReachLost = new java.util.concurrent.atomic.AtomicReference<>(null);
+                server.execute(() -> {
+                    try {
+                        ServerWorld liveWorld = server.getWorld(worldKey);
+                        ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                        if (liveWorld == null || liveBot == null || liveBot.isRemoved()) {
+                            evacuateFuture.complete(null);
+                            return;
                         }
-                        // Eat cooked food if hungry
-                        HealingService.autoEat(liveBot);
+                        if (liveBot.getEntityWorld() != liveWorld
+                                || !ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
+                            evacReachLost.set(liveBot.getEntityWorld() == liveWorld);
+                            evacuateFuture.complete(null);
+                            return;
+                        }
+                        var be = liveWorld.getBlockEntity(furnacePos);
+                        if (be instanceof AbstractFurnaceBlockEntity furnace) {
+                            ItemStack output = furnace.getStack(2);
+                            if (!output.isEmpty()) {
+                                ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
+                                if (remaining != null && remaining.isEmpty()) {
+                                    furnace.setStack(2, ItemStack.EMPTY);
+                                } else if (remaining != null && remaining.getCount() < output.getCount()) {
+                                    furnace.setStack(2, remaining);
+                                }
+                            }
+                            // Eat cooked food if hungry
+                            HealingService.autoEat(liveBot);
+                        }
+                        evacuateFuture.complete(null);
+                    } catch (Throwable t) {
+                        LOGGER.warn("cookAllFoodSync: evacuate failed: {}", t.getMessage());
+                        evacuateFuture.complete(null);
                     }
-                    evacuateFuture.complete(null);
-                } catch (Throwable t) {
-                    LOGGER.warn("cookAllFoodSync: evacuate failed: {}", t.getMessage());
-                    evacuateFuture.complete(null);
+                });
+                if (TaskService.isServerStopping()) {
+                    break;
                 }
-            });
-            if (!TaskService.isServerStopping()) {
                 try {
                     evacuateFuture.get(3, TimeUnit.SECONDS);
                 } catch (Exception ignored) {
+                    break;
                 }
+                Boolean lostInSameWorld = evacReachLost.get();
+                if (lostInSameWorld == null) {
+                    break;
+                }
+                if (!tryWalkBack(bot, approachPos, allowTeleport, lostInSameWorld, walkBacksUsed, furnacePos)) {
+                    LOGGER.info("cookAllFoodSync: {} can no longer interact with furnace at {}; output left in it",
+                            bot.getName().getString(), furnacePos.toShortString());
+                    break;
+                }
+                walkBacksUsed++;
             }
         }
 
@@ -365,6 +379,50 @@ public final class SmeltingService {
                     bot.getName().getString(), System.currentTimeMillis() - totalStartMs);
         }
         return anyCooked;
+    }
+
+    /**
+     * Walks the bot to the furnace's approach cell, nudging if the planned walk falls short. Blocks;
+     * worker thread only (MovementService.execute waits on server ticks).
+     */
+    private static boolean walkToFurnaceApproach(ServerPlayerEntity bot, BlockPos approachPos,
+                                                 boolean allowTeleport, String nudgeTag) {
+        boolean moved = false;
+        try {
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    approachPos, approachPos, null, null, bot.getHorizontalFacing());
+            MovementService.MovementResult moveRes = MovementService.execute(
+                    bot.getCommandSource(), bot, plan, allowTeleport, true);
+            moved = moveRes.success() || bot.getBlockPos().getSquaredDistance(approachPos) <= STATION_REACH_SQ;
+            if (!moved) {
+                MovementService.clearRecentWalkAttempt(bot.getUuid());
+                moved = MovementService.nudgeTowardUntilClose(
+                        bot, approachPos, STATION_REACH_SQ, 2600L, 0.15, nudgeTag);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("cookAllFoodSync: movement failed for {}: {}", bot.getName().getString(), e.getMessage());
+        }
+        return moved;
+    }
+
+    /**
+     * After cookAllFoodSync lost furnace reach: asks {@link FurnaceReachRecoveryPolicy} and, if it
+     * allows, walks back. Returns true when the caller should retry (the walk was made, whether or
+     * not it got all the way: the next reach check decides). Worker thread only.
+     */
+    private static boolean tryWalkBack(ServerPlayerEntity bot, BlockPos approachPos, boolean allowTeleport,
+                                       boolean sameWorld, int walkBacksUsed, BlockPos furnacePos) {
+        boolean stop = Thread.currentThread().isInterrupted() || TaskService.isServerStopping();
+        if (FurnaceReachRecoveryPolicy.onReachLost(sameWorld, walkBacksUsed, stop)
+                != FurnaceReachRecoveryPolicy.Decision.WALK_BACK) {
+            return false;
+        }
+        LOGGER.info("cookAllFoodSync: {} lost reach of furnace at {}, walking back ({}/{})",
+                bot.getName().getString(), furnacePos.toShortString(),
+                walkBacksUsed + 1, FurnaceReachRecoveryPolicy.MAX_WALK_BACKS);
+        walkToFurnaceApproach(bot, approachPos, allowTeleport, "cook-sync-walkback");
+        return true;
     }
 
     private static boolean startBatchCookInternal(ServerPlayerEntity bot,
