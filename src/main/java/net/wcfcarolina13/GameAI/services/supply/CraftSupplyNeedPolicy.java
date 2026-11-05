@@ -122,7 +122,13 @@ public final class CraftSupplyNeedPolicy {
         return state.toPlan(lim.maxLines());
     }
 
-    /** Plans an already-flattened set of needs (e.g. a multi-item batch): each resolved in order. */
+    /**
+     * Plans an already-flattened set of needs (e.g. a multi-item batch): each resolved in order.
+     * Each need is treated as an ingredient of some craft, so it starts at depth 1, one level below
+     * {@link #plan}'s target: a need of sticks still reaches planks and logs within the default
+     * depth, while a whole tool passed here as a need gets one fewer recipe level than through
+     * {@code plan}. Pass tools through {@code plan}.
+     */
     public static Plan planNeeds(Map<String, Integer> needs, Function<String, Recipe> recipes,
                                  Map<String, Integer> have, Map<String, Integer> chest, Limits limits) {
         Objects.requireNonNull(recipes, "recipes");
