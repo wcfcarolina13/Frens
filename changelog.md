@@ -2,6 +2,46 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Leaving a world no longer carries bot cooldowns into the next one (2026-11-05, unreleased)
+
+In singleplayer, quitting a world and opening another (or the same one) keeps the game process
+and every static field. The new integrated server restarts its tick counter at 0 and the bots keep
+their UUIDs. So per-bot gates stored as "not before tick N" or "already done on day N" in the old
+world held behaviour back in the new one for as long as the old world had run. These are now
+cleared at SERVER_STOPPED (`resetSession()` on each service):
+- sunset return and sunrise resume day gates (world A at day 40 suppressed both until day 40 in
+  world B);
+- emergency rescue cooldowns and pending arrivals;
+- mutual-aid gates, including the asked food chest (an old-world position), pending hand-offs and
+  engagements;
+- auto-hunt, auto-cook and fall-safety decision gates;
+- post-combat state (old-world positions the drop sweep could target);
+- every per-bot flee and shelter map, including shelter cooldowns, linger and exit ticks and the
+  active shelter.
+
+`DurabilityFallbackService`'s executor is now restarted at SERVER_STARTED like the others.
+Before, it was `final` and shut at SERVER_STOPPING, so after one world reload the durability
+fallback rejected every task for the rest of the game session.
+
+Costs and limits:
+- Clearing at stop drops nothing a new world could use. Shelters are restored from their own
+  store.
+- Review fix: skill-resume records are NOT cleared. The sunrise resume record is keyed on
+  persisted world time and dispatched with the new server's source, so a bot stopped at sunset
+  still resumes at sunrise after the player rejoins the same world. Also cleared, per the
+  review: mutual-aid check cooldowns and interaction ticks, the sunset pending sleep and active
+  sessions, and the combat flags.
+- Left out of this change:
+  - the hotbar lock map (it lives in the class rewritten by the open static-map PR, which takes
+    the same reset);
+  - hunt and fishing session files keyed by bot only, not by world (a persistence change, done
+    separately);
+  - memory-only references and low-impact tick maps (tree escape, powder snow, elytra).
+
+Tests: `SessionResetWiringTest` (3). Needs a sandbox check: play a world past day 2 with bots
+following, quit to title, open another world, and confirm the sunset return still fires on its
+first evening and `/bot` skills that use the durability fallback still work.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.

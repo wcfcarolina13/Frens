@@ -1248,6 +1248,38 @@ public final class BotFleeService {
 
     /** Per-bot no-dig-down marks left by an uncapped dig, kept until the next dawn. */
     private static final ConcurrentHashMap<UUID, List<DigDownPolicy.Mark>> NO_DIG_DOWN_MARKS = new ConcurrentHashMap<>();
+
+    /**
+     * Every per-bot flee and shelter map: cooldowns, linger and exit ticks, and the active shelter (old-world positions).
+     * Called at SERVER_STOPPED: a singleplayer quit keeps static state, the next world's server
+     * restarts its tick counter at 0 and the same bots keep their UUIDs, so tick-based gates from
+     * the old world would hold back behaviour for as long as that world had run.
+     */
+    public static void resetSession() {
+        FLEE_STATES.clear();
+        SHELTER_COOLDOWN.clear();
+        SHELTER_ACTIVE.clear();
+        SHELTER_GENERATION.clear();
+        SHELTER_LOCK.clear();
+        SURFACE_RECOVERY_LOCK.clear();
+        SURFACE_RECOVERY_FAILURE_TICK.clear();
+        SURFACE_RECOVERY_FAILURE_REASON.clear();
+        ASCENT_FAIL_LOG_STATE.clear();
+        ASCENT_FAIL_LOG_TIME.clear();
+        PILLAR_NONE_LOG_STATE.clear();
+        PILLAR_NONE_LOG_TIME.clear();
+        CURRENT_SURVIVAL_ACTION.clear();
+        PENDING_SURVIVAL_RESUME.clear();
+        UNDERGROUND_LINGER_START.clear();
+        RECENT_SHELTER_EXIT_TICK.clear();
+        COMMANDER_LEFT_TICK.clear();
+        COMMANDER_WAS_NEARBY.clear();
+        TASK_COMPLETED_TICK.clear();
+        LOGGED_MARK_SKIPS.clear();
+        LOGGED_SKIP_REASONS.clear();
+        NO_DIG_DOWN_MARKS.clear();
+    }
+
     /** Timeout for each bounded server-thread hop of the dig-down step. */
     private static final long DIG_DOWN_HOP_TIMEOUT_MS = 500L;
 
