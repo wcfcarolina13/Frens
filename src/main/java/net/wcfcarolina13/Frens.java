@@ -978,8 +978,6 @@ public class Frens implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             BotEventHandler.resetAll();
-            // Hotbar locks hold "until tick N"; the next world's ticks restart at 0.
-            net.wcfcarolina13.GameAI.services.HotbarLockService.resetSession();
             AutoFaceEntity.onServerStopped(server);
             // Integrated-server world reloads keep mod static state alive. Ensure task locks don't leak across reloads.
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopped, clearing task state.");
