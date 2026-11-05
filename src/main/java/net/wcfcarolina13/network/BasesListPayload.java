@@ -10,7 +10,7 @@ public record BasesListPayload(String basesJson) implements CustomPayload {
     public static final Identifier ID_IDENTIFIER = Identifier.of("frens", "bases_list");
     public static final CustomPayload.Id<BasesListPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
 
-    public static final PacketCodec<PacketByteBuf, String> STRING_CODEC = new StringCodec(32767);
+    public static final PacketCodec<PacketByteBuf, String> STRING_CODEC = new StringCodec(BaseScreenLimitPolicy.MAX_LIST_JSON_CHARS);
 
     public static final PacketCodec<PacketByteBuf, BasesListPayload> CODEC =
             PacketCodec.tuple(STRING_CODEC, BasesListPayload::basesJson, BasesListPayload::new);

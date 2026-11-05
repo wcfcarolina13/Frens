@@ -8,7 +8,6 @@ import net.minecraft.block.Blocks;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
-import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.SmeltingService;
 import net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler;
 
@@ -37,14 +36,15 @@ public final class CookablesNetworkManager {
         if (player == null || player.isRemoved()) {
             return;
         }
+        // Only the bot whose inventory screen the player has open. There is no fallback to the
+        // global active bot: that let any player list any bot's smeltables. The screen handler
+        // already re-checks access every tick; the gate here keeps this packet in line with the
+        // other bot-targeting receivers.
         ServerPlayerEntity bot = null;
         if (player.currentScreenHandler instanceof BotPlayerInventoryScreenHandler handler) {
             bot = handler.getBotRef();
         }
-        if (bot == null) {
-            bot = BotEventHandler.bot;
-        }
-        if (bot == null || bot.isRemoved()) {
+        if (bot == null || bot.isRemoved() || !BotAccessGate.permits(player, bot, "cookables_list")) {
             ServerPlayNetworking.send(player, new CookablesPayload("[]"));
             return;
         }
