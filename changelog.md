@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Follow no longer steers a bot while `/bot craft` walks it (unreleased, 2026-11-05)
+
+Found while checking the `/bot place` worker hop: nothing in the follow tick checks for an active task. Only `SkillManager.runSkill` (and `TaskService.runAmbient`) move the bot out of FOLLOW with `suspendFollowMode`. `/bot craft` runs `CraftingHelper` on a worker with a ticket but outside `runSkill`, so while it walked the bot to a table or furnace the follow tick kept writing movement inputs, and could stop it or teleport it back to the owner.
+
+- The craft worker now attaches its thread to the ticket, suspends follow before the work, reads the abort before `complete`, completes the ticket, then resumes follow unless the task was aborted (the same order as `runAmbient`).
+- **Not fixed here (same gap):** chest Quick Store / Quick Fetch (`ChestRegistryNetworkManager`, walks on `CompletableFuture.runAsync` with no ticket) and `SurfaceRecoveryService` (called from flee). The `/bot place` worker gets the same fix on its own branch.
+- **Cost:** a following bot stops following for the length of the craft and picks follow back up after; an aborted craft leaves follow off (as skills do).
+- Tests 3857 → 3858 (`CraftCommandFollowWiringTest`, source-reading). **Sandbox check:** with the bot following, `/bot craft` something that needs a crafting table a few blocks away: the bot walks to it without jittering or snapping back, crafts, then follows again.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
