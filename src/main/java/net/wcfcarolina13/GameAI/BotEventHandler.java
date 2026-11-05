@@ -1803,8 +1803,16 @@ public class BotEventHandler {
     }
 
     public static String setReturnToBaseSegmented(ServerPlayerEntity bot, Vec3d base) {
-        return setReturnToBaseInternal(bot, base, true, false);
+        return setReturnToBaseSegmented(bot, base, true);
     }
+
+    /** Segmented return with the "Returning to base." line optional (sunset says it once per session). */
+    public static String setReturnToBaseSegmented(ServerPlayerEntity bot, Vec3d base, boolean announce) {
+        return setReturnToBaseInternal(bot, base, announce, false);
+    }
+
+    /** The result {@link #setReturnToBaseSegmented} gives when it started (or restarted) a walking return. */
+    public static final String RETURN_STARTED_RESULT = "Bot is returning to base.";
 
     private static String setReturnToBaseInternal(ServerPlayerEntity bot,
                                                   Vec3d base,
@@ -1893,7 +1901,7 @@ public class BotEventHandler {
         if (announce) {
             sendBotMessage(bot, "Returning to base.");
         }
-        return "Bot is returning to base.";
+        return RETURN_STARTED_RESULT;
     }
 
     public static String setReturnToBase(ServerPlayerEntity bot, ServerPlayerEntity commander) {
