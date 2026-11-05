@@ -2669,14 +2669,56 @@ public class modCommandRegistry {
             return 0;
         }
 
-        int placed = 0;
-        boolean reachFailed = false;
-        BlockPos lastPlaced = null;
+        // In-reach pass on the server thread (the command thread): no walking here.
+        ServerCommandSource source = context.getSource();
+        PlaceRun first = runPlaceLoop(bot, target, item, placeItem, count, 0, null);
+        if (!PlacePosPolicy.handOffToWorker(true, first.stop())) {
+            reportPlacement(source, first, item);
+            return first.placed() > 0 ? 1 : 0;
+        }
+
+        // Out of reach: a worker walks the bot over and places the rest, then reports (1.1.296).
+        UUID botUuid = bot.getUuid();
+        var ticketOpt = TaskService.beginSkill("place", source, botUuid);
+        if (ticketOpt.isEmpty()) {
+            reportPlacement(source, first, item);
+            ChatUtils.sendSystemMessage(source, "Another task is already running, so I can't walk over.");
+            return first.placed() > 0 ? 1 : 0;
+        }
+        TaskService.TaskTicket ticket = ticketOpt.get();
+        MinecraftServer server = source.getServer();
+        skillExecutor.submit(() -> {
+            boolean success = false;
+            try {
+                PlaceRun rest = runPlaceLoop(bot, target, item, placeItem, count, first.placed(), first.lastPlaced());
+                success = rest.stop() == PlacePosPolicy.Stop.DONE;
+                server.execute(() -> reportPlacement(source, rest, item));
+            } finally {
+                TaskService.complete(ticket, success);
+            }
+        });
+        return 1;
+    }
+
+    /** How a placement run ended: the running total, the last cell placed, and why it stopped. */
+    private record PlaceRun(int placed, BlockPos lastPlaced, PlacePosPolicy.Stop stop) {}
+
+    /**
+     * Places items {@code placed..count-1}. On the server thread every attempt is in reach only; on
+     * a worker {@link #attemptPlacement} may walk and the run checks {@code /bot stop} per item.
+     */
+    private static PlaceRun runPlaceLoop(ServerPlayerEntity bot, PlacementTarget target, String item,
+                                         net.minecraft.item.Item placeItem, int count, int placed, BlockPos lastPlaced) {
+        MinecraftServer server = bot.getCommandSource().getServer();
+        boolean onServerThread = server == null || server.isOnThread();
         try {
-            for (int i = 0; i < count; i++) {
-                int slot = findItem(bot, placeItem);
+            while (placed < count) {
+                if (!onServerThread && TaskService.isAbortRequested(bot.getUuid())) {
+                    return new PlaceRun(placed, lastPlaced, PlacePosPolicy.Stop.ABORTED);
+                }
+                int slot = BotActions.callOnServerThread(bot, () -> findItem(bot, placeItem), 1000L, -1);
                 if (slot == -1) {
-                    break;
+                    return new PlaceRun(placed, lastPlaced, PlacePosPolicy.Stop.NO_ITEMS);
                 }
                 BlockPos placedPos;
                 if (placeItem == Items.CHEST && lastPlaced != null) {
@@ -2692,34 +2734,28 @@ public class modCommandRegistry {
                     placedPos = attemptAdjacentChest(bot, target.placePos, slot, placeItem);
                 }
                 if (placedPos == null) {
-                    ChatUtils.sendSystemMessage(context.getSource(), "I can't reach that spot.");
-                    reachFailed = true;
-                    break;
+                    return new PlaceRun(placed, lastPlaced,
+                            !onServerThread && TaskService.isAbortRequested(bot.getUuid())
+                                    ? PlacePosPolicy.Stop.ABORTED
+                                    : PlacePosPolicy.Stop.OUT_OF_REACH);
                 }
                 placed++;
                 lastPlaced = placedPos;
             }
         } catch (RuntimeException e) {
-            // Never let a placement bug surface as Brigadier's generic "An unexpected error occurred".
+            // Never let a placement bug surface as Brigadier's generic "An unexpected error occurred";
+            // the report still says what was placed before it.
             LOGGER.error("Unexpected error in /bot place {}", item, e);
-            ChatUtils.sendSystemMessage(context.getSource(),
-                    "Something went wrong placing the " + item + ", so I stopped.");
-            if (placed > 0) {
-                ChatUtils.sendSystemMessage(context.getSource(), placedLine(placed, item));
-            }
-            return placed > 0 ? 1 : 0;
+            return new PlaceRun(placed, lastPlaced, PlacePosPolicy.Stop.ERROR);
         }
-        if (placed > 0) {
-            ChatUtils.sendSystemMessage(context.getSource(), placedLine(placed, item));
-        } else if (!reachFailed) {
-            // A reach failure already said why nothing was placed; "I don't have any" would be false.
-            ChatUtils.sendSystemMessage(context.getSource(), "I don't have any " + item + " to place.");
-        }
-        return placed > 0 ? 1 : 0;
+        return new PlaceRun(placed, lastPlaced, PlacePosPolicy.Stop.DONE);
     }
 
-    private static String placedLine(int placed, String item) {
-        return "Placed " + placed + " " + item + (placed == 1 ? "" : "s") + ".";
+    /** Server thread only: sends the lines that end a run. */
+    private static void reportPlacement(ServerCommandSource source, PlaceRun run, String item) {
+        for (String line : PlacePosPolicy.reportLines(run.placed(), run.stop(), item)) {
+            ChatUtils.sendSystemMessage(source, line);
+        }
     }
 
     private static int executeCook(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemFilter, String fuelSpec) {
@@ -5667,12 +5703,17 @@ public class modCommandRegistry {
             return null;
         }
         BlockPos placePos = target.placePos;
-        bot.setYaw(target.yaw);
-        bot.setHeadYaw(target.yaw);
-        bot.setPitch(Math.max(-90.0F, Math.min(90.0F, target.pitch)));
+        // Entity and world mutations go to the server thread (runs inline when already on it).
+        BotActions.callOnServerThread(bot, () -> {
+            bot.setYaw(target.yaw);
+            bot.setHeadYaw(target.yaw);
+            bot.setPitch(Math.max(-90.0F, Math.min(90.0F, target.pitch)));
+            return true;
+        }, 1000L, false);
 
         // On the server thread a walk never moves the bot (it freezes the tick instead), so only
-        // the in-reach attempt is made there; the caller then says "I can't reach that spot."
+        // the in-reach attempt is made there; executePlaceGeneric then hands the run to a worker,
+        // which comes back here and may walk (1.1.296).
         MinecraftServer server = bot.getCommandSource().getServer();
         boolean onServerThread = server == null || server.isOnThread();
         int maxTries = PlacePosPolicy.maxAttempts(onServerThread);
@@ -5681,22 +5722,26 @@ public class modCommandRegistry {
             // Clear snow on target, only when the bot could break it by hand: in survival reach with
             // line of sight (the soft-block break rule). Out of reach the snow stays and the
             // caller says "I can't reach that spot." (1.1.295 sandbox: a remote clear, nothing placed).
-            var state = bot.getEntityWorld().getBlockState(placePos);
-            if ((state.isOf(net.minecraft.block.Blocks.SNOW) || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK))
-                    && net.wcfcarolina13.GameAI.services.BlockInteractionService.canInteract(bot, placePos)) {
-                if (bot.getEntityWorld() instanceof ServerWorld sw) {
-                    var auth = net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService
-                            .authorizeBlockMutation(bot, sw, placePos);
-                    if (auth.allowed()) {
-                        bot.getEntityWorld().breakBlock(placePos, false);
+            BotActions.callOnServerThread(bot, () -> {
+                var state = bot.getEntityWorld().getBlockState(placePos);
+                if ((state.isOf(net.minecraft.block.Blocks.SNOW) || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK))
+                        && net.wcfcarolina13.GameAI.services.BlockInteractionService.canInteract(bot, placePos)) {
+                    if (bot.getEntityWorld() instanceof ServerWorld sw) {
+                        var auth = net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService
+                                .authorizeBlockMutation(bot, sw, placePos);
+                        if (auth.allowed()) {
+                            bot.getEntityWorld().breakBlock(placePos, false);
+                        }
                     }
                 }
-            }
+                return true;
+            }, 1000L, false);
             if (BotActions.placeBlockAt(bot, placePos, target.face, List.of(placeItem))) {
                 return placePos.toImmutable();
             }
             tries++;
-            if (!PlacePosPolicy.mayWalk(onServerThread) || tries >= maxTries) {
+            if (!PlacePosPolicy.mayWalk(onServerThread) || tries >= maxTries
+                    || TaskService.isAbortRequested(bot.getUuid())) {
                 break;
             }
             // try moving closer and retry

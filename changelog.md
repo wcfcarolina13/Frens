@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## `/bot place` from a distance walks over on a worker (unreleased, 2026-11-05)
+
+- **Problem.** 1.1.295 stopped `/bot place` freezing the tick by trying only in reach on the server thread (Brigadier runs commands there), so a target out of reach just got "I can't reach that spot." (deferral in RALPH_TASK.md).
+- **Change.** `executePlaceGeneric` runs the in-reach pass on the server thread as before (`runPlaceLoop`). When that pass stops only because the spot is out of reach (`PlacePosPolicy.handOffToWorker`), it takes a `TaskService.beginSkill("place")` ticket and submits the rest of the run to `skillExecutor` (the `/bot craft` pattern); there `attemptPlacement` may walk (10 attempts, as before 1.1.295). The command returns 1 at once with no start line (`/bot craft` has none either). End-of-run lines moved to `PlacePosPolicy.reportLines` (stops: DONE, NO_ITEMS, OUT_OF_REACH, ABORTED, ERROR). If another task holds the slot: the server-pass result plus "Another task is already running, so I can't walk over."
+- **Threading.** Walking runs on the worker. Rotation, the gated snow clear and the inventory slot lookup now go through `BotActions.callOnServerThread` (inline on the server thread); `placeBlockAt` already did. The report is sent via `server.execute`. `/bot stop` sets the abort latch: checked before each item and before each walk; the ticket completes in `finally`.
+- **Cost.** In reach: unchanged (one attempt per item on the server thread). Out of reach: one worker run per command.
+- **Limits.** For chests, the fallback adjacent-to-target cells each get up to 10 walking attempts on the worker after the main target fails (bounded, `/bot stop` ends it). A worker run that still can't reach says "I can't reach that spot." as before.
+- **Tests.** 3859 → 3862 (`PlacePosPolicyTest` 11 → 14: hand-off gate, report lines per stop, worker-hop and server-thread wiring). Known failures only (`SoulStoreTest.persistCursorFailure…`, `SoulStoreTest.closeShutsDown…`).
+- **Sandbox check needed.** `/bot place chest` at a spot ~10 blocks from the bot: it walks over, places, says "Placed 1 chest.", and the server tick never stalls; `/bot stop` mid-walk ends it without a placement; `/bot place chest 2` in reach still places both at once.
+
 ## `/bot place chest <n>` puts the second chest beside the first (unreleased, 2026-11-05)
 
 1.1.295 review minor: `attemptAdjacentChest` built its target with the place cell `candidate.offset(opposite)`, which is the anchor itself (the chest just placed). The free neighbour it checked with `isAir` was never the cell it placed into. Read from the code: from the second chest on, every try aimed at an occupied cell, so the command placed one chest and then answered "I can't reach that spot."
