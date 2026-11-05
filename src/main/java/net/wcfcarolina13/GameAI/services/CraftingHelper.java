@@ -3693,14 +3693,6 @@ public final class CraftingHelper {
         return true;
     }
 
-    /**
-     * {@link #commitCraft(ServerPlayerEntity, Item, int, boolean, BooleanSupplier)} with the
-     * make-room call before the hop, as every recipe craft wants it.
-     */
-    private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot, Item output, int count, BooleanSupplier consumes) {
-        return commitCraft(bot, output, count, true, consumes);
-    }
-
     /** The bot's server, for {@link SupplyServerHop}: abandon-safe, so a commit the caller gave up
      *  on never runs late, and one already running is waited for rather than reported as failed. */
     private static net.minecraft.server.MinecraftServer serverOf(ServerPlayerEntity bot) {
@@ -3712,73 +3704,110 @@ public final class CraftingHelper {
      * into bundles but never walk) and the output's insert run together in ONE server-thread hop,
      * so a worker's craft can never leave the output without its ingredients taken, or the
      * ingredients taken without the output (the deferral "off-thread inventory mutation in
-     * CraftingHelper"). Making room stays on the caller's thread, before the hop, exactly as the
-     * output hand-out did before: off the server thread {@link #makeRoomForOutput} may walk to a
-     * chest to offload, on it only a cheap stack is dropped, and an output that still does not fit
-     * is dropped at the bot's feet rather than walked anywhere. No per-craft reserve here (the
-     * ingredients are about to be spent), but keepsStackForCraft still keeps an idle batch's
-     * BATCH_RESERVE in both calls, the forced retry included (finding 57).
+     * CraftingHelper"). Separate hops would let a stall abandon the first and still run the
+     * second: output with no ingredients, a duplication bug.
      *
-     * <p>A consume that reports too few ingredients ends the hop before the insert
-     * ({@link CraftCommitPolicy.Outcome#ABORTED}). A worker whose wait for the server runs out
-     * ({@link CraftCommitPolicy#HOP_TIMEOUT_MS}) gets {@link CraftCommitPolicy.Outcome#TIMED_OUT}:
-     * the queued hop is cancelled before it starts, so the pack is untouched and the craft made
-     * nothing. Separate hops for the consumes and the insert would let a stall cancel the first and
-     * still run the second: output with no ingredients, a duplication bug.
+     * <p>Room for an output that does not fit is made afterwards, on the caller's thread, in the
+     * old hand-out's order: a normal make-room, an insert, then a forced make-room and an insert that
+     * drops the rest at the bot's feet. Off the server thread {@link #makeRoomForOutput} may walk to a
+     * chest; because the ingredients are already spent by then, it can never offload them (the
+     * review finding that a make-room before the consume, with no reserves, deposited the logs a
+     * plank craft was about to use). keepsStackForCraft still keeps an idle batch's BATCH_RESERVE.
      *
-     * @param roomFirst whether the make-room call runs before the hop; a log-to-plank conversion
-     *                  that frees its own slot skips it ({@link CraftCommitPolicy#roomNeededBeforeHop})
-     * @param consumes  server thread only: the takes, true when every one had enough
+     * <p>The hop snapshots the pack first: a consume that reports too few ingredients, or one that
+     * throws, restores it, so an aborted craft takes nothing (not even an earlier ingredient of the
+     * same recipe) and makes nothing ({@link CraftCommitPolicy.Outcome#ABORTED}). A hop that did not
+     * complete ({@link SupplyServerHop.Status}) reports {@link CraftCommitPolicy.Outcome#TIMED_OUT}
+     * and the craft made nothing; the log names the status.
+     *
+     * @param consumes server thread only: the takes, true when every one had enough
      */
-    private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot,
-                                                         Item output,
-                                                         int count,
-                                                         boolean roomFirst,
-                                                         BooleanSupplier consumes) {
+    private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot, Item output, int count, BooleanSupplier consumes) {
         if (bot == null || output == null || consumes == null || count <= 0) {
             return CraftCommitPolicy.Outcome.ABORTED;
         }
         debugChest("Commit craft output=" + output.getName().getString() + " count=" + count
-                + " emptySlot=" + bot.getInventory().getEmptySlot() + " roomFirst=" + roomFirst);
-        if (roomFirst) {
-            makeRoomForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of(), false, true, true);
-        }
-        CraftCommitPolicy.HopResult hop = SupplyServerHop.call(serverOf(bot), () -> {
-            if (!consumes.getAsBoolean()) {
-                return CraftCommitPolicy.HopResult.ABORTED;
+                + " emptySlot=" + bot.getInventory().getEmptySlot());
+        net.minecraft.server.MinecraftServer server = serverOf(bot);
+        SupplyServerHop.Hop<CraftCommitPolicy.HopResult> first = SupplyServerHop.hop(server, () -> {
+            net.minecraft.entity.player.PlayerInventory inventory = bot.getInventory();
+            List<ItemStack> before = snapshotInventory(inventory);
+            try {
+                if (!consumes.getAsBoolean()) {
+                    restoreInventory(inventory, before);
+                    return CraftCommitPolicy.HopResult.ABORTED;
+                }
+            } catch (RuntimeException e) {
+                restoreInventory(inventory, before);
+                throw e;
             }
             ItemStack stack = new ItemStack(output, count);
-            boolean added = bot.getInventory().insertStack(stack);
+            boolean added = inventory.insertStack(stack);
             debugChest("InsertStack result added=" + added + " remaining=" + stack.getCount());
             return CraftCommitPolicy.HopResult.done(stack.getCount());
-        }, CraftCommitPolicy.HOP_TIMEOUT_MS, null);
+        }, CraftCommitPolicy.HOP_TIMEOUT_MS);
+        CraftCommitPolicy.HopResult hop = first.status() == SupplyServerHop.Status.DONE ? first.value() : null;
         CraftCommitPolicy.Outcome outcome = CraftCommitPolicy.outcome(hop);
         if (outcome == CraftCommitPolicy.Outcome.TIMED_OUT) {
-            LOGGER.warn("craft commit: the server did not run {}'s {}x {} within {} ms; nothing was taken or made",
-                    bot.getName().getString(), count, output.getName().getString(), CraftCommitPolicy.HOP_TIMEOUT_MS);
+            LOGGER.warn("craft commit: {}'s {}x {} did not complete (hop {}): {}",
+                    bot.getName().getString(), count, output.getName().getString(), first.status(),
+                    first.status() == SupplyServerHop.Status.UNFINISHED
+                            ? "it is still running and may yet finish; reported as not crafted"
+                            : "nothing was taken or made");
             return outcome;
         }
         if (!CraftCommitPolicy.needsSecondHop(hop)) {
             return outcome;
         }
-        int leftover = hop.leftover();
-        debugChest("InsertStack failed; retrying after offload. leftover=" + leftover);
-        makeRoomForOutput(bot, bot.getCommandSource(), output, leftover, 0, 0, Map.of(), true, true, true);
-        boolean placed = SupplyServerHop.call(serverOf(bot), () -> {
-            ItemStack stack = new ItemStack(output, leftover);
-            boolean retryAdded = bot.getInventory().insertStack(stack);
-            debugChest("InsertStack retry added=" + retryAdded + " remaining=" + stack.getCount());
-            if (!retryAdded && !stack.isEmpty()) {
-                bot.dropItem(stack, false, false);
-            }
-            return true;
-        }, CraftCommitPolicy.HOP_TIMEOUT_MS, false);
-        if (!placed) {
-            // The ingredients are spent and the first hop placed what fit; only this remainder is gone.
-            LOGGER.error("craft commit: the server did not take {}'s leftover {}x {} within {} ms; that output is lost",
-                    bot.getName().getString(), leftover, output.getName().getString(), CraftCommitPolicy.HOP_TIMEOUT_MS);
+        int leftover = placeLeftoverOutput(bot, server, output, hop.leftover(), false);
+        if (leftover > 0) {
+            placeLeftoverOutput(bot, server, output, leftover, true);
         }
         return outcome;
+    }
+
+    /**
+     * Makes room on the caller's thread, then inserts {@code leftover} of {@code output} in one hop;
+     * {@code forced} also drops what still does not fit. Returns what is left to place (0 when
+     * forced). A hop that did not complete loses that remainder (the ingredients are spent): ERROR.
+     */
+    private static int placeLeftoverOutput(ServerPlayerEntity bot, net.minecraft.server.MinecraftServer server,
+                                           Item output, int leftover, boolean forced) {
+        debugChest("InsertStack left " + leftover + "; making room (forced=" + forced + ")");
+        makeRoomForOutput(bot, bot.getCommandSource(), output, leftover, 0, 0, Map.of(), forced, true, true);
+        SupplyServerHop.Hop<Integer> hop = SupplyServerHop.hop(server, () -> {
+            ItemStack stack = new ItemStack(output, leftover);
+            boolean added = bot.getInventory().insertStack(stack);
+            debugChest("InsertStack retry added=" + added + " remaining=" + stack.getCount());
+            if (forced && !stack.isEmpty()) {
+                bot.dropItem(stack, false, false);
+                return 0;
+            }
+            return stack.getCount();
+        }, CraftCommitPolicy.HOP_TIMEOUT_MS);
+        if (hop.status() != SupplyServerHop.Status.DONE) {
+            LOGGER.error("craft commit: placing {}'s leftover {}x {} did not complete (hop {}); that output is lost",
+                    bot.getName().getString(), leftover, output.getName().getString(), hop.status());
+            return 0;
+        }
+        return hop.value() == null ? 0 : hop.value();
+    }
+
+    /** Server thread only: a deep copy of every slot, for {@link #restoreInventory}. */
+    private static List<ItemStack> snapshotInventory(net.minecraft.entity.player.PlayerInventory inventory) {
+        List<ItemStack> copy = new ArrayList<>(inventory.size());
+        for (int i = 0; i < inventory.size(); i++) {
+            copy.add(inventory.getStack(i).copy());
+        }
+        return copy;
+    }
+
+    /** Server thread only: puts every slot back as {@link #snapshotInventory} saw it. */
+    private static void restoreInventory(net.minecraft.entity.player.PlayerInventory inventory, List<ItemStack> snapshot) {
+        for (int i = 0; i < snapshot.size() && i < inventory.size(); i++) {
+            inventory.setStack(i, snapshot.get(i));
+        }
+        inventory.markDirty();
     }
 
     /**
@@ -4750,9 +4779,8 @@ public final class CraftingHelper {
 
     /**
      * One log-to-plank conversion as one commit: {@code use} of {@code log} out of slot {@code slot}
-     * (checked again on the server thread) and the planks they make in. A take that empties the slot
-     * leaves room for planks that fit one stack, so the make-room call is skipped then, as it was
-     * when the planks were handed out after the decrement.
+     * (checked again on the server thread) and the planks they make in; room for planks that do not
+     * fit is made after the logs are taken, as when the planks were handed out after the decrement.
      */
     private static CraftCommitPolicy.Outcome commitLogsToPlanks(ServerPlayerEntity bot,
                                                                 int slot,
@@ -4761,8 +4789,7 @@ public final class CraftingHelper {
                                                                 int use,
                                                                 Item plankItem) {
         int produced = use * PLANKS_PER_LOG;
-        boolean roomFirst = CraftCommitPolicy.roomNeededBeforeHop(held, use, produced, new ItemStack(plankItem).getMaxCount());
-        return commitCraft(bot, plankItem, produced, roomFirst, () -> consumeSlotOnServer(bot, slot, log, use));
+        return commitCraft(bot, plankItem, produced, () -> consumeSlotOnServer(bot, slot, log, use));
     }
 
     private static List<BlockPos> findStandableOptions(ServerWorld world, BlockPos center, int radius) {

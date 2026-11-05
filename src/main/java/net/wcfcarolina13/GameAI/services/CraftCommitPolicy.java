@@ -5,17 +5,17 @@ package net.wcfcarolina13.GameAI.services;
  * output insert run together in one server-thread hop, so a worker never leaves the pack with the
  * output but not the ingredients taken (or the other way round). Pure: no Minecraft types.
  *
- * <p>The hop reports a {@link HopResult}; a hop that never ran (the worker's wait ran out and the
- * queued task was cancelled before it started) reports {@code null}. Room for the output is made on
- * the caller's thread before the hop ({@code makeRoomForOutput}, which may walk to a chest from a
- * worker), and again, forced, when the insert left something over.
+ * <p>The hop reports a {@link HopResult}; a hop that did not complete reports {@code null}. Room
+ * for output that did not fit is made afterwards on the caller's thread ({@code makeRoomForOutput},
+ * which may walk to a chest from a worker), once normally and once forced, so it can never offload
+ * the ingredients the craft is about to use.
  */
 public final class CraftCommitPolicy {
 
     /**
      * How long a worker waits for the server to run the commit. Generous on purpose: the hop itself
-     * is a few slot writes, so running out means the server is genuinely stalled, and nothing
-     * happened (the task was cancelled unstarted).
+     * is a few slot writes, so running out means the server is genuinely stalled; an unstarted task
+     * is abandoned and never runs.
      */
     public static final long HOP_TIMEOUT_MS = 5000L;
 
@@ -26,7 +26,7 @@ public final class CraftCommitPolicy {
     public enum Outcome {
         /** Ingredients taken and the output in the pack (or dropped at the bot's feet). */
         CRAFTED,
-        /** A consume fell short: nothing was taken past that point and no output was made. */
+        /** A consume fell short (or threw): the pack is restored as it was and no output was made. */
         ABORTED,
         /** The server did not run the hop in time; the pack is untouched. */
         TIMED_OUT
@@ -62,22 +62,6 @@ public final class CraftCommitPolicy {
     /** What the craft reports as made: its count only when the commit went through. */
     public static int crafted(Outcome outcome, int count) {
         return outcome == Outcome.CRAFTED ? Math.max(0, count) : 0;
-    }
-
-    /**
-     * Whether a log-to-plank conversion needs the make-room call before its hop. Taking the whole
-     * stack frees that slot, and planks that fit one stack go there, as they did when the planks
-     * were handed out after the decrement; a partial take, or more planks than one stack, needs
-     * room found first.
-     *
-     * @param held     logs in the slot
-     * @param use      logs the conversion takes from it
-     * @param produced planks it makes
-     * @param maxStack a plank stack's size
-     */
-    public static boolean roomNeededBeforeHop(int held, int use, int produced, int maxStack) {
-        boolean freesSlot = use >= held;
-        return !(freesSlot && produced <= maxStack);
     }
 
     /**

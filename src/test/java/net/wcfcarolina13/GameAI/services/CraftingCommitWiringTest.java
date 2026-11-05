@@ -64,7 +64,8 @@ class CraftingCommitWiringTest {
             assertFalse(body.contains(".decrement("), scan + " decrements nothing itself");
             assertTrue(body.contains("CraftCommitPolicy.continueScan(outcome)"), scan + " stops on a stalled server");
         }
-        assertTrue(method(source, "commitLogsToPlanks").contains("CraftCommitPolicy.roomNeededBeforeHop("));
+        assertFalse(method(source, "commitLogsToPlanks").contains("makeRoomForOutput("),
+                "no make-room before the logs are taken");
     }
 
     @Test
@@ -102,7 +103,10 @@ class CraftingCommitWiringTest {
         }
         assertFalse(rest.contains(".decrement("), "a decrement outside the server-only bodies");
         // The only slot writes and output inserts are those bodies and the commit hops.
-        rest = rest.replace(block(source, "private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot,\n"), "");
+        rest = rest.replace(block(source, "private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot, Item output, int count, BooleanSupplier consumes) {"), "");
+        rest = rest.replace(block(source, "private static int placeLeftoverOutput("), "");
+        // The rollback (server thread only, inside the commit hop).
+        rest = rest.replace(block(source, "private static void restoreInventory("), "");
         rest = rest.replace(block(source, "private static boolean dropStackForSpace("), "");
         assertFalse(rest.contains(".setStack("), "a slot write outside the server-only bodies");
         assertFalse(rest.contains(".insertStack("), "an insert outside the commit hop");
@@ -118,15 +122,25 @@ class CraftingCommitWiringTest {
             assertNoWaits(block(source, body), body);
         }
         assertNoWaits(block(source, "private static void reachForItem("), "reachForItem");
-        // The commit helper's own hops: the make-room calls stay outside them.
-        String commit = block(source, "private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot,\n");
-        for (String hop : callArguments(commit, "SupplyServerHop.call(")) {
+        // The commit helper's own hop: no make-room before it (a make-room with no reserves could
+        // offload the very ingredients), and a failed consume restores the snapshot.
+        String commit = block(source, "private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot, Item output, int count, BooleanSupplier consumes) {");
+        List<String> hops = callArguments(commit, "SupplyServerHop.hop(");
+        assertEquals(1, hops.size(), "one hop for the consumes and the insert");
+        for (String hop : hops) {
             assertNoWaits(hop, "commitCraft hop");
+            assertEquals(2, count(hop, "restoreInventory(inventory, before)"), "short and throwing consumes both roll back");
+            assertTrue(hop.indexOf("snapshotInventory(") < hop.indexOf("consumes.getAsBoolean()"));
+            assertTrue(hop.indexOf("consumes.getAsBoolean()") < hop.indexOf("insertStack("));
         }
-        assertEquals(2, callArguments(commit, "SupplyServerHop.call(").size(), "one hop, plus the leftover's");
-        assertTrue(commit.contains("CraftCommitPolicy.HOP_TIMEOUT_MS, null)"), "a timed-out first hop reads as null");
-        assertTrue(commit.indexOf("makeRoomForOutput(") < commit.indexOf("SupplyServerHop.call("),
-                "room is made on the caller's thread before the hop");
+        assertFalse(commit.substring(0, commit.indexOf("SupplyServerHop.hop(")).contains("makeRoomForOutput("),
+                "no make-room before the consume");
+        // Leftover output: room is made on the caller's thread, then one insert hop each.
+        String leftover = block(source, "private static int placeLeftoverOutput(");
+        assertTrue(leftover.indexOf("makeRoomForOutput(") < leftover.indexOf("SupplyServerHop.hop("));
+        for (String hop : callArguments(leftover, "SupplyServerHop.hop(")) {
+            assertNoWaits(hop, "leftover hop");
+        }
         // The bundle reach in ensurePlanksFromLogs is its own hop and holds nothing else.
         for (String hop : callArguments(block(source, "private static void ensurePlanksFromLogs("),
                 "SupplyServerHop.call(")) {

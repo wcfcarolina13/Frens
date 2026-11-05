@@ -56,18 +56,6 @@ class CraftCommitPolicyTest {
     // ── log-to-plank conversions ────────────────────────────────────────────────────────────
 
     @Test
-    void takingTheWholeLogStackLeavesItsSlotForPlanksThatFitOneStack() {
-        assertFalse(CraftCommitPolicy.roomNeededBeforeHop(3, 3, 12, 64), "3 logs out, 12 planks into the freed slot");
-        assertFalse(CraftCommitPolicy.roomNeededBeforeHop(16, 16, 64, 64), "exactly one stack still fits");
-    }
-
-    @Test
-    void aPartialTakeOrMoreThanOneStackOfPlanksNeedsRoomFirst() {
-        assertTrue(CraftCommitPolicy.roomNeededBeforeHop(10, 3, 12, 64), "7 logs stay: no slot is freed");
-        assertTrue(CraftCommitPolicy.roomNeededBeforeHop(17, 17, 68, 64), "68 planks need a second slot");
-    }
-
-    @Test
     void aSlotScanStopsOnATimeoutAndSkipsAChangedSlot() {
         assertFalse(CraftCommitPolicy.continueScan(CraftCommitPolicy.Outcome.TIMED_OUT), "a stalled server ends the scan");
         assertTrue(CraftCommitPolicy.continueScan(CraftCommitPolicy.Outcome.ABORTED), "the slot changed: try the next");
