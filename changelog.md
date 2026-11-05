@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Cook cycle walks back to the furnace after losing reach (unreleased, 2026-11-05)
+
+- **Problem:** deferred minor from the 1.1.291 review. `SmeltingService.cookAllFoodSync` (the cook hobby and HuntSkill's post-hunt cook) checks furnace reach on every 2 s poll and before taking the final output. A bot pushed, knocked back or wandered out of reach mid-cook logged "can no longer interact with furnace" and quit the batch; the final-output step then skipped silently, so the cooked food stayed in the furnace.
+- **Change:** on lost reach (poll or final output) the worker asks the new pure `FurnaceReachRecoveryPolicy`: in the furnace's world and fewer than 2 walk-backs used this cycle → walk back to the approach cell (same `MovementService.execute` + nudge as the first approach, now shared in `walkToFurnaceApproach`) and retry; otherwise stop with the old log line. Another dimension, an interrupted worker or a stopping server never walks.
+- **Threading:** the walk runs on the cook worker (`AMBIENT_EXECUTOR` / the hunt skill thread), never the server thread; furnace and inventory work stays in the existing `server.execute` blocks.
+- **Cost:** at most 2 extra walks per cook cycle; walk time counts toward the batch/total timeouts.
+- **Limits:** `/bot cook` (`startBatchCookInternal`) and `startCollectFinishedFood` do not wait for the cook, so they have no mid-cook phase and are unchanged. The per-item load step still skips an item type on lost reach rather than walking. A bot pulled away repeatedly (follow command, mob shoves) gets its 2 walk-backs and then stops.
+- **Tests:** 3857 (1 expected SoulStoreTest failure) → 3864 (same 1 expected failure) (`FurnaceReachRecoveryPolicyTest`, 7).
+- **Sandbox check:** start a cook hobby or post-hunt cook, `/tp` the bot ~8 blocks from the furnace mid-batch; it should log "lost reach of furnace … walking back (1/2)", return, and collect the output. Teleport it to the Nether mid-cook: it should stop without walking.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
