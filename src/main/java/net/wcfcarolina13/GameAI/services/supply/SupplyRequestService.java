@@ -238,7 +238,7 @@ public final class SupplyRequestService {
     /** Hooks server start, the housekeeping tick and stop. Called once from mod init. */
     public static void register() {
         ServerLifecycleEvents.SERVER_STARTED.register(SupplyRequestService::start);
-        ServerTickEvents.END_SERVER_TICK.register(SupplyRequestService::tick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.TickGuard.endTick("SupplyRequestService::tick", SupplyRequestService::tick));
         ServerLifecycleEvents.SERVER_STOPPING.register(s -> stop());
         ServerLifecycleEvents.SERVER_STOPPED.register(s -> {
             ledger = null;
