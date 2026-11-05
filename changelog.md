@@ -18,6 +18,11 @@ Costs and limits:
   placement that selects and then places waits about two ticks instead of one.
 - If the server stalls for more than 750 ms, the selection is skipped (false, or no change for
   `selectHotbarSlot`) and the caller carries on with what is in hand, as for harvest tools today.
+- Eating: `HealingService.consumeFood` (auto-eat, also the recorded "desperate eat swaps slots on
+  the worker" deferral) and `HuntSkill.consumeInventoryFood` now swap, select and use in one
+  server-thread hop. Split across threads, a selection that timed out would have left the old
+  item in hand, and `useSelectedItem` would have used it: emptied a bucket, thrown a pearl, drawn
+  a bow. Found in review.
 - `CraftingHelper`'s own inventory swaps, and the local `selectHotbarSlot`/`swapStacks` helpers
   in `FarmSkill`, `HarvestCropSkill` and `PlantSeedsSkill`, are not changed here.
 

@@ -37,4 +37,12 @@ class BotActionsSelectorHopWiringTest {
                     s[0] + " must not mutate before the hop");
         }
     }
+
+    @Test
+    void eatingSwapsSelectsAndUsesInOneHop() throws IOException {
+        String healing = Files.readString(Path.of("src/main/java/net/wcfcarolina13/GameAI/services/HealingService.java"));
+        assertTrue(healing.contains("callOnServerThread(bot, () -> consumeFoodOnServer(bot, slot), 1500L, false)"));
+        String hunt = Files.readString(Path.of("src/main/java/net/wcfcarolina13/GameAI/skills/impl/HuntSkill.java"));
+        assertTrue(hunt.contains("callOnServerThread(bot, () -> consumeInventoryFoodOnServer(bot, slot), 1500L, false)"));
+    }
 }
