@@ -2,6 +2,29 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Voice engines and the model installer no longer hang or leave processes behind (2026-11-05, unreleased)
+
+Six confirmed outbound-I/O and child-process findings from a read-only audit of `GameAI/souls`, fixed on branch `claude/voice-io-deadlines`. No gameplay change, no config change, no version bump.
+
+**Dreamsleeve ack read is bounded.** `DreamsleeveVoiceEngine.sendRequest` connected and then did a blocking `channel.read(ack)` on the UNIX socket with no timeout, so a `tts_server.py` that accepted a request and never answered parked the single engine thread for good and voice went silently dead with nothing in the log. The channel is now non-blocking and connect, write and ack are each polled at 20 ms under one deadline, the same `synthTimeoutMs` deadline that `awaitRenderedFile` then continues with, so a line still costs at most the configured synth timeout even when the server is wedged, and the timeout kills and restarts the server like any other synth failure. The ack is still awaited rather than skipped, because the server writes it after taking the request and closing early would hand the Python side a broken pipe on every line. The fire-and-forget warm-up waits at most 2 s for its ack and swallows the timeout like its I/O errors. `DreamsleeveAckDeadlineTest` drives the new static `sendRequestLine` against a real UNIX socket: a silent server times out at the deadline, an acking server gets the request intact.
+
+**Engine `close()` kills directly.** All three engines (`PiperVoiceEngine`, `DreamsleeveVoiceEngine`, `PocketVoiceEngine`) submitted the kill to the engine thread, waited 1 s and then called `shutdownNow()`, which drops queued tasks. With a synth in flight the kill never ran, so warm Piper processes, `pocket-tts serve` and `tts_server.py` outlived a world reload and even JVM exit. The closer thread now calls `killAll()` / `killProcess()` itself after the executor wait, always, since `destroyForcibly` is thread-safe and idempotent. Piper's process map became a `ConcurrentHashMap` and the process handles are `volatile` so the closer walks a consistent snapshot. Cost: nothing on the hot path, one extra pass over the map at close.
+
+**Piper stdout read cannot block past the timeout.** `readLineWithDeadline` used `ready()` then `readLine()` on a `BufferedReader`, which blocks on a partial line and ignores interrupts. It now reads the raw pipe byte by byte through `available()` under the deadline (new pure helper `DeadlineReads.readLine`, mirroring `PiperInstaller.smokeTest`), decodes UTF-8 at the newline so paths with non-ASCII characters survive, skips blank lines as before, and fails fast when the child has exited with an empty pipe instead of waiting out the deadline.
+
+**Ollama detection cannot spin forever.** `OllamaModelInstaller.detect()` cast `openConnection()` to `HttpURLConnection`, which throws `ClassCastException` for a `file:` or `ftp:` base URL, and the `catch (IOException)` missed it, so the model-manager screen's detect thread died and the screen sat in DETECTING with no way out. The scheme is now validated up front (one check shared with `SoulSettings`), a rejected scheme reads as unreachable with a warning, and the HTTP block catches `RuntimeException` as well. A pull with a bad scheme fails with the same user-showable text, "The Ollama URL must use HTTP or HTTPS."
+
+**tar output is discarded.** `PiperInstaller.extract` started `tar` with `redirectErrorStream(true)` and nobody read the pipe, so more than 64 KB of output blocked tar until the 120 s timeout. Both streams now go to `Redirect.DISCARD` at the OS level. The failure message was fixed text already, so nothing is lost.
+
+**One Ollama endpoint builder.** `OllamaSoulProvider` used `baseUri.resolve("/api/chat")`, which drops a path prefix (a reverse proxy at `/ollama`), while the installer concatenated `base + "/api/..."`, so a trailing slash gave `//api/pull`. New pure `OllamaEndpointPolicy.endpoint(base, path)` strips trailing slashes, keeps a path prefix, substitutes the local daemon for a blank base and rejects non-HTTP schemes. Both callers and `SoulSettings` use it. `FilingSystem/ManualConfig.java` was deliberately not touched (two other open PRs change it).
+
+Limits: unbounded response reads and model-pull cancellation on stop are out of scope. The direct kill covers close paths only; a hard JVM kill still orphans a child, as before. Tests: `OllamaEndpointPolicyTest` (7), `DeadlineReadsTest` (9, fake stream and fake clock), `VoiceEngineShutdownWiringTest` (7, source wiring for the direct kill, the non-blocking ack, the byte-wise Piper read, the tar discard and the detect guard), `DreamsleeveAckDeadlineTest` (3, real UNIX socket, skipped where the JDK lacks them).
+
+Review fixes:
+- The Dreamsleeve warm-up ack now waits up to 120 s, not 2 s. If the server acks only after loading its model and rendering, a short wait would have sent the first real line into the load, timed it out, killed the server and looped. The wait runs on the engine thread. The old read had no bound.
+- A base URL pasted with a trailing `/api` is accepted, as the old `resolve()` call allowed.
+- The UNIX-socket test skips cleanly where there is no `/tmp`.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
