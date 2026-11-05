@@ -2,6 +2,28 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Hotbar selectors run on the server thread (2026-11-05, unreleased)
+
+Closes the "off-thread inventory mutation in `BotActions`" deferral (1.1.2xx deferred list). In
+1.1.289, `selectHarvestToolOrHands` started hopping to the server thread. The other public
+selectors now do the same: `selectBestWeapon`, `selectBestMeleeWeapon`, `selectBestTool`,
+`ensureHotbarItem` and `selectHotbarSlot`. They swap stacks and change the selected slot, and
+skills call them from workers. That covers fishing, woodcut and woodcut cleanup axe equipping,
+wool shears, farm mining, hunt melee weapons, and every placement path that selects a hotbar slot
+first. Each now runs inline on the server thread and waits for it (up to 750 ms) from a worker.
+A server task that has not started when the wait ends is cancelled.
+
+Costs and limits:
+- From a worker, each call now waits for the next server tick (about 50 ms at 20 TPS), so a
+  placement that selects and then places waits about two ticks instead of one.
+- If the server stalls for more than 750 ms, the selection is skipped (false, or no change for
+  `selectHotbarSlot`) and the caller carries on with what is in hand, as for harvest tools today.
+- `CraftingHelper`'s own inventory swaps, and the local `selectHotbarSlot`/`swapStacks` helpers
+  in `FarmSkill`, `HarvestCropSkill` and `PlantSeedsSkill`, are not changed here.
+
+Tests: `BotActionsSelectorHopWiringTest`. Needs a sandbox smoke test: fish, woodcut, shear sheep,
+hunt, and place blocks (shelter or bridge), watching for wrong-item use or slowed placement.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
