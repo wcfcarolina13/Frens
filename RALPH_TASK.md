@@ -6,7 +6,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 ## Session Handoff 2026-11-05 (cloud batch, unreleased) — next session starts here
 
-**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#34 and #39 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
+**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#34, #39 and #40 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
 
 **Integration check (2026-11-05):** all 29 branches of this batch (through #34) merged together onto main with no source conflict (only changelog.md, where keeping both sides is right); the combined tree builds and runs 4108 tests with only the root-container `SoulStoreTest.persistCursorFailure…` failing. Merging them in any order should need only changelog conflict resolution.
 
@@ -14,7 +14,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 **PRs by kind:**
 - Fixes with a sandbox check: #6 new-bots button on old servers, #7 End second exit, #10 skill start-up ticket leak, #11 `/bot place chest <n>`, #15 sunset "Returning to base." once, #16 furnace walk-back, #17/#20 store files 0600, #21 death soul respawn note, #23 despawned bots really removed in release builds (reflection matched `sendCommandTree`), #24 `/bot place` out of reach walks over, #27 follow no longer steers a bot during `/bot craft`, #32 the same for Quick Store / Quick Fetch, #33 `/bot follow stop` or `/bot stay` during a task is no longer undone when it ends, #28 hand-dig stair escape, #29 blind-walk guard.
-- Souls: #8 `threads.closed`, #9 BAD_AT from execution failures, #12 nickname addressing.
+- Souls: #8 `threads.closed`, #9 BAD_AT from execution failures, #12 nickname addressing, #40 TEASE peer stance rule (also: a banter seed with no subject no longer carries an act).
 - No behaviour change: #13 LeafClear types, #18 Fortify delegates, #19 SoulStore close test, #22 policy tests, #25 nav counter race, #26 guardrail (parallel Gradle memory).
 - Docs/design: #14 container fetch and organize options (new P2 backlog line), #30 combined chest ask policy layer, and #34 wiring it into tool crafts run from worker threads (one prompt for the whole set). Other crafts, and server-thread callers such as the idle stone-tool upgrade, still ask per item (the idle upgrade retries after its grant expires, pre-existing). Independent reviews (Fable) covered every code PR (#6–#12, #15–#17, #20, #21, #23–#25, #27–#30, #32); their should-fix findings are fixed on the branches (#33 came out of one), minors are noted in each PR.
 
@@ -29,6 +29,8 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 8. Slice D (remove the legacy pathfinder switch and bidir): "once the default has held" is your call.
 9. Addressee: a mid-sentence third-person mention (conflicts with an existing test) and "you and Bob" (needs the DM window's bot).
 10. `SurfaceRecoveryService` (runs from flee) walks without suspending follow, the same gap #27 and #32 fix for `/bot craft` and Quick Store / Fetch: fix it the same way?
+11. #40: TEASE applies only to pairs who both spoke, shares the friction day guard (so it spends that pair's curiosity/friction budget for the day), and its spec trust +1 is the existing both-spoke rule (net visible change: exasperation +1).
+12. Multiplayer roster payload is wrong as written: a membership payload changes nothing, because on a remote server the roster's names come from the client's own local config (no payload syncs `botGameProfile`/`botOwnership`/spawn points). The real fix is a server-owned roster (C2S request, S2C `name`/`inThisWorld`/`savedAnywhere`, mirroring the companion quest request/response pair). Needs: (a) non-ops see all server companions or only their own? (b) hide Restore/Create on remote servers for non-ops (2026-10-23 ruling)? (c) hide the client's local-only names on remote connections?
 
 **Found wrong as written (no change):** `TaskService.resetAll` worker ticket (every worker clears its own in a `finally`); weird-portal edge "re-rolls each tick" (the edge is consumed at the end of the 4 s scan).
 
@@ -36,7 +38,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 **Other open PRs from another session (#35–#38, not this batch):** #35 (save before `/bot despawn`) overlaps #23 (despawn really calls `PlayerManager.remove`, which also saves): they merge cleanly together and do not contradict, the save just happens twice.
 
-**Not done:** Piper Linux x64 install check (downloading and running the pinned binary was blocked by the cloud permission check; run it on the Mac or approve it). Everything that needs the game.
+**Not done:** scene smoothing step 2 (scene boundaries in history) changes the small-model prompt, and whether it cuts "Yeah, …" openers can only be judged by running scenes against Ollama, which the cloud cannot; do it on the Mac with an A/B of a few banter scenes. Piper Linux x64 install check (downloading and running the pinned binary was blocked by the cloud permission check; run it on the Mac or approve it). Everything that needs the game.
 
 ## Session Handoff 2026-10-24 (1.1.298) — superseded
 
