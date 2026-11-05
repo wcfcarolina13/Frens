@@ -85,6 +85,13 @@ class HotbarLockTableTest {
             String init = src.substring(at, src.indexOf(';', at));
             assertTrue(init.contains("ConcurrentHashMap"), f[0] + " " + f[1] + ": " + init);
         }
+        // Inner collections too: /bot stop interrupts a worker and a new skill can start for the
+        // same bot while the old one is still unwinding.
+        assertTrue(Files.readString(Path.of("src/main/java/net/wcfcarolina13/GameAI/skills/impl/WoolSkill.java"))
+                .contains("EXPLORED_ZONES.computeIfAbsent(bot.getUuid(), k -> new java.util.concurrent.ConcurrentHashMap<>())"));
+        assertTrue(Files.readString(Path.of(
+                        "src/main/java/net/wcfcarolina13/GameAI/services/construction/RoofAccessService.java"))
+                .contains("k -> new java.util.concurrent.CopyOnWriteArrayList<>()"));
         String hotbar = Files.readString(Path.of("src/main/java/net/wcfcarolina13/GameAI/services/HotbarLockService.java"));
         assertFalse(hotbar.contains("new HashMap"), "hotbar lock state lives in HotbarLockTable");
     }

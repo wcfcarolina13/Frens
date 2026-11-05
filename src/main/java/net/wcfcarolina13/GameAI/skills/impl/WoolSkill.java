@@ -514,7 +514,8 @@ public class WoolSkill implements Skill {
         BlockPos last = LAST_SEEN_SHEEP.get(bot.getUuid());
         BlockPos anchor = last != null ? last : bot.getBlockPos();
 
-        Map<Long, Long> zones = EXPLORED_ZONES.computeIfAbsent(bot.getUuid(), k -> new HashMap<>());
+        // Concurrent: an aborted wool worker can still be recording a zone while the next run reads it.
+        Map<Long, Long> zones = EXPLORED_ZONES.computeIfAbsent(bot.getUuid(), k -> new java.util.concurrent.ConcurrentHashMap<>());
         long now = System.currentTimeMillis();
 
         // Generate candidates: 8 directions at increasing radii, skip recently visited zones

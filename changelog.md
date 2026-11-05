@@ -19,7 +19,15 @@ locked.
 - `WoolSkill` (`LAST_SEEN_SHEEP`, `EXPLORED_ZONES`), `CollectDirtSkill`
   (`LAST_INVENTORY_FULL_MESSAGE`, `LAST_ESCAPE_ATTEMPT`) and `RoofAccessService.roofPillars`
   (build worker) are now `ConcurrentHashMap`s. Keys are per bot and each bot runs one skill at a
-  time, so the swap is enough. No key or value is ever null (checked at every call).
+  time, so the swap is enough for the outer maps. No key or value is ever null (checked at
+  every call). Inner collections were made safe too: `/bot stop` interrupts a worker and a new
+  skill can start for the same bot while the old one unwinds. The wool explored-zones map is a
+  `ConcurrentHashMap`, and the roof-pillar list is a `CopyOnWriteArrayList` (a handful of
+  entries).
+
+Left as is (cosmetic): two log-cooldown races can let one extra "HotbarLock: blocked" line through
+inside 40 ticks, or hold back the first one for up to 40 ticks. Roof descent now reads the last
+pillar from a snapshot, so a pillar removed by the old worker can't make it throw.
 
 Costs and limits: the failure was rare (two bots on the same skill at the same moment, or a hotbar
 lock expiring as ride sync re-locks it), so no field report maps to it. Its symptom would have
