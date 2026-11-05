@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Side channel can close one answered question (`threads.closed`) (unreleased, 2026-11-05)
+
+1.1.214 deferral: the `##FRENS` tail's `"threads":{"closed":[...]}` was parsed and ignored, because the only close (`SoulMindOps.markAnswered`) closes every thread and moves the player stance. Only active with `/bot soul structured on` (default off).
+
+- New per-question close `SoulMindOps.closeThreads`. The match is in `SoulThreadClosePolicy`: lower case, punctuation dropped, spaces collapsed, then equal, or one contains the other with the shorter at least 12 characters and 60% of the longer. Each claim closes one non-expired thread, at most 3 claims per scene, each bot only its own threads, matched on the mind as it is when the store writes it.
+- The contract paragraph gains two lines asking the model to copy an answered OPEN THREADS question word for word. The log line gains `closeClaims=<n>`.
+- **Rulings (cost if wrong):** a model close moves no stance (the owner's reply already does that through `markAnswered`, and the side channel never moves owner stance). Cost: no trust +1 when only the model noticed an answer. A paraphrase closes nothing. Cost: the thread stays until it expires (10 min TTL) and the bot may ask again. A wrong close was judged worse, since it drops a question the bot still wanted answered.
+- **Cost:** about 35 more prompt tokens per scene while structured output is on.
+- **Limits:** unit tests only (8 new, Tests 3857 → 3865). Whether the 3B model writes the key, and copies the question exactly, is unmeasured. The apply step in `SoulRuntime` has no unit test (no test seam for the server hop). Needs a sandbox check with structured output on: a bot asks a question, the owner answers it while talking to a different bot in a party scene, the log shows `closeClaims=1` and that bot's `mind.json` no longer lists the thread, and its stance is unchanged.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.

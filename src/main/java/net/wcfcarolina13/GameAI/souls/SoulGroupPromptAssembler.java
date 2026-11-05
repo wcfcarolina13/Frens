@@ -285,6 +285,8 @@ public final class SoulGroupPromptAssembler {
             "Use only the relations LIKES, DISLIKES, FEARS, GOOD_AT, BAD_AT, PROMISED, WANTS, CALLS. Values",
             "for warmth, friction and curiosity are only -1, 0 or 1. If nothing changed, omit the line",
             "entirely. Never let this line be spoken by a character.",
+            "If the owner answered a question listed under OPEN THREADS, add",
+            "\"threads\":{\"closed\":[\"<that question, word for word>\"]}.",
             "Always write the dialogue lines first; the ##FRENS line is never the whole reply.");
 
     // === Cast (authored identities, bounded per bot) ===

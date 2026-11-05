@@ -1116,11 +1116,13 @@ public final class SoulRuntime {
                 deltas.add(delta);
                 targets.add(ids.get(peerIndex));
             }
-            if (facts.isEmpty() && deltas.isEmpty()) {
+            List<String> closes = effects.closedThreads();
+            if (facts.isEmpty() && deltas.isEmpty() && closes.isEmpty()) {
                 continue;
             }
             updateMind(botId, m -> {
-                SoulTypes.SoulMind next = m;
+                // Matched against the mind as it is now; each bot closes only its own threads.
+                SoulTypes.SoulMind next = SoulMindOps.closeThreads(m, closes);
                 for (SoulTypes.RelationFact fact : facts) {
                     next = SoulMindOps.withRelations(next, SoulRelationOps.merge(next.relations(), fact));
                 }

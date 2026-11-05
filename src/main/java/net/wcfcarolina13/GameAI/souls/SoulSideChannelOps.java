@@ -65,7 +65,8 @@ final class SoulSideChannelOps {
      * {@code unparsed} is true only when a sentinel was present but its tail was not a JSON object.
      */
     record SideEffects(List<StanceDelta> stanceDeltas, List<FactCandidate> facts,
-                       int droppedStance, int droppedFacts, boolean unparsed) {
+                       int droppedStance, int droppedFacts, boolean unparsed,
+                       List<String> closedThreads) {
 
         static final SideEffects EMPTY = new SideEffects(List.of(), List.of(), 0, 0, false);
         static final SideEffects UNPARSED = new SideEffects(List.of(), List.of(), 0, 0, true);
@@ -73,11 +74,19 @@ final class SoulSideChannelOps {
         SideEffects {
             stanceDeltas = stanceDeltas == null ? List.of() : List.copyOf(stanceDeltas);
             facts = facts == null ? List.of() : List.copyOf(facts);
+            closedThreads = closedThreads == null ? List.of() : List.copyOf(closedThreads);
+        }
+
+        /** Without thread closes. */
+        SideEffects(List<StanceDelta> stanceDeltas, List<FactCandidate> facts,
+                    int droppedStance, int droppedFacts, boolean unparsed) {
+            this(stanceDeltas, facts, droppedStance, droppedFacts, unparsed, List.of());
         }
 
         /** True when there is nothing at all to apply and nothing at all to report. */
         boolean isEmpty() {
-            return stanceDeltas.isEmpty() && facts.isEmpty() && droppedStance == 0 && droppedFacts == 0;
+            return stanceDeltas.isEmpty() && facts.isEmpty() && droppedStance == 0 && droppedFacts == 0
+                    && closedThreads.isEmpty();
         }
     }
 
@@ -117,9 +126,35 @@ final class SoulSideChannelOps {
         int droppedStance = parseStance(root.get("stance"), roster, ownerName, deltas);
         List<FactCandidate> facts = new ArrayList<>();
         int droppedFacts = parseFacts(root.get("facts"), subjects, facts);
-        // "threads" is parsed-and-ignored on purpose: closing a specific question needs a
-        // per-question markAnswered overload the mind ops do not have yet (Phase 3c deferral).
-        return new SideEffects(deltas, facts, droppedStance, droppedFacts, false);
+        List<String> closed = parseClosedThreads(root.get("threads"));
+        return new SideEffects(deltas, facts, droppedStance, droppedFacts, false, closed);
+    }
+
+    /**
+     * {@code "threads":{"closed":["<question>", ...]}}: non-blank strings, at most
+     * {@link SoulThreadClosePolicy#MAX_CLOSES}, each cut to the question cap. Matching against the
+     * open threads happens at apply time, on the mind as it is then ({@link SoulMindOps#closeThreads}).
+     */
+    private static List<String> parseClosedThreads(JsonNode threads) {
+        if (threads == null || !threads.isObject()) {
+            return List.of();
+        }
+        JsonNode closed = threads.get("closed");
+        if (closed == null || !closed.isArray()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (JsonNode q : closed) {
+            if (out.size() >= SoulThreadClosePolicy.MAX_CLOSES) {
+                break;
+            }
+            if (q != null && q.isTextual() && !q.asText().isBlank()) {
+                String text = q.asText().trim();
+                out.add(text.length() > SoulMindOps.MAX_QUESTION_CHARS
+                        ? text.substring(0, SoulMindOps.MAX_QUESTION_CHARS) : text);
+            }
+        }
+        return out;
     }
 
     /** @return the number of stance entries seen and rejected. */

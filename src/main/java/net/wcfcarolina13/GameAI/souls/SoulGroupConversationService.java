@@ -452,10 +452,10 @@ public final class SoulGroupConversationService implements GroupScenePlayback.Li
         int stanceSeen = effects.stanceDeltas().size() + effects.droppedStance();
         int factsSeen = effects.facts().size() + effects.droppedFacts();
         sideChannel.applyIfCurrent(turn, effects, current);
-        LOGGER.info("[souls] side-channel correlationId={} stance={}/{} facts={}/{} dropped={}",
+        LOGGER.info("[souls] side-channel correlationId={} stance={}/{} facts={}/{} dropped={} closeClaims={}",
                 correlationId, effects.stanceDeltas().size(), stanceSeen,
                 effects.facts().size(), factsSeen,
-                effects.droppedStance() + effects.droppedFacts());
+                effects.droppedStance() + effects.droppedFacts(), effects.closedThreads().size());
     }
 
     /**
