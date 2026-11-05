@@ -15,7 +15,6 @@ cleared at SERVER_STOPPED (`resetSession()` on each service):
 - mutual-aid gates, including the asked food chest (an old-world position), pending hand-offs and
   engagements;
 - auto-hunt, auto-cook and fall-safety decision gates;
-- skill-resume records, which also held the old server's command sources;
 - post-combat state (old-world positions the drop sweep could target);
 - every per-bot flee and shelter map, including shelter cooldowns, linger and exit ticks and the
   active shelter.
@@ -25,8 +24,13 @@ Before, it was `final` and shut at SERVER_STOPPING, so after one world reload th
 fallback rejected every task for the rest of the game session.
 
 Costs and limits:
-- Clearing at stop drops nothing a new world could use. Resume records were already refused by
-  the stale-server guard, and shelters are restored from their own store.
+- Clearing at stop drops nothing a new world could use. Shelters are restored from their own
+  store.
+- Review fix: skill-resume records are NOT cleared. The sunrise resume record is keyed on
+  persisted world time and dispatched with the new server's source, so a bot stopped at sunset
+  still resumes at sunrise after the player rejoins the same world. Also cleared, per the
+  review: mutual-aid check cooldowns and interaction ticks, the sunset pending sleep and active
+  sessions, and the combat flags.
 - Left out of this change:
   - the hotbar lock map (it lives in the class rewritten by the open static-map PR, which takes
     the same reset);

@@ -93,6 +93,9 @@ public final class BotCombatCalloutService {
         LAST_HOSTILES_PRESENT_TICK.clear();
         LAST_COMBAT_CENTER.clear();
         RECENT_KILL_POSITIONS.clear();
+        IN_COMBAT.clear();
+        COMBAT_META.clear();
+        LAST_HOSTILE_DAMAGE_TICK.clear();
     }
 
 

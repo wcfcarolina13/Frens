@@ -24,7 +24,7 @@ class SessionResetWiringTest {
         stopped = stopped.substring(0, stopped.indexOf("\n        });"));
         for (String service : new String[]{"BotAutoReturnSunsetService", "BotEmergencyRescueService",
                 "BotMutualAidService", "BotAutoHuntService", "BotAutoCookingService", "BotFallSafetyService",
-                "SkillResumeService", "BotCombatCalloutService", "BotFleeService"}) {
+                "BotCombatCalloutService", "BotFleeService"}) {
             assertTrue(stopped.contains("services." + service + ".resetSession();"), service + " is reset at SERVER_STOPPED");
             String src = Files.readString(Path.of(SERVICES + service + ".java"));
             String reset = src.substring(src.indexOf("public static void resetSession() {"));
@@ -48,5 +48,14 @@ class SessionResetWiringTest {
         String frens = Files.readString(Path.of("src/main/java/net/wcfcarolina13/Frens.java"));
         String started = frens.substring(frens.indexOf("ServerLifecycleEvents.SERVER_STARTED.register(server -> {"));
         assertTrue(started.indexOf("DurabilityFallbackService.restartExecutors();") < started.indexOf("serverInstance = server;"));
+    }
+
+    @Test
+    void sunriseResumeSurvivesASameWorldRejoin() throws IOException {
+        // The sunrise resume record is keyed on persisted world time and dispatched with the new
+        // server's source: clearing it would stop a stopped-at-sunset bot resuming after a rejoin.
+        String frens = Files.readString(Path.of("src/main/java/net/wcfcarolina13/Frens.java"));
+        assertFalse(frens.contains("SkillResumeService.resetSession();"));
+        assertFalse(Files.readString(Path.of(SERVICES + "SkillResumeService.java")).contains("public static void resetSession()"));
     }
 }

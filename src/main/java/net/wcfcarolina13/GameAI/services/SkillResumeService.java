@@ -45,23 +45,6 @@ public final class SkillResumeService {
     private static final long SUNRISE_RESUME_EXPIRY_TICKS = 24000L; // 1 in-game day
     private static final Map<UUID, SunriseResumeRecord> SUNRISE_RESUME_BY_BOT = new ConcurrentHashMap<>();
 
-    /**
-     * Resume records (they hold the old server's command sources and tick-based expiries).
-     * Called at SERVER_STOPPED: a singleplayer quit keeps static state, the next world's server
-     * restarts its tick counter at 0 and the same bots keep their UUIDs, so tick-based gates from
-     * the old world would hold back behaviour for as long as that world had run.
-     */
-    public static void resetSession() {
-        LAST_SKILL_BY_BOT.clear();
-        PENDING_BY_RESPONDER.clear();
-        AWAITING_DECISION.clear();
-        AUTO_RESUME_PENDING.clear();
-        RESUME_INTENT.clear();
-        DEFERRED_RESUMES.clear();
-        ZONE_OVERRIDE_PENDING.clear();
-        SUNRISE_RESUME_BY_BOT.clear();
-    }
-
 
     public record SunriseResumeRecord(
             UUID botUuid,

@@ -145,6 +145,8 @@ public final class BotMutualAidService {
         NEXT_MAKE_ROOM_TICK.clear();
         PENDING_HANDOFFS.clear();
         ENGAGEMENTS.clear();
+        LAST_INTERACTION_TICK.clear();
+        BOT_AID_CHECK_COOLDOWNS.clear();
     }
 
     private static final double DEFENSE_IMPULSE = 0.20D;

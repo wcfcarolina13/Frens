@@ -70,6 +70,8 @@ public final class BotAutoReturnSunsetService {
     public static void resetSession() {
         LAST_TRIGGERED_DAY.clear();
         LAST_RESUMED_DAY.clear();
+        PENDING_SLEEP.clear();
+        ACTIVE_SESSIONS.clear();
     }
 
 

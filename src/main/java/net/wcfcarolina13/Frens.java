@@ -987,7 +987,6 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotAutoHuntService.resetSession();
             net.wcfcarolina13.GameAI.services.BotAutoCookingService.resetSession();
             net.wcfcarolina13.GameAI.services.BotFallSafetyService.resetSession();
-            net.wcfcarolina13.GameAI.services.SkillResumeService.resetSession();
             net.wcfcarolina13.GameAI.services.BotCombatCalloutService.resetSession();
             net.wcfcarolina13.GameAI.services.BotFleeService.resetSession();
             AutoFaceEntity.onServerStopped(server);
