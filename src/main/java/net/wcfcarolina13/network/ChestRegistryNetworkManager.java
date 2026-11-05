@@ -29,6 +29,17 @@ public final class ChestRegistryNetworkManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("chest-registry-network");
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
+    /**
+     * Quick Store / Quick Fetch walks. Its own daemon threads, not ForkJoinPool.commonPool: the
+     * worker attaches to its task ticket, and /bot stop interrupts the attached thread, which must
+     * never be a shared pool thread running someone else's work.
+     */
+    private static final java.util.concurrent.ExecutorService QUICK_TRANSFER_EXECUTOR =
+            java.util.concurrent.Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "frens-quick-transfer");
+                t.setDaemon(true);
+                return t;
+            });
     private static volatile boolean REGISTERED = false;
 
     private ChestRegistryNetworkManager() {}
@@ -371,8 +382,13 @@ public final class ChestRegistryNetworkManager {
             final boolean isDeposit = deposit;
             final boolean isKeepGear = keepGear;
             final String finalAction = action;
-            java.util.concurrent.CompletableFuture.runAsync(() -> {
+            QUICK_TRANSFER_EXECUTOR.execute(() -> {
+                // Like SkillManager.runSkill: attach so /bot stop interrupts the walk, and take the
+                // bot out of FOLLOW so the follow tick does not steer it while it walks to the chest.
+                net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume = null;
                 try {
+                    net.wcfcarolina13.GameAI.services.TaskService.attachExecutingThread(ticket, Thread.currentThread());
+                    followResume = net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
                     int moved = 0;
                     int maxAttempts = 3; // initial + 2 retries
                     for (int attempt = 0; attempt < maxAttempts; attempt++) {
@@ -454,7 +470,13 @@ public final class ChestRegistryNetworkManager {
                             player.getCommandSource(),
                             "\u00A7c" + botName + " failed to " + finalAction + " items: " + e.getMessage() + "\u00A7r"));
                 } finally {
+                    // Abort read before complete() drops the ticket; complete before resuming,
+                    // since resumeFollowMode skips while a task is still active.
+                    boolean abortRequested = net.wcfcarolina13.GameAI.services.TaskService.isAbortRequested(bot.getUuid());
                     net.wcfcarolina13.GameAI.services.TaskService.complete(ticket, true);
+                    if (!abortRequested) {
+                        net.wcfcarolina13.GameAI.skills.SkillManager.resumeFollowMode(bot, server, followResume);
+                    }
                 }
             });
 
