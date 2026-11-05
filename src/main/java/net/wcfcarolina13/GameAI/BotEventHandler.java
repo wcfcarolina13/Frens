@@ -38,6 +38,8 @@ import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.services.BackgroundSweepPolicy;
 import net.wcfcarolina13.GameAI.services.DropReachPolicy;
 import net.wcfcarolina13.GameAI.services.DropStandHelper;
+import net.wcfcarolina13.GameAI.services.LeafClearAction;
+import net.wcfcarolina13.GameAI.services.LeafClearResult;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
@@ -4368,8 +4370,8 @@ public class BotEventHandler {
                 if (!MovementService.hasLeafObstruction(bot, towardAction)) {
                     continue;
                 }
-                MovementService.LeafClearResult leafClear = MovementService.clearLeafObstructionDetailed(bot, towardAction);
-                if (leafClear.countsAsCleared() || leafClear.action() == MovementService.LeafClearAction.BYPASS_STEP) {
+                LeafClearResult leafClear = MovementService.clearLeafObstructionDetailed(bot, towardAction);
+                if (leafClear.countsAsCleared() || leafClear.action() == LeafClearAction.BYPASS_STEP) {
                     maybeLogFollowDecision(bot, "leaf-action: toward=" + towardAction + " action=" + leafClear.action()
                             + " target=" + leafClear.leafTarget() + " stagnant=" + effectiveStagnant);
                     return true;

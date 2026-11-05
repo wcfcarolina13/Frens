@@ -2,6 +2,12 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## LeafClearAction and LeafClearResult moved off MovementService (unreleased, 2026-11-05)
+
+- The nested `MovementService.LeafClearAction` enum and `MovementService.LeafClearResult` record (with `countsAsCleared()`) are now top-level types in `GameAI/services/`, next to `LeafClearService`; `LeafClearService`, `ChestStoreService` and `BotEventHandler` reference them directly.
+- No behaviour change: pure type move; the `MovementService.clearLeafObstructionDetailed` wrapper keeps its signature.
+- Tests: 3857 before, 3857 after (no test touched the moved types).
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
