@@ -55,10 +55,38 @@ class LineOfSightRedirectPolicyTest {
     }
 
     @Test
-    void hiddenBlockIsNotExcludedForTheRestOfTheJob() throws IOException {
+    void hiddenTargetGetsOneRetryThenIsExcluded() {
+        assertFalse(LineOfSightRedirectPolicy.excludeHidden(1));
+        assertTrue(LineOfSightRedirectPolicy.excludeHidden(2));
+        assertTrue(LineOfSightRedirectPolicy.excludeHidden(27));
+    }
+
+    @Test
+    void hiddenTargetExclusionUsesTheJobCounter() throws IOException {
         String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
         int stillPresent = shovel.indexOf("getBlockState(minedPos).getBlock() != Blocks.AIR");
-        assertTrue(shovel.indexOf("if (excluded != null && blockerXyz == null) {", stillPresent) > stillPresent);
+        int rule = shovel.indexOf("LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, minedPos))", stillPresent);
+        assertTrue(rule > stillPresent);
+    }
+
+    @Test
+    void refusedBlockerIsExcludedSoItIsNotPickedAgain() throws IOException {
+        String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
+        int mine = shovel.indexOf("mineWithTimeout(player, blocker)");
+        int exclude = shovel.indexOf("excluded.add(blocker);", mine);
+        assertTrue(mine >= 0 && exclude > mine);
+        assertTrue(shovel.contains("|| ProtectedStructureBlockHelper.isNeverBreakBlock(blockerState)"));
+    }
+
+    @Test
+    void lavaTouchingABlockKeepsItUnmined() throws IOException {
+        String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
+        int targetCheck = shovel.indexOf("BlockPos lavaNextToTarget = lavaTouching(player, detectedPos);");
+        int firstMine = shovel.indexOf("MiningTool.mineBlock(player, detectedPos)");
+        assertTrue(targetCheck >= 0 && firstMine > targetCheck, "target lava check runs before it is mined");
+        int blockerCheck = shovel.indexOf("BlockPos lavaNextToBlocker = lavaTouching(player, blocker);");
+        int blockerMine = shovel.indexOf("mineWithTimeout(player, blocker)");
+        assertTrue(blockerCheck >= 0 && blockerMine > blockerCheck, "blocker lava check runs before it is mined");
     }
 
     @Test

@@ -15,6 +15,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.services.LavaHazardService;
+import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
@@ -144,6 +145,16 @@ public final class DirtShovelSkill implements Skill {
                     ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                     return failure(context, hazard.failureMessage());
                 }
+                // detect() only inspects the block itself; lava touching it would pour out once it
+                // breaks. Leave that block as a skin over the lava and mine the others.
+                BlockPos lavaNextToTarget = lavaTouching(player, detectedPos);
+                if (lavaNextToTarget != null) {
+                    LOGGER.info("Leaving {} at {}: lava behind it at {}", label, detectedPos, lavaNextToTarget);
+                    if (excluded != null) {
+                        excluded.add(detectedPos);
+                    }
+                    continue;
+                }
 
                 LookController.faceBlock(player, detectedPos);
 
@@ -222,7 +233,10 @@ public final class DirtShovelSkill implements Skill {
                     if (LineOfSightRedirectPolicy.shouldRedirect(
                             !blocker.equals(detectedPos),
                             wanted,
-                            blockerState.getBlock() instanceof BlockEntityProvider,
+                            blockerState.getBlock() instanceof BlockEntityProvider
+                                    // block-state guard only: the painting scan is an entity query (server
+                                    // thread only); a painted blocker is refused by MiningTool and excluded below
+                                    || ProtectedStructureBlockHelper.isNeverBreakBlock(blockerState),
                             excluded != null && excluded.contains(blocker),
                             isWithinMiningReach(player, blocker))) {
                         // Same hazard handling as the main target: a hazard found here is still a hazard.
@@ -236,20 +250,35 @@ public final class DirtShovelSkill implements Skill {
                             ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                             return failure(context, hazard.failureMessage());
                         }
-                        LOGGER.info("{} at {} is hidden by {}; mining that {} block instead", label, detectedPos, blocker, label);
-                        String blockerResult = mineWithTimeout(player, blocker);
-                        if (blockerResult != null && player.getEntityWorld().getBlockState(blocker).isAir()) {
-                            minedPos = blocker;
-                            result = blockerResult;
-                            wasTorch = false;
+                        BlockPos lavaNextToBlocker = lavaTouching(player, blocker);
+                        if (lavaNextToBlocker != null) {
+                            LOGGER.info("Not mining {} to see past it: lava behind it at {}", blocker, lavaNextToBlocker);
+                            if (excluded != null) {
+                                excluded.add(blocker);
+                            }
+                        } else {
+                            LOGGER.info("{} at {} is hidden by {}; mining that {} block instead", label, detectedPos, blocker, label);
+                            String blockerResult = mineWithTimeout(player, blocker);
+                            if (blockerResult != null && player.getEntityWorld().getBlockState(blocker).isAir()) {
+                                minedPos = blocker;
+                                result = blockerResult;
+                                wasTorch = false;
+                            } else if (excluded != null && LineOfSightRedirectPolicy.blockerFrom(blockerResult) == null) {
+                                // Refused for a reason other than sight (painting guard, claim, tool): it
+                                // will be refused again, so never pick it as a redirect again.
+                                LOGGER.info("Redirect to {} refused ({}); excluding it", blocker, blockerResult);
+                                excluded.add(blocker);
+                            }
                         }
                     }
                 }
                 if (player.getEntityWorld().getBlockState(minedPos).getBlock() != Blocks.AIR) {
                     LOGGER.warn("{} block {} still present after mining", label, minedPos);
-                    // A hidden block depends on where the bot stands, so it is not excluded for the
-                    // rest of the job: it is demoted (record false, exposed-first ordering) instead.
-                    if (excluded != null && blockerXyz == null) {
+                    // A hidden block depends on where the bot stands: it gets one more try later
+                    // (mining around it may expose it), then it is excluded like any other failure.
+                    boolean exclude = blockerXyz == null
+                            || LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, minedPos));
+                    if (excluded != null && exclude) {
                         excluded.add(minedPos);
                     }
                     DirtNavigationPolicy.record(originBeforeMove, minedPos, false);
@@ -952,6 +981,33 @@ public final class DirtShovelSkill implements Skill {
             return dx >= 0 ? Direction.EAST : Direction.WEST;
         }
         return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static final String HIDDEN_COUNTS_KEY = "dirtShovel.hiddenCounts";
+
+    /** Counts how often {@code pos} was hidden in this job; with no shared state every call counts as the limit. */
+    @SuppressWarnings("unchecked")
+    private int noteHidden(SkillContext context, BlockPos pos) {
+        Map<String, Object> shared = context.sharedState();
+        if (shared == null) {
+            return LineOfSightRedirectPolicy.HIDDEN_RETRY_LIMIT;
+        }
+        Object raw = shared.computeIfAbsent(HIDDEN_COUNTS_KEY, k -> new java.util.concurrent.ConcurrentHashMap<BlockPos, Integer>());
+        if (!(raw instanceof Map<?, ?>)) {
+            return LineOfSightRedirectPolicy.HIDDEN_RETRY_LIMIT;
+        }
+        return ((Map<BlockPos, Integer>) raw).merge(pos.toImmutable(), 1, Integer::sum);
+    }
+
+    /** A lava (or lava-like) cell touching {@code pos}, or null. Breaking {@code pos} would open it. */
+    private BlockPos lavaTouching(ServerPlayerEntity player, BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            BlockPos neighbor = pos.offset(dir);
+            if (player.getEntityWorld().getFluidState(neighbor).isIn(net.minecraft.registry.tag.FluidTags.LAVA)) {
+                return neighbor;
+            }
+        }
+        return null;
     }
 
     /** Mines {@code pos} with the same 10 s budget as the main loop; null on timeout or error. */

@@ -18,7 +18,15 @@ public final class LineOfSightRedirectPolicy {
     private static final Pattern BLOCKED_BY =
             Pattern.compile("no line of sight \\(blocked by (-?\\d+), (-?\\d+), (-?\\d+)\\)");
 
+    /** A target hidden this many times in one job is excluded; the first time it gets one more try. */
+    public static final int HIDDEN_RETRY_LIMIT = 2;
+
     private LineOfSightRedirectPolicy() {
+    }
+
+    /** @param timesHidden how often this target was hidden in this job, counting this time */
+    public static boolean excludeHidden(int timesHidden) {
+        return timesHidden >= HIDDEN_RETRY_LIMIT;
     }
 
     /** The hiding block's coordinates from a MiningTool result, or null when the result is not a line-of-sight refusal. */
