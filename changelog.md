@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Test: the soul store close check waits for the worker to exit (unreleased, 2026-11-05)
+
+`SoulStoreTest.closeShutsDownInjectedExecutorLeavingNoThreadAlive` checked for a live executor thread right after `close()`, but `close()` only calls `shutdown()`, and the worker exits a moment later. Under load (parallel builds in a cloud container) it failed on unrelated branches. The test now joins the thread for up to 5 s before checking. A thread that `close()` never stops still fails. No main code changed. Tests 3857, unchanged count.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
