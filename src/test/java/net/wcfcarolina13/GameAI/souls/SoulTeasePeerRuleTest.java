@@ -117,6 +117,16 @@ class SoulTeasePeerRuleTest {
     }
 
     @Test
+    void aSideChannelFrictionClaimFirstLeavesNoTeaseStep() {
+        // The 3c side channel applies at provider-result time, before playback delivers lines.
+        SoulTypes.SoulMind claimed = SoulMindOps.bumpPeerStance(SoulTypes.SoulMind.empty(), BRAVO,
+                SoulSideChannelOps.Axis.FRICTION, 1, 4);
+        SoulTypes.SoulMind after = SoulMindOps.notePeerScene(claimed, 0, NAMES, IDS, BANTER, 4, SoulSpeechAct.TEASE);
+        assertEquals(1, stanceOf(after, BRAVO).exasperation(), "the day's friction step is already spent");
+        assertEquals(4, stanceOf(after, BRAVO).trust(), "trust has its own guard");
+    }
+
+    @Test
     void groupTurnCarriesTheActAndOlderConstructorsCarryNone() {
         SoulGroupTypes.GroupSceneTurn plain = new SoulGroupTypes.GroupSceneTurn(SoulGroupTypes.SceneKind.BANTER,
                 ALFA, "owner", List.of(), "", Instant.EPOCH, UUID.randomUUID(), false);

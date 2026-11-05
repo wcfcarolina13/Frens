@@ -161,7 +161,8 @@ final class SoulMindOps {
      *       least two lines, and both of them spoke → exasperation +1 (banter is affectionate
      *       friction), on the same once-per-day guard as the ask rules and never a second
      *       exasperation step in one scene. Its trust +1 half is rule 3, which already covers
-     *       every pair this rule reaches.</li>
+     *       every pair this rule reaches. A 3c side-channel FRICTION or CURIOSITY claim lands
+     *       before playback and spends the same guard, so it suppresses this step that day.</li>
      * </ol>
      *
      * @param selfIndex this bot's index into {@code rosterIds}

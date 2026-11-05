@@ -25,10 +25,16 @@ Choices the spec left open:
   every pair this rule reaches, under the same once-per-day guard, so the only visible change is
   exasperation +1.
 
+Fix found in review: `SoulBanterSeed.buildSeed` picked an act even when no anchor gave the seed
+a subject, so no directive sentence was written but the act was still returned. That act would
+have triggered the TEASE rule on a scene never told to tease, and the director remembered it in
+its recent-acts rotation. A seed with no subject now carries no act. The only behaviour change
+outside the new rule: such a scene no longer counts toward act rotation.
+
 Limits: the rule trusts the seed's directive, not the delivered text. If the model ignores "gently
 tease" and writes something friendly, the pair still gets exasperation +1. Local chime-ins and
 player-addressed turns have no act and are unaffected. `GroupSceneTurn` is not persisted, so no
-save format changes. Tests: `SoulTeasePeerRuleTest` (9). Needs a two-bot sandbox check: watch for
+save format changes. Tests: `SoulTeasePeerRuleTest` (10), `SoulBanterSeedTest.aSeedWithNoSubjectCarriesNoAct`. Needs a two-bot sandbox check: watch for
 `[souls] peer stance ... exasperation=1` after a teasing banter scene.
 
 ## Repository clean-up: public and private split (2026-11-04)
