@@ -6,7 +6,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 ## Session Handoff 2026-11-05 (cloud batch, unreleased) — next session starts here
 
-**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#34, #39 and #40 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
+**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#34, #39, #40 and draft #41 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
 
 **Integration check (2026-11-05):** all 29 branches of this batch (through #34) merged together onto main with no source conflict (only changelog.md, where keeping both sides is right); the combined tree builds and runs 4108 tests with only the root-container `SoulStoreTest.persistCursorFailure…` failing. Merging them in any order should need only changelog conflict resolution.
 
@@ -28,7 +28,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 7. OWNER_DAMAGE peer rule: needs (a) shared or own per-day trust guard, (b) environmental damage counts or not, (c) peer ids in participants or a fact, (d) apply at event or at consolidation. After #8/#9 merge.
 8. Slice D (remove the legacy pathfinder switch and bidir): "once the default has held" is your call.
 9. Addressee: a mid-sentence third-person mention (conflicts with an existing test) and "you and Bob" (needs the DM window's bot).
-10. `SurfaceRecoveryService` (runs from flee) walks without suspending follow, the same gap #27 and #32 fix for `/bot craft` and Quick Store / Fetch: fix it the same way?
+10. `SurfaceRecoveryService` (runs from flee) walks without suspending follow, the same gap #27 and #32 fix for `/bot craft` and Quick Store / Fetch: fix it the same way? Built as draft #41: merge it for yes, close it for no.
 11. #40: TEASE applies only to pairs who both spoke, shares the friction day guard (so it spends that pair's curiosity/friction budget for the day), and its spec trust +1 is the existing both-spoke rule (net visible change: exasperation +1).
 12. Multiplayer roster payload is wrong as written: a membership payload changes nothing, because on a remote server the roster's names come from the client's own local config (no payload syncs `botGameProfile`/`botOwnership`/spawn points). The real fix is a server-owned roster (C2S request, S2C `name`/`inThisWorld`/`savedAnywhere`, mirroring the companion quest request/response pair). Needs: (a) non-ops see all server companions or only their own? (b) hide Restore/Create on remote servers for non-ops (2026-10-23 ruling)? (c) hide the client's local-only names on remote connections?
 
