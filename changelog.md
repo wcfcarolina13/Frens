@@ -2,6 +2,26 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Surface recovery suspends follow (2026-11-05, unreleased, pending ruling)
+
+Built for ruling 10 in the 2026-11-05 handoff, as a draft: merge only if the ruling is yes.
+`SurfaceRecoveryService.runSurfaceRecovery` (run from flee's `escapeToSurface` and the dig-down
+climb-out) executes `SurfaceRecoverySkill` directly, not through `SkillManager.runSkill`. So
+nothing stopped the follow tick from steering a following bot toward its commander while the
+ascent walked it. This is the same gap that `/bot craft` and Quick Store / Fetch have in their
+open PRs. The service now suspends follow before the skill. It resumes follow after the ticket
+completes, silently, and never after an abort. A start refused because another task runs never
+touches follow. With the follow-stop veto from the follow-stop PR, a "stop following" given
+during the ascent also holds.
+
+Costs and limits: a following bot that fails to reach the surface resumes following from
+underground, which is the old behaviour. During the ascent, a following bot no longer drifts
+toward its commander, which on rare occasions may have helped it out of a hole. Tests:
+`SurfaceRecoveryFollowWiringTest` (source wiring). Needs a sandbox check: follow a bot, trap it
+in a covered pit until flee launches surface recovery, and watch the log for
+`[FollowAssert] task-resume bot=… mode=follow` after `Surface recovery exit`, with no follow
+steering in between.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
