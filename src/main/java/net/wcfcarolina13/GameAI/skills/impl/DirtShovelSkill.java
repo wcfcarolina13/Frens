@@ -274,8 +274,8 @@ public final class DirtShovelSkill implements Skill {
                                 wasTorch = false;
                             } else if (excluded != null && LineOfSightRedirectPolicy.blockerFrom(blockerResult) != null) {
                                 // The blocker is itself hidden: it counts toward the same retry limit.
-                                if (LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, blocker, player.getBlockPos()))) {
-                                    excludeHidden(context, excluded, blocker);
+                                if (LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, blocker))) {
+                                    excluded.add(blocker);
                                 }
                             } else if (excluded != null) {
                                 // Refused for a reason other than sight (painting guard, claim, tool): it
@@ -288,14 +288,12 @@ public final class DirtShovelSkill implements Skill {
                 }
                 if (player.getEntityWorld().getBlockState(minedPos).getBlock() != Blocks.AIR) {
                     LOGGER.warn("{} block {} still present after mining", label, minedPos);
-                    // A hidden block depends on where the bot stands and what is around it: two tries
-                    // from one stand, then it is set aside until the next block is mined.
-                    if (excluded != null) {
-                        if (blockerXyz == null) {
-                            excluded.add(minedPos);
-                        } else if (LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, minedPos, player.getBlockPos()))) {
-                            excludeHidden(context, excluded, minedPos);
-                        }
+                    // A hidden block depends on where the bot stands: it gets one more try later
+                    // (mining around it may expose it), then it is excluded like any other failure.
+                    boolean exclude = blockerXyz == null
+                            || LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, minedPos));
+                    if (excluded != null && exclude) {
+                        excluded.add(minedPos);
                     }
                     DirtNavigationPolicy.record(originBeforeMove, minedPos, false);
                     continue;
@@ -339,8 +337,6 @@ public final class DirtShovelSkill implements Skill {
                     SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.z", minedPos.getZ());
                     SharedStateUtils.setValue(context.sharedState(), "lastShovelStatus", "success");
                 }
-                // Progress changed the terrain: blocks set aside as hidden may be visible now.
-                releaseHidden(context, excluded);
                 return SkillExecutionResult.success(result);
             }
 
@@ -1021,57 +1017,19 @@ public final class DirtShovelSkill implements Skill {
     }
 
     private static final String HIDDEN_COUNTS_KEY = "dirtShovel.hiddenCounts";
-    private static final String HIDDEN_SET_ASIDE_KEY = "dirtShovel.hiddenSetAside";
 
-    /**
-     * Counts how often {@code pos} was hidden from {@code stand} since the last mined block. With no
-     * shared state every call counts as the limit (the old exclude-at-once behaviour).
-     */
+    /** Counts how often {@code pos} was hidden in this job; with no shared state every call counts as the limit. */
     @SuppressWarnings("unchecked")
-    private int noteHidden(SkillContext context, BlockPos pos, BlockPos stand) {
+    private int noteHidden(SkillContext context, BlockPos pos) {
         Map<String, Object> shared = context.sharedState();
         if (shared == null) {
             return LineOfSightRedirectPolicy.HIDDEN_RETRY_LIMIT;
         }
-        Object raw = shared.computeIfAbsent(HIDDEN_COUNTS_KEY, k -> new java.util.concurrent.ConcurrentHashMap<String, Integer>());
+        Object raw = shared.computeIfAbsent(HIDDEN_COUNTS_KEY, k -> new java.util.concurrent.ConcurrentHashMap<BlockPos, Integer>());
         if (!(raw instanceof Map<?, ?>)) {
             return LineOfSightRedirectPolicy.HIDDEN_RETRY_LIMIT;
         }
-        String key = pos.toShortString() + "@" + (stand == null ? "?" : stand.toShortString());
-        return ((Map<String, Integer>) raw).merge(key, 1, Integer::sum);
-    }
-
-    /** Excludes a hidden block and remembers it, so {@link #releaseHidden} can make it eligible again. */
-    @SuppressWarnings("unchecked")
-    private void excludeHidden(SkillContext context, Set<BlockPos> excluded, BlockPos pos) {
-        BlockPos immutable = pos.toImmutable();
-        excluded.add(immutable);
-        Map<String, Object> shared = context.sharedState();
-        if (shared == null) {
-            return;
-        }
-        Object raw = shared.computeIfAbsent(HIDDEN_SET_ASIDE_KEY, k -> java.util.concurrent.ConcurrentHashMap.<BlockPos>newKeySet());
-        if (raw instanceof Set<?>) {
-            ((Set<BlockPos>) raw).add(immutable);
-        }
-    }
-
-    /** After a mined block: hidden blocks set aside become candidates again and their counts restart. */
-    private void releaseHidden(SkillContext context, Set<BlockPos> excluded) {
-        Map<String, Object> shared = context.sharedState();
-        if (shared == null) {
-            return;
-        }
-        Object setAside = shared.get(HIDDEN_SET_ASIDE_KEY);
-        if (setAside instanceof Set<?> set) {
-            if (excluded != null) {
-                excluded.removeAll(set);
-            }
-            set.clear();
-        }
-        if (shared.get(HIDDEN_COUNTS_KEY) instanceof Map<?, ?> counts) {
-            counts.clear();
-        }
+        return ((Map<BlockPos, Integer>) raw).merge(pos.toImmutable(), 1, Integer::sum);
     }
 
     /** A lava (or lava-like) cell touching {@code pos}, or null. Breaking {@code pos} would open it. */
