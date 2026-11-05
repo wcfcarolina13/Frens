@@ -5749,9 +5749,12 @@ public class modCommandRegistry {
             return null;
         }
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = anchor.offset(dir);
-            PlacementTarget alt = new PlacementTarget(candidate, dir.getOpposite(), bot.getYaw(), bot.getPitch(),
-                    candidate.offset(dir.getOpposite()));
+            // Click the anchor chest on its side facing dir; the new chest goes into the neighbour.
+            AdjacentChestPolicy.Target cells = AdjacentChestPolicy.target(
+                    new AdjacentChestPolicy.Cell(anchor.getX(), anchor.getY(), anchor.getZ()),
+                    dir.getOffsetX(), dir.getOffsetZ());
+            BlockPos candidate = new BlockPos(cells.place().x(), cells.place().y(), cells.place().z());
+            PlacementTarget alt = new PlacementTarget(anchor, dir, bot.getYaw(), bot.getPitch(), candidate);
             if (bot.getEntityWorld().getBlockState(candidate).isAir()) {
                 BlockPos placed = attemptPlacement(bot, alt, slot, placeItem);
                 if (placed != null) {
