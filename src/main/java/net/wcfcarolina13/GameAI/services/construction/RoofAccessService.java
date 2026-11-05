@@ -43,7 +43,7 @@ public final class RoofAccessService {
     /**
      * Per-bot tracking of roof access pillars.
      */
-    private static final Map<UUID, List<RoofAccessPillar>> roofPillars = new HashMap<>();
+    private static final Map<UUID, List<RoofAccessPillar>> roofPillars = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * Get roof pillar tracking for a bot.
