@@ -214,6 +214,14 @@ public class ManualConfig {
     private static final Object SAVE_LOCK = new Object();
 
     /**
+     * True when the settings file could not be read and could not be moved aside either: saves
+     * are then refused for the session so the unreadable original is never overwritten by the
+     * in-memory defaults. A file that was quarantined (renamed to {@code .bad-<stamp>}) leaves
+     * this false and the defaults save normally.
+     */
+    private static volatile boolean loadFailed = false;
+
+    /**
      * True while this client is connected to a remote (dedicated) server whose global config has
      * been synced into this in-memory instance. Transient so Gson never serializes it.
      */
@@ -268,9 +276,16 @@ public class ManualConfig {
         }
         syncLegacyPathfinderFlag();
         synchronized (SAVE_LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Config was not saved because its original file could not be read.");
+                return;
+            }
             Gson gson = new GsonBuilder().setPrettyPrinting().create();
-            try (FileWriter writer = new FileWriter(filePath())) {
-                gson.toJson(toSavedJson(), writer);
+            try {
+                // Temp file + atomic rename: a crash or a full disk mid-write leaves the previous
+                // settings intact instead of a truncated file that fails the next launch.
+                net.wcfcarolina13.GameAI.services.AtomicStoreWriter.writeString(
+                        java.nio.file.Paths.get(filePath()), gson.toJson(toSavedJson()));
             } catch (IOException e) {
                 LOGGER.error("Failed to save config file: {}", e.getMessage());
             }
@@ -310,6 +325,10 @@ public class ManualConfig {
             Gson gson = new Gson();
             Type type = new TypeToken<ManualConfig>(){}.getType();
             ManualConfig loadedConfig = gson.fromJson(reader, type);
+            if (loadedConfig == null) {
+                // An empty file (a crash during a pre-atomic in-place write) parses to null.
+                throw new IllegalStateException("settings file is empty");
+            }
             if (loadedConfig.botQuestMemory == null) {
                 loadedConfig.botQuestMemory = new ConcurrentHashMap<>();
             }
@@ -343,8 +362,20 @@ public class ManualConfig {
                 loadedConfig.save();
             }
             return loadedConfig;
-        } catch (IOException e) {
-            LOGGER.error("Failed to load config file. Using default config.", e);
+        } catch (IOException | RuntimeException e) {
+            // RuntimeException covers Gson's JsonSyntaxException on a truncated file and the
+            // empty-file case above. This runs from Frens.CONFIG's static initializer, so nothing
+            // may escape: a corrupt file is moved to settings.json5.bad-<stamp> and the game
+            // starts from defaults; an unreadable (locked) file is left in place and saves are
+            // refused for the session so it is never overwritten by those defaults.
+            LOGGER.error("Failed to load config file {}. Using default config.", file.getAbsolutePath(), e);
+            java.nio.file.Path backup = net.wcfcarolina13.GameAI.services.UnreadableStoreFile.quarantineIfCorrupt(
+                    file.toPath(), e, java.time.LocalDateTime.now(), LOGGER, "settings");
+            loadFailed = backup == null;
+            if (backup != null) {
+                LOGGER.error("The unreadable settings file was moved to {}; bot ownership, profiles, spawn points and controls start from defaults.",
+                        backup.getFileName());
+            }
             ManualConfig fallback = new ManualConfig();
             fallback.baritoneDefaultMigrated = true; // already on the new default; never flip a later classic pick
             fallback.unifiedDefaultMigrated = true;

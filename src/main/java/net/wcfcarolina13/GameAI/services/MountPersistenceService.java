@@ -23,7 +23,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -36,8 +35,13 @@ public final class MountPersistenceService {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final String FILE_NAME = "bot_mount_state.json";
 
-    private static final Map<String, Map<String, MountState>> STATE = new HashMap<>();
-    private static boolean loaded = false;
+    // Concurrent maps: recordMount/clear run from join and leave hooks as well as the tick, so
+    // per-entry updates are safe without the lock; LOCK serializes load and the whole-file write.
+    private static final Map<String, Map<String, MountState>> STATE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Object LOCK = new Object();
+    private static volatile boolean loaded = false;
+    /** Set when the file could neither be read nor moved aside; saves are then refused so it is never overwritten. */
+    private static volatile boolean loadFailed = false;
     private static final Map<UUID, PendingRestore> PENDING_RESTORE = new HashMap<>();
     private static final int MAX_RESTORE_ATTEMPTS = 10;
     private static final long RESTORE_RETRY_TICKS = 20L;
@@ -83,7 +87,7 @@ public final class MountPersistenceService {
         boolean heldByBot = leashTargetId != null && leashTargetId.equals(mount.getUuid());
         MountState state = new MountState(mount.getUuid(), worldId, mount.getX(), mount.getY(), mount.getZ(),
                 mountType, saddled, health, wasMounted, heldByBot);
-        STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, state);
+        STATE.computeIfAbsent(alias, k -> new java.util.concurrent.ConcurrentHashMap<>()).put(saveWorldKey, state);
         flush();
         LOGGER.info("Mount record: bot={} mount={} type={} pos={} wasMounted={} heldByBot={} saddled={} health={}",
                 alias,
@@ -212,7 +216,7 @@ public final class MountPersistenceService {
         String saveWorldKey = BotWorldStateService.currentWorldKey(bot.getCommandSource().getServer());
         MountState updated = new MountState(state.mountUuid(), state.worldId(), state.x(), state.y(), state.z(),
                 state.mountType(), state.saddled(), state.health(), state.wasMounted(), false);
-        STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
+        STATE.computeIfAbsent(alias, k -> new java.util.concurrent.ConcurrentHashMap<>()).put(saveWorldKey, updated);
         flush();
         LOGGER.info("[leash-target] {} saved mount {} no longer held by bot ({})",
                 bot.getName().getString(), state.mountUuid(), event);
@@ -323,7 +327,7 @@ public final class MountPersistenceService {
             RESTORE_CLAIMED_THIS_TICK.add(nearby.getUuid());
             MountState updated = new MountState(nearby.getUuid(), state.worldId(), nearby.getX(), nearby.getY(),
                     nearby.getZ(), state.mountType(), state.saddled(), state.health(), state.wasMounted(), state.heldByBot());
-            STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
+            STATE.computeIfAbsent(alias, k -> new java.util.concurrent.ConcurrentHashMap<>()).put(saveWorldKey, updated);
             flush();
             LOGGER.warn("Mount restore: matched existing {} near {}", state.mountType(), pos.toShortString());
             maybeSecureOnRejoin(bot, nearby, alias, saveWorldKey, updated);
@@ -395,6 +399,16 @@ public final class MountPersistenceService {
         if (loaded) {
             return;
         }
+        synchronized (LOCK) {
+            if (loaded) {
+                return;
+            }
+            loadLocked();
+            loaded = true;
+        }
+    }
+
+    private static void loadLocked() {
         Path file = stateFile();
         if (Files.exists(file)) {
             try (Reader reader = Files.newBufferedReader(file)) {
@@ -410,7 +424,7 @@ public final class MountPersistenceService {
                                 LOGGER.info("Skipping pre-per-world mount record for {} (old format, no longer migrated)", alias);
                             } else {
                                 // New format: alias → { worldKey → MountState }
-                                Map<String, MountState> worldMap = new HashMap<>();
+                                Map<String, MountState> worldMap = new java.util.concurrent.ConcurrentHashMap<>();
                                 for (Map.Entry<?, ?> worldEntry : innerMap.entrySet()) {
                                     String worldKey = worldEntry.getKey().toString();
                                     MountState st = GSON.fromJson(GSON.toJson(worldEntry.getValue()), MountState.class);
@@ -421,22 +435,29 @@ public final class MountPersistenceService {
                         }
                     }
                 }
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 LOGGER.warn("Failed to load mount state: {}", e.getMessage());
+                // Never keep the half-parsed state and then overwrite the file with it: a corrupt
+                // file is moved to .bad-<stamp> and the store starts empty; an unreadable one is
+                // left in place and every save is refused.
+                STATE.clear();
+                Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "mount state");
+                loadFailed = backup == null;
             }
         }
-        loaded = true;
     }
 
     private static void flush() {
-        try {
-            Path file = stateFile();
-            Files.createDirectories(file.getParent());
-            try (Writer writer = Files.newBufferedWriter(file)) {
-                GSON.toJson(STATE, writer);
+        synchronized (LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Mount state was not saved because its original file could not be read.");
+                return;
             }
-        } catch (IOException e) {
-            LOGGER.warn("Failed to save mount state: {}", e.getMessage());
+            try {
+                AtomicStoreWriter.writeString(stateFile(), GSON.toJson(STATE));
+            } catch (IOException | RuntimeException e) {
+                LOGGER.warn("Failed to save mount state: {}", e.getMessage());
+            }
         }
     }
 
@@ -511,7 +532,7 @@ public final class MountPersistenceService {
 
         MountState updated = new MountState(state.mountUuid(), state.worldId(), state.x(), state.y(), state.z(),
                 state.mountType(), state.saddled(), state.health(), remounted, heldRestored);
-        STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
+        STATE.computeIfAbsent(alias, k -> new java.util.concurrent.ConcurrentHashMap<>()).put(saveWorldKey, updated);
         flush();
         LOGGER.info("Mount rejoin restore: bot={} mount={} type={} wasMounted={} heldByBot={} remounted={} heldRestored={}",
                 alias, mount.getUuid(), state.mountType(),

@@ -134,25 +134,23 @@ public final class BotInventoryStorageService {
             // empty save is a real deposit/death and is honoured (no item duplication on rejoin).
             // 2026-08-29: this was a 300-byte size heuristic — it protected Jake's large
             // snapshot and let Bob's two-item one be wiped by the first periodic save.
+            // An unreadable snapshot (count -1) may still hold items, so it is protected too.
             if (items.isEmpty() && RESTORE_PENDING.contains(bot.getUuid())
-                    && Files.exists(path) && snapshotItemCount(path) > 0) {
-                LOGGER.warn("Refusing to overwrite snapshot {} (still holds items) with the empty inventory of not-yet-restored '{}'",
+                    && Files.exists(path) && snapshotItemCount(path) != 0) {
+                LOGGER.warn("Refusing to overwrite snapshot {} (holds items, or could not be read) with the empty inventory of not-yet-restored '{}'",
                         path.getFileName(), bot.getName().getString());
                 return false;
             }
 
-            // Backup: copy existing file to .bak before overwriting.
-            // If a crash corrupts the save, the .bak preserves the last good state.
-            if (Files.exists(path)) {
-                Path backup = path.resolveSibling(path.getFileName().toString() + ".bak");
-                try {
-                    Files.copy(path, backup, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                } catch (IOException bakErr) {
-                    LOGGER.warn("Failed to create backup for '{}': {}", bot.getName().getString(), bakErr.getMessage());
-                }
-            }
-
-            net.minecraft.nbt.NbtIo.writeCompressed(root, path);
+            // The new snapshot is written to a temp file in the same directory and forced to disk;
+            // only then is the still-intact primary copied to .bak and the temp renamed over the
+            // primary. A failed or interrupted write therefore leaves both the primary and the
+            // .bak as they were (the old in-place write could truncate the primary, and two
+            // failures in a row then destroyed both copies).
+            Path backup = path.resolveSibling(path.getFileName().toString() + ".bak");
+            AtomicStoreWriter.writeWithBackup(path, backup,
+                    out -> net.minecraft.nbt.NbtIo.writeCompressed(root, out),
+                    bakErr -> LOGGER.warn("Failed to create backup for '{}': {}", bot.getName().getString(), bakErr.getMessage()));
             maybeLogSave(bot, path);
             return true;
         } catch (IOException e) {
@@ -299,13 +297,17 @@ public final class BotInventoryStorageService {
         }
     }
 
-    /** Item entries in a snapshot file; 0 when unreadable (an unreadable file is not worth protecting). */
+    /**
+     * Item entries in a snapshot file, or -1 when it cannot be read. An unreadable primary used
+     * to count as 0 and so lost the empty-save guard, while its .bak (the only good copy left)
+     * was then overwritten by a copy of the unreadable primary.
+     */
     private static int snapshotItemCount(Path path) {
         try {
             NbtCompound root = net.minecraft.nbt.NbtIo.readCompressed(path, NbtSizeTracker.ofUnlimitedBytes());
             return root.getList(KEY_INVENTORY).map(NbtList::size).orElse(0);
         } catch (IOException | RuntimeException e) {
-            return 0;
+            return -1;
         }
     }
 

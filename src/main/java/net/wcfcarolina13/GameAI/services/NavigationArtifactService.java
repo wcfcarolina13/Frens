@@ -37,7 +37,6 @@ import net.minecraft.registry.Registries;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -150,6 +149,8 @@ public final class NavigationArtifactService {
     private static volatile String sessionWorldKey;
     /** Entries of other save worlds read from the file: not restored here, written back unchanged. */
     private static final List<SavedTravel> OTHER_WORLD_TRAVELS = new ArrayList<>();
+    /** Set when the travel file could neither be read nor moved aside; saves are then refused so it is never overwritten. */
+    private static boolean travelsLoadFailed = false;
 
     private static Path travelFile() {
         return FabricLoader.getInstance().getConfigDir().resolve("frens").resolve(TRAVEL_FILE);
@@ -1848,9 +1849,11 @@ public final class NavigationArtifactService {
                 // Other save worlds' trips stay in the shared file until their own world loads.
                 list.addAll(OTHER_WORLD_TRAVELS);
 
-                try (Writer writer = Files.newBufferedWriter(file)) {
-                    GSON.toJson(list, writer);
+                if (travelsLoadFailed) {
+                    LOGGER.warn("Pending travels were not saved because their original file could not be read.");
+                    return;
                 }
+                AtomicStoreWriter.writeString(file, GSON.toJson(list));
             } catch (IOException e) {
                 LOGGER.warn("Failed to save pending travels: {}", e.getMessage());
             }
@@ -1930,8 +1933,13 @@ public final class NavigationArtifactService {
                     }
                     restorePostArrival(s, currentWorld, travelRestored);
                 }
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
+                // RuntimeException: Gson's JsonSyntaxException on a truncated file. This runs in
+                // the SERVER_STARTED hook, so it must not escape. A corrupt file is moved to
+                // .bad-<stamp>; an unreadable one is left in place and saves are refused.
                 LOGGER.warn("Failed to load pending travels: {}", e.getMessage());
+                Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "pending travels");
+                travelsLoadFailed = backup == null;
             }
         }
     }

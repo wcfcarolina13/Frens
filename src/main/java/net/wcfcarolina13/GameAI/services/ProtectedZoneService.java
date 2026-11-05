@@ -35,6 +35,9 @@ public class ProtectedZoneService {
     // hooks) to know whether eager writes are safe; before load, the in-memory map is empty
     // and a write would be clobbered when loadZones runs. Migration covers the pre-load case.
     private static final Set<String> LOADED_WORLDS = ConcurrentHashMap.newKeySet();
+    /** Worlds whose zone file could neither be read nor moved aside: saves are refused so it is never overwritten. */
+    private static final Set<String> LOAD_FAILED_WORLDS = ConcurrentHashMap.newKeySet();
+    private static final Object SAVE_LOCK = new Object();
 
     private static final String ZONE_FILE_NAME = "protected_zones.json";
 
@@ -442,6 +445,7 @@ public class ProtectedZoneService {
         // Replace, never merge: the maps are static and outlive a world when the integrated
         // server switches saves inside one JVM.
         zones.remove(worldId);
+        LOAD_FAILED_WORLDS.remove(worldId);
 
         Path zoneFile = getZoneFile(server, worldId);
         Path legacyFile = getLegacyZoneFile(server, worldId);
@@ -526,8 +530,15 @@ public class ProtectedZoneService {
                 save(server, worldId);
                 LOGGER.info("Re-saved zones for world {} in AABB format after legacy migration", worldId);
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // RuntimeException: Gson's JsonSyntaxException on a truncated file. This runs in the
+            // SERVER_STARTED hook, so it must not escape. A corrupt file is moved to .bad-<stamp>
+            // and the world starts without zones; an unreadable one is left in place and saves
+            // for that world are refused, so a later createZone cannot overwrite it.
             LOGGER.error("Failed to load protected zones for world {}", worldId, e);
+            Path backup = UnreadableStoreFile.quarantineIfCorrupt(fileToRead, e, java.time.LocalDateTime.now(), LOGGER,
+                    "protected zones (" + worldId + ")");
+            if (backup == null) LOAD_FAILED_WORLDS.add(worldId);
         }
     }
 
@@ -536,22 +547,27 @@ public class ProtectedZoneService {
         // An empty map is written as [] so removing the last zone sticks (and so a world that
         // started empty keeps its own store; see WorldStoreKeyPolicy.mustCreateOwnStore).
         if (worldZones == null) return;
+        if (LOAD_FAILED_WORLDS.contains(worldId)) {
+            LOGGER.warn("Protected zones for world {} were not saved because their original file could not be read.", worldId);
+            return;
+        }
 
-        try {
-            Path zoneDir = getZoneDirectory(server, worldId);
-            Files.createDirectories(zoneDir);
+        // Mutators call save from the server thread and from base-registration hooks; the lock
+        // keeps two concurrent saves from racing on the same file.
+        synchronized (SAVE_LOCK) {
+            try {
+                List<ZoneData> zoneDataList = new ArrayList<>();
+                for (ProtectedZone zone : worldZones.values()) {
+                    zoneDataList.add(new ZoneData(zone));
+                }
 
-            List<ZoneData> zoneDataList = new ArrayList<>();
-            for (ProtectedZone zone : worldZones.values()) {
-                zoneDataList.add(new ZoneData(zone));
+                String json = GSON.toJson(zoneDataList);
+                AtomicStoreWriter.writeString(getZoneFile(server, worldId), json);
+
+                LOGGER.debug("Saved {} protected zones for world {}", zoneDataList.size(), worldId);
+            } catch (IOException e) {
+                LOGGER.error("Failed to save protected zones for world {}", worldId, e);
             }
-
-            String json = GSON.toJson(zoneDataList);
-            Files.writeString(getZoneFile(server, worldId), json);
-
-            LOGGER.debug("Saved {} protected zones for world {}", zoneDataList.size(), worldId);
-        } catch (IOException e) {
-            LOGGER.error("Failed to save protected zones for world {}", worldId, e);
         }
     }
 
