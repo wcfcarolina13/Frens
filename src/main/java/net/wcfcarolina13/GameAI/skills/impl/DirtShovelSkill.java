@@ -15,6 +15,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.services.LavaHazardService;
+import net.wcfcarolina13.GameAI.services.ProtectedStructureBlockHelper;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
@@ -24,6 +25,7 @@ import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillPreferences;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
+import net.wcfcarolina13.GameAI.skills.LineOfSightRedirectPolicy;
 import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector;
 import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.Hazard;
 import net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.DetectionResult;
@@ -143,6 +145,16 @@ public final class DirtShovelSkill implements Skill {
                     ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                     return failure(context, hazard.failureMessage());
                 }
+                // detect() only inspects the block itself; lava touching it would pour out once it
+                // breaks. Leave that block as a skin over the lava and mine the others.
+                BlockPos lavaNextToTarget = lavaTouching(player, detectedPos);
+                if (lavaNextToTarget != null) {
+                    LOGGER.info("Leaving {} at {}: lava behind it at {}", label, detectedPos, lavaNextToTarget);
+                    if (excluded != null) {
+                        excluded.add(detectedPos);
+                    }
+                    continue;
+                }
 
                 LookController.faceBlock(player, detectedPos);
 
@@ -156,7 +168,10 @@ public final class DirtShovelSkill implements Skill {
                 }
 
                 BlockPos currentPos = player.getBlockPos();
-                if (currentPos.getSquaredDistance(detectedPos) > 9.0D) {
+                // Was an integer corner-to-corner check of 3 blocks: any top-row block of a wall seen
+                // from the ground (dy = 3) failed it as soon as dx or dz was non-zero and was excluded
+                // for the whole job, although MiningTool's reach allows it. Use the reach check.
+                if (!isWithinMiningReach(player, detectedPos)) {
                     LOGGER.warn("Too far from {} after approach preparation (player at {})", detectedPos, currentPos);
                     if (excluded != null) {
                         excluded.add(detectedPos);
@@ -210,26 +225,80 @@ public final class DirtShovelSkill implements Skill {
                 if (result == null) {
                     result = "Unknown shovel result";
                 }
-                if (player.getEntityWorld().getBlockState(detectedPos).getBlock() != Blocks.AIR) {
-                    LOGGER.warn("{} block {} still present after mining", label, detectedPos);
-                    if (excluded != null) {
-                        excluded.add(detectedPos);
+                // The target was hidden by another block. If that block is one the job wants, mine it
+                // instead: the target stays a candidate (no longer hidden) rather than being excluded.
+                BlockPos minedPos = detectedPos;
+                int[] blockerXyz = LineOfSightRedirectPolicy.blockerFrom(result);
+                if (blockerXyz != null) {
+                    BlockPos blocker = new BlockPos(blockerXyz[0], blockerXyz[1], blockerXyz[2]);
+                    BlockState blockerState = player.getEntityWorld().getBlockState(blocker);
+                    boolean wanted = allowAnyBlock ? !blockerState.isAir() : matchesTargetBlock(blockerState, targetBlocks);
+                    if (LineOfSightRedirectPolicy.shouldRedirect(
+                            !blocker.equals(detectedPos),
+                            wanted,
+                            blockerState.getBlock() instanceof BlockEntityProvider
+                                    // block-state guard only: the painting scan is an entity query (server
+                                    // thread only); a painted blocker is refused by MiningTool and excluded below
+                                    || ProtectedStructureBlockHelper.isNeverBreakBlock(blockerState),
+                            excluded != null && excluded.contains(blocker),
+                            isWithinMiningReach(player, blocker))) {
+                        // Same hazard handling as the main target: a hazard found here is still a hazard.
+                        DetectionResult blockerDetection = MiningHazardDetector.detect(player, List.of(blocker), List.of());
+                        if (blockerDetection.blockingHazard().isPresent()) {
+                            Hazard hazard = blockerDetection.blockingHazard().get();
+                            if (isLavaHazard(hazard)) {
+                                LavaHazardService.respondToLava(player, source, hazard.location());
+                            }
+                            SkillResumeService.flagManualResume(player);
+                            ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
+                            return failure(context, hazard.failureMessage());
+                        }
+                        BlockPos lavaNextToBlocker = lavaTouching(player, blocker);
+                        if (lavaNextToBlocker != null) {
+                            LOGGER.info("Not mining {} to see past it: lava behind it at {}", blocker, lavaNextToBlocker);
+                            if (excluded != null) {
+                                excluded.add(blocker);
+                            }
+                        } else {
+                            LOGGER.info("{} at {} is hidden by {}; mining that {} block instead", label, detectedPos, blocker, label);
+                            String blockerResult = mineWithTimeout(player, blocker);
+                            if (blockerResult != null && player.getEntityWorld().getBlockState(blocker).isAir()) {
+                                minedPos = blocker;
+                                result = blockerResult;
+                                wasTorch = false;
+                            } else if (excluded != null && LineOfSightRedirectPolicy.blockerFrom(blockerResult) == null) {
+                                // Refused for a reason other than sight (painting guard, claim, tool): it
+                                // will be refused again, so never pick it as a redirect again.
+                                LOGGER.info("Redirect to {} refused ({}); excluding it", blocker, blockerResult);
+                                excluded.add(blocker);
+                            }
+                        }
                     }
-                    DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
+                }
+                if (player.getEntityWorld().getBlockState(minedPos).getBlock() != Blocks.AIR) {
+                    LOGGER.warn("{} block {} still present after mining", label, minedPos);
+                    // A hidden block depends on where the bot stands: it gets one more try later
+                    // (mining around it may expose it), then it is excluded like any other failure.
+                    boolean exclude = blockerXyz == null
+                            || LineOfSightRedirectPolicy.excludeHidden(noteHidden(context, minedPos));
+                    if (excluded != null && exclude) {
+                        excluded.add(minedPos);
+                    }
+                    DirtNavigationPolicy.record(originBeforeMove, minedPos, false);
                     continue;
                 }
                 if (!result.toLowerCase().contains("complete")) {
-                    LOGGER.warn("Mining result for {} did not signal completion: {}", detectedPos, result);
+                    LOGGER.warn("Mining result for {} did not signal completion: {}", minedPos, result);
                     if (excluded != null) {
-                        excluded.add(detectedPos);
+                        excluded.add(minedPos);
                     }
-                    DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
+                    DirtNavigationPolicy.record(originBeforeMove, minedPos, false);
                     continue;
                 }
                 
                 // If we just mined a torch, replace it immediately to keep area lit
                 if (wasTorch) {
-                    TorchPlacer.replaceTorchAt(player, detectedPos);
+                    TorchPlacer.replaceTorchAt(player, minedPos);
                 }
                 
                 // Place torch if area is dark (for generic mining, not depth/stair modes)
@@ -242,19 +311,19 @@ public final class DirtShovelSkill implements Skill {
                         }
                         if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
                             // Just log, don't fail the job - torches are optional for generic mining
-                            LOGGER.info("Out of torches during generic mining at {}", detectedPos);
+                            LOGGER.info("Out of torches during generic mining at {}", minedPos);
                         }
                     }
                 }
 
                 if (context.sharedState() != null) {
-                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.pos", detectedPos);
-                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.x", detectedPos.getX());
-                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.y", detectedPos.getY());
-                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.z", detectedPos.getZ());
-                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.x", detectedPos.getX());
-                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.y", detectedPos.getY());
-                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.z", detectedPos.getZ());
+                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.pos", minedPos);
+                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.x", minedPos.getX());
+                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.y", minedPos.getY());
+                    SharedStateUtils.setValue(context.sharedState(), "lastDetectedBlock.z", minedPos.getZ());
+                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.x", minedPos.getX());
+                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.y", minedPos.getY());
+                    SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.z", minedPos.getZ());
                     SharedStateUtils.setValue(context.sharedState(), "lastShovelStatus", "success");
                 }
                 return SkillExecutionResult.success(result);
@@ -413,8 +482,12 @@ public final class DirtShovelSkill implements Skill {
                 }
             }
         }
+        // Exposed blocks first: a buried block can't be seen, so trying it first only costs a walk
+        // and a line-of-sight refusal.
+        Map<BlockPos, Boolean> exposed = new HashMap<>();
         Comparator<BlockPos> comparator =
-                Comparator.<BlockPos>comparingDouble(pos -> -DirtNavigationPolicy.score(origin, pos))
+                Comparator.<BlockPos>comparingInt(pos -> exposed.computeIfAbsent(pos, p -> hasOpenFace(player, p)) ? 0 : 1)
+                        .thenComparingDouble(pos -> -DirtNavigationPolicy.score(origin, pos))
                         .thenComparingDouble(pos -> origin.getSquaredDistance(pos));
         if (diggingDown && allowAnyBlock) {
             comparator = Comparator.<BlockPos>comparingInt(BlockPos::getY)
@@ -795,6 +868,27 @@ public final class DirtShovelSkill implements Skill {
         return player.getBlockPos().getSquaredDistance(destination) <= 4.0D;
     }
 
+    /** Last warn time per block for repeated approach-clearing refusals (log only, behaviour unchanged). */
+    private static final Map<BlockPos, Long> UNEXPECTED_RESULT_LOG = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long UNEXPECTED_RESULT_LOG_INTERVAL_MS = 30_000L;
+
+    /**
+     * The same hidden block can be tried as an approach step for many candidates in a row (a sandbox
+     * run logged 42 "no line of sight" lines for one cell between two mined blocks). The first line
+     * per block per 30 s is a warning; repeats go to debug.
+     */
+    private static void logUnexpectedResult(BlockPos blockPos, String result) {
+        if (UNEXPECTED_RESULT_LOG.size() > 512) {
+            UNEXPECTED_RESULT_LOG.clear();
+        }
+        if (net.wcfcarolina13.GameAI.services.LogThrottle.due(UNEXPECTED_RESULT_LOG, blockPos.toImmutable(),
+                System.currentTimeMillis(), UNEXPECTED_RESULT_LOG_INTERVAL_MS)) {
+            LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
+        } else {
+            LOGGER.debug("Mining {} returned unexpected result again: {}", blockPos, result);
+        }
+    }
+
     private boolean mineWithinReach(ServerPlayerEntity player, BlockPos blockPos) {
         if (blockPos == null || player == null) {
             return true;
@@ -811,7 +905,7 @@ public final class DirtShovelSkill implements Skill {
         try {
             String result = future.get(6, TimeUnit.SECONDS);
             if (result == null || !result.toLowerCase().contains("complete")) {
-                LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
+                logUnexpectedResult(blockPos, result);
                 return false;
             }
             if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {
@@ -913,12 +1007,70 @@ public final class DirtShovelSkill implements Skill {
         return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
+    private static final String HIDDEN_COUNTS_KEY = "dirtShovel.hiddenCounts";
+
+    /** Counts how often {@code pos} was hidden in this job; with no shared state every call counts as the limit. */
+    @SuppressWarnings("unchecked")
+    private int noteHidden(SkillContext context, BlockPos pos) {
+        Map<String, Object> shared = context.sharedState();
+        if (shared == null) {
+            return LineOfSightRedirectPolicy.HIDDEN_RETRY_LIMIT;
+        }
+        Object raw = shared.computeIfAbsent(HIDDEN_COUNTS_KEY, k -> new java.util.concurrent.ConcurrentHashMap<BlockPos, Integer>());
+        if (!(raw instanceof Map<?, ?>)) {
+            return LineOfSightRedirectPolicy.HIDDEN_RETRY_LIMIT;
+        }
+        return ((Map<BlockPos, Integer>) raw).merge(pos.toImmutable(), 1, Integer::sum);
+    }
+
+    /** A lava (or lava-like) cell touching {@code pos}, or null. Breaking {@code pos} would open it. */
+    private BlockPos lavaTouching(ServerPlayerEntity player, BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            BlockPos neighbor = pos.offset(dir);
+            if (player.getEntityWorld().getFluidState(neighbor).isIn(net.minecraft.registry.tag.FluidTags.LAVA)) {
+                return neighbor;
+            }
+        }
+        return null;
+    }
+
+    /** Mines {@code pos} with the same 10 s budget as the main loop; null on timeout or error. */
+    private String mineWithTimeout(ServerPlayerEntity player, BlockPos pos) {
+        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
+            try {
+                return MiningTool.mineBlock(player, pos).get();
+            } catch (Exception e) {
+                LOGGER.error("Error while mining {}", pos, e);
+                return null;
+            }
+        });
+        try {
+            return future.get(10, TimeUnit.SECONDS);
+        } catch (TimeoutException timeout) {
+            future.cancel(true);
+            LOGGER.warn("Mining {} timed out", pos);
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private boolean isWithinMiningReach(ServerPlayerEntity player, BlockPos blockPos) {
         if (player == null || blockPos == null) {
             return false;
         }
         Vec3d target = Vec3d.ofCenter(blockPos);
         return player.squaredDistanceTo(target.x, target.y, target.z) <= MAX_MINING_DISTANCE_SQ;
+    }
+
+    /** True when any face of {@code pos} touches a cell with no collision shape (air, water, plants). */
+    private boolean hasOpenFace(ServerPlayerEntity player, BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            if (isPassable(player, pos.offset(dir))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isPassable(ServerPlayerEntity player, BlockPos pos) {

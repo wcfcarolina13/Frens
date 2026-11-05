@@ -282,6 +282,9 @@ public class CollectDirtSkill implements Skill {
         int attempt = 0;
         String lastMessage = "";
         long startTime = System.currentTimeMillis();
+        // The runtime cap measures time without progress: a mined block resets it, so a large
+        // request is not cut off at 60 s while the bot is still collecting.
+        long lastProgressMs = startTime;
         int radiusBoost = 0;
         int verticalBoost = 0;
         Set<BlockPos> unreachable = new HashSet<>();
@@ -331,7 +334,7 @@ public class CollectDirtSkill implements Skill {
 
         while (collected < targetCount
                 && failuresInRow < currentMaxFails
-                && System.currentTimeMillis() - startTime < MAX_RUNTIME_MILLIS
+                && System.currentTimeMillis() - lastProgressMs < MAX_RUNTIME_MILLIS
                 && !Thread.currentThread().isInterrupted()
                 && !TaskService.isAbortRequested(source.getPlayer() != null ? source.getPlayer().getUuid() : null)) {
 
@@ -480,6 +483,7 @@ public class CollectDirtSkill implements Skill {
                     }
                 }
                 collected = Math.max(collected, inventoryCollected);
+                lastProgressMs = System.currentTimeMillis();
                 failuresInRow = 0;
                 radiusBoost = 0;
                 verticalBoost = 0;
@@ -554,7 +558,7 @@ public class CollectDirtSkill implements Skill {
                         LOGGER.info("{} exploration cleared {} unreachable targets after moving {} blocks", 
                                 skillName, cleared, String.format("%.1f", distance));
                         LOGGER.info("{} exploration step succeeded; retrying search.", skillName);
-                        startTime = System.currentTimeMillis();
+                        lastProgressMs = System.currentTimeMillis();
                         explorationAttempts = 0;
                         continue;
                     } else if (explorationSucceeded) {
