@@ -6,15 +6,15 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 ## Session Handoff 2026-11-05 (cloud batch, unreleased) — next session starts here
 
-**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#30 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
+**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#32 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
 
 **Merge order (stacked PRs):** #11 → #24 (place worker hop), #13 → #29 (blind-walk guard), #17 → #20 (more owner-only files). Retarget the second of each pair to `main` after the first merges.
 
 **PRs by kind:**
-- Fixes with a sandbox check: #6 new-bots button on old servers, #7 End second exit, #10 skill start-up ticket leak, #11 `/bot place chest <n>`, #15 sunset "Returning to base." once, #16 furnace walk-back, #17/#20 store files 0600, #21 death soul respawn note, #23 despawned bots really removed in release builds (reflection matched `sendCommandTree`), #24 `/bot place` out of reach walks over, #27 follow no longer steers a bot during `/bot craft`, #28 hand-dig stair escape, #29 blind-walk guard.
+- Fixes with a sandbox check: #6 new-bots button on old servers, #7 End second exit, #10 skill start-up ticket leak, #11 `/bot place chest <n>`, #15 sunset "Returning to base." once, #16 furnace walk-back, #17/#20 store files 0600, #21 death soul respawn note, #23 despawned bots really removed in release builds (reflection matched `sendCommandTree`), #24 `/bot place` out of reach walks over, #27 follow no longer steers a bot during `/bot craft`, #32 the same for Quick Store / Quick Fetch, #28 hand-dig stair escape, #29 blind-walk guard.
 - Souls: #8 `threads.closed`, #9 BAD_AT from execution failures, #12 nickname addressing.
 - No behaviour change: #13 LeafClear types, #18 Fortify delegates, #19 SoulStore close test, #22 policy tests, #25 nav counter race, #26 guardrail (parallel Gradle memory).
-- Docs/design: #14 container fetch and organize options (new P2 backlog line), #30 combined chest ask policy layer (not wired).
+- Docs/design: #14 container fetch and organize options (new P2 backlog line), #30 combined chest ask policy layer (not wired). Independent reviews (Fable) covered #7–#12, #15, #16, #21, #23, #24, #28–#30; their should-fix findings are fixed on the branches, minors are noted in each PR.
 
 **Rulings needed (each PR or doc has the detail and a recommended answer):**
 1. #14: the 10 container fetch/organize rulings in `docs/superpowers/specs/2026-11-05-container-fetch-and-organize-options.md`.
@@ -26,7 +26,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 7. OWNER_DAMAGE peer rule: needs (a) shared or own per-day trust guard, (b) environmental damage counts or not, (c) peer ids in participants or a fact, (d) apply at event or at consolidation. After #8/#9 merge.
 8. Slice D (remove the legacy pathfinder switch and bidir): "once the default has held" is your call.
 9. Addressee: a mid-sentence third-person mention (conflicts with an existing test) and "you and Bob" (needs the DM window's bot).
-10. Chest Quick Store / Quick Fetch and `SurfaceRecoveryService` walk without suspending follow (same gap as #27): fix the same way?
+10. `SurfaceRecoveryService` (runs from flee) walks without suspending follow, the same gap #27 and #32 fix for `/bot craft` and Quick Store / Fetch: fix it the same way?
 
 **Found wrong as written (no change):** `TaskService.resetAll` worker ticket (every worker clears its own in a `finally`); weird-portal edge "re-rolls each tick" (the edge is consumed at the end of the 4 s scan).
 
