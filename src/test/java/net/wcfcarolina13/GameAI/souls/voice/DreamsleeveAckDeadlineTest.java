@@ -28,6 +28,8 @@ class DreamsleeveAckDeadlineTest {
 
     private static Path shortSocketPath() {
         // AF_UNIX paths are short on macOS, so bind under /tmp like the engine does.
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.Files.isDirectory(Path.of("/tmp")),
+                "no /tmp (Windows): skipped");
         return Path.of("/tmp", "frens-acktest-" + Long.toHexString(System.nanoTime() & 0xFFFFFFFFL) + ".sock");
     }
 

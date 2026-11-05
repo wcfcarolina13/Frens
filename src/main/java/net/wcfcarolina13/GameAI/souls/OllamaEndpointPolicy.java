@@ -50,7 +50,8 @@ public final class OllamaEndpointPolicy {
 
     /**
      * Joins the base URL and an API path. Blank base means the default local daemon. Any number
-     * of trailing slashes on the base are dropped, a missing leading slash on the path is added,
+     * of trailing slashes and a trailing {@code /api} on the base are dropped, a missing leading slash
+     * on the path is added,
      * and a path prefix on the base ({@code http://host/ollama}) is kept in front of the API path.
      *
      * @throws IllegalArgumentException when the base is not an HTTP or HTTPS URL
@@ -68,6 +69,15 @@ public final class OllamaEndpointPolicy {
             end--;
         }
         base = base.substring(0, end);
+        // A pasted ".../api" base (the old resolve() call quietly fixed it) would give /api/api/chat.
+        if (base.endsWith("/api")) {
+            base = base.substring(0, base.length() - "/api".length());
+            int trim = base.length();
+            while (trim > 0 && base.charAt(trim - 1) == '/') {
+                trim--;
+            }
+            base = base.substring(0, trim);
+        }
         String path = apiPath == null ? "" : apiPath.trim();
         if (!path.startsWith("/")) {
             path = "/" + path;

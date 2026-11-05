@@ -73,8 +73,13 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
     private volatile Process process;
     private volatile boolean closed;
 
-    /** The warm-up request is opportunistic, so its ack wait is short and its failure ignored. */
-    static final long WARMUP_ACK_TIMEOUT_MS = 2_000L;
+    /**
+     * The warm-up ack wait. Long on purpose: if the server acks only after it has loaded its model
+     * and rendered, a short wait would send the first real line into the load, time it out, kill the
+     * server and loop. This runs on the engine thread, never the server thread; the old read had no
+     * bound at all. Failure is still ignored.
+     */
+    static final long WARMUP_ACK_TIMEOUT_MS = 120_000L;
 
     public DreamsleeveVoiceEngine(String dreamsleeveDir, String refAudio, String refText,
                                    long synthTimeoutMs) throws IOException {

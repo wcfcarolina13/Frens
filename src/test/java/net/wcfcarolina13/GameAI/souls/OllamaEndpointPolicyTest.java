@@ -69,4 +69,14 @@ class OllamaEndpointPolicyTest {
         assertFalse(OllamaEndpointPolicy.SCHEME_ERROR.contains("—"));
         assertFalse(OllamaEndpointPolicy.SCHEME_ERROR.contains(";"));
     }
+
+    @org.junit.jupiter.api.Test
+    void aPastedApiSuffixIsDropped() {
+        org.junit.jupiter.api.Assertions.assertEquals("http://host:11434/api/chat",
+                OllamaEndpointPolicy.endpoint("http://host:11434/api", "/api/chat"));
+        org.junit.jupiter.api.Assertions.assertEquals("http://host:11434/api/chat",
+                OllamaEndpointPolicy.endpoint("http://host:11434/api/", "/api/chat"));
+        org.junit.jupiter.api.Assertions.assertEquals("https://h/ollama/api/pull",
+                OllamaEndpointPolicy.endpoint("https://h/ollama/api", "api/pull"));
+    }
 }

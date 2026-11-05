@@ -20,6 +20,11 @@ Six confirmed outbound-I/O and child-process findings from a read-only audit of 
 
 Limits: unbounded response reads and model-pull cancellation on stop are out of scope. The direct kill covers close paths only; a hard JVM kill still orphans a child, as before. Tests: `OllamaEndpointPolicyTest` (7), `DeadlineReadsTest` (9, fake stream and fake clock), `VoiceEngineShutdownWiringTest` (7, source wiring for the direct kill, the non-blocking ack, the byte-wise Piper read, the tar discard and the detect guard), `DreamsleeveAckDeadlineTest` (3, real UNIX socket, skipped where the JDK lacks them).
 
+Review fixes:
+- The Dreamsleeve warm-up ack now waits up to 120 s, not 2 s. If the server acks only after loading its model and rendering, a short wait would have sent the first real line into the load, timed it out, killed the server and looped. The wait runs on the engine thread. The old read had no bound.
+- A base URL pasted with a trailing `/api` is accepted, as the old `resolve()` call allowed.
+- The UNIX-socket test skips cleanly where there is no `/tmp`.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
