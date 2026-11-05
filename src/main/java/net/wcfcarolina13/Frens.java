@@ -1254,6 +1254,12 @@ public class Frens implements ModInitializer {
                                 .promptForRespawn(srv, serverPlayer);
                     }
                     BotEventHandler.unregisterBot(serverPlayer);
+                    // unregisterBot ends in PlayerManager.remove, which saves player data: that
+                    // re-created the .dat onBotDeath just deleted (post-drop inventory, death spot),
+                    // so a "yes" respawned the bot where it died. Delete it again, as /bot forget does.
+                    if (srv != null) {
+                        BotPersistenceService.deletePlayerDataFile(srv, serverPlayer.getUuid());
+                    }
                 }
                 HuntSessionService.clearSession(serverPlayer.getUuid());
             }
