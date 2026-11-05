@@ -2,6 +2,41 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Three server-thread freezes removed (2026-11-05, unreleased)
+
+From an audit of code that sleeps or waits on the server thread:
+- **"Map village" froze the server for 5 s and lost the villagers.**
+  - The cause: the packet handler runs on the server thread, and
+    `VillageFortificationLayoutService.detectVillagePositions` posted the villager scan to
+    `server.execute` and then waited 5 s for it. A task posted to the waiting thread cannot run, so
+    every call waited the full 5 s and built the layout with no villagers.
+  - The fix: the scan now goes through `ServerThreadCallPolicy.call`, which runs inline on the
+    server thread and still hops from a worker.
+- **Feeding a hurt mount froze the tick for up to ~1 s.** Ride sync calls
+  `AnimalFeedingService.feedIfNeeded` from the server tick. Its loop fed up to 6 items with
+  `Thread.sleep(160)` between them. On the server thread it now feeds one item, then schedules the
+  next about 3 ticks later (`TaskService.runOnServerAfterTicks`) while the animal is still hurt, up
+  to the same 6. Workers keep the old loop.
+- **`/bot come` with "teleport during skills" on froze for seconds.** Within 30 blocks the
+  movement service walks before it teleports, and the command runs on the server thread, where
+  that walk sleeps (up to ~2.4 s direct walk plus 3 s pursuit). Within 30 blocks (new
+  `ComeTeleportPolicy`, the same band `MovementService.moveTo` uses), `/bot come` now uses the
+  tick-driven come-walk, as it does when teleport is off. Farther, it still teleports.
+
+Costs and limits:
+- A near `/bot come` with teleport on no longer falls back to a teleport when the walk is blocked.
+  It keeps re-planning, like follow, until it arrives or you call it again from farther away.
+- Mount feeding paces at ~150 ms instead of 160 ms.
+- Not changed here:
+  - the return-to-base door traverse (recorded deferral, waiting for the WARN tripwire's
+    evidence);
+  - the respawn restart sleep (the area of the earlier open PR on respawn).
+
+Tests: `ServerThreadNoBlockTest` (4). Needs a sandbox check:
+- "Map village" from the base UI near a village: no freeze, and villagers in the layout.
+- Mount a hurt horse with its food: no hitch, several feeds.
+- `/bot come` with teleport on from 10 blocks: the bot walks, no freeze.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
