@@ -671,7 +671,8 @@ public class HarvestCropSkill implements Skill {
 
     private static int ensureSeedHotbar(ServerPlayerEntity bot, Item targetSeed) {
         // Moves a stack into the hotbar: server thread (inline when already there), not the worker.
-        return net.wcfcarolina13.GameAI.BotActions.callOnServerThread(bot, () -> ensureSeedHotbarOnServer(bot, targetSeed), 750L, -1);
+        // Retried once on a timeout: callers end their planting pass on -1.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThreadRetrying(bot, () -> ensureSeedHotbarOnServer(bot, targetSeed), 750L, -1);
     }
 
     private static int ensureSeedHotbarOnServer(ServerPlayerEntity bot, Item targetSeed) {
@@ -712,7 +713,8 @@ public class HarvestCropSkill implements Skill {
 
     private static int findAnySeedHotbarSlot(ServerPlayerEntity bot) {
         // Moves a stack into the hotbar: server thread (inline when already there), not the worker.
-        return net.wcfcarolina13.GameAI.BotActions.callOnServerThread(bot, () -> findAnySeedHotbarSlotOnServer(bot), 750L, -1);
+        // Retried once on a timeout: callers end their planting pass on -1.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThreadRetrying(bot, () -> findAnySeedHotbarSlotOnServer(bot), 750L, -1);
     }
 
     private static int findAnySeedHotbarSlotOnServer(ServerPlayerEntity bot) {

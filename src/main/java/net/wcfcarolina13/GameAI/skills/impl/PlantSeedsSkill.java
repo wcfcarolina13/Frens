@@ -231,7 +231,8 @@ public class PlantSeedsSkill implements Skill {
 
     private static int ensureAnySeedHotbar(ServerPlayerEntity bot) {
         // Moves a stack into the hotbar: server thread (inline when already there), not the worker.
-        return net.wcfcarolina13.GameAI.BotActions.callOnServerThread(bot, () -> ensureAnySeedHotbarOnServer(bot), 750L, -1);
+        // Retried once on a timeout: callers end their planting pass on -1.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThreadRetrying(bot, () -> ensureAnySeedHotbarOnServer(bot), 750L, -1);
     }
 
     private static int ensureAnySeedHotbarOnServer(ServerPlayerEntity bot) {

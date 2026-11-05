@@ -14,9 +14,18 @@ Each now runs on the server thread, inline when already there. That covers the f
 seed paths, harvest replanting and plant-seeds. On a timeout (750 ms) the slot helpers return
 -1, which the callers already handle as "item unavailable", and selection is skipped.
 
+Review fixes: callers end their planting pass on -1 ("Seeds disappeared", "no seeds available"),
+so a single server stall over 750 ms (autosave, chunk generation) would have ended planting for
+the run. The slot lookups now go through the new
+`BotActions.callOnServerThreadRetrying`/`ServerThreadCallPolicy.callRetrying`, which retries
+once on a timeout and never retries a real answer. Only two stalls in a row read as "no
+seeds". `FarmSkill.ensureHotbarAccess` returns a slot that is already in the hotbar before any
+hop. `ScaffoldSlotPolicy.resolveHotbarTarget` returns that slot whatever the lock, so this saves
+the hop in the stray-water scan and most bucket re-selects.
+
 Costs and limits: about one server tick per helper call from a worker. The interactions after
 them are already hopped by the off-thread mutation fix (planting) or already ran in
-`server.execute` (water scooping). Tests: `FarmHotbarHelperHopWiringTest`. Needs a sandbox smoke
+`server.execute` (water scooping). Tests: `FarmHotbarHelperHopWiringTest` (2), `ServerThreadCallRetryTest` (4). Needs a sandbox smoke
 test: farm (till, plant, water), harvest with replant, plant seeds from the main inventory.
 
 ## Repository clean-up: public and private split (2026-11-04)

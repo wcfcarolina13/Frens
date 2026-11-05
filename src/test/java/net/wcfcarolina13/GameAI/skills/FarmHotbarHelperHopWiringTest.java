@@ -30,7 +30,19 @@ class FarmHotbarHelperHopWiringTest {
             String src = Files.readString(Path.of(DIR + c[0]));
             int at = src.indexOf(c[1]);
             assertTrue(at >= 0, c[0] + ": " + c[1]);
-            assertTrue(src.lastIndexOf("callOnServerThread(bot, () ->", at) > at - 200, c[0] + " hop around " + c[1]);
+            assertTrue(src.lastIndexOf("BotActions.callOnServerThread", at) > at - 200, c[0] + " hop around " + c[1]);
         }
+    }
+
+    @Test
+    void slotLookupsRetryOnceOnATimeout() throws IOException {
+        // Callers end a planting pass on -1, so one server stall must not read as "no seeds".
+        for (String f : new String[]{"FarmSkill.java", "HarvestCropSkill.java", "PlantSeedsSkill.java"}) {
+            assertTrue(Files.readString(Path.of(DIR + f)).contains("BotActions.callOnServerThreadRetrying(bot, () ->"), f);
+        }
+        String farm = Files.readString(Path.of(DIR + "FarmSkill.java"));
+        int access = farm.indexOf("private static int ensureHotbarAccess(ServerPlayerEntity bot, int slot) {");
+        assertTrue(farm.indexOf("if (slot >= 0 && slot < 9)", access) < farm.indexOf("callOnServerThreadRetrying", access),
+                "a hotbar slot returns before any hop");
     }
 }
