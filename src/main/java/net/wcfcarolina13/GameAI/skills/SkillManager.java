@@ -112,6 +112,9 @@ public final class SkillManager {
      * @return the state to hand to {@link #resumeFollowMode}; never null
      */
     public static FollowResumeState suspendFollowMode(ServerPlayerEntity botPlayer) {
+        if (botPlayer != null) {
+            net.wcfcarolina13.GameAI.services.FollowResumeVeto.clearOnSuspend(botPlayer.getUuid());
+        }
         if (botPlayer == null || BotEventHandler.getCurrentMode(botPlayer) != BotEventHandler.Mode.FOLLOW) {
             return new FollowResumeState(null, null, 0.0D, true);
         }
@@ -139,6 +142,12 @@ public final class SkillManager {
             return;
         }
         if (resume.fixedGoal() == null && resume.followUuid() == null) {
+            return;
+        }
+        // "/bot follow stop" or "/bot stay" during the task: the player's word outlives the task.
+        if (net.wcfcarolina13.GameAI.services.FollowResumeVeto.consume(botPlayer.getUuid())) {
+            LOGGER.info("[FollowAssert] task-resume skipped bot={} reason=player-stopped-follow-during-task",
+                    botPlayer.getName().getString());
             return;
         }
         // Callers complete their ticket first. A task that started in the gap owns the bot now:
