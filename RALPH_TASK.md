@@ -8,7 +8,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 **State:** main unchanged (1.1.298). A cloud session opened PRs #6–#34 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
 
-**Integration check (2026-11-05):** all 27 branches of this batch merged together onto main with no source conflict (only changelog.md, where keeping both sides is right); the combined tree builds and runs 4068 tests with only the root-container `SoulStoreTest.persistCursorFailure…` failing. Merging them in any order should need only changelog conflict resolution.
+**Integration check (2026-11-05):** all 29 branches of this batch (through #34) merged together onto main with no source conflict (only changelog.md, where keeping both sides is right); the combined tree builds and runs 4108 tests with only the root-container `SoulStoreTest.persistCursorFailure…` failing. Merging them in any order should need only changelog conflict resolution.
 
 **Merge order (stacked PRs):** #11 → #24 (place worker hop), #13 → #29 (blind-walk guard), #17 → #20 (more owner-only files), #30 → #34 (combined chest ask wiring). Retarget the second of each pair to `main` after the first merges.
 
