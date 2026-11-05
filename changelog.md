@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## CI runs the test suite (2026-11-05, unreleased)
+
+CI ran `./gradlew build -x test`, so the JUnit suite (about 3900 tests: pure policy, wiring and
+file-system tests that need no game) never ran on a pull request. Every "tests pass" claim rested
+on a local run. `ci-build.yml` now runs `./gradlew test` as its own step after the build and
+uploads the HTML test report when that step fails. The release workflow is unchanged.
+
+Costs and limits:
+- A few more CI minutes per push.
+- A red test now blocks a PR's check.
+- The SoulStore close test (`closeShutsDownInjectedExecutorLeavingNoThreadAlive`) is
+  timing-sensitive under load. The open SoulStore close-test PR (#19) makes it wait for the
+  worker, so merge that first, or expect a rare re-run.
+- The root-only `persistCursorFailure` test fails only when run as root; the GitHub runner is not
+  root.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
