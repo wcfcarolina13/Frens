@@ -4,7 +4,37 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-10-24 (1.1.298) — next session starts here
+## Session Handoff 2026-11-05 (cloud batch, unreleased) — next session starts here
+
+**State:** main unchanged (1.1.298). A cloud session opened PRs #6–#30 (wcfcarolina13/Frens), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
+
+**Merge order (stacked PRs):** #11 → #24 (place worker hop), #13 → #29 (blind-walk guard), #17 → #20 (more owner-only files). Retarget the second of each pair to `main` after the first merges.
+
+**PRs by kind:**
+- Fixes with a sandbox check: #6 new-bots button on old servers, #7 End second exit, #10 skill start-up ticket leak, #11 `/bot place chest <n>`, #15 sunset "Returning to base." once, #16 furnace walk-back, #17/#20 store files 0600, #21 death soul respawn note, #23 despawned bots really removed in release builds (reflection matched `sendCommandTree`), #24 `/bot place` out of reach walks over, #27 follow no longer steers a bot during `/bot craft`, #28 hand-dig stair escape, #29 blind-walk guard.
+- Souls: #8 `threads.closed`, #9 BAD_AT from execution failures, #12 nickname addressing.
+- No behaviour change: #13 LeafClear types, #18 Fortify delegates, #19 SoulStore close test, #22 policy tests, #25 nav counter race, #26 guardrail (parallel Gradle memory).
+- Docs/design: #14 container fetch and organize options (new P2 backlog line), #30 combined chest ask policy layer (not wired).
+
+**Rulings needed (each PR or doc has the detail and a recommended answer):**
+1. #14: the 10 container fetch/organize rulings in `docs/superpowers/specs/2026-11-05-container-fetch-and-organize-options.md`.
+2. #30: partly stocked chest asks for what it has; craft from own stock before asking; drop recently refused items; "Always" covers every allowed line.
+3. #28: stone by hand allowed (about 22 s a step), straight staircase, water refuses like lava.
+4. #9: allow-list of "stuck" failure phrasings; GOOD_AT needs completions >= failures; a model BAD_AT removes a SEEN GOOD_AT.
+5. #21: the death fallback still skips `AutoFaceEntity.handleBotRespawn`, `BotPersistenceService.onBotRespawn` (would run `onBotJoin` after a death) and `botSpawnCount++`: keep skipping?
+6. Refused-adoption bucket (1.1.291 deferral) is wrong as written: no write creates an empty bucket; the first runtime record creates a real one, and the import then refuses. Options: merge into a non-empty target, replace behind a backup, or reword the preview to "import before any bot activity" (recommended, cheapest).
+7. OWNER_DAMAGE peer rule: needs (a) shared or own per-day trust guard, (b) environmental damage counts or not, (c) peer ids in participants or a fact, (d) apply at event or at consolidation. After #8/#9 merge.
+8. Slice D (remove the legacy pathfinder switch and bidir): "once the default has held" is your call.
+9. Addressee: a mid-sentence third-person mention (conflicts with an existing test) and "you and Bob" (needs the DM window's bot).
+10. Chest Quick Store / Quick Fetch and `SurfaceRecoveryService` walk without suspending follow (same gap as #27): fix the same way?
+
+**Found wrong as written (no change):** `TaskService.resetAll` worker ticket (every worker clears its own in a `finally`); weird-portal edge "re-rolls each tick" (the edge is consumed at the end of the 4 s scan).
+
+**Review of PRs #2–#5 (read-only, not posted):** #2 should-fix: `BotWakeUpDialogueService` :205 and :275 still call the world-agnostic `isLoggedOff`, so a bot logged off in world A is skipped as "already in zzz-cycle" in world B (use `isLoggedOffIn`); minors: the logoff sidecar is keyed by name only, and an entry whose dimension no longer resolves is now skipped for good. #3 looks right (door left open, as the village exit does). #4 minor: a hop that finishes as the 2 s timeout fires is retried and can read NOT_SWITCHED with the tool in hand. #5 minor: a private line whose reply is cancelled without SPOKEN or FAILURE (server stop) can still become a public memory at the next rollover.
+
+**Not done:** Piper Linux x64 install check (downloading and running the pinned binary was blocked by the cloud permission check; run it on the Mac or approve it). Everything that needs the game.
+
+## Session Handoff 2026-10-24 (1.1.298) — superseded
 
 **State:** 1.1.298 on main. From Bradley's Nirn report on 1.1.297: a sleeping bot stays in bed in every mode (follow kept ticking and dragged it off the bed, the 1.1.229 resume theory was wrong), follow does not pull a bot away while it walks to a bed, `/bot follow`, `/bot stop` and the follow toggle wake it. New admin setting "Log Off If Can't Sleep" (default on): after zzz or co-sleep a bot with no bed logs off at once and comes back at dawn with its inventory, off keeps bots online. Bot-placed beds are no longer "obstructed" (trySleep gets the head). Sandbox-checked, 5 of 5 pass, `docs/testing/FIELD_1_1_298_SANDBOX_2026-10-23.md`, replays `frens_1_1_298_*`. Tests 3853.
 
