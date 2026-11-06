@@ -3011,9 +3011,18 @@ public final class BotFleeService {
                 return;
             }
 
-            // 2. Type-specific exit
+            // 2. A wooden door to the sky first, for the generic and join-enclosed exits: both
+            // otherwise mine through whatever encloses the bot, which in a house is the player's
+            // wall or roof. Then the type-specific exit, if the door did not get the bot out.
             boolean recoveryRan = false;
-            if (info != null && info.type() == ShelterType.CLIFF && info.capPos() != null) {
+            boolean leftByDoor = ShelterDoorExitPolicy.tryDoorFirst(info == null ? null : info.type().name())
+                    && tryLeaveByDoor(bot, world, pos);
+            if (shouldAbortSurvival(bot)) {
+                return;
+            }
+            if (leftByDoor) {
+                // Out through the door: nothing to mine.
+            } else if (info != null && info.type() == ShelterType.CLIFF && info.capPos() != null) {
                 breakFreeCliff(bot, world, info);
             } else if (info != null && (info.type() == ShelterType.DIG_DOWN || info.type() == ShelterType.JOIN_ENCLOSED) && info.capPos() != null) {
                 recoveryRan = breakFreeDugDown(bot, world, info);
@@ -3184,6 +3193,58 @@ public final class BotFleeService {
         MovementService.tryTraverseOpenableToward(bot, doorPos, outside, "village-breakfree");
         Thread.sleep(500L);
         LOGGER.info("Bot {} stepped out of village shelter at {}", bot.getName().getString(), doorPos.toShortString());
+    }
+
+    /**
+     * Walks out through the nearest wooden door whose far side opens to the sky, the way the
+     * village-house exit does, then on to a cell two past the door. Returns true only when the bot
+     * ended on the far side of the doorway. Otherwise (no such door, the door would not open, the
+     * bot did not get through) it walks back to {@code start}, so the caller's mining exit runs
+     * from the cell it was planned for, exactly as before.
+     */
+    private static boolean tryLeaveByDoor(ServerPlayerEntity bot, ServerWorld world, BlockPos start)
+            throws InterruptedException {
+        MinecraftServer server = bot.getCommandSource().getServer();
+        PlayerBuiltStructureScanner.SkyDoor door = callOnServer(server,
+                () -> PlayerBuiltStructureScanner.findSkyDoor(new ChunkBlockReader(world), start),
+                WALL_OFF_HOP_TIMEOUT_MS, null);
+        if (door == null) {
+            return false;
+        }
+        String name = bot.getName().getString();
+        BlockPos doorPos = door.lowerHalf();
+        Direction farDir = door.facesAlongX()
+                ? (door.farSign() > 0 ? Direction.EAST : Direction.WEST)
+                : (door.farSign() > 0 ? Direction.SOUTH : Direction.NORTH);
+        BlockPos farCell = doorPos.offset(farDir, 2).toImmutable();
+        LOGGER.info("Bot {} break-free: leaving by the door at {}", name, doorPos.toShortString());
+        if (MovementService.tryTraverseOpenableToward(bot, doorPos, farCell, "shelter-door-exit")
+                && !shouldAbortSurvival(bot)) {
+            // The traverse's step nudge stops within 2 blocks of its step tile, often still in the
+            // doorway: walk on clear of it (one past when two past is not standable).
+            boolean farStandable = Boolean.TRUE.equals(callOnServer(server,
+                    () -> VoxelJunctionService.isStandable(world, farCell), WALL_OFF_HOP_TIMEOUT_MS, Boolean.FALSE));
+            BlockPos target = farStandable ? farCell : doorPos.offset(farDir).toImmutable();
+            MovementService.execute(bot.getCommandSource(), bot, new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT, target, target, null, null, null), Boolean.FALSE, true);
+            Thread.sleep(400L);
+        }
+        BlockPos end = bot.getBlockPos();
+        boolean crossed = door.facesAlongX()
+                ? ShelterDoorExitPolicy.crossedDoorway(doorPos.getX(), start.getX(), end.getX())
+                : ShelterDoorExitPolicy.crossedDoorway(doorPos.getZ(), start.getZ(), end.getZ());
+        if (crossed) {
+            LOGGER.info("Bot {} broke free through the door at {}", name, doorPos.toShortString());
+            return true;
+        }
+        LOGGER.info("Bot {} break-free: door exit at {} did not get it out (at {}), mining out instead",
+                name, doorPos.toShortString(), end.toShortString());
+        if (!end.equals(start) && !shouldAbortSurvival(bot)) {
+            MovementService.execute(bot.getCommandSource(), bot, new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT, start, start, null, null, null), Boolean.FALSE, true);
+            Thread.sleep(300L);
+        }
+        return false;
     }
 
     /** Generic break-free: try 4 horizontal directions, then mine up. */
