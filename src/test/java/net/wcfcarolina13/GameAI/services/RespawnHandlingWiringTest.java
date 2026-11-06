@@ -87,7 +87,7 @@ class RespawnHandlingWiringTest {
         String autoFace = flatten(Path.of("src/main/java/net/wcfcarolina13/Entity/AutoFaceEntity.java"));
         String restart = block(autoFace, "public static void handleBotRespawn(ServerPlayerEntity bot, boolean alive)");
         assertTrue(restart.contains("TaskService.onBotRespawn(bot, plan.taskAbortMessage())"));
-        assertTrue(block(restart, "if (plan.sleepBeforeRestart())").contains("Thread.sleep(100)"));
+        assertFalse(restart.contains("Thread.sleep"), "AFTER_RESPAWN runs on the server thread: no sleep");
         assertTrue(restart.indexOf("stopAutoFace(bot)") < restart.indexOf("startAutoFace(bot)"));
     }
 

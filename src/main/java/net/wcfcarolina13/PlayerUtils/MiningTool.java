@@ -536,12 +536,12 @@ public class MiningTool {
         if (foundSlot != -1) {
             final int slot = foundSlot;
             final ItemStack expected = tool;
-            Boolean ok = callOnServer(bot, () -> {
+            ToolSwitchPolicy.Outcome outcome = hopWithRetry(bot, "slot " + slot, () -> {
                 PlayerInventory inv = bot.getInventory();
                 if (!ToolSelector.slotStillMatches(expected, inv.getStack(slot))) {
                     LOGGER.debug("Tool switch: slot {} no longer holds {} — aborting swap for {}",
                             slot, expected.getItem(), bot.getName().getString());
-                    return Boolean.FALSE;
+                    return false;
                 }
                 if (slot < 9) {
                     BotActions.selectHotbarSlot(bot, slot);
@@ -554,8 +554,8 @@ public class MiningTool {
                 swapStacks(inv, slot, target);
                 BotActions.selectHotbarSlot(bot, target);
                 return ToolSelector.slotStillMatches(expected, bot.getMainHandStack());
-            }, Boolean.FALSE);
-            if (Boolean.TRUE.equals(ok)) {
+            });
+            if (outcome == ToolSwitchPolicy.Outcome.SWITCHED) {
                 return true;
             }
         }
@@ -566,19 +566,48 @@ public class MiningTool {
                     stack -> ItemStack.areItemsAndComponentsEqual(stack, wanted);
             // Only worth a bundle hop when nothing matching sits in a direct slot but a bundle holds one.
             // Extraction and the follow-up equip must be the same server-thread unit.
-            Boolean reached = callOnServer(bot, () -> {
+            ToolSwitchPolicy.Outcome reached = hopWithRetry(bot, "bundle reach", () -> {
                 if (InventoryIterator.countDirect(bot, match) != 0
                         || InventoryIterator.count(bot, match) == 0
                         || !net.wcfcarolina13.GameAI.services.BundleService.reachFirst(bot, match)) {
-                    return Boolean.FALSE;
+                    return false;
                 }
                 LOGGER.info("Tool switch: reached {} out of a bundle for {}",
                         wanted.getItem(), bot.getName().getString());
                 return switchToTool(bot, wanted, false);
-            }, Boolean.FALSE);
-            return Boolean.TRUE.equals(reached);
+            });
+            return reached == ToolSwitchPolicy.Outcome.SWITCHED;
         }
         return false;
+    }
+
+    /**
+     * One tool-switch step as a server-thread unit, sent again once if the hop timed out
+     * ({@link ToolSwitchPolicy}). The step's own throw is caught inside the hop and reported as
+     * NOT_SWITCHED, so only a hop that never ran (and was cancelled) is retried.
+     */
+    private static ToolSwitchPolicy.Outcome hopWithRetry(ServerPlayerEntity bot, String what,
+                                                         java.util.function.BooleanSupplier step) {
+        for (int attempt = 1; ; attempt++) {
+            ToolSwitchPolicy.Outcome outcome = callOnServer(bot, () -> {
+                try {
+                    return step.getAsBoolean() ? ToolSwitchPolicy.Outcome.SWITCHED
+                            : ToolSwitchPolicy.Outcome.NOT_SWITCHED;
+                } catch (Throwable t) {
+                    LOGGER.debug("Tool switch step failed: {}", t.toString());
+                    return ToolSwitchPolicy.Outcome.NOT_SWITCHED;
+                }
+            }, ToolSwitchPolicy.Outcome.TIMED_OUT);
+            if (!ToolSwitchPolicy.retry(outcome, attempt, Thread.currentThread().isInterrupted())) {
+                if (outcome == ToolSwitchPolicy.Outcome.TIMED_OUT) {
+                    LOGGER.info("Tool switch ({}) for {}: server hop timed out {} times",
+                            what, bot.getName().getString(), attempt);
+                }
+                return outcome;
+            }
+            LOGGER.debug("Tool switch ({}) for {}: server hop timed out, retrying once",
+                    what, bot.getName().getString());
+        }
     }
 
     /**

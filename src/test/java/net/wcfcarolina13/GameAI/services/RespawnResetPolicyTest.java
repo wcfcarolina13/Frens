@@ -23,7 +23,6 @@ class RespawnResetPolicyTest {
         assertTrue(plan.regroupChat());
         assertTrue(plan.clearLeash());
         assertTrue(plan.noteSoulRespawn());
-        assertTrue(plan.sleepBeforeRestart());
         assertEquals("§cCurrent task aborted due to respawn.", plan.taskAbortMessage());
         assertEquals("§cTask aborted due to bot respawn.", plan.lateAbortMessage());
     }
@@ -36,7 +35,6 @@ class RespawnResetPolicyTest {
         assertFalse(plan.relocate(), "no teleport to the respawn point");
         assertFalse(plan.regroupChat(), "no regrouped line for a bot that did not die");
         assertFalse(plan.noteSoulRespawn(), "the soul does not record a respawn");
-        assertFalse(plan.sleepBeforeRestart(), "no server-thread sleep");
         assertTrue(plan.clearLeash(), "a dimension change drops the leads too");
         assertEquals("§eTask ended: changed dimension.", plan.taskAbortMessage());
         assertNull(plan.lateAbortMessage(), "one abort, with the dimension message");
