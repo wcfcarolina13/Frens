@@ -56,4 +56,12 @@ class CollectTargetPolicyTest {
         assertTrue(loop >= 0 && loopGate > loop && abort > loopGate, "each candidate checks first");
         assertTrue(shovel.contains("TARGET_REACHED.set(previousStop);"), "thread-local restored in finally");
     }
+
+    @Test
+    void redirectChecksTheTargetBeforeMiningTheBlocker() throws IOException {
+        String shovel = source("GameAI/skills/impl/DirtShovelSkill.java");
+        int check = shovel.indexOf("not mining past");
+        int redirect = shovel.indexOf("is hidden by {}; mining that");
+        assertTrue(check > 0 && check < redirect, "the redirect must stop once the amount is reached");
+    }
 }
