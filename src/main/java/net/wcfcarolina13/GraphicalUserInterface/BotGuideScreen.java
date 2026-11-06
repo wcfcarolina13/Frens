@@ -978,6 +978,34 @@ public final class BotGuideScreen extends Screen {
                         "trail escort companion"
                 ),
                 new GuideTopic(
+                        "settings_quiet_bots",
+                        "Settings",
+                        "Keep Bots Quiet",
+                        "Turn down what bots say, in text or out loud.",
+                        List.of(
+                                "Open Bot Controls and find the dialogue toggles.",
+                                "Scripted Text and Scripted Voice cover the ready-made lines.",
+                                "Soul Chat and Soul Voice cover AI chat, if you set it up.",
+                                "Each toggle works alone, so you can keep text and turn off voice."
+                        ),
+                        "",
+                        "Bot Controls",
+                        "quiet mute silence stop talking chatter voice text dialogue"
+                ),
+                new GuideTopic(
+                        "settings_friend_bots",
+                        "Settings",
+                        "Let a Friend Use Bots",
+                        "Who can command a bot on a shared world.",
+                        List.of(
+                                "A bot's owner, an operator or the host can command it.",
+                                "To let a friend command your bots, make them an operator on the world."
+                        ),
+                        "",
+                        "Bot Controls",
+                        "friend guest lan multiplayer share permission operator op"
+                ),
+                new GuideTopic(
                         "settings_follow_teleport",
                         "Settings",
                         "Follow Teleport",
