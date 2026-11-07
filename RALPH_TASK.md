@@ -41,6 +41,24 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 11. #40: TEASE applies only to pairs who both spoke, shares the friction day guard (so it spends that pair's curiosity/friction budget for the day), and its spec trust +1 is the existing both-spoke rule (net visible change: exasperation +1).
 12. Multiplayer roster payload is wrong as written: a membership payload changes nothing, because on a remote server the roster's names come from the client's own local config (no payload syncs `botGameProfile`/`botOwnership`/spawn points). The real fix is a server-owned roster (C2S request, S2C `name`/`inThisWorld`/`savedAnywhere`, mirroring the companion quest request/response pair). Needs: (a) non-ops see all server companions or only their own? (b) hide Restore/Create on remote servers for non-ops (2026-10-23 ruling)? (c) hide the client's local-only names on remote connections?
 
+**Headless server check (2026-11-07):** a Fabric dedicated server (MC 1.21.11, Fabric API 0.141.6; the dev `runServer` fails because Fabric API 0.136.0's game-rule mixin doesn't match 1.21.11) ran an integration build of every open branch #6–#56 plus #65. Bots were driven over RCON, with `execute as <bot>` as the commander and a datapack function where a crosshair target was needed.
+- Boot with all branches: OK, no frens-tick-guard lines.
+- #23/despawn: despawn + respawn keeps inventory (28 items). PASS
+- #65 hazard: fire at Bea's feet -> "escaping hazard 'Fire'", hp 20. PASS
+- #65 hunger: hunger effect, Alex ate 8 bread (food 9->13 under hunger 200). PASS
+- #47 craft: 2 logs -> 8 planks; full pack 14 logs -> 56 planks, counts consistent. PASS (leftover-drop path not triggered)
+- #11 place chest 2 twice: 4 chests in two side-by-side pairs, no "can't reach". PASS (double-chest merge not checked)
+- #24 out of reach: walked ~15 blocks on worker, placed, COMPLETED. PASS
+- #24 /bot stop mid-walk: ABORTED "Stopped by the player", nothing placed. PASS
+- #42: collect_dirt on Alex and Bea at once, both 'Collected 12 dirt blocks', COMPLETED. PASS
+- #43 flare: firework launched, no off-thread errors. PASS
+- #44 fish: 'Fishing succeeded (2 items)'. PASS
+- woodcut full pack: StackOverflowError (craft -> make room -> offload -> place chest -> craft chest ...). Also on plain main (373 nested). FIXED in #66 (stacked on #47): woodcut "Cut 4 tree(s)", craft nests 3. Residual: craft still fails in that corner, 2 tables placed, misleading line.
+- #43 hovel: 'Hovel built.', 5 roof pillars snapped and cleaned ok=true. PASS
+- #43/#46 farm: 'Prepared a hydrated farm and planted 32 seeds (tilled 45)'; scoop + water placement + planting from inventory work. PASS (an earlier run failed only because my test had one water block, which the bot scooped)
+- Whole run: no frens-tick-guard lines, no ERROR apart from the StackOverflowError above.
+- Not testable headless: anything needing a human player (follow, Quick Store UI, chat addressing, C2S packets #53), Ollama/souls (#5, #8, #9, #21, #40), voice (#54), End exit (#7), world switching (#51, #52), CI (#55).
+
 **Noted for later (no change), after PR #3 lands (it edits `BotFleeService`):** the emergency-tactics thread (`tryEmergencyTactic`) is limited to one per flee episode by `emergencyTacticAttempted`, but unlike the proactive-shelter thread it takes no lock and no `beginSurvivalAction`. Unverified whether a new flee episode can start, and spawn a second chain, while the first is still running. Check that before adding a guard.
 
 **Noted for later (no change):** `TaskService.abortTicket` interrupts the old worker and drops its ticket at once, so `/bot stop` plus a new command (or a system task preempting) starts a second worker for the same bot while the first is still unwinding. #42 makes the shared collections it found safe for this, but any per-bot state that assumes "one worker per bot" can see two for a moment. Making abort wait for the old worker to exit would close it; that changes stop latency, so it is a design call.
