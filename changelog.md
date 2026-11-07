@@ -16,9 +16,10 @@ a skill the player starts directly. Headless, the same setup crafted a table, st
 pickaxe, then mined at 1.15 s a block and reached the commander.
 
 Costs and limits:
-- The recovery skill now behaves as if the commander asked for it: anything else in the skill
-  that reads the request source (chat replies, supply asks) goes to the commander. That is the
-  same as `/bot skill stripmine` typed by the player.
+- The two recovery skills (`stripmine`, `collect_dirt`) use the request source only for tool and
+  torch provisioning (`ensurePickaxe`, `ensureToolForKeyword`, `ensureTorches`), so the change
+  is limited to those crafts now being allowed by the commander's history, as for the same skill
+  typed by the player.
 - With no commander (none online) it falls back to the old behaviour.
 - A bot still won't craft a tool its commander has never crafted. That gate is unchanged.
 
