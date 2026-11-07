@@ -57,6 +57,12 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 - #43 hovel: 'Hovel built.', 5 roof pillars snapped and cleaned ok=true. PASS
 - #43/#46 farm: 'Prepared a hydrated farm and planted 32 seeds (tilled 45)'; scoop + water placement + planting from inventory work. PASS (an earlier run failed only because my test had one water block, which the bot scooped)
 - Whole run: no frens-tick-guard lines, no ERROR apart from the StackOverflowError above.
+- #50: truncated settings.json5 and bot_home_data.json -> boot OK, ERROR/WARN lines, .bad-<timestamp> copies kept, defaults this session. PASS
+- #49 come: teleport on (global), 79 blocks -> teleported; 21 blocks -> walked; both commands returned in ~30 ms, no "Can't keep up". PASS
+- Unexplained (not claimed as a bug): `/bot config teleportDuringSkills on alex` replied "alex now teleport during skill tasks." but a 78-block come still walked until `globalTeleport on`.
+- After the settings.json5 reset, bots respawned with lowercase names (alex, bea).
+- #15 sunset: not checked. The toggle reached alex, but alex was following bea after /bot come, and no sunset return started at dusk on day 1.
+- #28 pit: not exercised. A bot in a 3-deep pit with only a pickaxe got out through the existing follow-stuck mining escape, not the new hand-dug staircase.
 - Not testable headless: anything needing a human player (follow, Quick Store UI, chat addressing, C2S packets #53), Ollama/souls (#5, #8, #9, #21, #40), voice (#54), End exit (#7), world switching (#51, #52), CI (#55).
 
 **Noted for later (no change), after PR #3 lands (it edits `BotFleeService`):** the emergency-tactics thread (`tryEmergencyTactic`) is limited to one per flee episode by `emergencyTacticAttempted`, but unlike the proactive-shelter thread it takes no lock and no `beginSurvivalAction`. Unverified whether a new flee episode can start, and spawn a second chain, while the first is still running. Check that before adding a guard.
