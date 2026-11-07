@@ -67,6 +67,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 - New PRs from the headless run: #66 (full-pack chest craft recursion, stacked on #47) and #67 (cook hobby task slot, from main). #65 (per-bot guard, stacked on #56).
 - #33: alex follows bea, woodcut started, `/bot follow stop` mid-task -> at task end `task-resume skipped reason=player-stopped-follow-during-task`, mode IDLE. PASS
 - #29 blind walk: not exercised. Across a 3-block gap over a 38-block drop the follow planner chose a drop into water below (hp stayed 20); no blind straight-line walk happened.
+- #27: alex following bea, `/bot craft wooden_pickaxe` with a table 8 blocks away -> walked to the table with no follow steering, crafted, then `task-resume ... 'Now following bea.'`. PASS
 - Not testable headless: anything needing a human player (follow, Quick Store UI, chat addressing, C2S packets #53), Ollama/souls (#5, #8, #9, #21, #40), voice (#54), End exit (#7), world switching (#51, #52), CI (#55).
 
 **Noted for later (no change), after PR #3 lands (it edits `BotFleeService`):** the emergency-tactics thread (`tryEmergencyTactic`) is limited to one per flee episode by `emergencyTacticAttempted`, but unlike the proactive-shelter thread it takes no lock and no `beginSurvivalAction`. Unverified whether a new flee episode can start, and spawn a second chain, while the first is still running. Check that before adding a guard.
