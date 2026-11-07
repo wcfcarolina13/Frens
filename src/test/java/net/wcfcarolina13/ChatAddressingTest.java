@@ -513,4 +513,24 @@ class ChatAddressingTest {
         assertTrue(ChatAddressing.resolve("Jake hi", List.of()).isEmpty());
         assertTrue(ChatAddressing.resolve("Jake hi", null).isEmpty());
     }
+
+    @Test
+    void youAndAnotherBotAfterALeadingNameAddressesBoth() {
+        ChatAddressing.Resolution r = ChatAddressing.resolve("Jake, you and Wren go mine", JAKE_AND_WREN).orElseThrow();
+        assertEquals(List.of(0, 1), r.matchedNameIndices());
+        assertEquals("you and Wren go mine", r.prompt());
+        assertEquals(List.of(1, 0), ChatAddressing.resolve("Wren: you and jake follow me", JAKE_AND_WREN)
+                .orElseThrow().matchedNameIndices());
+    }
+
+    @Test
+    void youAndSomethingElseStaysWithTheLeadingName() {
+        assertEquals(List.of(0), ChatAddressing.resolve("Jake, you and I should mine", JAKE_AND_WREN)
+                .orElseThrow().matchedNameIndices());
+        assertEquals(List.of(0), ChatAddressing.resolve("Jake, you and the others wait", JAKE_AND_WREN)
+                .orElseThrow().matchedNameIndices());
+        // Not leading: a mid-sentence "you and Wren" does not add Wren to a non-leading match.
+        assertEquals(List.of(0), ChatAddressing.resolve("did Jake say you and Wren went", JAKE_AND_WREN)
+                .orElseThrow().matchedNameIndices());
+    }
 }

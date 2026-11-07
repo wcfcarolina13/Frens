@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## "You and <bot>" after a leading name addresses both bots (2026-11-07, unreleased)
+
+One of the addressee deferrals (1.1.219 handoff). "Jake, you and Wren go mine" went to Jake only,
+so Wren ignored an order meant for it. When a line opens with a bot's name and the rest starts
+with "you and" plus another bot's name, that bot is addressed too. The prompt keeps the clause as
+written.
+
+Costs and limits:
+- Only the first two words after the leading name are read: "you and I", "you and the others"
+  and a mid-sentence "you and Wren" (not after a leading name) stay as before.
+- The other two deferrals are not done. Mid-sentence third-person mentions ("I think Jake is
+  lazy") still reach Jake, because whether a bot should answer being talked about is a design
+  call. Human nicknames are in a separate PR.
+
+Tests: `ChatAddressingTest` (2 new).
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
