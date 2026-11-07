@@ -71,7 +71,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 - Backlog field checks (lines 824–827), run on a plain main build:
   - item 826 (raw chicken + raw porkchop -> idle hobby picks cook): PASS. It cooked chicken then porkchop in turn, but a wander started 5 s in, the bot lost the furnace ('can no longer interact with furnace'), and the cook ended success=false. That is the #67 bug on main.
   - item 827 (food <= threshold with no food -> auto-hunt): PASS. 'Auto-hunt (hungry) starting for bea at food=10' (threshold 10, as the update note says). Cows inside a base zone were skipped (BLOCKED_PROTECTED); the hunt went looking for wild animals.
-  - items 824 and 825 not run.
+  - items 824 and 825 not run (825 attempted; my setup teleported in a creeper and the hunt aborted to flee, so no result).
 - Not testable headless: anything needing a human player (follow, Quick Store UI, chat addressing, C2S packets #53), Ollama/souls (#5, #8, #9, #21, #40), voice (#54), End exit (#7), world switching (#51, #52), CI (#55).
 
 **Noted for later (no change), after PR #3 lands (it edits `BotFleeService`):** the emergency-tactics thread (`tryEmergencyTactic`) is limited to one per flee episode by `emergencyTacticAttempted`, but unlike the proactive-shelter thread it takes no lock and no `beginSurvivalAction`. Unverified whether a new flee episode can start, and spawn a second chain, while the first is still running. Check that before adding a guard.
