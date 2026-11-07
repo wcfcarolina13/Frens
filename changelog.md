@@ -2,6 +2,26 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## A drop sweep comes back for the drops after making room (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server. With a full pack, a drop sweep makes room
+by crafting a bundle, which can walk the bot to a crafting table. The sweep then looks for drops
+around the bot, not where it started. In the headless run the table was about 27 blocks from the
+drop, outside the 20-block radius, so the sweep ended (a DEBUG "no drops within radius" line) and
+the drop that started it stayed on the ground.
+
+After making room, a sweep that is more than half its radius from where it started now walks back
+there before it looks again (`SweepReturnPolicy`). Headless, the same setup logged "walked back to
+the sweep start … (arrived)" and picked up the 16 cobblestone.
+
+Costs and limits:
+- One extra walk when making room moved the bot more than half the radius; none when the bundle
+  was packed in place.
+- If there is no path back, it logs one line and the sweep continues from where the bot is.
+- The walk counts toward the sweep's time budget.
+
+Tests: `SweepReturnPolicyTest` (2).
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
