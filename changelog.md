@@ -16,13 +16,14 @@ offload uses chests that are already there or gives up. The same woodcut now end
 
 Costs and limits:
 - In that corner (full pack, no chest, no table) `/bot craft chest` still fails. The bot can place
-  two crafting tables first, one per nesting level, and its only line is "I need 4 planks per
-  craft." That is wrong; the real problem is the full pack. Dropping a cheap stack to make room,
+  two crafting tables first, one per nesting level. Its line now names the cause ("My pack is
+  full, so I can't turn my logs into planks. Make some room and ask again.", `PlanksShortLinePolicy`)
+  instead of "I need 4 planks per craft.". Dropping a cheap stack to make room,
   as the server-thread path already does, would fix the outcome but changes what bots throw away
   mid-task, so it is left as a decision.
 - The guard is per thread, so two bots crafting at once don't block each other.
 
-Tests: `OffloadChestGuardTest` (3).
+Tests: `OffloadChestGuardTest` (3), `PlanksShortLinePolicyTest` (2).
 
 ## CraftingHelper commits each craft in one server-thread step (2026-11-05, unreleased)
 

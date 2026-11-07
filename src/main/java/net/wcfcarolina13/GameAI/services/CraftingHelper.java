@@ -994,7 +994,12 @@ public final class CraftingHelper {
             }
         }
         if (!ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)) {
-            if (!quiet) sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft.");
+            if (!quiet) {
+                boolean hasLogs = InventoryIterator.count(bot,
+                        st -> st.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) > 0;
+                sendCraftTableNeededOnce(bot, source, PlanksShortLinePolicy.line(planksPerItem, hasLogs,
+                        bot.getInventory().getEmptySlot() == -1));
+            }
             return 0;
         }
         int plankCount = countPlanks(bot);
