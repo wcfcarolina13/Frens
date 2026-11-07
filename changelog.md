@@ -14,9 +14,9 @@ like the other hobbies. Headless, the scheduler then reported "active-task" for 
 80-second cook, no other hobby started, and the bot collected all 8 cooked beef.
 
 Costs and limits:
-- While the cook runs the bot counts as busy, so anything that checks for an active task waits
-  (for example the next hobby, and idle chatter that skips busy bots). Sunset return can still
-  interrupt it, because ambient tasks are open-ended.
+- While the cook runs the bot counts as busy: the next hobby waits, and so does any other code
+  that checks `TaskService.hasActiveTask` (I did not audit each of those callers). Sunset return
+  can still interrupt it, because ambient tasks are open-ended.
 - `/bot stop` now reaches the cook worker (the thread is attached to the task). That was not
   exercised headless.
 
