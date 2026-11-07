@@ -14,13 +14,16 @@ down.
 All of them now go through `TickGuard`. A RuntimeException is logged, with its stack trace the
 first time and then at most once a minute per handler with a count (`TickGuardLogPolicy`), and the
 server keeps ticking. This covers:
-- the 59 END_SERVER_TICK handlers in Frens.java;
-- the group chat hint and supply request ticks;
+- the 57 END_SERVER_TICK handlers in Frens.java, plus the group chat hint and supply request
+  ticks (59 in all);
 - ALLOW_DAMAGE (falls back to vanilla: the damage goes ahead);
+- AFTER_DAMAGE (the bot's apology for hitting a player);
 - AFTER_DEATH;
-- UseEntityCallback (falls back to PASS).
+- UseEntityCallback and AttackEntityCallback (both fall back to PASS, so the use or attack goes
+  ahead as vanilla would).
 
-A test fails if a new END_SERVER_TICK registration skips the guard.
+A test fails if a new END_SERVER_TICK registration skips the guard, or if any of the five
+damage, death and entity callbacks in Frens.java loses it.
 
 Costs and limits:
 - A failing handler skips the rest of its own work for that tick: every bot after the failing

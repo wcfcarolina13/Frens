@@ -50,5 +50,7 @@ class TickGuardTest {
         assertTrue(frens.contains("ServerLivingEntityEvents.ALLOW_DAMAGE.register(TickGuard.allowDamage(\"allow-damage\","));
         assertTrue(frens.contains("ServerLivingEntityEvents.AFTER_DEATH.register(TickGuard.afterDeath(\"after-death\","));
         assertTrue(frens.contains("UseEntityCallback.EVENT.register(TickGuard.useEntity(\"use-entity\","));
+        assertTrue(frens.contains("ServerLivingEntityEvents.AFTER_DAMAGE.register(TickGuard.afterDamage(\"after-damage\","));
+        assertTrue(frens.contains("AttackEntityCallback.EVENT.register(TickGuard.attackEntity(\"attack-entity\","));
     }
 }

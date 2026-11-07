@@ -531,14 +531,14 @@ public class Frens implements ModInitializer {
             }
         });
 
-        net.fabricmc.fabric.api.event.player.AttackEntityCallback.EVENT.register(
+        net.fabricmc.fabric.api.event.player.AttackEntityCallback.EVENT.register(TickGuard.attackEntity("attack-entity",
                 (player, world, hand, entity, hitResult) -> {
             if (world != null && !world.isClient()
                     && player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer) {
                 net.wcfcarolina13.GameAI.souls.SoulRuntime.notePlayerAttack(serverPlayer, entity);
             }
             return net.minecraft.util.ActionResult.PASS;
-        });
+        }));
 
         LOGGER.info("Hello Fabric world!");
 
@@ -1185,7 +1185,7 @@ public class Frens implements ModInitializer {
 
         // A bot's hit on a real player (melee or its arrow) that actually landed: the bot apologises.
         // Bot victims are covered by their own friendly-fire-received line in ALLOW_DAMAGE above.
-        ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamageTaken, damageTaken, blocked) -> {
+        ServerLivingEntityEvents.AFTER_DAMAGE.register(TickGuard.afterDamage("after-damage", (entity, source, baseDamageTaken, damageTaken, blocked) -> {
             if (!(entity instanceof ServerPlayerEntity victim) || source == null) {
                 return;
             }
@@ -1198,7 +1198,7 @@ public class Frens implements ModInitializer {
                 net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onBotHitPlayer(
                         (ServerPlayerEntity) attacker, victim, damageTaken);
             }
-        });
+        }));
 
         ServerLivingEntityEvents.AFTER_DEATH.register(TickGuard.afterDeath("after-death", (entity, damageSource) -> {
             if (entity instanceof ServerPlayerEntity serverPlayer) {

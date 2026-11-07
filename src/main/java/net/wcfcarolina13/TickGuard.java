@@ -2,6 +2,7 @@ package net.wcfcarolina13;
 
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.minecraft.util.ActionResult;
 import org.slf4j.Logger;
@@ -43,6 +44,16 @@ public final class TickGuard {
         };
     }
 
+    public static ServerLivingEntityEvents.AfterDamage afterDamage(String name, ServerLivingEntityEvents.AfterDamage body) {
+        return (entity, source, baseDamageTaken, damageTaken, blocked) -> {
+            try {
+                body.afterDamage(entity, source, baseDamageTaken, damageTaken, blocked);
+            } catch (RuntimeException e) {
+                report(name, e);
+            }
+        };
+    }
+
     public static ServerLivingEntityEvents.AfterDeath afterDeath(String name, ServerLivingEntityEvents.AfterDeath body) {
         return (entity, source) -> {
             try {
@@ -55,6 +66,18 @@ public final class TickGuard {
 
     /** On failure the interaction falls through to vanilla (PASS). */
     public static UseEntityCallback useEntity(String name, UseEntityCallback body) {
+        return (player, world, hand, entity, hit) -> {
+            try {
+                return body.interact(player, world, hand, entity, hit);
+            } catch (RuntimeException e) {
+                report(name, e);
+                return ActionResult.PASS;
+            }
+        };
+    }
+
+    /** On failure the attack goes ahead as vanilla would (PASS). */
+    public static AttackEntityCallback attackEntity(String name, AttackEntityCallback body) {
         return (player, world, hand, entity, hit) -> {
             try {
                 return body.interact(player, world, hand, entity, hit);
