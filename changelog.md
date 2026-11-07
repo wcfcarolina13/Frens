@@ -2,6 +2,26 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## The cook hobby no longer runs alongside a second hobby (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server. The idle scheduler only waits 4 to 8
+seconds after starting a hobby, and relies on that hobby's task slot to keep the next one from
+starting. The cook hobby took no slot, so a wander started 3 seconds into the cook and walked the
+bot off the furnace. The cook lost reach twice and spent the cycle walking back.
+
+The cook hobby now holds an ambient, open-ended task (`skill:hobby-cook`) for its whole cycle,
+like the other hobbies. Headless, the scheduler then reported "active-task" for the full
+80-second cook, no other hobby started, and the bot collected all 8 cooked beef.
+
+Costs and limits:
+- While the cook runs the bot counts as busy, so anything that checks for an active task waits
+  (for example the next hobby, and idle chatter that skips busy bots). Sunset return can still
+  interrupt it, because ambient tasks are open-ended.
+- `/bot stop` now reaches the cook worker (the thread is attached to the task). That was not
+  exercised headless.
+
+Tests: `CookHobbyTaskWiringTest` (1).
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
