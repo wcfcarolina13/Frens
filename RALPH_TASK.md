@@ -63,6 +63,8 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 - After the settings.json5 reset, bots respawned with lowercase names (alex, bea).
 - #15 sunset: not checked. The toggle reached alex, but alex was following bea after /bot come, and no sunset return started at dusk on day 1.
 - #28 pit: not exercised. A bot in a 3-deep pit with only a pickaxe got out through the existing follow-stuck mining escape, not the new hand-dug staircase.
+- #16 cook: the cook hobby walked back to the furnace (1/2, 2/2) as designed, but only because a wander hobby had started 3 s into the cook and walked the bot away. The cook hobby held no task slot (on main too). FIXED in #67: the scheduler reports active-task for the whole 80 s cook, no second hobby, 8 cooked beef collected. `/bot stop` mid-cook not exercised.
+- New PRs from the headless run: #66 (full-pack chest craft recursion, stacked on #47) and #67 (cook hobby task slot, from main). #65 (per-bot guard, stacked on #56).
 - Not testable headless: anything needing a human player (follow, Quick Store UI, chat addressing, C2S packets #53), Ollama/souls (#5, #8, #9, #21, #40), voice (#54), End exit (#7), world switching (#51, #52), CI (#55).
 
 **Noted for later (no change), after PR #3 lands (it edits `BotFleeService`):** the emergency-tactics thread (`tryEmergencyTactic`) is limited to one per flee episode by `emergencyTacticAttempted`, but unlike the proactive-shelter thread it takes no lock and no `beginSurvivalAction`. Unverified whether a new flee episode can start, and spawn a second chain, while the first is still running. Check that before adding a guard.
