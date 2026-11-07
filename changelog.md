@@ -2,6 +2,28 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## A full pack with no chest or table no longer crashes the craft (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server. A bot with a full pack, no chest and no
+crafting table nearby recursed until `StackOverflowError`. Placing an offload chest can craft one,
+the craft makes room by offloading, and that offload places (and crafts) another chest. A woodcut
+with a full pack crashed at its end ("Skill 'woodcut' crashed: StackOverflowError"), and
+`/bot craft chest` nested 373 table crafts before it aborted. Plain main does the same.
+
+Only the outermost offload on a thread may place a chest now (`OffloadChestGuard`). A nested
+offload uses chests that are already there or gives up. The same woodcut now ends with
+"Cut 4 tree(s)", and the craft nests 3 deep instead of 373.
+
+Costs and limits:
+- In that corner (full pack, no chest, no table) `/bot craft chest` still fails. The bot can place
+  two crafting tables first, one per nesting level, and its only line is "I need 4 planks per
+  craft." That is wrong; the real problem is the full pack. Dropping a cheap stack to make room,
+  as the server-thread path already does, would fix the outcome but changes what bots throw away
+  mid-task, so it is left as a decision.
+- The guard is per thread, so two bots crafting at once don't block each other.
+
+Tests: `OffloadChestGuardTest` (3).
+
 ## CraftingHelper commits each craft in one server-thread step (2026-11-05, unreleased)
 
 Stacked on the combined chest ask (PRs #34 and #39). Closes the deferral "off-thread inventory mutation in CraftingHelper": `/bot craft` and the skills run `CraftingHelper` on a worker, and every craft tail there decremented the ingredient stacks and inserted the output on that worker. Now `commitCraft(bot, output, count, consumes)` does the whole inventory step in ONE `SupplyServerHop.call` hop: the lambda's consumes (`consumeItemOnServer`, `consumePlanksOnServer`, `consumeCobbleOnServer`, `consumeSlotOnServer`, which may reach into bundles but never walk) and then `insertStack` of the output. The 21 craft tails (ladders, beds, white wool, `craftWithPlanks` incl. chest and table, sticks, torches with the coal-then-charcoal choice, doors, fences, leads, bundles, leather, saddles, both fishing-rod items, the tool craft, shields, `craftSimple` for buckets and shears, leather armor, `craftCobbleBlock` for furnaces, fishing rods) and the two log-to-plank loops (`craftPlanks`, `ensurePlanksFromLogs`: one commit per slot, the slot checked again on the server thread) go through it; `distributeOutput` is gone. One hop, not two: separate hops could abandon the consume and still run the insert, output with no ingredients. `SupplyServerHop` rather than `BotActions.callOnServerThread` (changed in review): it is abandon-safe by an atomic claim, so a task that had not started when the wait ran out never runs, and a task already running is waited for instead of being reported as failed.
