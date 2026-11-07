@@ -4,6 +4,7 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.ActionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,12 +89,38 @@ public final class TickGuard {
         };
     }
 
+    /**
+     * Runs one bot's share of a tick loop. A RuntimeException is logged under {@code name} (with the
+     * bot's name) and the loop goes on to the next bot, so one bot in an odd state does not skip the
+     * rest.
+     */
+    public static void perBot(String name, ServerPlayerEntity bot, Runnable body) {
+        try {
+            body.run();
+        } catch (RuntimeException e) {
+            report(name + " [" + botName(bot) + "]", name, e);
+        }
+    }
+
+    private static String botName(ServerPlayerEntity bot) {
+        try {
+            return bot == null ? "null" : bot.getName().getString();
+        } catch (RuntimeException e) {
+            return "?";
+        }
+    }
+
     private static void report(String name, RuntimeException e) {
-        long held = LOG.onFailure(name, System.currentTimeMillis());
+        report(name, name, e);
+    }
+
+    /** {@code label} is what the log names; {@code throttleKey} is what the once-a-minute limit counts. */
+    private static void report(String label, String throttleKey, RuntimeException e) {
+        long held = LOG.onFailure(throttleKey, System.currentTimeMillis());
         if (held < 0) {
             return;
         }
-        LOGGER.error("Handler '{}' threw and was skipped this time{}", name,
+        LOGGER.error("Handler '{}' threw and was skipped this time{}", label,
                 held > 0 ? " (" + held + " more failures since the last report)" : "", e);
     }
 }

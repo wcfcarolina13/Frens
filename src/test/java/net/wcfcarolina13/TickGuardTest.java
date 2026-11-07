@@ -53,4 +53,21 @@ class TickGuardTest {
         assertTrue(frens.contains("ServerLivingEntityEvents.AFTER_DAMAGE.register(TickGuard.afterDamage(\"after-damage\","));
         assertTrue(frens.contains("AttackEntityCallback.EVENT.register(TickGuard.attackEntity(\"attack-entity\","));
     }
+
+    @Test
+    void survivalLoopsIsolateEachBot() throws IOException {
+        // Hazard escape, eating and autosave: one bot's exception must not skip the bots after it.
+        String[][] sites = {
+                {"src/main/java/net/wcfcarolina13/GameAI/services/BotHazardService.java", "TickGuard.perBot(\"BotHazardService::onServerTick\", bot,"},
+                {"src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java", "TickGuard.perBot(\"BotEventHandler::tickHunger\", player,"},
+                {"src/main/java/net/wcfcarolina13/GameAI/services/BotPersistenceService.java", "TickGuard.perBot(\"BotPersistenceService::onServerTick\", player,"},
+        };
+        for (String[] site : sites) {
+            assertTrue(Files.readString(Path.of(site[0])).contains(site[1]), site[0]);
+        }
+        String persistence = Files.readString(Path.of(sites[2][0]));
+        int guard = persistence.indexOf(sites[2][1]);
+        assertTrue(persistence.lastIndexOf("active.add(player.getUuid());", guard) > 0,
+                "the bot counts as active even when its save throws, so its LAST_SAVE_TICK entry is kept");
+    }
 }

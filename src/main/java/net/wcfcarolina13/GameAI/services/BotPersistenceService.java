@@ -375,15 +375,19 @@ public final class BotPersistenceService {
                 continue;
             }
             active.add(player.getUuid());
-            BotWorldStateService.saveState(player); // keep last-known position fresh
-            int last = LAST_SAVE_TICK.getOrDefault(player.getUuid(), Integer.MIN_VALUE);
-            if (currentTick - last >= AUTOSAVE_INTERVAL_TICKS) {
-                if (persistViaPlayerManager(server, player, "autosave")) {
-                    BotInventoryStorageService.save(player);
-                    BotWorldStateService.saveState(player);
-                    LAST_SAVE_TICK.put(player.getUuid(), currentTick);
+            // One bot's failure must not skip the autosave of the bots after it, the
+            // LAST_SAVE_TICK prune or the mount autosave below.
+            net.wcfcarolina13.TickGuard.perBot("BotPersistenceService::onServerTick", player, () -> {
+                BotWorldStateService.saveState(player); // keep last-known position fresh
+                int last = LAST_SAVE_TICK.getOrDefault(player.getUuid(), Integer.MIN_VALUE);
+                if (currentTick - last >= AUTOSAVE_INTERVAL_TICKS) {
+                    if (persistViaPlayerManager(server, player, "autosave")) {
+                        BotInventoryStorageService.save(player);
+                        BotWorldStateService.saveState(player);
+                        LAST_SAVE_TICK.put(player.getUuid(), currentTick);
+                    }
                 }
-            }
+            });
         }
 
         LAST_SAVE_TICK.keySet().retainAll(active);
