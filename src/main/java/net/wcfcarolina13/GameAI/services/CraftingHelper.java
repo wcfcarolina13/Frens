@@ -4064,9 +4064,20 @@ public final class CraftingHelper {
         }
         List<BlockPos> chests = findNearbyChests(world, bot.getBlockPos(), CHEST_OFFLOAD_SEARCH_RADIUS, CHEST_OFFLOAD_SEARCH_YSPAN);
         if (chests.isEmpty()) {
-            BlockPos placed = ChestStoreService.placeChestNearBot(source, bot, false);
-            if (placed != null) {
-                chests = List.of(placed.toImmutable());
+            // Placing a chest may craft one, and that craft makes room by offloading again. Only the
+            // outermost offload may place: a nested one uses existing chests or gives up, so a full
+            // pack with no chest and no table ends in a refused craft instead of a StackOverflowError.
+            if (!OffloadChestGuard.tryEnter()) {
+                debugChest("Nested offload while a chest is being placed; not placing another.");
+                return false;
+            }
+            try {
+                BlockPos placed = ChestStoreService.placeChestNearBot(source, bot, false);
+                if (placed != null) {
+                    chests = List.of(placed.toImmutable());
+                }
+            } finally {
+                OffloadChestGuard.exit();
             }
         }
         if (chests.isEmpty()) {
