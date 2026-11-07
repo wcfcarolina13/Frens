@@ -2,6 +2,28 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## A boxed-in bot answering /bot come crafts a pickaxe instead of digging bare-handed (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server (backlog: "Come tool crafting
+(verification)"). A bot sealed in stone with 4 oak logs, told to `/bot come`, launched the
+recovery stripmine and dug every block with bare hands (7.5 s a block, no cobblestone).
+
+Tool provisioning (`ToolProvisionService.ensurePickaxe`) only crafts a tool whose recipe is in
+the requester's crafting history, and that history is recorded against the player who gave the
+order, not the bot. The come-recovery skill ran with no request source, so it read the bot's
+own history, which held nothing useful. It now carries the commander as the request source, like
+a skill the player starts directly. Headless, the same setup crafted a table, sticks and a wooden
+pickaxe, then mined at 1.15 s a block and reached the commander.
+
+Costs and limits:
+- The recovery skill now behaves as if the commander asked for it: anything else in the skill
+  that reads the request source (chat replies, supply asks) goes to the commander. That is the
+  same as `/bot skill stripmine` typed by the player.
+- With no commander (none online) it falls back to the old behaviour.
+- A bot still won't craft a tool its commander has never crafted. That gate is unchanged.
+
+Tests: `ComeRecoveryRequestSourceWiringTest` (1).
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
