@@ -39,7 +39,8 @@ import java.util.Set;
  *       for them, not the bots ({@code otherAddressee}, no bot indices). A bot name always wins
  *       over a human name. Names of two characters or fewer, or on a small common-word list,
  *       only count when the token carries a trailing {@code ,} or {@code :}, so a player called
- *       "Hey" does not swallow every greeting.</li>
+ *       "Hey" does not swallow every greeting. A shortened name ("Rob," for Robert_99) counts
+ *       only with that mark too ({@link #isNicknameOfAHuman}).</li>
  *   <li><b>Trailing vocative</b> — a non-leading first match loses to a different bot named by
  *       the last token when the token before it ends in a comma ("did Jake eat, Wren" → Wren).
  *       Leading names still win.</li>
@@ -306,12 +307,44 @@ public final class ChatAddressing {
             if (botIndex(botNames, first) >= 0) {
                 return false;
             }
+            boolean vocative = token.endsWith(",") || token.endsWith(":");
             for (String human : humanNames) {
                 if (normalizeToken(human).equals(first)) {
-                    return !needsVocativeMark(first) || token.endsWith(",") || token.endsWith(":");
+                    return !needsVocativeMark(first) || vocative;
                 }
             }
+            if (vocative && isNicknameOfAHuman(first, botNames, humanNames)) {
+                return true;
+            }
             return false;
+        }
+        return false;
+    }
+
+    /** Shortest leading part of a human's name that counts as a nickname ("Rob," for Robert_99). */
+    static final int MIN_NICKNAME_CHARS = 3;
+
+    /**
+     * A shortened human name used as a vocative: "Rob," or "Steve:" for players named Robert_99 or
+     * Steve123. Only with a trailing {@code ,} or {@code :} (the caller checks), at least
+     * {@link #MIN_NICKNAME_CHARS} long, not a common word, the start of some other human's
+     * normalized name, and not the start of any bot name (a clipped bot name stays unaddressed
+     * rather than being sent away from the bots).
+     */
+    static boolean isNicknameOfAHuman(String normalizedToken, List<String> botNames,
+                                      Collection<String> humanNames) {
+        if (normalizedToken.length() < MIN_NICKNAME_CHARS || HUMAN_NAME_STOPWORDS.contains(normalizedToken)) {
+            return false;
+        }
+        for (String bot : botNames) {
+            if (normalizeToken(bot).startsWith(normalizedToken)) {
+                return false;
+            }
+        }
+        for (String human : humanNames) {
+            if (normalizeToken(human).startsWith(normalizedToken)) {
+                return true;
+            }
         }
         return false;
     }

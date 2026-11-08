@@ -2,6 +2,15 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## A shortened player name with a comma addresses that player (unreleased, 2026-11-05)
+
+1.1.219 addressee deferral "nicknames and prefix matching for human names". "Rob, want some bread?" with a player named Robert_99 online went to the bots' address rules (no bot named, so plain chat, but a later bot name in the line would have pulled the bots in). Only an exact name counted as another player's address.
+
+- `ChatAddressing.isNicknameOfAHuman`: a leading token with a trailing `,` or `:`, at least 3 letters, not on the common-word list, that starts another online player's normalized name, is that player's address (no bot reply, no overhear). A token that also starts a bot's name stays with the bots ("Jak," with a player Jakob and a bot Jake).
+- **Cost (rulings I made):** without the comma or colon nothing changes ("rob want bread" is plain chat), so a nickname written without punctuation still reaches the bots. Prefix only: "Bobby" for Robert does not match. Not run against the local addressee eval set (it lives on the Mac).
+- **Limits:** unit tests only (4 new, Tests 3857 → 3861). The other two 1.1.219 deferrals stay open: a mid-sentence third-person mention (conflicts with an existing test, needs a ruling) and "you and Bob" (needs the DM follow-up window's bot, which this stateless resolver does not have).
+- **Sandbox check:** with a second human online named e.g. Robert_99, "Rob, come here" gets no bot reply, and "Jake, come here" still does.
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.

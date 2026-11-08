@@ -352,6 +352,41 @@ class ChatAddressingTest {
     }
 
     @Test
+    void shortenedHumanNameWithACommaIsAnOtherAddressee() {
+        List<String> humans = List.of("Robert_99", "Steve123");
+        assertTrue(resolved("Rob, want some bread?", JAKE_AND_WREN, humans).otherAddressee());
+        assertTrue(resolved("steve: over here", JAKE_AND_WREN, humans).otherAddressee());
+        assertTrue(resolved("Rob, ask Jake for wood", JAKE_AND_WREN, humans).otherAddressee(),
+                "a later bot mention is swallowed, as for a full name");
+    }
+
+    @Test
+    void shortenedHumanNameNeedsTheMarkAndThreeLetters() {
+        List<String> humans = List.of("Robert_99");
+        assertTrue(ChatAddressing.resolve("rob want some bread", JAKE_AND_WREN, humans).isEmpty(),
+                "no comma or colon: plain chat, as before");
+        assertTrue(ChatAddressing.resolve("Ro, want some bread", JAKE_AND_WREN, humans).isEmpty(),
+                "two letters are too short");
+        ChatAddressing.Resolution r = resolved("Rob jake come here", JAKE_AND_WREN, humans);
+        assertFalse(r.otherAddressee());
+    }
+
+    @Test
+    void shortenedNameThatStartsABotNameStaysWithTheBots() {
+        // Human "Jakob" and bot "Jake": "Jak," could be either, so it is not sent away from the bots.
+        List<String> humans = List.of("Jakob");
+        assertFalse(ChatAddressing.isNicknameOfAHuman("jak", JAKE_AND_WREN, humans));
+        assertTrue(ChatAddressing.isNicknameOfAHuman("jako", JAKE_AND_WREN, humans));
+    }
+
+    @Test
+    void commonWordIsNeverANickname() {
+        assertFalse(ChatAddressing.isNicknameOfAHuman("hey", JAKE_AND_WREN, List.of("Heyward")));
+        assertTrue(ChatAddressing.resolve("Hey, Jake come here", JAKE_AND_WREN, List.of("Heyward"))
+                .map(r -> !r.otherAddressee()).orElse(false));
+    }
+
+    @Test
     void shortHumanNameNeedsATrailingCommaOrColon() {
         List<String> al = List.of("Al");
         assertTrue(ChatAddressing.resolve("al come look", JAKE_AND_WREN, al).isEmpty());
