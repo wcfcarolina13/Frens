@@ -513,4 +513,19 @@ class SoulBanterSeedTest {
         SoulBanterSeed.rememberRecent(ring, null, 4);
         assertEquals(4, ring.size());
     }
+
+    @Test
+    void aSeedWithNoSubjectCarriesNoAct() {
+        SoulTypes.BotSnapshot bot = new SoulTypes.BotSnapshot(UUID.randomUUID(), "Jake",
+                "", "", 0, 64, 0, true, "", "", 20f, 20f, 20, 0, "", 0, 36,
+                List.of(), "", "", "", "", "", "", true, 0, true, Optional.empty());
+        SoulTypes.GroundingSnapshot bare = new SoulTypes.GroundingSnapshot(SoulTypes.Reachability.LOCAL, bot,
+                Optional.empty(), Instant.EPOCH);
+        for (int i = 0; i < 20; i++) {
+            SoulBanterSeed.Seed seed = SoulBanterSeed.buildSeed(List.of(bare), List.of(List.of()),
+                    "Bradley", "", new Random(i), Set.of(), List.of(), List.of(), List.of(), Set.of());
+            assertTrue(seed.topic().isEmpty(), "precondition, no anchors: " + seed.text());
+            assertEquals(null, seed.act(), "no directive was written, so no act: " + seed.text());
+        }
+    }
 }
