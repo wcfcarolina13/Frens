@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -13,8 +14,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Source-reading checks for the one combined chest ask (Bradley 2026-10-23) wired into the tool
- * craft: where it sits in {@code CraftingHelper}, which thread does what, and how the facade and
- * the service carry the bundle. Server types keep this out of a unit test.
+ * craft and the other worker crafts (ladders, torches, beds, shields, buckets and shears, the
+ * furnace, chests and crafting tables): where it sits in {@code CraftingHelper}, which thread
+ * does what, and how the facade and the service carry the bundle. Server types keep this out of
+ * a unit test.
  */
 class CombinedChestAskWiringTest {
 
@@ -43,8 +46,88 @@ class CombinedChestAskWiringTest {
     }
 
     @Test
-    void onlyAWorkerAsksAndItWaitsForTheAnswer() throws IOException {
+    void theToolAskIsAThinWrapperOverTheSharedCraftAsk() throws IOException {
         String body = block(crafting(), "private static CraftBundleAskPolicy.Next askChestForToolMaterials(");
+        assertTrue(body.contains("CraftBundleAskPolicy.toolRecipe(headKey, headCount, stickCount)"));
+        assertTrue(body.contains("CraftBundleAskPolicy.headKeys(headKey)"), "a hopeless head still skips the material");
+        assertTrue(body.contains("return askChestForCraftMaterials(bot, source, ask, shortfall);"));
+        assertFalse(body.contains("SupplyWithdrawals."), "the wrapper plans nothing and asks nothing itself");
+        String known = block(crafting(), "private static CraftBundleAskPolicy.Next askChestForKnownCraft(");
+        assertTrue(known.contains("CraftBundleAskPolicy.known(Registries.ITEM.getId(output).toString())"));
+        assertTrue(known.contains("if (craft == null) {\n            return CraftBundleAskPolicy.Next.CONTINUE;"),
+                "a craft outside the table keeps today's path");
+        assertTrue(known.contains("new CraftAsk(input -> craft, match, amount, needsTable, List.of())"),
+                "no alternative material: nothing is hopeless, a partial chest is asked for what it has");
+    }
+
+    @Test
+    void everyOtherWorkerCraftAsksOnceBeforeItsStationAndItsPerItemPulls() throws IOException {
+        String src = crafting();
+        // Each craft: the one ask, then (where the recipe is 3x3) the station, then the per-item sub-steps.
+        String ladders = block(src, "private static int craftLadders(");
+        assertOrder(ladders, "askChestForKnownCraft(bot, source, Items.LADDER, amountRequested, s -> false, true)",
+                "ensureCraftingStation(bot, source)", "ensureSticks(bot, source, neededSticks)");
+        assertTrue(ladders.indexOf("hasRecipePermission(") < ladders.indexOf("askChestForKnownCraft("),
+                "a recipe the bot may not craft is never asked for");
+        String torches = block(src, "private static int craftTorches(");
+        assertOrder(torches, "askChestForKnownCraft(bot, source, Items.TORCH, targetTorches, CraftingHelper::isTorchFuel, false)",
+                "ensureSticks(bot, source, craftsNeeded)",
+                "int fuelShort = CraftBundleAskPolicy.torchFuelShortfall(craftsNeeded, coal, charcoal);",
+                "ensureItemAvailable(bot, source, Items.COAL, coal + fuelShort);",
+                "ensureItemAvailable(bot, source, Items.CHARCOAL, charcoal + fuelShort);");
+        assertFalse(torches.contains("ensureItemAvailable(bot, source, Items.COAL, craftsNeeded)"),
+                "charcoal the bundle granted must not open a second prompt for coal");
+        assertTrue(torches.indexOf("hasRecipePermission(") < torches.indexOf("askChestForKnownCraft("),
+                "a recipe the bot may not craft is never asked for");
+        assertFalse(torches.contains("ensureCraftingStation("), "a torch is a 2x2 recipe: no table in its ask");
+        String shield = block(src, "private static int craftShield(");
+        assertOrder(shield, "askChestForKnownCraft(bot, source, Items.SHIELD, amount, s -> s.isOf(Items.IRON_INGOT), true)",
+                "ensureCraftingStation(bot, source)", "ensurePlanksAvailable(bot, source, 6 * amount)");
+        String simple = block(src, "private static int craftSimple(");
+        assertOrder(simple, "askChestForKnownCraft(bot, source, output, amount, s -> s.isOf(input), output.equals(Items.BUCKET))",
+                "ensureCraftingStation(bot, source)", "ensureItemAvailable(bot, source, Items.IRON_INGOT, per * amount)");
+        String cobble = block(src, "private static int craftCobbleBlock(");
+        assertOrder(cobble, "askChestForKnownCraft(bot, source, output, amount, CraftingHelper::isStoneCraftingMaterial,",
+                "ensureCraftingStation(bot, source)", "ensureCobbleAvailable(bot, source, per * amount)");
+        String planks = block(src, "private static int craftWithPlanks(");
+        assertOrder(planks, "hasRecipePermission(commander, source.getServer(), recipeId)", "if (askChest) {",
+                "askChestForKnownCraft(bot, source, output, amountRequested, s -> false,\n"
+                + "                    !output.equals(Items.CRAFTING_TABLE))", "ensureCraftingStation(bot, source, quiet)",
+                "ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)");
+        assertEquals(1, count(planks, "hasRecipePermission("), "the permission check runs once, before the ask");
+        // The station sub-step's table never asks; /bot craft chest|crafting_table do.
+        String table = block(src, "public static boolean craftCraftingTable(");
+        assertTrue(table.contains("Items.CRAFTING_TABLE, amountRequested, quiet, false)"));
+        assertTrue(src.contains("Items.CRAFTING_TABLE, amount, false, true);"));
+        assertTrue(src.contains("Items.CHEST, amount, false, true);"));
+        // A bed picks its colour from what was gathered (the bot, then one chest), wool and planks in one ask.
+        String bed = block(src, "private static int craftBed(");
+        assertTrue(bed.contains("CraftBundleAskPolicy.chooseBedWool(woolIds, input.have(), input.chestPools(), 3 * bedAmount)"));
+        assertTrue(bed.contains("return CraftBundleAskPolicy.bedCraft(Registries.ITEM.getId(recipe.bed()).toString(), wool);"));
+        assertOrder(bed, ".filter(r -> hasRecipePermission(commander, source.getServer(), r.recipeId()))",
+                "askChestForCraftMaterials(bot, source, bedAsk, null)", "BedRecipe chosen = null;",
+                "ensureCraftingStation(bot, source)", "withdrawFromNearbyChests(bot, source, s -> s.isOf(woolItem)");
+        assertEquals(1, count(bed, "hasRecipePermission("),
+                "the colours are filtered by permission once, before the ask; no check after the withdrawal");
+        // A declined or unanswered ask ends each craft after the one stop line; everything else goes on.
+        for (String body : List.of(ladders, torches, shield, simple, cobble, planks, bed)) {
+            assertTrue(body.contains("case STOP_SILENT, STOP_WITH_LINE -> {\n"), "stop after a No");
+            assertFalse(body.contains("SKIP_MATERIAL"), "no alternative material to skip to");
+        }
+    }
+
+    private static void assertOrder(String body, String... needles) {
+        int at = -1;
+        for (String needle : needles) {
+            int next = body.indexOf(needle, at + 1);
+            assertTrue(next > at, "expected in order: " + needle);
+            at = next;
+        }
+    }
+
+    @Test
+    void onlyAWorkerAsksAndItWaitsForTheAnswer() throws IOException {
+        String body = block(crafting(), "private static CraftBundleAskPolicy.Next askChestForCraftMaterials(");
         // A server-thread craft (the idle stone upgrade from onServerTick) cannot wait and would not
         // be back before the 60 s grant expired, so an "Allow once" would never be spent and a new
         // prompt would open on every retry: it keeps the per-item pulls, exactly as before the bundle.
@@ -56,10 +139,15 @@ class CombinedChestAskWiringTest {
         assertFalse(body.contains("WaitMode.NONE"), "no caller of the bundle runs without waiting");
         assertFalse(body.contains("onServerThread"), "past the thread check there is one path, the worker's");
         // One hop gathers the bot's counts and every chest's grantable counts.
-        assertTrue(body.contains("BundleInput input = SupplyServerHop.call(server, () -> gatherBundleInput(world, bot, match, head, headIsPlanks),"));
-        // The plan is pure and runs on the caller's thread; the chest choice too.
+        assertTrue(body.contains("BundleInput input = SupplyServerHop.call(server, () -> gatherBundleInput(world, bot, match),"));
+        // The recipe lookup, the plan and the chest choice are pure and run on the caller's thread.
+        assertTrue(body.contains("CraftBundleAskPolicy.craftRecipes(\n                craft, amount, tableMustBeCrafted)"));
         assertTrue(body.contains("CraftSupplyNeedPolicy.plan(CraftBundleAskPolicy.CRAFT_SET, 1, recipes, input.have(), chest.pools(),"));
-        assertTrue(body.contains("CraftBundleAskPolicy.chooseChest(plans)"));
+        assertTrue(body.contains("CraftBundleAskPolicy.chooseChest(plans, craft.mustComplete())"),
+                "a bed's wool must come whole from the one chest asked");
+        // Only a 3x3 craft adds the table; taken logs become the planks the plan counted on.
+        assertTrue(body.contains("boolean tableMustBeCrafted = ask.needsTable() && !tableAvailableWithoutCrafting(bot, source);"));
+        assertTrue(body.contains("ensurePlanksFromLogs(bot, CraftBundleAskPolicy.planksWanted(craft.recipe(), amount,"));
         // The worker waits for the one answer.
         assertTrue(body.contains("SupplyWithdrawals.WaitMode mode = SupplyWithdrawals.WaitMode.UNTIL_ANSWERED;"));
         assertTrue(body.contains("SupplyWithdrawals.withdrawBundle(bot, chest.pos(), asks, purpose,\n"
@@ -74,6 +162,8 @@ class CombinedChestAskWiringTest {
         String gather = block(crafting(), "private static BundleInput gatherBundleInput(");
         assertTrue(gather.contains("findPullCandidates(world, bot, match, false)"));
         assertTrue(gather.contains("SupplyWithdrawals.grantableEstimate(world, candidate.sample(), candidate.count())"));
+        assertTrue(gather.contains("have.merge(bundlePool(stack), stack.getCount(), Integer::sum);"),
+                "the bot's counts are pooled the same way as the chest's");
         assertFalse(Pattern.compile("\\.\\s*(?:removeStack|split|setStack|decrement|insertStack)\\s*\\(").matcher(gather).find(),
                 "the gather is read-only");
     }
