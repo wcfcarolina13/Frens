@@ -238,27 +238,6 @@ public final class MovementService {
         BRIDGE
     }
 
-    public enum LeafClearAction {
-        NO_OBSTRUCTION,
-        BYPASS_STEP,
-        BYPASS_PROGRESS,
-        MINING_STARTED,
-        MINING_IN_PROGRESS,
-        NO_CLEAR
-    }
-
-    public record LeafClearResult(LeafClearAction action,
-                                  boolean leafInPath,
-                                  int bypassFailures,
-                                  BlockPos leafTarget,
-                                  String detail) {
-        public boolean countsAsCleared() {
-            return action == LeafClearAction.MINING_STARTED
-                    || action == LeafClearAction.MINING_IN_PROGRESS
-                    || action == LeafClearAction.BYPASS_PROGRESS;
-        }
-    }
-
     public record MovementOptions(boolean allowWade,
                                   int maxWadeDepth,
                                   boolean allowBridge,

@@ -161,4 +161,11 @@ class MakeRoomDropPolicyTest {
         // Finding 57 (1.1.279): the only cobblestone, 13 of it, while the rest of the batch needs 6.
         assertTrue(MakeRoomDropPolicy.reservedKeepsStack(13, 13, 6));
     }
+
+    @Test
+    void offloadKeepsLogsWhenTheCraftKeepsPlanks() {
+        org.junit.jupiter.api.Assertions.assertTrue(MakeRoomDropPolicy.offloadKeepsLogs(true, false));
+        org.junit.jupiter.api.Assertions.assertTrue(MakeRoomDropPolicy.offloadKeepsLogs(false, true));
+        org.junit.jupiter.api.Assertions.assertFalse(MakeRoomDropPolicy.offloadKeepsLogs(false, false));
+    }
 }
