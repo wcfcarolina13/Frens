@@ -236,9 +236,14 @@ public final class SoulEventObserver {
                 witnesses.add(bot.getUuid());
             }
         }
+        Entity attacker = source == null ? null : source.getAttacker();
+        boolean fight = SharedHardshipPolicy.isFight(attacker != null,
+                attacker != null && attacker.getUuid().equals(ownerId),
+                attacker != null && BotRegistry.isRegistered(attacker.getUuid()));
+        List<UUID> hardshipPeers = fight ? witnesses : List.of();
         for (UUID botId : ownBots) {
             observer.noteOwnerDamage(botId, ownerId, witnesses.contains(botId), dimension, biome, amount, src,
-                    tick, witnesses);
+                    tick, hardshipPeers);
         }
     }
 
@@ -503,8 +508,9 @@ public final class SoulEventObserver {
     }
 
     /**
-     * As above, with every bot that witnessed the same hurt. When the hurt came from a fight (not
-     * {@link #isEnvironmentalDamage the environment}), the other witnesses with an active soul are
+     * As above, with every bot that witnessed the same hurt. The caller passes witnesses only for a
+     * fight ({@link SharedHardshipPolicy#isFight}); as a second guard, an
+     * {@link #isEnvironmentalDamage environmental} source never lists them. The other witnesses with an active soul are
      * added to the event's participants after the owner, and the runtime turns them into a
      * shared-hardship trust bump ({@link SoulMindOps#noteSharedHardship}; Bradley's ruling
      * 2026-11-08: combat hurts only).
