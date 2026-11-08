@@ -104,6 +104,8 @@ public final class BotControlApplier {
         }
 
         String currentWorldKey = BotWorldStateService.currentWorldKey(server);
+        // A dedicated server auto-spawns at startup, before the first tick loads this sidecar.
+        BotZzzSleepService.ensureLoaded();
 
         // Collect aliases that explicitly have spawn data or world-state in the current world.
         java.util.Set<String> candidates = new java.util.LinkedHashSet<>();
@@ -171,10 +173,27 @@ public final class BotControlApplier {
                 // drop its post-arrival action. Checked here, not at queue time, because on a
                 // dedicated server the queue is built before loadPendingTravels runs.
                 NavigationArtifactService.PendingTravel trip = NavigationArtifactService.getPendingTravelByName(alias);
-                if (trip != null) {
-                    Frens.LOGGER.info("Auto-spawn skipped for {}: in transit to {}, it arrives there instead",
-                            alias, trip.destination().toShortString());
-                    return;
+                AutoSpawnPolicy.Skip skip = AutoSpawnPolicy.skipReason(
+                        server.getPlayerManager().getPlayer(alias) != null,
+                        BotZzzSleepService.isLoggedOffIn(server, alias),
+                        trip != null);
+                switch (skip) {
+                    case ALREADY_ONLINE -> {
+                        Frens.LOGGER.info("Auto-spawn skipped for {}: already online", alias);
+                        return;
+                    }
+                    case LOGGED_OFF_FOR_NIGHT -> {
+                        Frens.LOGGER.info("Auto-spawn skipped for {}: logged off for the night, it comes back at dawn",
+                                alias);
+                        return;
+                    }
+                    case IN_TRANSIT -> {
+                        Frens.LOGGER.info("Auto-spawn skipped for {}: in transit to {}, it arrives there instead",
+                                alias, trip.destination().toShortString());
+                        return;
+                    }
+                    case NONE -> {
+                    }
                 }
                 int observed = server.getPlayerManager().getCurrentPlayerCount();
                 int max = server.getPlayerManager().getMaxPlayerCount();

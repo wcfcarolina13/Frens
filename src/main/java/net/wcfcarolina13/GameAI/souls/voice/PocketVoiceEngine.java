@@ -65,7 +65,8 @@ public final class PocketVoiceEngine implements SoulVoiceEngine {
                 return t;
             });
 
-    private Process process;
+    /** Written on the engine thread, read by the closer thread for the direct kill in {@link #close()}. */
+    private volatile Process process;
     private volatile boolean closed;
 
     public PocketVoiceEngine(String installDir, String defaultVoice, long synthTimeoutMs,
@@ -253,9 +254,11 @@ public final class PocketVoiceEngine implements SoulVoiceEngine {
         drain.start();
     }
 
+    /** Safe from any thread: {@code destroyForcibly} is thread-safe and idempotent. */
     private void killProcess() {
-        if (process != null) {
-            process.destroyForcibly();
+        Process current = process;
+        if (current != null) {
+            current.destroyForcibly();
             process = null;
         }
     }
@@ -269,7 +272,10 @@ public final class PocketVoiceEngine implements SoulVoiceEngine {
     /**
      * Idempotent, non-blocking teardown — identical discipline to
      * {@link DreamsleeveVoiceEngine#close()}: flip the flag, enqueue the kill, stop the
-     * executor, and let a daemon closer thread do the blocking wait.
+     * executor, and let a daemon closer thread do the blocking wait. The closer also kills the
+     * server directly: with a synth in flight the queued kill never runs ({@code shutdownNow}
+     * drops it), which used to leave {@code pocket-tts serve} alive past a world reload and
+     * even past JVM exit.
      */
     @Override
     public void close() {
@@ -292,6 +298,7 @@ public final class PocketVoiceEngine implements SoulVoiceEngine {
                 Thread.currentThread().interrupt();
                 engineThread.shutdownNow();
             }
+            killProcess();
         }, "frens-soul-voice-closer");
         closer.setDaemon(true);
         closer.start();

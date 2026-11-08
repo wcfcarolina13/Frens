@@ -43,4 +43,34 @@ public final class AutoSpawnPolicy {
     public static int effectivePlayerCount(int observed, int baseline, int dispatched) {
         return Math.max(observed, baseline + Math.max(0, dispatched));
     }
+
+    /** Why a queued auto-spawn does not run, checked when its task runs on the server thread. */
+    public enum Skip {
+        /** Spawn it. */
+        NONE,
+        /** Already online, for example brought back by the dawn wake monitor or by hand. */
+        ALREADY_ONLINE,
+        /** Logged off for the night because it had no bed; the dawn wake monitor brings it back. */
+        LOGGED_OFF_FOR_NIGHT,
+        /** Restored mid-trip; it arrives at its destination by itself. */
+        IN_TRANSIT
+    }
+
+    /**
+     * Decides whether a queued auto-spawn runs. A bot that logged off for the night is left to
+     * the wake monitor, which returns it at its logoff spot at dawn (or on its next pass if it is
+     * already day). Spawning it here brought it back at night, at its saved spawn point.
+     */
+    public static Skip skipReason(boolean alreadyOnline, boolean loggedOffForNight, boolean inTransit) {
+        if (alreadyOnline) {
+            return Skip.ALREADY_ONLINE;
+        }
+        if (loggedOffForNight) {
+            return Skip.LOGGED_OFF_FOR_NIGHT;
+        }
+        if (inTransit) {
+            return Skip.IN_TRANSIT;
+        }
+        return Skip.NONE;
+    }
 }
