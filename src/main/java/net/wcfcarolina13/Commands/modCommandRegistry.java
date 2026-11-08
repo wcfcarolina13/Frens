@@ -1107,7 +1107,9 @@ public class modCommandRegistry {
                                 )
                         )
 
+                        // Dev helper, only registered for players while /bot debug is on.
                         .then(literal("mine_block")
+                                .requires(src -> DebugToggleService.verbose())
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .then(CommandManager.argument("block_type", StringArgumentType.string())
                                                 .then(CommandManager.argument("x", IntegerArgumentType.integer())
@@ -2633,7 +2635,12 @@ public class modCommandRegistry {
         skillExecutor.submit(() -> {
             int crafted = 0;
             boolean success = false;
+            // Like SkillManager.runSkill: the follow tick would otherwise keep steering (and stop or
+            // teleport) the bot while CraftingHelper walks it to a table or furnace.
+            net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume = null;
             try {
+                TaskService.attachExecutingThread(ticket, Thread.currentThread());
+                followResume = net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
                 crafted = CraftingHelper.craftGenericForPlayer(source, bot, commander, item, amount, material);
                 success = crafted > 0 && !TaskService.isAbortRequested(botUuid);
                 if (crafted > 0) {
@@ -2645,7 +2652,13 @@ public class modCommandRegistry {
                 LOGGER.error("Unexpected error in /bot craft {}", item, e);
                 source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, "An unexpected error occurred trying to craft that."));
             } finally {
+                // Read the abort before complete() drops the ticket; complete before resuming,
+                // since resumeFollowMode skips while a task is still active.
+                boolean abortRequested = TaskService.isAbortRequested(botUuid);
                 TaskService.complete(ticket, success);
+                if (!abortRequested) {
+                    net.wcfcarolina13.GameAI.skills.SkillManager.resumeFollowMode(bot, source.getServer(), followResume);
+                }
             }
         });
 
@@ -2669,14 +2682,67 @@ public class modCommandRegistry {
             return 0;
         }
 
-        int placed = 0;
-        boolean reachFailed = false;
-        BlockPos lastPlaced = null;
+        // In-reach pass on the server thread (the command thread): no walking here.
+        ServerCommandSource source = context.getSource();
+        PlaceRun first = runPlaceLoop(bot, target, item, placeItem, count, 0, null);
+        if (!PlacePosPolicy.handOffToWorker(true, first.stop())) {
+            reportPlacement(source, first, item);
+            return first.placed() > 0 ? 1 : 0;
+        }
+
+        // Out of reach: a worker walks the bot over and places the rest, then reports (1.1.296).
+        UUID botUuid = bot.getUuid();
+        var ticketOpt = TaskService.beginSkill("place", source, botUuid);
+        if (ticketOpt.isEmpty()) {
+            reportPlacement(source, first, item);
+            ChatUtils.sendSystemMessage(source, "Another task is already running, so I can't walk over.");
+            return first.placed() > 0 ? 1 : 0;
+        }
+        TaskService.TaskTicket ticket = ticketOpt.get();
+        MinecraftServer server = source.getServer();
+        skillExecutor.submit(() -> {
+            boolean success = false;
+            // Attach so /bot stop interrupts the walk, not only latches the abort.
+            TaskService.attachExecutingThread(ticket, Thread.currentThread());
+            // Like SkillManager.runSkill: nothing in the follow tick checks for a task, so follow
+            // would keep steering (or teleport) the bot while the worker walks it to the spot.
+            net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume =
+                    net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
+            try {
+                PlaceRun rest = runPlaceLoop(bot, target, item, placeItem, count, first.placed(), first.lastPlaced());
+                success = rest.stop() == PlacePosPolicy.Stop.DONE;
+                server.execute(() -> reportPlacement(source, rest, item));
+            } finally {
+                // Abort read before complete() drops the ticket; complete before resuming.
+                boolean abortRequested = TaskService.isAbortRequested(botUuid);
+                TaskService.complete(ticket, success);
+                if (!abortRequested) {
+                    net.wcfcarolina13.GameAI.skills.SkillManager.resumeFollowMode(bot, server, followResume);
+                }
+            }
+        });
+        return 1;
+    }
+
+    /** How a placement run ended: the running total, the last cell placed, and why it stopped. */
+    private record PlaceRun(int placed, BlockPos lastPlaced, PlacePosPolicy.Stop stop) {}
+
+    /**
+     * Places items {@code placed..count-1}. On the server thread every attempt is in reach only; on
+     * a worker {@link #attemptPlacement} may walk and the run checks {@code /bot stop} per item.
+     */
+    private static PlaceRun runPlaceLoop(ServerPlayerEntity bot, PlacementTarget target, String item,
+                                         net.minecraft.item.Item placeItem, int count, int placed, BlockPos lastPlaced) {
+        MinecraftServer server = bot.getCommandSource().getServer();
+        boolean onServerThread = server == null || server.isOnThread();
         try {
-            for (int i = 0; i < count; i++) {
-                int slot = findItem(bot, placeItem);
+            while (placed < count) {
+                if (!onServerThread && TaskService.isAbortRequested(bot.getUuid())) {
+                    return new PlaceRun(placed, lastPlaced, PlacePosPolicy.Stop.ABORTED);
+                }
+                int slot = BotActions.callOnServerThread(bot, () -> findItem(bot, placeItem), 1000L, -1);
                 if (slot == -1) {
-                    break;
+                    return new PlaceRun(placed, lastPlaced, PlacePosPolicy.Stop.NO_ITEMS);
                 }
                 BlockPos placedPos;
                 if (placeItem == Items.CHEST && lastPlaced != null) {
@@ -2692,34 +2758,28 @@ public class modCommandRegistry {
                     placedPos = attemptAdjacentChest(bot, target.placePos, slot, placeItem);
                 }
                 if (placedPos == null) {
-                    ChatUtils.sendSystemMessage(context.getSource(), "I can't reach that spot.");
-                    reachFailed = true;
-                    break;
+                    return new PlaceRun(placed, lastPlaced,
+                            !onServerThread && TaskService.isAbortRequested(bot.getUuid())
+                                    ? PlacePosPolicy.Stop.ABORTED
+                                    : PlacePosPolicy.Stop.OUT_OF_REACH);
                 }
                 placed++;
                 lastPlaced = placedPos;
             }
         } catch (RuntimeException e) {
-            // Never let a placement bug surface as Brigadier's generic "An unexpected error occurred".
+            // Never let a placement bug surface as Brigadier's generic "An unexpected error occurred";
+            // the report still says what was placed before it.
             LOGGER.error("Unexpected error in /bot place {}", item, e);
-            ChatUtils.sendSystemMessage(context.getSource(),
-                    "Something went wrong placing the " + item + ", so I stopped.");
-            if (placed > 0) {
-                ChatUtils.sendSystemMessage(context.getSource(), placedLine(placed, item));
-            }
-            return placed > 0 ? 1 : 0;
+            return new PlaceRun(placed, lastPlaced, PlacePosPolicy.Stop.ERROR);
         }
-        if (placed > 0) {
-            ChatUtils.sendSystemMessage(context.getSource(), placedLine(placed, item));
-        } else if (!reachFailed) {
-            // A reach failure already said why nothing was placed; "I don't have any" would be false.
-            ChatUtils.sendSystemMessage(context.getSource(), "I don't have any " + item + " to place.");
-        }
-        return placed > 0 ? 1 : 0;
+        return new PlaceRun(placed, lastPlaced, PlacePosPolicy.Stop.DONE);
     }
 
-    private static String placedLine(int placed, String item) {
-        return "Placed " + placed + " " + item + (placed == 1 ? "" : "s") + ".";
+    /** Server thread only: sends the lines that end a run. */
+    private static void reportPlacement(ServerCommandSource source, PlaceRun run, String item) {
+        for (String line : PlacePosPolicy.reportLines(run.placed(), run.stop(), item)) {
+            ChatUtils.sendSystemMessage(source, line);
+        }
     }
 
     private static int executeCook(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemFilter, String fuelSpec) {
@@ -4666,7 +4726,10 @@ public class modCommandRegistry {
 
         // Come should be "self-healing": keep replanning like follow-walk does, instead of relying on a single
         // direct-path attempt that can be blocked by doorway/fence/corner geometry.
-        if (!teleportAllowed) {
+        // Within 30 blocks the teleport path would walk first, and this command runs on the server
+        // thread, where that walk sleeps (seconds-long freezes); the tick-driven come-walk is used
+        // there too, and teleporting is kept for longer distances.
+        if (!teleportAllowed || ComeTeleportPolicy.walkInsteadOfTeleport(bot.squaredDistanceTo(commander))) {
             // Come is a player-issued override; abort any running skill so follow-walk can take over immediately.
             TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come.");
             BotIdleHobbiesService.snoozeFor(bot, 3_600L);
@@ -5667,12 +5730,17 @@ public class modCommandRegistry {
             return null;
         }
         BlockPos placePos = target.placePos;
-        bot.setYaw(target.yaw);
-        bot.setHeadYaw(target.yaw);
-        bot.setPitch(Math.max(-90.0F, Math.min(90.0F, target.pitch)));
+        // Entity and world mutations go to the server thread (runs inline when already on it).
+        BotActions.callOnServerThread(bot, () -> {
+            bot.setYaw(target.yaw);
+            bot.setHeadYaw(target.yaw);
+            bot.setPitch(Math.max(-90.0F, Math.min(90.0F, target.pitch)));
+            return true;
+        }, 1000L, false);
 
         // On the server thread a walk never moves the bot (it freezes the tick instead), so only
-        // the in-reach attempt is made there; the caller then says "I can't reach that spot."
+        // the in-reach attempt is made there; executePlaceGeneric then hands the run to a worker,
+        // which comes back here and may walk (1.1.296).
         MinecraftServer server = bot.getCommandSource().getServer();
         boolean onServerThread = server == null || server.isOnThread();
         int maxTries = PlacePosPolicy.maxAttempts(onServerThread);
@@ -5681,22 +5749,26 @@ public class modCommandRegistry {
             // Clear snow on target, only when the bot could break it by hand: in survival reach with
             // line of sight (the soft-block break rule). Out of reach the snow stays and the
             // caller says "I can't reach that spot." (1.1.295 sandbox: a remote clear, nothing placed).
-            var state = bot.getEntityWorld().getBlockState(placePos);
-            if ((state.isOf(net.minecraft.block.Blocks.SNOW) || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK))
-                    && net.wcfcarolina13.GameAI.services.BlockInteractionService.canInteract(bot, placePos)) {
-                if (bot.getEntityWorld() instanceof ServerWorld sw) {
-                    var auth = net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService
-                            .authorizeBlockMutation(bot, sw, placePos);
-                    if (auth.allowed()) {
-                        bot.getEntityWorld().breakBlock(placePos, false);
+            BotActions.callOnServerThread(bot, () -> {
+                var state = bot.getEntityWorld().getBlockState(placePos);
+                if ((state.isOf(net.minecraft.block.Blocks.SNOW) || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK))
+                        && net.wcfcarolina13.GameAI.services.BlockInteractionService.canInteract(bot, placePos)) {
+                    if (bot.getEntityWorld() instanceof ServerWorld sw) {
+                        var auth = net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService
+                                .authorizeBlockMutation(bot, sw, placePos);
+                        if (auth.allowed()) {
+                            bot.getEntityWorld().breakBlock(placePos, false);
+                        }
                     }
                 }
-            }
+                return true;
+            }, 1000L, false);
             if (BotActions.placeBlockAt(bot, placePos, target.face, List.of(placeItem))) {
                 return placePos.toImmutable();
             }
             tries++;
-            if (!PlacePosPolicy.mayWalk(onServerThread) || tries >= maxTries) {
+            if (!PlacePosPolicy.mayWalk(onServerThread) || tries >= maxTries
+                    || TaskService.isAbortRequested(bot.getUuid())) {
                 break;
             }
             // try moving closer and retry
@@ -5749,9 +5821,12 @@ public class modCommandRegistry {
             return null;
         }
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = anchor.offset(dir);
-            PlacementTarget alt = new PlacementTarget(candidate, dir.getOpposite(), bot.getYaw(), bot.getPitch(),
-                    candidate.offset(dir.getOpposite()));
+            // Click the anchor chest on its side facing dir; the new chest goes into the neighbour.
+            AdjacentChestPolicy.Target cells = AdjacentChestPolicy.target(
+                    new AdjacentChestPolicy.Cell(anchor.getX(), anchor.getY(), anchor.getZ()),
+                    dir.getOffsetX(), dir.getOffsetZ());
+            BlockPos candidate = new BlockPos(cells.place().x(), cells.place().y(), cells.place().z());
+            PlacementTarget alt = new PlacementTarget(anchor, dir, bot.getYaw(), bot.getPitch(), candidate);
             if (bot.getEntityWorld().getBlockState(candidate).isAir()) {
                 BlockPos placed = attemptPlacement(bot, alt, slot, placeItem);
                 if (placed != null) {
@@ -5764,6 +5839,10 @@ public class modCommandRegistry {
 
     private static int executeFollowStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow stop.");
+        // A running task has follow suspended and would hand it back when it ends: veto that.
+        if (net.wcfcarolina13.GameAI.services.FollowResumeVeto.shouldVeto(TaskService.hasActiveTask(bot.getUuid()))) {
+            net.wcfcarolina13.GameAI.services.FollowResumeVeto.veto(bot.getUuid());
+        }
         // Commands already emit a system summary; avoid redundant bot-authored chat acks.
         BotEventHandler.stopFollowing(bot, false);
         CompanionContextReactionService.playStopAck(bot);
@@ -5789,6 +5868,9 @@ public class modCommandRegistry {
     static int executeStay(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
         rememberTarget(context.getSource(), bot);
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot stay.");
+        if (net.wcfcarolina13.GameAI.services.FollowResumeVeto.shouldVeto(TaskService.hasActiveTask(bot.getUuid()))) {
+            net.wcfcarolina13.GameAI.services.FollowResumeVeto.veto(bot.getUuid());
+        }
         String result = BotEventHandler.setStayMode(bot);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         CompanionContextReactionService.playStopAck(bot);
@@ -5913,7 +5995,8 @@ public class modCommandRegistry {
                 ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(alias, worldKey);
                 ctrl.setAutoSpawnOnLoad(false);
             }
-            BotEventHandler.unregisterBot(bot);
+            // Save first: removal alone lost everything since the last autosave.
+            BotEventHandler.unregisterBot(bot, true);
             successes++;
         }
         if (!sessionOnly && !targets.isEmpty()) {

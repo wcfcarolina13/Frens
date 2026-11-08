@@ -34,6 +34,8 @@ public final class LockableBlockService {
 
     // Lock registry: dimension -> set of locked block positions
     private static final Map<String, Set<BlockPos>> LOCKED_BLOCKS = new ConcurrentHashMap<>();
+    /** Worlds whose lock file could neither be read nor moved aside: saves are refused so it is never overwritten. */
+    private static final Set<String> LOAD_FAILED_WORLDS = ConcurrentHashMap.newKeySet();
 
     // Lock mode active per player (transient, not persisted)
     private static final Map<UUID, Boolean> LOCK_MODE = new ConcurrentHashMap<>();
@@ -189,6 +191,7 @@ public final class LockableBlockService {
         // Replace, never merge: the map is static and outlives a world when the integrated
         // server switches saves inside one JVM.
         LOCKED_BLOCKS.remove(worldId);
+        LOAD_FAILED_WORLDS.remove(worldId);
         Path file = getLockFile(server, worldId);
         Path legacyFile = WorldZoneStore.legacyDir(server, worldId).resolve(LOCK_FILE_NAME);
         WorldStoreKeyPolicy.Adoption adoption = WorldZoneStore.decide(server, worldId, file, legacyFile);
@@ -206,11 +209,13 @@ public final class LockableBlockService {
                         worldId, WorldZoneStore.fingerprint(server), adoption);
             }
         }
+        boolean parsedOk = false;
         try {
             Set<BlockPos> locks = ConcurrentHashMap.newKeySet();
             if (fileToRead != null) {
                 String json = Files.readString(fileToRead);
                 List<int[]> positions = GSON.fromJson(json, new TypeToken<List<int[]>>(){}.getType());
+                parsedOk = true; // a later failure is not a corrupt file
                 if (positions != null) {
                     for (int[] coords : positions) {
                         if (coords != null && coords.length >= 3) {
@@ -230,13 +235,29 @@ public final class LockableBlockService {
             if (adoption == WorldStoreKeyPolicy.Adoption.ADOPT_LEGACY) {
                 WorldZoneStore.writeClaim(WorldZoneStore.legacyDir(server, worldId), WorldZoneStore.fingerprint(server));
             }
-        } catch (IOException e) {
-            LOGGER.error("Failed to load locked blocks for world {}", worldId, e);
+        } catch (IOException | RuntimeException e) {
+            // RuntimeException: Gson's JsonSyntaxException on a truncated file. This runs in the
+            // SERVER_STARTED hook, so it must not escape. A corrupt file is moved to .bad-<stamp>;
+            // an unreadable one is left in place and saves for that world are refused, so the
+            // shutdown saveAllWorlds cannot write [] over it.
+            if (parsedOk || fileToRead == null) {
+                // Read fine (or nothing to read); the adoption write or claim failed. Not corrupt.
+                LOGGER.error("Locked blocks for world {} loaded, but a follow-up write failed", worldId, e);
+            } else {
+                LOGGER.error("Failed to load locked blocks for world {}", worldId, e);
+                Path backup = UnreadableStoreFile.quarantineIfCorrupt(fileToRead, e, java.time.LocalDateTime.now(), LOGGER,
+                        "locked blocks (" + worldId + ")");
+                if (backup == null) LOAD_FAILED_WORLDS.add(worldId);
+            }
         }
     }
 
     public static void saveForWorld(MinecraftServer server, String worldId) {
         Set<BlockPos> locks = LOCKED_BLOCKS.get(worldId);
+        if (LOAD_FAILED_WORLDS.contains(worldId)) {
+            LOGGER.warn("Locked blocks for world {} were not saved because their original file could not be read.", worldId);
+            return;
+        }
         try {
             // Empty is written as [] (never deleted) so this save keeps its own store and can't
             // later adopt another save's legacy locks.
@@ -246,14 +267,13 @@ public final class LockableBlockService {
         }
     }
 
-    private static void writeLocks(MinecraftServer server, String worldId, Set<BlockPos> locks) throws IOException {
+    private static synchronized void writeLocks(MinecraftServer server, String worldId, Set<BlockPos> locks) throws IOException {
         Path file = getLockFile(server, worldId);
-        Files.createDirectories(file.getParent());
         List<int[]> positions = new ArrayList<>();
         for (BlockPos pos : locks) {
             positions.add(new int[]{pos.getX(), pos.getY(), pos.getZ()});
         }
-        Files.writeString(file, GSON.toJson(positions));
+        AtomicStoreWriter.writeString(file, GSON.toJson(positions));
     }
 
     public static void saveAllWorlds(MinecraftServer server) {

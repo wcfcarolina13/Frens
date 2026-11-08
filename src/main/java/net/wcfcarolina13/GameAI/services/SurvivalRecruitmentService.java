@@ -1269,7 +1269,8 @@ public final class SurvivalRecruitmentService {
         ServerPlayerEntity existing = server.getPlayerManager().getPlayer(alias);
         if (existing != null && !existing.isRemoved() && existing.isAlive()) {
             if (existing instanceof createFakePlayer) {
-                BotEventHandler.unregisterBot(existing);
+                // The reset keeps the bot's inventory, so save it like /bot despawn does.
+                BotEventHandler.unregisterBot(existing, true);
             } else {
                 ChatUtils.sendSystemMessage(player.getCommandSource(), "Can't reset: a real player named '" + alias + "' is online.");
                 return;
