@@ -645,6 +645,25 @@ Costs and limits:
 - A bot still won't craft a tool its commander has never crafted. That gate is unchanged.
 
 Tests: `ComeRecoveryRequestSourceWiringTest` (1).
+## The cook hobby no longer runs alongside a second hobby (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server. The idle scheduler only waits 4 to 8
+seconds after starting a hobby, and relies on that hobby's task slot to keep the next one from
+starting. The cook hobby took no slot, so a wander started 3 seconds into the cook and walked the
+bot off the furnace. The cook lost reach twice and spent the cycle walking back.
+
+The cook hobby now holds an ambient, open-ended task (`skill:hobby-cook`) for its whole cycle,
+like the other hobbies. Headless, the scheduler then reported "active-task" for the full
+80-second cook, no other hobby started, and the bot collected all 8 cooked beef.
+
+Costs and limits:
+- While the cook runs the bot counts as busy: the next hobby waits, and so does any other code
+  that checks `TaskService.hasActiveTask` (I did not audit each of those callers). Sunset return
+  can still interrupt it, because ambient tasks are open-ended.
+- `/bot stop` now reaches the cook worker (the thread is attached to the task). That was not
+  exercised headless.
+
+Tests: `CookHobbyTaskWiringTest` (1).
 
 ## Repository clean-up: public and private split (2026-11-04)
 
