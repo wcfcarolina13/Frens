@@ -411,7 +411,7 @@ public final class SoulBanterDirector {
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
                 kind(lane), playerId, player.getName().getString(),
                 roster, seed, Instant.now(), routingId, addressPlayer, onlineHumans,
-                privateAnchorUsed ? playerId : null);
+                privateAnchorUsed ? playerId : null, seeded.act());
         LOGGER.debug("[souls] banter privacy routingId={} withheldPrivateMemories={} onlineHumans={}",
                 routingId, withheldPrivate, onlineHumans.size());
         long armedUntilMs = now + nextDelay(lane);
