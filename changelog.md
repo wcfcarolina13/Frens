@@ -11,6 +11,7 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 - **Rulings (cost if wrong):** a model close moves no stance (the owner's reply already does that through `markAnswered`, and the side channel never moves owner stance). Cost: no trust +1 when only the model noticed an answer. A paraphrase closes nothing. Cost: the thread stays until it expires (10 min TTL) and the bot may ask again. A wrong close was judged worse, since it drops a question the bot still wanted answered.
 - **Cost:** about 35 more prompt tokens per scene while structured output is on.
 - **Limits:** unit tests only (8 new, Tests 3857 → 3865). Whether the 3B model writes the key, and copies the question exactly, is unmeasured. The apply step in `SoulRuntime` has no unit test (no test seam for the server hop). Needs a sandbox check with structured output on: a bot asks a question, the owner answers it while talking to a different bot in a party scene, the log shows `closeClaims=1` and that bot's `mind.json` no longer lists the thread, and its stance is unchanged.
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
