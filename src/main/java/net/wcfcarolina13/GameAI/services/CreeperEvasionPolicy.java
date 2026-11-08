@@ -116,4 +116,50 @@ public final class CreeperEvasionPolicy {
         }
         return Decision.FLEE_SPRINT;
     }
+
+    /** Melee reach for the knockback swing (BotActions.attackTarget's 3-block reach). */
+    public static final double KNOCKBACK_REACH = 3.0D;
+
+    /**
+     * Bradley's ruling (2026-11-08, backlog 986, "hit it to knock it back"): an armed bot with no
+     * shield and no block to place cannot do the block-and-shield trick STAY stands for, and a
+     * cornered one cannot back away. Before, it stood or backed into the wall and took ~10 damage
+     * (headless run, walled 8x9 pen). Now, inside melee reach, it swings at the creeper first to
+     * knock it back out of its fuse range, then backs off. Open ground is unchanged: FLEE_SPRINT and
+     * a free BACK_AWAY swing nothing.
+     */
+    public static boolean swingFirst(Decision decision, boolean armed, boolean hasShield, boolean hasBlock,
+                                     double distance, boolean cornered) {
+        if (decision == null || !armed || hasShield || distance > KNOCKBACK_REACH) {
+            return false;
+        }
+        if (decision == Decision.STAY) {
+            return !hasBlock;
+        }
+        return cornered;
+    }
+
+    /** STAY's block-and-shield trick needs a shield or a block; without both the bot backs away instead. */
+    public static boolean trickUnavailable(Decision decision, boolean hasShield, boolean hasBlock) {
+        return decision == Decision.STAY && !hasShield && !hasBlock;
+    }
+
+    /** Ticks without gaining distance that count as cornered for the knockback swing (half a second). */
+    public static final int BACKOFF_SWING_STUCK_TICKS = 10;
+
+    /**
+     * The creeper-defense backoff's swing (BotCreeperDefenseService): a bot backing away with a melee
+     * weapon and no shield that has not gained distance for {@link #BACKOFF_SWING_STUCK_TICKS} with
+     * the creeper inside {@link #KNOCKBACK_REACH} swings at it. A free flee keeps gaining distance, so
+     * open ground is unchanged.
+     */
+    public static boolean backoffSwing(boolean hasMelee, boolean hasShield, double distance, int ticksWithoutProgress) {
+        return hasMelee && !hasShield && distance <= KNOCKBACK_REACH
+                && ticksWithoutProgress >= BACKOFF_SWING_STUCK_TICKS;
+    }
+
+    /** A knockback swing waits for a fully charged attack (a weak hit barely moves the creeper). */
+    public static boolean swingReady(float attackCooldownProgress) {
+        return attackCooldownProgress >= 0.9F;
+    }
 }

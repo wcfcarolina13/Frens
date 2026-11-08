@@ -3294,6 +3294,18 @@ public class BotEventHandler {
         });
     }
 
+    /** A block the creeper STAY trick can place: any of the scaffold blocks BotActions.placeBlockAt uses. */
+    private static boolean hasCreeperBlock(ServerPlayerEntity bot) {
+        var inv = bot.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            net.minecraft.item.ItemStack st = inv.getStack(i);
+            if (!st.isEmpty() && net.wcfcarolina13.GameAI.services.construction.ScaffoldService.SCAFFOLD_BLOCKS.contains(st.getItem())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean handlePatrol(ServerPlayerEntity bot, BotCommandStateService.State state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
         Vec3d center = getGuardCenter(bot);
         double radius = getPatrolRadius(bot);
@@ -3834,7 +3846,18 @@ public class BotEventHandler {
                         distance, armed, chargedCreeper, fuseState, healthFraction);
                 logCreeperDecisionIfChanged(bot, closest.getId(), decision, distance, armed, fuseState);
 
-                if (decision == CreeperEvasionPolicy.Decision.STAY) {
+                boolean hasShieldNow = bot.getOffHandStack().isOf(net.minecraft.item.Items.SHIELD)
+                        || bot.getMainHandStack().isOf(net.minecraft.item.Items.SHIELD);
+                boolean hasBlockNow = hasCreeperBlock(bot);
+                boolean noTrick = CreeperEvasionPolicy.trickUnavailable(decision, hasShieldNow, hasBlockNow);
+                if (noTrick && CreeperEvasionPolicy.swingFirst(decision, armed, hasShieldNow, hasBlockNow, distance, false)) {
+                    // No block, no shield: knock it back with a swing, then back off below.
+                    LOGGER.info("Creeper knockback: {} swings at the creeper at {} blocks (no shield or block for the trick)",
+                            bot.getName().getString(), String.format("%.1f", distance));
+                    BotActions.attackTarget(bot, closest);
+                }
+
+                if (decision == CreeperEvasionPolicy.Decision.STAY && !noTrick) {
                     double cdx = closest.getX() - bot.getX();
                     double cdz = closest.getZ() - bot.getZ();
                     double clen = Math.sqrt(cdx * cdx + cdz * cdz);
@@ -3849,7 +3872,7 @@ public class BotEventHandler {
                     return true;
                 }
 
-                boolean backAway = decision == CreeperEvasionPolicy.Decision.BACK_AWAY;
+                boolean backAway = decision == CreeperEvasionPolicy.Decision.BACK_AWAY || noTrick;
 
                 // Track flee progress per bot. If the bot doesn't gain ground over
                 // ~1s, treat it as "can't make distance" and force the shield even
@@ -3872,8 +3895,13 @@ public class BotEventHandler {
                     CREEPER_FLEE_STATE.put(botId, new CreeperFleeMemory(closest.getUuid(), distance, nowTick, 0));
                 }
 
-                boolean hasShield = bot.getOffHandStack().isOf(net.minecraft.item.Items.SHIELD)
-                        || bot.getMainHandStack().isOf(net.minecraft.item.Items.SHIELD);
+                boolean hasShield = hasShieldNow;
+                if (!noTrick && CreeperEvasionPolicy.swingFirst(decision, armed, hasShield, hasBlockNow, distance, cantMakeDistance)) {
+                    // Cornered with no shield: a swing knocks the creeper back where backing away cannot.
+                    LOGGER.info("Creeper knockback: {} is cornered and swings at the creeper at {} blocks",
+                            bot.getName().getString(), String.format("%.1f", distance));
+                    BotActions.attackTarget(bot, closest);
+                }
                 // BACK_AWAY always retreats under shield — that is the point of it.
                 if (backAway || distance <= creeperShieldRadius || (cantMakeDistance && hasShield)) {
                     BotActions.raiseShieldFacing(bot, closest);
