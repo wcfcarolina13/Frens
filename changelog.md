@@ -8,6 +8,7 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 
 - Cost: one uncontended lock per recorded move; these are recorded once per step, not per tick.
 - Tests 3857 → 3863 (3 per class, including an 8-thread race that fails without the lock). No sandbox check needed.
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
