@@ -8,8 +8,8 @@ import net.minecraft.util.math.BlockPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -31,6 +31,8 @@ public final class FishingSessionService {
 
     private static Map<String, SessionData> DATA = new HashMap<>();
     private static boolean loaded = false;
+    /** Set when the file could neither be read nor moved aside; saves are then refused so it is never overwritten. */
+    private static boolean loadFailed = false;
 
     private FishingSessionService() {}
 
@@ -107,9 +109,11 @@ public final class FishingSessionService {
                     Map<String, SessionData> parsed = GSON.fromJson(reader,
                             new com.google.gson.reflect.TypeToken<Map<String, SessionData>>() {}.getType());
                     if (parsed != null) DATA = parsed;
-                } catch (Exception e) {
+                } catch (IOException | RuntimeException e) {
                     LOGGER.warn("Failed to load fishing sessions: {}", e.getMessage());
                     DATA = new HashMap<>();
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "fishing sessions");
+                    loadFailed = backup == null;
                 }
             }
             long now = System.currentTimeMillis();
@@ -118,15 +122,18 @@ public final class FishingSessionService {
         }
     }
 
+    /** Serializes and writes under {@link #LOCK}: callers mutate {@link #DATA} under that lock. */
     private static void flush() {
-        Path file = stateFile();
-        try {
-            Files.createDirectories(file.getParent());
-            try (Writer writer = Files.newBufferedWriter(file)) {
-                GSON.toJson(DATA, writer);
+        synchronized (LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Fishing sessions were not saved because their original file could not be read.");
+                return;
             }
-        } catch (Exception e) {
-            LOGGER.warn("Failed to save fishing sessions: {}", e.getMessage());
+            try {
+                AtomicStoreWriter.writeString(stateFile(), GSON.toJson(DATA));
+            } catch (IOException | RuntimeException e) {
+                LOGGER.warn("Failed to save fishing sessions: {}", e.getMessage());
+            }
         }
     }
 

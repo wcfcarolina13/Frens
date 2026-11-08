@@ -345,6 +345,36 @@ Tests: `ServerThreadNoBlockTest` (4). Needs a sandbox check:
 - "Map village" from the base UI near a village: no freeze, and villagers in the layout.
 - Mount a hurt horse with its food: no hitch, several feeds.
 - `/bot come` with teleport on from 10 blocks: the bot walks, no freeze.
+## Save files written atomically; corrupt ones quarantined instead of wiped or crashing (2026-11-05, unreleased)
+
+A read-only audit of the stores under `config/frens/` and the per-world inventory snapshots found three loss paths: files were rewritten in place (a crash or a full disk mid-write left a truncated file), a truncated file then threw Gson's `JsonSyntaxException` out of a load that caught only `IOException`, and several loads reset their in-memory state on any failure so the next save wrote an empty store over the file that had failed to load. `settings.json5` (bot ownership, profiles, spawn points, controls, quest memory) was the worst case: its parse error escaped `Frens.CONFIG`'s static initialiser and the game would not launch, and an empty file made `fromJson` return null and NPE the same way.
+
+New `GameAI/services/AtomicStoreWriter` (pure `java.nio`, unit-tested): the content goes to a temp sibling in the same directory, is `force(true)`d, then renamed over the target with `ATOMIC_MOVE`; `AtomicMoveNotSupportedException` or `AccessDeniedException` (Windows antivirus or indexer holding the target) falls back to a plain replacing move once; the temp file is deleted on every failure path and the `IOException` reaches the caller, which keeps its own logging. `writeString`, `writeBytes`, `write(Body)` and `writeWithBackup(target, backup, body, onBackupFailure)`. The pre-existing inline copies of the pattern (`BotWorldStateService`, `FortificationPersistenceService`) were left alone.
+
+Loads mirror `FortificationPersistenceService`: catch `IOException | RuntimeException`, hand the file to `UnreadableStoreFile.quarantineIfCorrupt` (a corrupt file is renamed to `<name>.bad-<stamp>` and the store starts empty; a file that could not be read for I/O reasons is left in place and a `loadFailed` gate refuses every save for the session, so the unreadable original is never overwritten). Stores changed:
+
+- `ManualConfig`: saves through the writer; an empty file is treated as corrupt; nothing escapes `load()` (ERROR log, quarantine, defaults). A quarantined settings file means bot ownership and controls start from defaults for that launch, with the original kept beside it.
+- `BotHomeService`, `BotChestRegistryService`: writer plus the load gate, so the debounced save or next flush cannot wipe homes, bases and chest claims of every world.
+- `ProtectedZoneService`, `LockableBlockService`: writer, a save lock, per-world failed sets, and the parse exception no longer escapes the `SERVER_STARTED` lambda (which has no try/catch and would abort server start). `LockableBlockService.saveAllWorlds` at shutdown can no longer write `[]` over a file that failed to load.
+- `MountPersistenceService`: writer, a `LOCK` around load and flush, `volatile loaded`, concurrent maps for the state (recordMount and clear run from join and leave hooks); a half-parsed file is dropped rather than written back.
+- `NavigationArtifactService` pending travels: writer plus the gate; the parse exception no longer escapes server start.
+- `FishingSessionService`, `HuntSessionService`: `flush()` serialised `DATA` outside `LOCK` while mutators held it; it now serialises and writes under the lock.
+- `BotInventoryStorageService`: the snapshot is written to a temp file and forced first; only then is the still-intact primary copied to `.bak` and the temp renamed over the primary, so a failed write leaves both copies as they were (before, two failures in a row destroyed both). The audit suggested renaming the primary to `.bak` instead of copying; that was not done because `delete()` leaves `.bak` behind and the loader ignores a lone `.bak`, so a crash between the two renames would have lost the snapshot. `snapshotItemCount` returns -1 for an unreadable file and the empty-save guard now protects it (it used to count 0, let the empty save through, and the copy step then overwrote the good `.bak` with the unreadable primary).
+
+Costs and limits: one `fsync` per save (milliseconds on an SSD; these stores save on debounce, on change or at shutdown, not per tick). A crash during a write can leave an orphaned `<name>.<random>.tmp` beside the store, harmless. A corrupt file is kept as `.bad-<stamp>` and the admin join notice lists it; the store does start empty for that session. Not touched: `BotZzzSleepService` (owned by another open PR) and the low-stakes stores (BotDeathRecord, Shelter, PlayerAlliance, WoodcutKnowledge, PassageAnchor, NavHazardCache). Tests: `AtomicStoreWriterTest` (replace, no `.tmp` left on success or failure, target never truncated, backup ordering) and `AtomicStoreWiringTest` (each store saves through the writer, catches `RuntimeException`, quarantines, gates saves). The sandbox runs as root, so the failure tests use a directory in the target's place rather than an unwritable directory.
+
+Review fix: the inventory `.bak` is refreshed only from a primary that can be read. Otherwise a save made after restoring from `.bak` would first copy the unreadable primary over the good backup, and a crash before the rename would leave no readable copy. The cost is one extra read of the small primary file per save.
+
+Review fixes:
+- *Only a parse failure quarantines.* In `ManualConfig`, `NavigationArtifactService`, `ProtectedZoneService` and `LockableBlockService`, the catch also covered migrations, world reads and the adoption-path write. A disk-full error on that write, or an exception after a good parse, would have quarantined a good file, or refused saves for the session with a misleading "could not read" notice. Now only the read and parse go to quarantine. A later step logs an ERROR and keeps what was read.
+- *The Windows fallback keeps the new content.* A non-atomic replace deletes the target before renaming. If the delete succeeds (an antivirus holding the file with share-delete) and the rename fails, neither file would have existed. The temp is now kept and its path is named in the error.
+- *Replaced files keep their POSIX permissions.* `createTempFile` makes the temp 0600, which would have silently dropped group/world read bits.
+- `MountPersistenceService` skips a JSON-null entry instead of refusing saves for the session.
+- Pending travels: each entry's post-arrival restore has its own try. A restore that still fails part-way refuses saves for the session, so the file is never rewritten without the entries that were not restored.
+- Permissions are copied to the temp after the write. Copying a read-only target's mode first made the write itself fail.
+
+Costs noted in review: each save now forces the temp file to disk on the calling thread. Inventory autosave runs about every 30 s per bot on the server thread, so that is a few ms per bot per save on a slow disk. The inventory save also reads the small primary once to decide on the backup.
+
 
 ## Repository clean-up: public and private split (2026-11-04)
 
