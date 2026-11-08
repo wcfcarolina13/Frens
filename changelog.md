@@ -11,6 +11,7 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 - **Limits:** a new session (next day, or after the session is cleared by stop/rescue/toggle) announces again, as intended. "Arrived at base." still plays the `mode_return_returning` clip (no arrival clip exists), so the voice can sound like a second "returning" on arrival; not changed here.
 - **Tests:** +7 (`SunsetReturnAnnouncePolicyTest`).
 - **Sandbox check:** sunset return with a forced interruption (low food so the bot detours to eat, or a hostile to trigger flee), then confirm one "Returning to base." in chat for the whole trip.
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
