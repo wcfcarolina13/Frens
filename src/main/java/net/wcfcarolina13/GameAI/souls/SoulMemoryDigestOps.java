@@ -105,9 +105,42 @@ final class SoulMemoryDigestOps {
     static Material gather(List<SoulTypes.ConversationRecord> sinceRecords,
                            SoulTypes.ConversationCursor from, UUID botId, String botName,
                            String playerName, boolean party, UUID playerId) {
+        return gather(sinceRecords, from, botId, botName, playerName, party, playerId, null);
+    }
+
+    /**
+     * How long a party scene that has only HEARD lines so far is treated as still being answered.
+     * A slow local model can take well over a minute per scene, plus queueing; a scene that got no
+     * reply at all for this long is digested as it stands.
+     */
+    static final java.time.Duration OPEN_SCENE_HOLD = java.time.Duration.ofMinutes(10);
+
+    /**
+     * As {@link #gather(List, SoulTypes.ConversationCursor, UUID, String, String, boolean, UUID)},
+     * holding back an open party scene when {@code now} is given. A scene whose records so far are
+     * all HEARD, the newest within {@link #OPEN_SCENE_HOLD} of {@code now}, is still being
+     * answered: its privacy is set by the SPOKEN or FAILURE lines it has not written yet. Digesting
+     * its HEARD now would make a PUBLIC memory from a private scene's owner line (the 1.1.296 cursor
+     * split), and the cursor would never come back to it. So the batch stops before the earliest
+     * open scene's first record, and the cursor stops there too: that scene and everything after it
+     * are read whole by a later digest, never twice.
+     */
+    static Material gather(List<SoulTypes.ConversationRecord> sinceRecords,
+                           SoulTypes.ConversationCursor from, UUID botId, String botName,
+                           String playerName, boolean party, UUID playerId, java.time.Instant now) {
+        List<SoulTypes.ConversationRecord> input = sinceRecords;
+        Long holdFrom = party && now != null ? openSceneHoldFrom(sinceRecords, now) : null;
+        if (holdFrom != null) {
+            input = new ArrayList<>();
+            for (SoulTypes.ConversationRecord record : sinceRecords) {
+                if (record != null && record.sequence() < holdFrom) {
+                    input.add(record);
+                }
+            }
+        }
         // 1.1.296: a HEARD record takes the privateTo of its scene's marked SPOKEN lines in this
         // batch, so digestible/digestVisibility treat the owner's own reply as private too.
-        List<SoulTypes.ConversationRecord> all = SoulPrivacyPolicy.withInheritedPrivacy(sinceRecords);
+        List<SoulTypes.ConversationRecord> all = SoulPrivacyPolicy.withInheritedPrivacy(input);
         if (all.isEmpty()) {
             return new Material(List.of(), "", 0, from);
         }
@@ -115,8 +148,9 @@ final class SoulMemoryDigestOps {
         for (SoulTypes.ConversationRecord record : all) {
             maxSequence = Math.max(maxSequence, record.sequence());
         }
-        SoulTypes.ConversationCursor next =
-                new SoulTypes.ConversationCursor(all.get(0).epoch(), maxSequence + 1);
+        SoulTypes.ConversationCursor next = holdFrom != null
+                ? new SoulTypes.ConversationCursor(all.get(0).epoch(), holdFrom)
+                : new SoulTypes.ConversationCursor(all.get(0).epoch(), maxSequence + 1);
 
         List<SoulTypes.ConversationRecord> usable = new ArrayList<>();
         for (SoulTypes.ConversationRecord record : all) {
@@ -156,6 +190,48 @@ final class SoulMemoryDigestOps {
             }
         }
         return new Material(kept, String.join("\n", lines), playerLines, next);
+    }
+
+    /**
+     * The first sequence of the earliest open scene in {@code records}, or null when none is open.
+     * Open: every record of that {@code correlationId} so far is HEARD, and the newest of them is
+     * within {@link #OPEN_SCENE_HOLD} of {@code now}. Past that window a scene is never held, so
+     * the cursor can not stall on a scene that was simply never answered.
+     */
+    static Long openSceneHoldFrom(List<SoulTypes.ConversationRecord> records, java.time.Instant now) {
+        if (records == null || records.isEmpty() || now == null) {
+            return null;
+        }
+        Map<UUID, Long> firstSequence = new LinkedHashMap<>();
+        Map<UUID, java.time.Instant> newestHeard = new java.util.HashMap<>();
+        Set<UUID> settled = new java.util.HashSet<>();
+        for (SoulTypes.ConversationRecord record : records) {
+            if (record == null || record.correlationId() == null) {
+                continue;
+            }
+            UUID scene = record.correlationId();
+            firstSequence.merge(scene, record.sequence(), Math::min);
+            if (record.kind() != SoulTypes.TurnKind.HEARD) {
+                settled.add(scene);
+            } else {
+                newestHeard.merge(scene, record.occurredAt(),
+                        (a, b) -> a.isAfter(b) ? a : b);
+            }
+        }
+        java.time.Instant cutoff = now.minus(OPEN_SCENE_HOLD);
+        Long holdFrom = null;
+        for (Map.Entry<UUID, Long> entry : firstSequence.entrySet()) {
+            UUID scene = entry.getKey();
+            java.time.Instant newest = newestHeard.get(scene);
+            if (settled.contains(scene) || newest == null
+                    || newest.isBefore(cutoff)) {
+                continue;
+            }
+            if (holdFrom == null || entry.getValue() < holdFrom) {
+                holdFrom = entry.getValue();
+            }
+        }
+        return holdFrom;
     }
 
     /** Party records already carry their speaker tag; DM records are tagged here. */
