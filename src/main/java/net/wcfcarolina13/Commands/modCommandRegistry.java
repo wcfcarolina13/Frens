@@ -1107,7 +1107,9 @@ public class modCommandRegistry {
                                 )
                         )
 
+                        // Dev helper, only registered for players while /bot debug is on.
                         .then(literal("mine_block")
+                                .requires(src -> DebugToggleService.verbose())
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .then(CommandManager.argument("block_type", StringArgumentType.string())
                                                 .then(CommandManager.argument("x", IntegerArgumentType.integer())
