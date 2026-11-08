@@ -45,6 +45,7 @@ public final class SkillResumeService {
     private static final long SUNRISE_RESUME_EXPIRY_TICKS = 24000L; // 1 in-game day
     private static final Map<UUID, SunriseResumeRecord> SUNRISE_RESUME_BY_BOT = new ConcurrentHashMap<>();
 
+
     public record SunriseResumeRecord(
             UUID botUuid,
             String skillName,

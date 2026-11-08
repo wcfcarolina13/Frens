@@ -18,7 +18,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -60,6 +59,8 @@ public final class BotHomeService {
 
     private static RootData DATA = new RootData();
     private static boolean loaded = false;
+    /** Set when the file could neither be read nor moved aside; saves are then refused so it is never overwritten. */
+    private static boolean loadFailed = false;
 
     /** Default protection radius (blocks) applied when a base has no explicit radius. */
     public static final int DEFAULT_BASE_PROTECTION_RADIUS = 40;
@@ -361,9 +362,14 @@ public final class BotHomeService {
                     if (parsed != null) {
                         DATA = parsed;
                     }
-                } catch (Exception e) {
+                } catch (IOException | RuntimeException e) {
                     LOGGER.warn("Failed to load bot home data: {}", e.getMessage());
                     DATA = new RootData();
+                    // A corrupt file is moved to .bad-<stamp> and the store starts empty; an
+                    // unreadable one stays in place and every save is refused, so the next
+                    // debounced write cannot wipe the homes and bases of every world.
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "bot homes");
+                    loadFailed = backup == null;
                 }
             }
             loaded = true;
@@ -395,12 +401,12 @@ public final class BotHomeService {
     /** The actual whole-file write. Only ever called by {@link #writer}. */
     private static void writeToDisk() {
         synchronized (LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Bot home data was not saved because its original file could not be read.");
+                return;
+            }
             try {
-                Path file = stateFile();
-                Files.createDirectories(file.getParent());
-                try (Writer out = Files.newBufferedWriter(file)) {
-                    GSON.toJson(DATA, out);
-                }
+                AtomicStoreWriter.writeString(stateFile(), GSON.toJson(DATA));
             } catch (IOException e) {
                 LOGGER.warn("Failed to save bot home data: {}", e.getMessage());
             }

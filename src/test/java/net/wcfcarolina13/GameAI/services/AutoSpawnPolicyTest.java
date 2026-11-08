@@ -54,4 +54,23 @@ class AutoSpawnPolicyTest {
         assertEquals(1, AutoSpawnPolicy.effectivePlayerCount(1, 1, 0));
         assertEquals(1, AutoSpawnPolicy.effectivePlayerCount(1, 1, -2));
     }
+
+    @Test
+    void loggedOffBotIsLeftToTheWakeMonitor() {
+        assertEquals(AutoSpawnPolicy.Skip.LOGGED_OFF_FOR_NIGHT, AutoSpawnPolicy.skipReason(false, true, false));
+        assertEquals(AutoSpawnPolicy.Skip.LOGGED_OFF_FOR_NIGHT, AutoSpawnPolicy.skipReason(false, true, true));
+    }
+
+    @Test
+    void onlineBotIsNeverSpawnedTwice() {
+        // The wake monitor may have brought it back between queueing and running.
+        assertEquals(AutoSpawnPolicy.Skip.ALREADY_ONLINE, AutoSpawnPolicy.skipReason(true, true, false));
+        assertEquals(AutoSpawnPolicy.Skip.ALREADY_ONLINE, AutoSpawnPolicy.skipReason(true, false, true));
+    }
+
+    @Test
+    void inTransitAndPlainCases() {
+        assertEquals(AutoSpawnPolicy.Skip.IN_TRANSIT, AutoSpawnPolicy.skipReason(false, false, true));
+        assertEquals(AutoSpawnPolicy.Skip.NONE, AutoSpawnPolicy.skipReason(false, false, false));
+    }
 }
