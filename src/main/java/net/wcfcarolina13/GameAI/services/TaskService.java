@@ -860,7 +860,10 @@ public final class TaskService {
     private static boolean abortTicket(TaskTicket ticket, String reason, boolean dispatchMessage) {
         ABORT_LATCH.put(key(ticket.botUuid()), reason == null ? "" : reason);
         Thread worker = ticket.executingThreadOrNull();
-        if (worker != null && worker.isAlive() && worker != Thread.currentThread() && !ticket.isFinished()) {
+        // Also when the worker aborts its own ticket and keeps running (ShelterSkill, emergency
+        // rescue): a command issued during that unwind must still wait. The worker itself skips the
+        // wait in awaitPreviousWorker (previousIsCurrent).
+        if (worker != null && worker.isAlive() && !ticket.isFinished()) {
             UNWINDING.put(key(ticket.botUuid()), ticket);
         }
         boolean cancelled = ticket.requestCancel(reason);

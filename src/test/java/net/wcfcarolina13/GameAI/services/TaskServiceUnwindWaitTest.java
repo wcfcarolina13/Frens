@@ -139,6 +139,39 @@ class TaskServiceUnwindWaitTest {
         }
     }
 
+    /** A worker that aborts its own ticket and keeps unwinding still holds off a new command. */
+    @Test
+    void selfAbortedWorkerStillHoldsOffTheNextTask() throws Exception {
+        UUID bot = UUID.randomUUID();
+        CountDownLatch aborted = new CountDownLatch(1);
+        AtomicBoolean oldDone = new AtomicBoolean(false);
+        Thread old = new Thread(() -> {
+            TaskService.TaskTicket ticket = TaskService.beginSkill("old", null, bot).orElseThrow();
+            TaskService.attachExecutingThread(ticket, Thread.currentThread());
+            TaskService.forceAbort(bot, "self", false);
+            aborted.countDown();
+            long end = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(250);
+            while (System.nanoTime() < end) {
+                Thread.onSpinWait();
+            }
+            oldDone.set(true);
+            TaskService.complete(ticket, false);
+        }, "old-worker");
+        old.start();
+        assertTrue(aborted.await(2, TimeUnit.SECONDS));
+        AtomicBoolean oldDoneWhenNewWentOn = new AtomicBoolean(false);
+        Thread fresh = new Thread(() -> {
+            TaskService.TaskTicket ticket = TaskService.beginSkill("new", null, bot).orElseThrow();
+            TaskService.attachExecutingThread(ticket, Thread.currentThread());
+            oldDoneWhenNewWentOn.set(oldDone.get());
+            TaskService.complete(ticket, true);
+        }, "new-worker");
+        fresh.start();
+        fresh.join(5000);
+        old.join(5000);
+        assertTrue(oldDoneWhenNewWentOn.get(), "the new worker went on while the self-aborted one still ran");
+    }
+
     @Test
     void noWaitWhenNothingWasStopped() throws Exception {
         UUID bot = UUID.randomUUID();
