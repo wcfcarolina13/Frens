@@ -4724,7 +4724,10 @@ public class modCommandRegistry {
 
         // Come should be "self-healing": keep replanning like follow-walk does, instead of relying on a single
         // direct-path attempt that can be blocked by doorway/fence/corner geometry.
-        if (!teleportAllowed) {
+        // Within 30 blocks the teleport path would walk first, and this command runs on the server
+        // thread, where that walk sleeps (seconds-long freezes); the tick-driven come-walk is used
+        // there too, and teleporting is kept for longer distances.
+        if (!teleportAllowed || ComeTeleportPolicy.walkInsteadOfTeleport(bot.squaredDistanceTo(commander))) {
             // Come is a player-issued override; abort any running skill so follow-walk can take over immediately.
             TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come.");
             BotIdleHobbiesService.snoozeFor(bot, 3_600L);
