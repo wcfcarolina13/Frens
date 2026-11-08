@@ -22,8 +22,16 @@ class PathFinderDefaultPolicyTest {
     void fromSavedReadsExplicitPicks() {
         assertEquals(PathFinderChoice.UNIFIED, PathFinderDefaultPolicy.fromSaved("unified"));
         assertEquals(PathFinderChoice.BARITONE, PathFinderDefaultPolicy.fromSaved("Baritone"));
-        assertEquals(PathFinderChoice.BIDIR, PathFinderDefaultPolicy.fromSaved("classic"));
-        assertEquals(PathFinderChoice.BIDIR, PathFinderDefaultPolicy.fromSaved("bidir"));
+    }
+
+    @Test
+    void removedClassicTokensLoadAsTheDefault() {
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderDefaultPolicy.fromSaved("classic"));
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderDefaultPolicy.fromSaved("bidir"));
+        assertTrue(PathFinderDefaultPolicy.isRemovedFinderToken("Classic "));
+        assertTrue(PathFinderDefaultPolicy.isRemovedFinderToken("bidir"));
+        assertFalse(PathFinderDefaultPolicy.isRemovedFinderToken("baritone"));
+        assertFalse(PathFinderDefaultPolicy.isRemovedFinderToken(null));
     }
 
     @Test
@@ -31,14 +39,14 @@ class PathFinderDefaultPolicyTest {
         for (PathFinderChoice choice : PathFinderChoice.values()) {
             assertEquals(choice, PathFinderDefaultPolicy.fromSaved(PathFinderDefaultPolicy.toSaved(choice)));
         }
-        assertEquals("classic", PathFinderDefaultPolicy.toSaved(PathFinderChoice.BIDIR));
         assertNull(PathFinderDefaultPolicy.toSaved(null));
     }
 
     @Test
-    void legacyFalseIsKeptAsClassic() {
+    void legacyFalseNowMovesToUnifiedToo() {
+        // It meant an explicit classic pick, and classic was removed in Slice D.
         PathFinderDefaultPolicy.MigrationResult result = PathFinderDefaultPolicy.migrate(null, false, false);
-        assertEquals("classic", result.pathfinder());
+        assertNull(result.pathfinder());
         assertTrue(result.needsSave());
     }
 

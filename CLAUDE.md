@@ -121,8 +121,8 @@ Each service handles a single concern. Key ones:
 - `ScaffoldService` — Pillaring/scaffolding primitives
 
 ### PathFinding (`PathFinding/`)
-- `PathFinder.java` — Classic A* pathfinder
-- `BaritoneStylePathFinder.java` — Baritone-style pathfinder (opt-in fallback since 1.1.261 when unified became the default: `/bot config pathfinder unified|baritone|classic`)
+- `PathFinder.java` — Finder dispatch (unified by default, `unified/` package) and path helpers; the classic bidirectional A* was removed in Slice D (2026-11-08)
+- `BaritoneStylePathFinder.java` — Baritone-style pathfinder (opt-in fallback since 1.1.261 when unified became the default: `/bot config pathfinder unified|baritone`)
 - `ChartPathToBlock.java`, `GoTo.java`, `PathTracer.java`, `Segment.java` — Navigation helpers
 
 ### Commands

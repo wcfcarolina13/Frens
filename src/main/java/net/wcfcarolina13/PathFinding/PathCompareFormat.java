@@ -50,48 +50,24 @@ public final class PathCompareFormat {
         return reasonName == null || reasonName.equals("NONE") ? null : reasonName;
     }
 
-    public static String line(String botName,
-                              int fromX, int fromY, int fromZ,
-                              int toX, int toY, int toZ,
-                              PathFinderChoice primary,
-                              long bidirMs, int bidirLen, String bidirStatus,
-                              long baritoneMs, int baritoneLen, String baritoneStatus) {
-        return "[PathCompare] bot=" + sanitize(botName)
-                + " from=" + fromX + "," + fromY + "," + fromZ
-                + " to=" + toX + "," + toY + "," + toZ
-                + " primary=" + primary.label()
-                + " bidir=" + finderValue(bidirMs, bidirLen, bidirStatus)
-                + " baritone=" + finderValue(baritoneMs, baritoneLen, baritoneStatus);
-    }
-
     /**
-     * The 1.1.242 three-finder line: {@code unified=} after {@code baritone=}, then {@code plan=p<n>}
-     * (the primary's plan ID, omitted when {@code planId <= 0}). Both additive to the k=v parse.
+     * The two-finder line (Slice D removed the classic finder and its {@code bidir=} value):
+     * {@code baritone=}, then {@code unified=} with its optional reason, then {@code plan=p<n>} (the
+     * primary's plan ID, omitted when {@code planId <= 0}). The analyzer reads finders from the k=v
+     * pairs, so old three-finder logs still parse.
      */
     public static String line(String botName,
                               int fromX, int fromY, int fromZ,
                               int toX, int toY, int toZ,
                               PathFinderChoice primary,
-                              long bidirMs, int bidirLen, String bidirStatus,
-                              long baritoneMs, int baritoneLen, String baritoneStatus,
-                              long unifiedMs, int unifiedLen, String unifiedStatus,
-                              long planId) {
-        return line(botName, fromX, fromY, fromZ, toX, toY, toZ, primary,
-                bidirMs, bidirLen, bidirStatus, baritoneMs, baritoneLen, baritoneStatus,
-                unifiedMs, unifiedLen, unifiedStatus, null, planId);
-    }
-
-    /** As above with the unified plan's reason suffix ({@link #unifiedReason}; null for none). */
-    public static String line(String botName,
-                              int fromX, int fromY, int fromZ,
-                              int toX, int toY, int toZ,
-                              PathFinderChoice primary,
-                              long bidirMs, int bidirLen, String bidirStatus,
                               long baritoneMs, int baritoneLen, String baritoneStatus,
                               long unifiedMs, int unifiedLen, String unifiedStatus, String unifiedReason,
                               long planId) {
-        return line(botName, fromX, fromY, fromZ, toX, toY, toZ, primary,
-                bidirMs, bidirLen, bidirStatus, baritoneMs, baritoneLen, baritoneStatus)
+        return "[PathCompare] bot=" + sanitize(botName)
+                + " from=" + fromX + "," + fromY + "," + fromZ
+                + " to=" + toX + "," + toY + "," + toZ
+                + " primary=" + primary.label()
+                + " baritone=" + finderValue(baritoneMs, baritoneLen, baritoneStatus)
                 + " unified=" + finderValue(unifiedMs, unifiedLen, unifiedStatus, unifiedReason)
                 + (planId > 0 ? " plan=" + PathPlanIds.format(planId) : "");
     }
