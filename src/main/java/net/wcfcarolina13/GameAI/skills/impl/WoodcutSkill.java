@@ -2479,8 +2479,12 @@ public final class WoodcutSkill implements Skill {
                     // If still not on the right block, force-position onto the column center.
                     // This is safe: the bot is on its own scaffold, we just need it centered
                     // so the gravity drop goes straight down.
-                    if (!bot.getBlockPos().equals(aboveColumn)) {
-                        Vec3d center = Vec3d.ofBottomCenter(aboveColumn);
+                    Vec3d center = Vec3d.ofBottomCenter(aboveColumn);
+                    if (!bot.getBlockPos().equals(aboveColumn)
+                            && ScaffoldRecenterPolicy.mayForcePosition(
+                                    bot.getEntityPos().squaredDistanceTo(center),
+                                    world.getBlockState(aboveColumn).getCollisionShape(world, aboveColumn).isEmpty(),
+                                    world.getBlockState(aboveColumn.up()).getCollisionShape(world, aboveColumn.up()).isEmpty())) {
                         world.getServer().execute(() -> {
                             bot.setPosition(center.x, center.y, center.z);
                             bot.setVelocity(Vec3d.ZERO);
