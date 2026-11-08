@@ -38,7 +38,11 @@ import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules.Access;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules.AccessFacts;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules.SlotView;
+import net.wcfcarolina13.GameAI.services.supply.SupplyBundlePromptPolicy.Shown;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.AlwaysScope;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.BundleLine;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.BundleOpenResult;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.LineOutcome;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Consume;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.OpenResult;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.OpenStatus;
@@ -52,6 +56,7 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Pos;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.RequestFingerprint;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Stock;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Verdict;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.BundleAsk;
 import net.wcfcarolina13.PlayerUtils.DebouncedWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,6 +69,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -80,8 +86,8 @@ import java.util.concurrent.TimeUnit;
  * decide on, and acts on the answer — the owner's prompt, the clickable reply, the item move and
  * the per-save file of standing "always" permissions.
  *
- * <p><b>One way in (supplies Phase 3).</b> {@link #request} and {@link #transferNow} have exactly
- * one caller, {@link SupplyWithdrawals}: every automatic chest withdrawal a companion makes goes
+ * <p><b>One way in (supplies Phase 3).</b> {@link #request}, {@link #requestBundle} and
+ * {@link #transferNow} have exactly one caller, {@link SupplyWithdrawals}: every automatic chest withdrawal a companion makes goes
  * through that facade, which keeps the request's fingerprint between the ask and the take.
  * {@code SupplyEntryPointTest} scans the source tree so no other file reaches them. What the owner
  * does themselves — {@code /bot withdraw} and Quick Fetch — is the owner's own act and stays
@@ -190,6 +196,36 @@ public final class SupplyRequestService {
             }
             if (status == RequestStatus.OPENED && requestId() != null) {
                 return status + " id=" + requestId();
+            }
+            return status.name();
+        }
+    }
+
+    /**
+     * What {@link #requestBundle} did: the bundle's overall status (the same meanings as
+     * {@link RequestOutcome#status()}) and, when the ledger was consulted, its per-line outcomes in
+     * input order (one per distinct exact item after merging).
+     */
+    public record BundleRequestOutcome(RequestStatus status, BundleOpenResult ledger, Access access) {
+        static BundleRequestOutcome of(RequestStatus status) {
+            return new BundleRequestOutcome(status, null, null);
+        }
+
+        public UUID requestId() {
+            return ledger == null ? null : ledger.requestId();
+        }
+
+        /** The ledger's line outcomes, or none when it was not consulted. */
+        public List<LineOutcome> lines() {
+            return ledger == null ? List.of() : ledger.lines();
+        }
+
+        String logText() {
+            if (status == RequestStatus.DENIED && access != null) {
+                return status + "(" + access + ")";
+            }
+            if (status == RequestStatus.OPENED && requestId() != null) {
+                return status + " id=" + requestId() + " asked=" + (ledger == null ? 0 : ledger.asked().size());
             }
             return status.name();
         }
@@ -443,6 +479,134 @@ public final class SupplyRequestService {
         return outcome;
     }
 
+    /**
+     * Asks {@code bot}'s owner, in ONE prompt, whether it may take every line of {@code lines} from
+     * the chest at {@code chestPos} (Bradley's ruling of 2026-10-23: one combined ask, one approval
+     * for the set). Called only by {@link SupplyWithdrawals} (see the class comment).
+     *
+     * <p>The same order as {@link #request}: owner → chest access → unless a standing permission
+     * or live grants cover every line, the owner in prompt range → the ledger's
+     * {@link SupplyRequestLedger#openBundle}. Lines naming the same exact item are merged first.
+     * On {@link RequestStatus#OPENED} the owner gets one message naming every asked line, the
+     * purpose and what the chest still cannot cover, with the same three clickable answers; the
+     * grants the answer makes are spent line by line through {@link #transferNow}.
+     *
+     * @param purpose      what the bot is making ("a wooden pickaxe"), or blank
+     * @param stillMissing what this chest cannot cover, for the prompt text only
+     */
+    public static BundleRequestOutcome requestBundle(ServerPlayerEntity bot, BlockPos chestPos, List<BundleAsk> lines,
+                                                     String purpose, List<Shown> stillMissing) {
+        BundleRequestOutcome outcome = evaluateBundleRequest(bot, chestPos, lines, purpose, stillMissing);
+        LOGGER.info("[supply] request-bundle bot={} chest={} lines={} purpose={} outcome={}",
+                nameOf(bot), posText(chestPos), bundleText(lines), purpose == null || purpose.isBlank() ? "-" : purpose,
+                outcome.logText());
+        return outcome;
+    }
+
+    private static BundleRequestOutcome evaluateBundleRequest(ServerPlayerEntity bot, BlockPos chestPos,
+                                                              List<BundleAsk> lines, String purpose,
+                                                              List<Shown> stillMissing) {
+        if (offServerThread("requestBundle")) {
+            return BundleRequestOutcome.of(RequestStatus.WRONG_THREAD);
+        }
+        SupplyRequestLedger book = ledger;
+        MinecraftServer srv = server;
+        if (book == null || srv == null) {
+            return BundleRequestOutcome.of(RequestStatus.NOT_RUNNING);
+        }
+        if (bot == null || chestPos == null || lines == null || lines.isEmpty()) {
+            return BundleRequestOutcome.of(RequestStatus.INVALID);
+        }
+        for (BundleAsk ask : lines) {
+            if (ask == null || ask.sample() == null || ask.sample().isEmpty() || ask.qty() <= 0 || ask.need() <= 0) {
+                return BundleRequestOutcome.of(RequestStatus.INVALID);
+            }
+        }
+        ServerWorld world = bot.getEntityWorld();
+        DynamicOps<JsonElement> ops = world.getRegistryManager().getOps(JsonOps.INSTANCE);
+        UUID owner = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
+        if (owner == null) {
+            return BundleRequestOutcome.of(RequestStatus.INELIGIBLE);
+        }
+        ChestRead chest = readChest(srv, world, chestPos, bot, owner);
+        if (chest.access() != Access.OK) {
+            return new BundleRequestOutcome(RequestStatus.DENIED, null, chest.access());
+        }
+        // One line per exact item: two asks for the same stack are one ask for their sum.
+        LinkedHashMap<ItemKey, int[]> merged = new LinkedHashMap<>();
+        for (BundleAsk ask : lines) {
+            int[] sum = merged.computeIfAbsent(itemKey(ask.sample(), ops), k -> new int[2]);
+            sum[0] += ask.qty();
+            sum[1] += ask.need();
+        }
+        List<BundleLine> bundle = new ArrayList<>(merged.size());
+        boolean allCovered = true;
+        for (Map.Entry<ItemKey, int[]> e : merged.entrySet()) {
+            ItemKey item = e.getKey();
+            Stock stock = SupplyChestRules.stock(slotViews(chest.inventory(), item.itemId(), ops), item, book.config());
+            bundle.add(new BundleLine(item, e.getValue()[0], stock, e.getValue()[1]));
+            RequestFingerprint fp = new RequestFingerprint(owner, bot.getUuid(), chest.key(), item, e.getValue()[0]);
+            allCovered &= book.isRequestPermitted(fp, stock, e.getValue()[1]);
+        }
+        // As for a single request: only an ask that may prompt needs the owner in range.
+        ServerPlayerEntity ownerPlayer = null;
+        if (!book.hasAlways(owner, chest.key()) && !allCovered) {
+            ownerPlayer = ownerInPromptRange(srv, bot, owner);
+            if (ownerPlayer == null) {
+                return BundleRequestOutcome.of(RequestStatus.OWNER_NOT_NEARBY);
+            }
+        }
+        book.sweep();
+        BundleOpenResult opened = book.openBundle(owner, bot.getUuid(), chest.key(), bundle);
+        BundleRequestOutcome outcome = new BundleRequestOutcome(statusOf(opened.status()), opened, Access.OK);
+        if (opened.status() == OpenStatus.OPENED && ownerPlayer != null && opened.requestId() != null) {
+            sendBundlePrompt(ownerPlayer, bot, chestPos, opened.requestId(), shownLines(opened.asked()), purpose,
+                    stillMissing == null ? List.of() : stillMissing);
+        }
+        return outcome;
+    }
+
+    /** The asked lines as the prompt shows them: the approved quantity and the item's name. */
+    private static List<Shown> shownLines(List<RequestFingerprint> lines) {
+        List<Shown> shown = new ArrayList<>(lines.size());
+        for (RequestFingerprint line : lines) {
+            shown.add(new Shown(line.qty(), itemNameOf(line.itemId())));
+        }
+        return shown;
+    }
+
+    private static void sendBundlePrompt(ServerPlayerEntity owner, ServerPlayerEntity bot, BlockPos pos, UUID requestId,
+                                         List<Shown> asked, String purpose, List<Shown> stillMissing) {
+        String botName = nameOf(bot);
+        MutableText message = Text.literal(SupplyBundlePromptPolicy.promptText(botName, asked, purpose,
+                pos.getX(), pos.getY(), pos.getZ(), stillMissing) + " ");
+        message.append(choiceButton("[Allow once]", Formatting.GREEN, requestId, Choice.ALLOW_ONCE,
+                SupplyBundlePromptPolicy.allowOnceHover(botName, asked)));
+        message.append(Text.literal(" "));
+        message.append(choiceButton("[Always: common supplies, this chest]", Formatting.GOLD, requestId,
+                Choice.ALWAYS_COMMON,
+                "Let your companions take common supplies from this chest without asking. Undo with "
+                        + SupplyChestRules.revokeCommand(pos.getX(), pos.getY(), pos.getZ())));
+        message.append(Text.literal(" "));
+        message.append(choiceButton("[No]", Formatting.RED, requestId, Choice.NO,
+                "Refuse. " + botName + " won't ask for these here again for a while."));
+        owner.sendMessage(message, false);
+    }
+
+    private static String bundleText(List<BundleAsk> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return "-";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (BundleAsk ask : lines) {
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(ask == null ? "-" : itemIdOf(ask.sample()) + "x" + ask.qty());
+        }
+        return sb.toString();
+    }
+
     private static RequestStatus statusOf(OpenStatus status) {
         return switch (status) {
             case OPENED -> RequestStatus.OPENED;
@@ -518,6 +682,16 @@ public final class SupplyRequestService {
         String bot = fp == null ? "Your companion" : botNameOf(fp.bot());
         String item = fp == null ? "items" : itemNameOf(fp.itemId());
         int qty = fp == null ? 0 : fp.qty();
+        // A bundle's answer names every line it covered; a single-item prompt reads as before.
+        if (response.lines().size() > 1) {
+            List<Shown> shown = shownLines(response.lines());
+            if (response.status() == ResponseStatus.GRANTED_ONCE) {
+                return SupplyBundlePromptPolicy.grantedOnceReply(bot, shown);
+            }
+            if (response.status() == ResponseStatus.REJECTED) {
+                return SupplyBundlePromptPolicy.rejectedReply(bot, shown);
+            }
+        }
         return switch (response.status()) {
             case GRANTED_ONCE -> "Allowed: " + bot + " may take " + qty + " " + item + " from that chest, this once.";
             case GRANTED_ALWAYS -> "Allowed: your companions may take common supplies from that chest"
@@ -954,6 +1128,16 @@ public final class SupplyRequestService {
     static boolean isPermitted(RequestFingerprint fp) {
         SupplyRequestLedger book = ledger;
         return book != null && book.isPermitted(fp);
+    }
+
+    /**
+     * Whether the owner's No for {@code itemId} at {@code chest} still silences {@code bot}
+     * ({@link SupplyRequestLedger#isRejectCoolingDown}); {@code false} when not running. Any
+     * thread: the ledger is synchronized.
+     */
+    static boolean isRejectCoolingDown(UUID bot, ChestKey chest, String itemId) {
+        SupplyRequestLedger book = ledger;
+        return book != null && book.isRejectCoolingDown(bot, chest, itemId);
     }
 
     /**

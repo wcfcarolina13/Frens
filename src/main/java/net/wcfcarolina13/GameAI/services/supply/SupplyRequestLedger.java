@@ -624,6 +624,16 @@ public final class SupplyRequestLedger {
         return grant != null && now < grant.expiresAtMs() && fp.qty() <= grant.fp().qty();
     }
 
+    /**
+     * True while a No for {@code itemId} at {@code chest} still silences {@code bot}
+     * ({@link Timings#rejectCooldownMs} after the answer). Only an explicit No sets it: a prompt
+     * that lapsed unanswered leaves it off, which is how a caller tells the two apart.
+     */
+    public synchronized boolean isRejectCoolingDown(UUID bot, ChestKey chest, String itemId) {
+        return bot != null && chest != null && itemId != null
+                && isActive(rejectCooldownUntil, new RejectKey(bot, chest, itemId), clock.getAsLong());
+    }
+
     /** True while {@code bot} has an unexpired prompt waiting. */
     public synchronized boolean hasPending(UUID bot) {
         UUID id = bot == null ? null : pendingIdByBot.get(bot);
