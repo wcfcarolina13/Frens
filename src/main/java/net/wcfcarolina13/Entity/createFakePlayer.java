@@ -72,7 +72,7 @@ public class createFakePlayer extends ServerPlayerEntity {
     }
 
     /** {@link BotIdentityRecoveryPolicy}: the UUID in this bot's newest inventory snapshot, or null. */
-    private static String recoverSavedUuid(MinecraftServer server, String username) {
+    private static BotIdentityRecoveryPolicy.Candidate recoverSavedIdentity(MinecraftServer server, String username) {
         try {
             var cache = server.getApiServices().nameToIdCache();
             java.util.List<BotIdentityRecoveryPolicy.Candidate> candidates = new java.util.ArrayList<>();
@@ -85,7 +85,12 @@ public class createFakePlayer extends ServerPlayerEntity {
                 }
                 candidates.add(new BotIdentityRecoveryPolicy.Candidate(raw, cached));
             }
-            return BotIdentityRecoveryPolicy.pick(username, candidates);
+            BotIdentityRecoveryPolicy.Candidate byName = candidates.isEmpty()
+                    ? cache.findByName(username)
+                            .map(e -> new BotIdentityRecoveryPolicy.Candidate(e.id().toString(), e.name()))
+                            .orElse(null)
+                    : null;
+            return BotIdentityRecoveryPolicy.choose(username, candidates, byName);
         } catch (RuntimeException e) {
             LOGGER.debug("UUID recovery for {} failed: {}", username, e.toString());
             return null;
@@ -116,12 +121,14 @@ public class createFakePlayer extends ServerPlayerEntity {
             if (configuredUuid == null || configuredUuid.isBlank()) {
                 // The settings file has no UUID for this bot (new, or the file was reset): reuse the
                 // one its inventory snapshot keeps, so a reset does not make it a different player.
-                String recovered = recoverSavedUuid(server, username);
+                BotIdentityRecoveryPolicy.Candidate recovered = recoverSavedIdentity(server, username);
                 if (recovered != null) {
-                    LOGGER.info("Bot {} has no saved profile in the settings; reusing UUID {} from its inventory snapshot",
-                            username, recovered);
+                    LOGGER.info("Bot {} has no saved profile in the settings; reusing UUID {} (saved as {})",
+                            username, recovered.uuid(), BotIdentityRecoveryPolicy.profileName(username, recovered));
                 }
-                gameProfile = new GameProfile(recovered != null ? UUID.fromString(recovered) : UUID.randomUUID(), username);
+                gameProfile = recovered != null
+                        ? new GameProfile(UUID.fromString(recovered.uuid()), BotIdentityRecoveryPolicy.profileName(username, recovered))
+                        : new GameProfile(UUID.randomUUID(), username);
                 try {
                     Frens.CONFIG.setBotProfile(gameProfile.name(), gameProfile.id().toString());
                     Frens.CONFIG.save();

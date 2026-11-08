@@ -20,20 +20,41 @@ public final class BotIdentityRecoveryPolicy {
 
     /** {@code newestFirst}: the snapshots' UUIDs, newest file first. Null when there is none to reuse. */
     public static String pick(String username, List<Candidate> newestFirst) {
-        if (username == null || newestFirst == null || newestFirst.isEmpty()) {
+        Candidate c = choose(username, newestFirst, null);
+        return c == null ? null : c.uuid();
+    }
+
+    /**
+     * The identity to reuse: a snapshot candidate as {@link #pick} chooses it, else the user-cache
+     * entry for the name ({@code cacheByName}, used when the bot has no snapshot yet), accepted only
+     * when its cached name is the exact spelling, since the cache looks names up ignoring case.
+     */
+    public static Candidate choose(String username, List<Candidate> newestFirst, Candidate cacheByName) {
+        if (username == null) {
             return null;
         }
-        for (Candidate c : newestFirst) {
-            if (c != null && valid(c.uuid()) && username.equals(c.cachedName())) {
-                return c.uuid();
+        if (newestFirst != null) {
+            for (Candidate c : newestFirst) {
+                if (c != null && valid(c.uuid()) && username.equals(c.cachedName())) {
+                    return c;
+                }
+            }
+            for (Candidate c : newestFirst) {
+                if (c != null && valid(c.uuid()) && (c.cachedName() == null || c.cachedName().equalsIgnoreCase(username))) {
+                    return c;
+                }
             }
         }
-        for (Candidate c : newestFirst) {
-            if (c != null && valid(c.uuid()) && (c.cachedName() == null || c.cachedName().equalsIgnoreCase(username))) {
-                return c.uuid();
-            }
+        if (cacheByName != null && valid(cacheByName.uuid()) && username.equals(cacheByName.cachedName())) {
+            return cacheByName;
         }
         return null;
+    }
+
+    /** The profile name to spawn with: the matched UUID's cached spelling, else the requested name. */
+    public static String profileName(String username, Candidate matched) {
+        return matched != null && matched.cachedName() != null && !matched.cachedName().isBlank()
+                ? matched.cachedName() : username;
     }
 
     private static boolean valid(String uuid) {

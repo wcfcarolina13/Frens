@@ -34,4 +34,24 @@ class BotIdentityRecoveryPolicyTest {
                 new BotIdentityRecoveryPolicy.Candidate("not-a-uuid", "Guardy"))));
         assertNull(BotIdentityRecoveryPolicy.pick("Guardy", List.of()));
     }
+
+    private static final String U1 = "11111111-1111-1111-1111-111111111111";
+
+    @Test
+    void withNoSnapshotTheUserCacheIsUsedOnlyForTheExactSpelling() {
+        var hit = new BotIdentityRecoveryPolicy.Candidate(U1, "Bob");
+        org.junit.jupiter.api.Assertions.assertEquals(U1,
+                BotIdentityRecoveryPolicy.choose("Bob", java.util.List.of(), hit).uuid());
+        org.junit.jupiter.api.Assertions.assertNull(BotIdentityRecoveryPolicy.choose("bob", java.util.List.of(), hit));
+        org.junit.jupiter.api.Assertions.assertNull(BotIdentityRecoveryPolicy.choose("Bob", null, null));
+    }
+
+    @Test
+    void theProfileTakesTheMatchedUuidsCachedSpelling() {
+        var matched = new BotIdentityRecoveryPolicy.Candidate(U1, "Bob");
+        org.junit.jupiter.api.Assertions.assertEquals("Bob", BotIdentityRecoveryPolicy.profileName("bob", matched));
+        org.junit.jupiter.api.Assertions.assertEquals("bob", BotIdentityRecoveryPolicy.profileName("bob",
+                new BotIdentityRecoveryPolicy.Candidate(U1, null)));
+        org.junit.jupiter.api.Assertions.assertEquals("bob", BotIdentityRecoveryPolicy.profileName("bob", null));
+    }
 }
