@@ -9,9 +9,11 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.RequestFinge
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Stock;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Verdict;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -110,8 +112,79 @@ public final class SupplyRequestLedger {
         FOREIGN_CALLER
     }
 
-    /** @param fingerprint the answered request, or {@code null} for NOT_FOUND / FOREIGN_CALLER */
-    public record Response(ResponseStatus status, RequestFingerprint fingerprint) {
+    /**
+     * @param fingerprint the answered request (the first line of a bundle), or {@code null} for
+     *                    NOT_FOUND / FOREIGN_CALLER
+     * @param lines       every line the answer covered: one for a single-item prompt, all of them for
+     *                    a bundle ({@link #openBundle}); empty when {@code fingerprint} is null
+     */
+    public record Response(ResponseStatus status, RequestFingerprint fingerprint, List<RequestFingerprint> lines) {
+        public Response {
+            lines = lines == null ? List.of() : List.copyOf(lines);
+        }
+
+        public Response(ResponseStatus status, RequestFingerprint fingerprint) {
+            this(status, fingerprint, fingerprint == null ? List.of() : List.of(fingerprint));
+        }
+    }
+
+    /**
+     * One line of a bundled ask (supplies Phase 4, "one combined ask"): an exact item, how many the
+     * bot asks for, the chest's current stock of it and how many the bot actually needs.
+     */
+    public record BundleLine(ItemKey item, int qty, Stock stock, int need) {
+        public BundleLine {
+            Objects.requireNonNull(item, "item");
+            stock = stock == null ? Stock.of(0) : stock;
+        }
+    }
+
+    /** What {@link #openBundle} did with one line. */
+    public enum LineStatus {
+        /** In the prompt (or, under {@link OpenStatus#COVERED_BY_ALWAYS}, covered by the permission). */
+        ASKED,
+        /** A live "Allow once" already covers it: not in the prompt, spend it with {@link #consumeGrant}. */
+        COVERED_BY_GRANT,
+        /** The owner said No to this item here recently: left out of the prompt. */
+        REJECT_COOLDOWN,
+        /** The policy refuses it ({@link LineOutcome#verdict()}): left out of the prompt. */
+        INELIGIBLE
+    }
+
+    /**
+     * @param requested the line as asked
+     * @param approved  the line cut to what the policy permits, or {@code null} unless
+     *                  {@link LineStatus#ASKED} / {@link LineStatus#COVERED_BY_GRANT}
+     */
+    public record LineOutcome(RequestFingerprint requested, LineStatus status, RequestFingerprint approved,
+                              Verdict verdict) {
+    }
+
+    /**
+     * @param status    overall outcome, with the same meanings as for {@link #open}
+     * @param requestId set for {@link OpenStatus#OPENED} only: one id, one answer, for every asked line
+     * @param lines     one outcome per input line, in input order
+     */
+    public record BundleOpenResult(OpenStatus status, UUID requestId, List<LineOutcome> lines) {
+        public BundleOpenResult {
+            lines = lines == null ? List.of() : List.copyOf(lines);
+        }
+
+        /** The approved fingerprints of the lines with {@code status}, in order. */
+        public List<RequestFingerprint> approved(LineStatus status) {
+            List<RequestFingerprint> out = new ArrayList<>();
+            for (LineOutcome line : lines) {
+                if (line.status() == status && line.approved() != null) {
+                    out.add(line.approved());
+                }
+            }
+            return out;
+        }
+
+        /** The lines the prompt shows (or the permission covers): what to show and later consume. */
+        public List<RequestFingerprint> asked() {
+            return approved(LineStatus.ASKED);
+        }
     }
 
     public enum ConsumeStatus {
@@ -160,7 +233,11 @@ public final class SupplyRequestLedger {
         }
     }
 
-    private record Pending(UUID id, RequestFingerprint fp, long expiresAtMs) {
+    /** One prompt; {@code lines} is never empty and every line shares owner, bot and chest. */
+    private record Pending(UUID id, List<RequestFingerprint> lines, long expiresAtMs) {
+        RequestFingerprint fp() {
+            return lines.get(0);
+        }
     }
 
     private record Grant(RequestFingerprint fp, long expiresAtMs) {
@@ -258,11 +335,100 @@ public final class SupplyRequestLedger {
             return new OpenResult(OpenStatus.PROMPT_COOLDOWN, null, null, Verdict.ELIGIBLE);
         }
         UUID id = Objects.requireNonNull(ids.get(), "ids supplied null");
-        Pending pending = new Pending(id, approved, now + timings.requestLifetimeMs());
+        Pending pending = new Pending(id, List.of(approved), now + timings.requestLifetimeMs());
         pendingById.put(id, pending);
         pendingIdByBot.put(fp.bot(), id);
         extendPromptCooldown(fp.bot(), now);
         return new OpenResult(OpenStatus.OPENED, id, approved, Verdict.ELIGIBLE);
+    }
+
+    /**
+     * Asks, in ONE prompt, for every line of a craft's need set from one chest (Bradley's ruling of
+     * 2026-10-23: "one combined ask ... one approval covers the set"). {@link #open} is the
+     * single-line case and keeps its own path; a one-line bundle decides exactly as {@code open}.
+     *
+     * <p>Per line, in {@code open}'s order: the policy (an ineligible line is left out and says
+     * why), a live "Allow once" for that exact target (covered, left out), a recent No for that
+     * item here (left out: a set never re-asks something the owner just refused). Then, for the
+     * whole bundle: a standing permission covers every eligible line ({@link OpenStatus#COVERED_BY_ALWAYS});
+     * nothing left to ask gives {@link OpenStatus#COVERED_BY_GRANT} if any line was covered, else
+     * {@link OpenStatus#REJECT_COOLDOWN}; otherwise the one-prompt-per-bot and prompt-cooldown
+     * checks, then one pending prompt for the asked lines. {@link #respond} grants (or refuses)
+     * every asked line at once; each grant is spent line by line through the unchanged
+     * {@link #consumeGrant}.
+     *
+     * @throws IllegalArgumentException if {@code lines} is empty or two lines name the same exact item
+     */
+    public synchronized BundleOpenResult openBundle(UUID owner, UUID bot, ChestKey chest, List<BundleLine> lines) {
+        Objects.requireNonNull(bot, "bot");
+        Objects.requireNonNull(chest, "chest");
+        if (lines == null || lines.isEmpty()) {
+            throw new IllegalArgumentException("a bundle needs at least one line");
+        }
+        Set<ItemKey> seen = new HashSet<>();
+        for (BundleLine line : lines) {
+            if (!seen.add(line.item())) {
+                throw new IllegalArgumentException("duplicate bundle line: " + line.item().itemId());
+            }
+        }
+        long now = clock.getAsLong();
+        boolean alwaysCovers = owner != null && always.contains(new AlwaysScope(owner, chest));
+        List<LineOutcome> outcomes = new ArrayList<>();
+        List<RequestFingerprint> toAsk = new ArrayList<>();
+        boolean anyEligible = false;
+        boolean anyCovered = false;
+        for (BundleLine line : lines) {
+            RequestFingerprint fp = new RequestFingerprint(owner, bot, chest, line.item(), line.qty());
+            Assessment assessment = SupplyRequestPolicy.assess(fp, line.stock(), line.need(), config);
+            if (!assessment.eligible()) {
+                outcomes.add(new LineOutcome(fp, LineStatus.INELIGIBLE, null, assessment.verdict()));
+                continue;
+            }
+            anyEligible = true;
+            RequestFingerprint approved = fp.withQty(assessment.quantity());
+            if (alwaysCovers) {
+                outcomes.add(new LineOutcome(fp, LineStatus.ASKED, approved, Verdict.ELIGIBLE));
+            } else if (grantCovers(approved, now)) {
+                anyCovered = true;
+                outcomes.add(new LineOutcome(fp, LineStatus.COVERED_BY_GRANT, approved, Verdict.ELIGIBLE));
+            } else if (isActive(rejectCooldownUntil, new RejectKey(bot, chest, fp.itemId()), now)) {
+                outcomes.add(new LineOutcome(fp, LineStatus.REJECT_COOLDOWN, null, Verdict.ELIGIBLE));
+            } else {
+                outcomes.add(new LineOutcome(fp, LineStatus.ASKED, approved, Verdict.ELIGIBLE));
+                toAsk.add(approved);
+            }
+        }
+        if (!anyEligible) {
+            return new BundleOpenResult(OpenStatus.INELIGIBLE, null, outcomes);
+        }
+        if (alwaysCovers) {
+            return new BundleOpenResult(OpenStatus.COVERED_BY_ALWAYS, null, outcomes);
+        }
+        if (toAsk.isEmpty()) {
+            return new BundleOpenResult(anyCovered ? OpenStatus.COVERED_BY_GRANT : OpenStatus.REJECT_COOLDOWN,
+                    null, outcomes);
+        }
+        UUID pendingId = pendingIdByBot.get(bot);
+        if (pendingId != null) {
+            Pending pending = pendingById.get(pendingId);
+            if (pending != null && now < pending.expiresAtMs()) {
+                return new BundleOpenResult(OpenStatus.DUPLICATE_PENDING, null, outcomes);
+            }
+            if (pending != null) {
+                expire(pending);
+            } else {
+                pendingIdByBot.remove(bot);
+            }
+        }
+        if (isActive(promptCooldownUntil, bot, now)) {
+            return new BundleOpenResult(OpenStatus.PROMPT_COOLDOWN, null, outcomes);
+        }
+        UUID id = Objects.requireNonNull(ids.get(), "ids supplied null");
+        Pending pending = new Pending(id, List.copyOf(toAsk), now + timings.requestLifetimeMs());
+        pendingById.put(id, pending);
+        pendingIdByBot.put(bot, id);
+        extendPromptCooldown(bot, now);
+        return new BundleOpenResult(OpenStatus.OPENED, id, outcomes);
     }
 
     /**
@@ -286,28 +452,32 @@ public final class SupplyRequestLedger {
         if (!SupplyRequestPolicy.mayRespond(responder, fp.owner(), responderIsOperator, config)) {
             return new Response(ResponseStatus.FOREIGN_CALLER, null);
         }
+        List<RequestFingerprint> lines = pending.lines();
         if (now >= pending.expiresAtMs()) {
             expire(pending);
-            return new Response(ResponseStatus.EXPIRED, fp);
+            return new Response(ResponseStatus.EXPIRED, fp, lines);
         }
         close(pending);
         extendPromptCooldown(fp.bot(), now);
+        // One answer covers every line of the prompt: a bundle is granted or refused as a set.
         return switch (choice) {
             case NO -> {
-                // The latest answer wins: an earlier "Allow once" for this exact target is withdrawn.
-                grants.remove(Target.of(fp));
-                rejectCooldownUntil.put(new RejectKey(fp.bot(), fp.chest(), fp.itemId()),
-                        now + timings.rejectCooldownMs());
-                yield new Response(ResponseStatus.REJECTED, fp);
+                for (RequestFingerprint line : lines) {
+                    // The latest answer wins: an earlier "Allow once" for this exact target is withdrawn.
+                    grants.remove(Target.of(line));
+                    rejectCooldownUntil.put(new RejectKey(line.bot(), line.chest(), line.itemId()),
+                            now + timings.rejectCooldownMs());
+                }
+                yield new Response(ResponseStatus.REJECTED, fp, lines);
             }
             case ALLOW_ONCE -> {
-                grants.put(Target.of(fp), new Grant(fp, now + timings.grantLifetimeMs()));
-                yield new Response(ResponseStatus.GRANTED_ONCE, fp);
+                grantAll(lines, now);
+                yield new Response(ResponseStatus.GRANTED_ONCE, fp, lines);
             }
             case ALWAYS_COMMON -> {
-                grants.put(Target.of(fp), new Grant(fp, now + timings.grantLifetimeMs()));
+                grantAll(lines, now);
                 always.add(new AlwaysScope(fp.owner(), fp.chest()));
-                yield new Response(ResponseStatus.GRANTED_ALWAYS, fp);
+                yield new Response(ResponseStatus.GRANTED_ALWAYS, fp, lines);
             }
         };
     }
@@ -454,6 +624,16 @@ public final class SupplyRequestLedger {
         return grant != null && now < grant.expiresAtMs() && fp.qty() <= grant.fp().qty();
     }
 
+    /**
+     * True while a No for {@code itemId} at {@code chest} still silences {@code bot}
+     * ({@link Timings#rejectCooldownMs} after the answer). Only an explicit No sets it: a prompt
+     * that lapsed unanswered leaves it off, which is how a caller tells the two apart.
+     */
+    public synchronized boolean isRejectCoolingDown(UUID bot, ChestKey chest, String itemId) {
+        return bot != null && chest != null && itemId != null
+                && isActive(rejectCooldownUntil, new RejectKey(bot, chest, itemId), clock.getAsLong());
+    }
+
     /** True while {@code bot} has an unexpired prompt waiting. */
     public synchronized boolean hasPending(UUID bot) {
         UUID id = bot == null ? null : pendingIdByBot.get(bot);
@@ -516,6 +696,12 @@ public final class SupplyRequestLedger {
     }
 
     // ── internals ────────────────────────────────────────────────────────────────────────────
+
+    private void grantAll(List<RequestFingerprint> lines, long now) {
+        for (RequestFingerprint line : lines) {
+            grants.put(Target.of(line), new Grant(line, now + timings.grantLifetimeMs()));
+        }
+    }
 
     private void close(Pending pending) {
         pendingById.remove(pending.id());
