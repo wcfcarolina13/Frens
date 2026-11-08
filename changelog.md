@@ -21,6 +21,12 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 - New `ExecutionPolicyTest` (8 tests): defaults, smallest and largest accepted values, each guard field rejecting zero and negative values, and which field is reported first.
 - New `BotSleepProximityPolicyTest` (6 tests): the 16-block co-sleep radius is inclusive at 256 squared, is measured on squared distance, and treats NaN and infinity as out of range. It was only checked as a source string in `WakeUpDelayWiringTest` before.
 - Tests: 3857 before, 3871 after. No suspected bugs. Every `ExecutionPolicy` call site passes a positive time budget (the FortifyVillageSkill segment budget is checked for `<= 0` first).
+## Navigation outcome counters no longer lose concurrent updates (unreleased, 2026-11-05)
+
+`DirtNavigationPolicy` and `ExplorationMovePolicy` kept success and failure counts as plain `int++` on a shared object inside a `ConcurrentHashMap`; the map is thread-safe but the counts were not, so worker threads recording at the same moment could drop a count (found by the policy test sweep). The two counter methods are now `synchronized`. Both classes gain int-offset overloads (`scoreOffset`, `recordOffset`) so they can be tested without `BlockPos`, and a test seam to clear them.
+
+- Cost: one uncontended lock per recorded move; these are recorded once per step, not per tick.
+- Tests 3857 → 3863 (3 per class, including an 8-thread race that fails without the lock). No sandbox check needed.
 
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
