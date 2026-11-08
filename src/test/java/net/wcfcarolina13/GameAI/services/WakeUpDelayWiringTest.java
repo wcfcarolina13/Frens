@@ -45,7 +45,7 @@ class WakeUpDelayWiringTest {
         String retry = retry();
         int stamp = retry.indexOf("CO_SLEEP_QUEUED_TICK.put(botId, retryTick)");
         for (String check : new String[]{"!retryPlayer.isSleeping()", "bot.isSleeping()",
-                "BotZzzSleepService.isInSleepCycle(botId)", "BotZzzSleepService.isLoggedOff(bot.getName().getString())",
+                "BotZzzSleepService.isInSleepCycle(botId)", "BotZzzSleepService.isLoggedOffIn(server, bot.getName().getString())",
                 "TaskService.hasActiveTask(botId)", "TickIntervals.elapsed(retryTick, lastQueued, CO_SLEEP_COOLDOWN_TICKS)",
                 "BotSleepProximityPolicy.isWithinCommanderSleepRadius(distSq)", "sw.isDay() && !sw.isThundering()"}) {
             assertBefore(retry, check, stamp);

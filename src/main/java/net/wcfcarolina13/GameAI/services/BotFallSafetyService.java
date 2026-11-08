@@ -37,6 +37,17 @@ public final class BotFallSafetyService {
 
     private static final Map<UUID, Long> NEXT_ATTEMPT_TICK = new ConcurrentHashMap<>();
 
+    /**
+     * Fall-safety attempt gate.
+     * Called at SERVER_STOPPED: a singleplayer quit keeps static state, the next world's server
+     * restarts its tick counter at 0 and the same bots keep their UUIDs, so tick-based gates from
+     * the old world would hold back behaviour for as long as that world had run.
+     */
+    public static void resetSession() {
+        NEXT_ATTEMPT_TICK.clear();
+    }
+
+
     private BotFallSafetyService() {
     }
 
