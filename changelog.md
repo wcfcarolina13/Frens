@@ -9,6 +9,7 @@ Found while scoping the `TaskService.resetAll` review minor (that minor needs no
 - Those steps now sit in a guard that completes the ticket as failed and returns "Skill '<name>' could not start." The log gets an ERROR with the stack.
 - **Cost:** if `suspendFollowMode` throws after it has already paused follow, follow is not resumed (no resume state was returned). A stuck slot was judged worse.
 - **Limits:** no field report of this; the gap was found by reading the code. Covered by a source-reading wiring test (`SkillManagerTicketReleaseWiringTest`; SkillManager touches server types). Tests 3857 → 3858. Nothing to check in the sandbox beyond a normal skill start, since the failing path cannot be triggered on purpose.
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
