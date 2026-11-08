@@ -28,6 +28,8 @@ import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
+import net.wcfcarolina13.GameAI.services.supply.CraftSupplyNeedPolicy;
+import net.wcfcarolina13.GameAI.services.supply.SupplyBundlePromptPolicy;
 import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals;
@@ -50,6 +52,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 /**
@@ -477,7 +480,7 @@ public final class CraftingHelper {
             return false;
         }
 
-        int crafts = craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amountRequested, quiet);
+        int crafts = craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amountRequested, quiet, false);
         if (crafts > 0) {
             LOGGER.info("Crafted {} crafting table(s) for a station sub-step", crafts);
             return true;
@@ -554,7 +557,7 @@ public final class CraftingHelper {
             return craftPlanks(bot, source, commander, amount, target);
         }
         return switch (normalized) {
-            case "crafting_table" -> craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amount, false);
+            case "crafting_table" -> craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amount, false, true);
             case "sticks", "stick" -> craftSticks(bot, source, commander, amount);
             case "torch", "torches" -> craftTorches(bot, source, commander, amount);
             case "door", "doors" -> craftDoor(bot, source, commander, amount);
@@ -579,7 +582,7 @@ public final class CraftingHelper {
             case "bucket" -> craftSimple(bot, source, commander, amount, Items.BUCKET, Items.IRON_INGOT, 3);
             case "shears" -> craftSimple(bot, source, commander, amount, Items.SHEARS, Items.IRON_INGOT, 2);
             case "furnace" -> craftCobbleBlock(bot, source, commander, amount, Items.FURNACE, 8);
-            case "chest" -> craftWithPlanks(bot, source, commander, Identifier.of("minecraft", "chest"), 8, Items.CHEST, amount, false);
+            case "chest" -> craftWithPlanks(bot, source, commander, Identifier.of("minecraft", "chest"), 8, Items.CHEST, amount, false, true);
             case "planks", "plank" -> craftPlanks(bot, source, commander, amount, null);
             case "ladder", "ladders" -> craftLadders(bot, source, commander, amount);
             case "bed", "beds" -> craftBed(bot, source, commander, amount);
@@ -599,10 +602,11 @@ public final class CraftingHelper {
             return 0;
         }
         int needed = Math.max(1, amount);
-        int planksPerLog = 4;
-        int logsNeeded = (int) Math.ceil(needed / (double) planksPerLog);
+        int logsNeeded = (int) Math.ceil(needed / (double) PLANKS_PER_LOG);
         int crafted = 0;
 
+        // The scan reads slots on the caller's thread; each conversion (those logs out, their
+        // planks in) is one commit, which checks the slot again on the server thread.
         for (int i = 0; i < bot.getInventory().size() && logsNeeded > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty() || !stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) {
@@ -616,14 +620,15 @@ public final class CraftingHelper {
             if (plankItem == null || plankItem == Items.AIR) {
                 continue;
             }
-            stack.decrement(use);
-            if (stack.isEmpty()) {
-                bot.getInventory().setStack(i, ItemStack.EMPTY);
+            CraftCommitPolicy.Outcome outcome = commitLogsToPlanks(bot, i, stack.getItem(), stack.getCount(), use, plankItem);
+            if (!CraftCommitPolicy.continueScan(outcome)) {
+                break;
             }
-            int produced = use * planksPerLog;
-            distributeOutput(bot, plankItem, produced);
+            if (outcome != CraftCommitPolicy.Outcome.CRAFTED) {
+                continue;
+            }
             recordCraftHistory(commander, plankItem);
-            crafted += produced;
+            crafted += use * PLANKS_PER_LOG;
             logsNeeded -= use;
         }
 
@@ -643,12 +648,21 @@ public final class CraftingHelper {
             return 0;
         }
         // Ladder: 7 sticks => 3 ladders (3x3 recipe)
-        if (!ensureCraftingStation(bot, source)) {
-            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
-            return 0;
-        }
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "ladder"))) {
             say(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        // One combined chest ask for the sticks (or the planks or logs they come from) and the
+        // table's planks, before the station and the stick sub-step find them in the pack.
+        switch (askChestForKnownCraft(bot, source, Items.LADDER, amountRequested, s -> false, true)) {
+            case STOP_SILENT, STOP_WITH_LINE -> {
+                return 0;
+            }
+            default -> {
+            }
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
             return 0;
         }
 
@@ -675,8 +689,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.LADDER, crafts * 3, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STICK, crafts * 7);
-        distributeOutput(bot, Items.LADDER, crafts * 3);
+        if (commitCraft(bot, Items.LADDER, crafts * 3,
+                () -> consumeItemOnServer(bot, Items.STICK, crafts * 7)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, Identifier.of("minecraft", "ladder"));
         return crafts * 3;
     }
@@ -689,7 +705,7 @@ public final class CraftingHelper {
         // are 2x2 recipes, and a table placed for a bed the bot cannot make is litter.
         // Choose a color based on available wool stacks (3 required per bed).
         record BedRecipe(net.minecraft.item.Item wool, net.minecraft.item.Item bed, Identifier recipeId) {}
-        List<BedRecipe> recipes = List.of(
+        List<BedRecipe> allRecipes = List.of(
                 new BedRecipe(Items.WHITE_WOOL, Items.WHITE_BED, Identifier.of("minecraft", "white_bed")),
                 new BedRecipe(Items.BLACK_WOOL, Items.BLACK_BED, Identifier.of("minecraft", "black_bed")),
                 new BedRecipe(Items.BLUE_WOOL, Items.BLUE_BED, Identifier.of("minecraft", "blue_bed")),
@@ -707,6 +723,39 @@ public final class CraftingHelper {
                 new BedRecipe(Items.RED_WOOL, Items.RED_BED, Identifier.of("minecraft", "red_bed")),
                 new BedRecipe(Items.YELLOW_WOOL, Items.YELLOW_BED, Identifier.of("minecraft", "yellow_bed"))
         );
+        // The recipe-permission check runs before the ask (as ladders do): a bed the bot may not
+        // craft (a datapack removed the recipe) never takes its wool and planks from the chest
+        // first. Only the permitted colours are chosen from, before and after the ask.
+        List<BedRecipe> recipes = allRecipes.stream()
+                .filter(r -> hasRecipePermission(commander, source.getServer(), r.recipeId()))
+                .toList();
+        if (recipes.isEmpty()) {
+            say(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+
+        // One combined chest ask for the wool and the planks (and the table's planks): the colour
+        // is the first the bot holds enough of, else the first one chest completes. Off the
+        // server thread the colour choice below sees the inventory alone, so this is also how a
+        // worker bed craft reaches wool that is only in a chest.
+        List<String> woolIds = recipes.stream().map(r -> Registries.ITEM.getId(r.wool()).toString()).toList();
+        Set<Item> woolItems = new HashSet<>(recipes.stream().map(BedRecipe::wool).toList());
+        int bedAmount = Math.max(1, amount);
+        CraftAsk bedAsk = new CraftAsk(input -> {
+            String wool = CraftBundleAskPolicy.chooseBedWool(woolIds, input.have(), input.chestPools(), 3 * bedAmount);
+            if (wool == null) {
+                return null;
+            }
+            BedRecipe recipe = recipes.get(woolIds.indexOf(wool));
+            return CraftBundleAskPolicy.bedCraft(Registries.ITEM.getId(recipe.bed()).toString(), wool);
+        }, s -> woolItems.contains(s.getItem()), bedAmount, true, List.of());
+        switch (askChestForCraftMaterials(bot, source, bedAsk, null)) {
+            case STOP_SILENT, STOP_WITH_LINE -> {
+                return 0;
+            }
+            default -> {
+            }
+        }
 
         BedRecipe chosen = null;
         Map<Item, Integer> totals = countItemsInInventoryAndNearbyChests(
@@ -743,10 +792,6 @@ public final class CraftingHelper {
                     Map.of("matching wool", 3 * Math.max(1, amount)),
                     Map.of("matching wool", bestWool),
                     "Beds need 3 matching wool or enough string to make it, plus 3 planks per bed.");
-            return 0;
-        }
-        if (!hasRecipePermission(commander, source.getServer(), chosen.recipeId())) {
-            say(source, "I don't know how to craft that yet.");
             return 0;
         }
 
@@ -805,13 +850,17 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, chosen.bed(), crafts, crafts * 3, 0, reserveItems)) {
             return 0;
         }
-        if (!consumePlanks(bot, crafts * 3)) {
+        BedRecipe bed = chosen;
+        CraftCommitPolicy.Outcome committed = commitCraft(bot, bed.bed(), crafts,
+                () -> consumePlanksOnServer(bot, crafts * 3) && consumeItemOnServer(bot, bed.wool(), crafts * 3));
+        if (committed == CraftCommitPolicy.Outcome.ABORTED) {
             say(source, "I couldn't reserve planks for beds.");
             return 0;
         }
-        consumeItem(bot, chosen.wool(), crafts * 3);
-        distributeOutput(bot, chosen.bed(), crafts);
-        recordCraftHistory(commander, chosen.recipeId());
+        if (committed != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
+        recordCraftHistory(commander, bed.recipeId());
         return crafts;
     }
 
@@ -844,8 +893,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.WHITE_WOOL, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STRING, crafts * 4);
-        distributeOutput(bot, Items.WHITE_WOOL, crafts);
+        if (commitCraft(bot, Items.WHITE_WOOL, crafts,
+                () -> consumeItemOnServer(bot, Items.STRING, crafts * 4)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, WHITE_WOOL_RECIPE_ID);
         LOGGER.info("Crafted {} white wool from string for {} while preparing bed materials.",
                 crafts,
@@ -869,7 +920,11 @@ public final class CraftingHelper {
         return InventoryIterator.count(bot, CraftingHelper::isPlank);
     }
 
-    private static boolean consumePlanks(ServerPlayerEntity bot, int needed) {
+    /**
+     * Server thread only, from inside a {@link #commitCraft} lambda: {@link #consumeItemOnServer}
+     * for any planks. False means too few: the commit stops before any output.
+     */
+    private static boolean consumePlanksOnServer(ServerPlayerEntity bot, int needed) {
         // Bundle-aware counts feed the "can I craft this?" gate, but decrementing a bundled view is a
         // no-op — pull the shortfall into real slots before touching any stack.
         reachForItem(bot, CraftingHelper::isPlank, needed);
@@ -886,7 +941,7 @@ public final class CraftingHelper {
                 bot.getInventory().setStack(i, ItemStack.EMPTY);
             }
         }
-        return remaining == 0;
+        return reportConsumeShortfall(bot, "planks", needed, remaining);
     }
 
     private static boolean hasRecipePermission(ServerPlayerEntity commander, MinecraftServer server, Identifier recipeId) {
@@ -911,19 +966,40 @@ public final class CraftingHelper {
                                        int planksPerItem,
                                        net.minecraft.item.Item output,
                                        int amountRequested,
-                                       boolean quiet) {
+                                       boolean quiet,
+                                       boolean askChest) {
+        // The recipe-permission check comes before the ask: a craft the bot may not make never
+        // takes its planks from the chest and then says it does not know the recipe.
+        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
+            if (!quiet) say(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        if (askChest) {
+            // One combined chest ask for the planks (or the logs they come from) and, for a 3x3
+            // output, the table's planks. The station sub-step (a table made for another craft)
+            // never asks here: that craft's own ask, where it has one, already counted the table.
+            switch (askChestForKnownCraft(bot, source, output, amountRequested, s -> false,
+                    !output.equals(Items.CRAFTING_TABLE))) {
+                case STOP_SILENT, STOP_WITH_LINE -> {
+                    return 0;
+                }
+                default -> {
+                }
+            }
+        }
         if (!output.equals(Items.CRAFTING_TABLE)) {
             if (!ensureCraftingStation(bot, source, quiet)) {
                 if (!quiet) sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
                 return 0;
             }
         }
-        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            if (!quiet) say(source, "I don't know how to craft that yet.");
-            return 0;
-        }
         if (!ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)) {
-            if (!quiet) sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft.");
+            if (!quiet) {
+                boolean hasLogs = InventoryIterator.count(bot,
+                        st -> st.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) > 0;
+                sendCraftTableNeededOnce(bot, source, PlanksShortLinePolicy.line(planksPerItem, hasLogs,
+                        bot.getInventory().getEmptySlot() == -1));
+            }
             return 0;
         }
         int plankCount = countPlanks(bot);
@@ -936,11 +1012,15 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForSubCraft(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of(), quiet)) {
             return 0;
         }
-        if (!consumePlanks(bot, crafts * planksPerItem)) {
+        CraftCommitPolicy.Outcome committed = commitCraft(bot, output, crafts,
+                () -> consumePlanksOnServer(bot, crafts * planksPerItem));
+        if (committed == CraftCommitPolicy.Outcome.ABORTED) {
             if (!quiet) say(source, "I couldn't reserve planks for crafting.");
             return 0;
         }
-        distributeOutput(bot, output, crafts);
+        if (committed != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -981,13 +1061,17 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForSubCraft(bot, source, Items.STICK, crafts * 4, crafts * 2, 0, Map.of(), quiet)) {
             return 0;
         }
-        if (!consumePlanks(bot, crafts * 2)) {
+        CraftCommitPolicy.Outcome committed = commitCraft(bot, Items.STICK, crafts * 4,
+                () -> consumePlanksOnServer(bot, crafts * 2));
+        if (committed == CraftCommitPolicy.Outcome.ABORTED) {
             if (!quiet) {
                 say(source, "I couldn't reserve planks for sticks.");
             }
             return 0;
         }
-        distributeOutput(bot, Items.STICK, crafts * 4);
+        if (committed != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, Identifier.of("minecraft", "stick"));
         return crafts * 4;
     }
@@ -1003,6 +1087,14 @@ public final class CraftingHelper {
         }
         int targetTorches = Math.max(1, amountRequested);
         int craftsNeeded = (int) Math.ceil(targetTorches / 4.0);
+        // One combined chest ask for the coal or charcoal and the sticks (a 2x2 recipe: no table).
+        switch (askChestForKnownCraft(bot, source, Items.TORCH, targetTorches, CraftingHelper::isTorchFuel, false)) {
+            case STOP_SILENT, STOP_WITH_LINE -> {
+                return 0;
+            }
+            default -> {
+            }
+        }
         if (!ensureSticks(bot, source, craftsNeeded)) {
             if (!CraftingStationPolicy.reportStickShortfall(takeFullPackRefusal())) {
                 return 0; // the full-pack line already said why
@@ -1013,13 +1105,21 @@ public final class CraftingHelper {
                     "Torches need sticks, and I don't have enough.");
             return 0;
         }
-        ensureItemAvailable(bot, source, Items.COAL, craftsNeeded);
+        // The bundle may have granted charcoal (TORCH_FUEL is coal or charcoal), so only the fuel
+        // still short is pulled, coal first and then charcoal, as before the bundle when nothing
+        // was held: held charcoal must not open a second prompt for coal.
         int coal = countItem(bot, Items.COAL);
-        int remaining = Math.max(0, craftsNeeded - coal);
-        if (remaining > 0) {
-            ensureItemAvailable(bot, source, Items.CHARCOAL, remaining);
-        }
         int charcoal = countItem(bot, Items.CHARCOAL);
+        int fuelShort = CraftBundleAskPolicy.torchFuelShortfall(craftsNeeded, coal, charcoal);
+        if (fuelShort > 0) {
+            ensureItemAvailable(bot, source, Items.COAL, coal + fuelShort);
+            coal = countItem(bot, Items.COAL);
+            fuelShort = CraftBundleAskPolicy.torchFuelShortfall(craftsNeeded, coal, charcoal);
+            if (fuelShort > 0) {
+                ensureItemAvailable(bot, source, Items.CHARCOAL, charcoal + fuelShort);
+                charcoal = countItem(bot, Items.CHARCOAL);
+            }
+        }
         int sticks = countItem(bot, Items.STICK);
         int fuel = coal + charcoal;
         int crafts = Math.min(craftsNeeded, Math.min(sticks, fuel));
@@ -1045,16 +1145,19 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.TORCH, crafts * 4, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STICK, crafts);
         int useCoal = Math.min(crafts, coal);
-        if (useCoal > 0) {
-            consumeItem(bot, Items.COAL, useCoal);
-        }
         int useCharcoal = crafts - useCoal;
-        if (useCharcoal > 0) {
-            consumeItem(bot, Items.CHARCOAL, useCharcoal);
+        if (commitCraft(bot, Items.TORCH, crafts * 4, () -> {
+            if (!consumeItemOnServer(bot, Items.STICK, crafts)) {
+                return false;
+            }
+            if (useCoal > 0 && !consumeItemOnServer(bot, Items.COAL, useCoal)) {
+                return false;
+            }
+            return useCharcoal <= 0 || consumeItemOnServer(bot, Items.CHARCOAL, useCharcoal);
+        }) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
         }
-        distributeOutput(bot, Items.TORCH, crafts * 4);
         recordCraftHistory(commander, recipeId);
         return crafts * 4;
     }
@@ -1135,9 +1238,12 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, best.door(), crafts * 3, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, best.plank(), crafts * 6);
-        distributeOutput(bot, best.door(), crafts * 3);
-        recordCraftHistory(commander, best.recipeId());
+        DoorRecipe door = best;
+        if (commitCraft(bot, door.door(), crafts * 3,
+                () -> consumeItemOnServer(bot, door.plank(), crafts * 6)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
+        recordCraftHistory(commander, door.recipeId());
         return crafts * 3;
     }
 
@@ -1231,10 +1337,13 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, best.fence(), crafts * 3, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, best.plank(), crafts * 4);
-        consumeItem(bot, Items.STICK, crafts * 2);
-        distributeOutput(bot, best.fence(), crafts * 3);
-        recordCraftHistory(commander, best.recipeId());
+        FenceRecipe fence = best;
+        if (commitCraft(bot, fence.fence(), crafts * 3,
+                () -> consumeItemOnServer(bot, fence.plank(), crafts * 4)
+                        && consumeItemOnServer(bot, Items.STICK, crafts * 2)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
+        recordCraftHistory(commander, fence.recipeId());
         return crafts * 3;
     }
 
@@ -1267,9 +1376,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.LEAD, crafts * 2, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STRING, crafts * 4);
-        consumeItem(bot, Items.SLIME_BALL, crafts);
-        distributeOutput(bot, Items.LEAD, crafts * 2);
+        if (commitCraft(bot, Items.LEAD, crafts * 2,
+                () -> consumeItemOnServer(bot, Items.STRING, crafts * 4)
+                        && consumeItemOnServer(bot, Items.SLIME_BALL, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts * 2;
     }
@@ -1303,9 +1414,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.BUNDLE, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.LEATHER, crafts);
-        consumeItem(bot, Items.STRING, crafts);
-        distributeOutput(bot, Items.BUNDLE, crafts);
+        if (commitCraft(bot, Items.BUNDLE, crafts,
+                () -> consumeItemOnServer(bot, Items.LEATHER, crafts)
+                        && consumeItemOnServer(bot, Items.STRING, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1332,8 +1445,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.LEATHER, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.RABBIT_HIDE, crafts * 4);
-        distributeOutput(bot, Items.LEATHER, crafts);
+        if (commitCraft(bot, Items.LEATHER, crafts,
+                () -> consumeItemOnServer(bot, Items.RABBIT_HIDE, crafts * 4)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1367,9 +1482,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.SADDLE, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.LEATHER, crafts * 3);
-        consumeItem(bot, Items.IRON_INGOT, crafts);
-        distributeOutput(bot, Items.SADDLE, crafts);
+        if (commitCraft(bot, Items.SADDLE, crafts,
+                () -> consumeItemOnServer(bot, Items.LEATHER, crafts * 3)
+                        && consumeItemOnServer(bot, Items.IRON_INGOT, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1405,9 +1522,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.CARROT_ON_A_STICK, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.CARROT, crafts);
-        consumeItem(bot, Items.FISHING_ROD, crafts);
-        distributeOutput(bot, Items.CARROT_ON_A_STICK, crafts);
+        if (commitCraft(bot, Items.CARROT_ON_A_STICK, crafts,
+                () -> consumeItemOnServer(bot, Items.CARROT, crafts)
+                        && consumeItemOnServer(bot, Items.FISHING_ROD, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1443,9 +1562,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.WARPED_FUNGUS_ON_A_STICK, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.WARPED_FUNGUS, crafts);
-        consumeItem(bot, Items.FISHING_ROD, crafts);
-        distributeOutput(bot, Items.WARPED_FUNGUS_ON_A_STICK, crafts);
+        if (commitCraft(bot, Items.WARPED_FUNGUS_ON_A_STICK, crafts,
+                () -> consumeItemOnServer(bot, Items.WARPED_FUNGUS, crafts)
+                        && consumeItemOnServer(bot, Items.FISHING_ROD, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, recipeId);
         return crafts;
     }
@@ -1516,6 +1637,14 @@ public final class CraftingHelper {
             if (crafts > 0) {
                 return crafts;
             }
+            if (crafts == SUPPLY_DECLINED) {
+                // The owner declined the one combined chest ask, or never answered: one line (already
+                // said, or held in the strict shortfall) and no other material is tried behind their back.
+                if (shortfall != null && shortfall.message != null && source != null) {
+                    say(source, shortfall.message);
+                }
+                return 0;
+            }
             if (shortfall != null && shortfall.packFull) {
                 // The pack is full for every material: no per-material shortfall line after it.
                 return 0;
@@ -1569,6 +1698,8 @@ public final class CraftingHelper {
 
     /** {@link #craftToolWithMaterial}'s answer when no crafting table could be reached or placed. */
     private static final int STATION_UNAVAILABLE = -1;
+    /** {@link #craftToolWithMaterial}'s answer when the owner declined (or never answered) the one combined chest ask. */
+    private static final int SUPPLY_DECLINED = -2;
 
     /** Head items one tool of this kind takes. */
     private static int headCountFor(ToolKind kind, ToolMaterial mat) {
@@ -1605,6 +1736,23 @@ public final class CraftingHelper {
             default -> 2;
         };
         int headCount = headCountFor(kind, mat);
+
+        // One combined chest ask for everything this craft lacks (the table's planks included), before
+        // the station and the per-item sub-steps below, which then find the materials in the pack.
+        switch (askChestForToolMaterials(bot, source, kind, mat, amount, headCount, stickCount, shortfall)) {
+            case STOP_SILENT, STOP_WITH_LINE -> {
+                return SUPPLY_DECLINED;
+            }
+            case SKIP_MATERIAL -> {
+                // Neither the bot nor any chest here has this head: nothing is asked for its sticks.
+                if (shortfall != null && shortfall.message == null) {
+                    shortfall.message = toolShortfallLine(bot, kind, mat, amount, headCount, stickCount);
+                }
+                return 0;
+            }
+            case CONTINUE -> {
+            }
+        }
 
         // Ensure crafting table nearby for 3x3 recipes. An explicit-material craft answers with
         // one shortfall line that names the table too, so the station stays quiet for it.
@@ -1672,13 +1820,7 @@ public final class CraftingHelper {
             return 0;
         }
 
-        net.minecraft.item.Item output = switch (kind) {
-            case AXE -> resolveTiered(mat, Items.WOODEN_AXE, Items.STONE_AXE, Items.IRON_AXE, Items.GOLDEN_AXE, Items.DIAMOND_AXE);
-            case SHOVEL -> resolveTiered(mat, Items.WOODEN_SHOVEL, Items.STONE_SHOVEL, Items.IRON_SHOVEL, Items.GOLDEN_SHOVEL, Items.DIAMOND_SHOVEL);
-            case PICKAXE -> resolveTiered(mat, Items.WOODEN_PICKAXE, Items.STONE_PICKAXE, Items.IRON_PICKAXE, Items.GOLDEN_PICKAXE, Items.DIAMOND_PICKAXE);
-            case HOE -> resolveTiered(mat, Items.WOODEN_HOE, Items.STONE_HOE, Items.IRON_HOE, Items.GOLDEN_HOE, Items.DIAMOND_HOE);
-            case SWORD -> resolveTiered(mat, Items.WOODEN_SWORD, Items.STONE_SWORD, Items.IRON_SWORD, Items.GOLDEN_SWORD, Items.DIAMOND_SWORD);
-        };
+        net.minecraft.item.Item output = toolOutput(kind, mat);
         Map<Item, Integer> reserveItems = new HashMap<>();
         reserveItems.put(Items.STICK, crafts * stickCount);
         if (mat.headItem().equals(Items.OAK_PLANKS)) {
@@ -1694,11 +1836,16 @@ public final class CraftingHelper {
             }
         }
 
-        consumeItem(bot, Items.STICK, crafts * stickCount);
-        if (mat.headItem().equals(Items.OAK_PLANKS)) {
-            consumePlanks(bot, crafts * headCount);
-        } else {
-            consumeItem(bot, mat.headItem(), crafts * headCount);
+        boolean woodHead = mat.headItem().equals(Items.OAK_PLANKS);
+        if (commitCraft(bot, output, crafts, () -> {
+            if (!consumeItemOnServer(bot, Items.STICK, crafts * stickCount)) {
+                return false;
+            }
+            return woodHead
+                    ? consumePlanksOnServer(bot, crafts * headCount)
+                    : consumeItemOnServer(bot, mat.headItem(), crafts * headCount);
+        }) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
         }
 
         LOGGER.info("Crafted {} {}(s) using {} (sticks {} each, heads {}x {})",
@@ -1708,9 +1855,325 @@ public final class CraftingHelper {
                 stickCount,
                 headCount,
                 mat.headItem().getName().getString());
-        distributeOutput(bot, output, crafts);
         recordCraftHistory(commander, output);
         return crafts;
+    }
+
+    /** The tool item one kind and material make. */
+    private static net.minecraft.item.Item toolOutput(ToolKind kind, ToolMaterial mat) {
+        return switch (kind) {
+            case AXE -> resolveTiered(mat, Items.WOODEN_AXE, Items.STONE_AXE, Items.IRON_AXE, Items.GOLDEN_AXE, Items.DIAMOND_AXE);
+            case SHOVEL -> resolveTiered(mat, Items.WOODEN_SHOVEL, Items.STONE_SHOVEL, Items.IRON_SHOVEL, Items.GOLDEN_SHOVEL, Items.DIAMOND_SHOVEL);
+            case PICKAXE -> resolveTiered(mat, Items.WOODEN_PICKAXE, Items.STONE_PICKAXE, Items.IRON_PICKAXE, Items.GOLDEN_PICKAXE, Items.DIAMOND_PICKAXE);
+            case HOE -> resolveTiered(mat, Items.WOODEN_HOE, Items.STONE_HOE, Items.IRON_HOE, Items.GOLDEN_HOE, Items.DIAMOND_HOE);
+            case SWORD -> resolveTiered(mat, Items.WOODEN_SWORD, Items.STONE_SWORD, Items.IRON_SWORD, Items.GOLDEN_SWORD, Items.DIAMOND_SWORD);
+        };
+    }
+
+    // ── One combined chest ask (Bradley 2026-10-23) ──────────────────────────────────────────
+
+    /** One exact chest stack the plan may draw on: the listing's candidate, its pool and what the policy could grant. */
+    private record BundleStack(PullCandidate stack, String pool, int grantable) {
+    }
+
+    /** One chest near the bot: its stacks and, per pool, what it could grant in all. Built on the server thread. */
+    private record BundleChest(BlockPos pos, List<BundleStack> stacks, Map<String, Integer> pools) {
+    }
+
+    /** What the plan needs from the world: the bot's own counts per pool and the chests, nearest first. */
+    private record BundleInput(Map<String, Integer> have, List<BundleChest> chests) {
+        /** Each chest's grantable count per pool, nearest first. */
+        List<Map<String, Integer>> chestPools() {
+            List<Map<String, Integer>> pools = new ArrayList<>(chests.size());
+            for (BundleChest chest : chests) {
+                pools.add(chest.pools());
+            }
+            return pools;
+        }
+    }
+
+    /**
+     * One craft's combined ask, as {@link #askChestForCraftMaterials} needs it.
+     *
+     * @param craftFor   the craft to plan from what was gathered (a bed picks its wool colour from
+     *                   it); {@code null} means nothing to plan, today's path runs
+     * @param match      the exact items this craft draws on besides planks, logs and sticks
+     * @param amount     how many of the target
+     * @param needsTable whether the craft is a 3×3 recipe (its table joins the ask when none is near)
+     * @param headKeys   the keys whose absence everywhere makes the craft hopeless
+     *                   ({@link CraftBundleAskPolicy#headHopeless}); empty for a craft with no
+     *                   alternative material
+     */
+    private record CraftAsk(java.util.function.Function<BundleInput, CraftBundleAskPolicy.KnownCraft> craftFor,
+                            Predicate<ItemStack> match,
+                            int amount,
+                            boolean needsTable,
+                            List<String> headKeys) {
+    }
+
+    /**
+     * One tool craft's ask: its head items (planks for wood) and sticks; see
+     * {@link #askChestForCraftMaterials} for the flow.
+     */
+    private static CraftBundleAskPolicy.Next askChestForToolMaterials(ServerPlayerEntity bot,
+                                                                      ServerCommandSource source,
+                                                                      ToolKind kind,
+                                                                      ToolMaterial mat,
+                                                                      int amount,
+                                                                      int headCount,
+                                                                      int stickCount,
+                                                                      ToolShortfall shortfall) {
+        if (mat == null) {
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        Item head = mat.headItem();
+        boolean headIsPlanks = head.equals(Items.OAK_PLANKS);
+        String headKey = headIsPlanks ? CraftBundleAskPolicy.PLANKS : Registries.ITEM.getId(head).toString();
+        String toolId = Registries.ITEM.getId(toolOutput(kind, mat)).toString();
+        String label = toolLabel(kind, mat);
+        CraftBundleAskPolicy.KnownCraft tool = new CraftBundleAskPolicy.KnownCraft(toolId,
+                CraftBundleAskPolicy.toolRecipe(headKey, headCount, stickCount), label, label + "s");
+        CraftAsk ask = new CraftAsk(input -> tool, s -> !headIsPlanks && s.isOf(head), amount, true,
+                CraftBundleAskPolicy.headKeys(headKey));
+        return askChestForCraftMaterials(bot, source, ask, shortfall);
+    }
+
+    /**
+     * The ask for a craft in {@link CraftBundleAskPolicy#known}'s table (ladder, torch, shield,
+     * bucket, shears, furnace, chest, crafting table); an item not in the table asks nothing.
+     *
+     * @param match      the exact items the craft draws on besides planks, logs and sticks
+     * @param needsTable whether the craft is a 3×3 recipe
+     */
+    private static CraftBundleAskPolicy.Next askChestForKnownCraft(ServerPlayerEntity bot,
+                                                                   ServerCommandSource source,
+                                                                   Item output,
+                                                                   int amount,
+                                                                   Predicate<ItemStack> match,
+                                                                   boolean needsTable) {
+        if (output == null) {
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        CraftBundleAskPolicy.KnownCraft craft = CraftBundleAskPolicy.known(Registries.ITEM.getId(output).toString());
+        if (craft == null) {
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        return askChestForCraftMaterials(bot, source, new CraftAsk(input -> craft, match, amount, needsTable, List.of()), null);
+    }
+
+    /**
+     * Everything one craft lacks, asked of one chest in ONE prompt (Bradley's ruling of
+     * 2026-10-23), before the station and the per-item sub-steps. The bot's own counts and each
+     * chest's grantable counts (reserve already out) are gathered on the server thread
+     * ({@link #gatherBundleInput}, through {@link SupplyServerHop} from a worker); the recipe
+     * lookup ({@link CraftBundleAskPolicy#craftRecipes}), the plan ({@link CraftSupplyNeedPolicy})
+     * and the chest choice ({@link CraftBundleAskPolicy}) run on the caller's thread; the one ask
+     * and the takes run through {@link SupplyWithdrawals#withdrawBundle}.
+     *
+     * <p>Worker threads only. The worker waits for the owner's answer ({@link SupplyWithdrawals.WaitMode#UNTIL_ANSWERED}),
+     * walks once when the answer is yes but the chest is out of reach, and converts taken logs to
+     * the planks the craft counted on. On the server thread (the idle stone upgrade from
+     * {@code onServerTick}) nothing is asked and the per-item pulls run as before the bundle: that
+     * caller cannot wait, and it retries no sooner than the grant lives, so a prompt it opened
+     * would never be redeemed and would reopen on every retry. Nothing to ask (no chest, nothing
+     * needed, nothing grantable) keeps today's per-item path too.
+     *
+     * @param shortfall a strict tool craft's shortfall, which carries the stop line instead of a
+     *                  chat message; {@code null} for every other craft
+     * @return what the craft does next; {@link CraftBundleAskPolicy.Next#STOP_WITH_LINE} has said
+     *         its line (or left it in {@code shortfall} for a strict craft)
+     */
+    private static CraftBundleAskPolicy.Next askChestForCraftMaterials(ServerPlayerEntity bot,
+                                                                       ServerCommandSource source,
+                                                                       CraftAsk ask,
+                                                                       ToolShortfall shortfall) {
+        if (bot == null || source == null || ask == null || !(source.getWorld() instanceof ServerWorld world)) {
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        if (server.isOnThread()) {
+            // A server-thread craft cannot wait for the answer and would not be back before the
+            // grant expired: it keeps the per-item pulls, exactly as before the bundle.
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        Predicate<ItemStack> extra = ask.match() == null ? s -> false : ask.match();
+        Predicate<ItemStack> match = s -> isPlank(s) || isLog(s) || s.isOf(Items.STICK) || extra.test(s);
+        boolean tableMustBeCrafted = ask.needsTable() && !tableAvailableWithoutCrafting(bot, source);
+        BundleInput input = SupplyServerHop.call(server, () -> gatherBundleInput(world, bot, match),
+                CHEST_PULL_SCAN_HOP_MS, null);
+        if (input == null || input.chests().isEmpty()) {
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        CraftBundleAskPolicy.KnownCraft craft = ask.craftFor() == null ? null : ask.craftFor().apply(input);
+        if (craft == null) {
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        int amount = Math.max(1, ask.amount());
+        java.util.function.Function<String, CraftSupplyNeedPolicy.Recipe> recipes = CraftBundleAskPolicy.craftRecipes(
+                craft, amount, tableMustBeCrafted);
+        List<CraftSupplyNeedPolicy.Plan> plans = new ArrayList<>(input.chests().size());
+        for (BundleChest chest : input.chests()) {
+            plans.add(CraftSupplyNeedPolicy.plan(CraftBundleAskPolicy.CRAFT_SET, 1, recipes, input.have(), chest.pools(),
+                    CraftSupplyNeedPolicy.Limits.defaults()));
+        }
+        if (CraftBundleAskPolicy.headHopeless(plans, ask.headKeys())) {
+            LOGGER.info("Craft bundle: no chest near {} can complete {} ({} missing everywhere); skipping it",
+                    bot.getName().getString(), craft.singular(), ask.headKeys());
+            return CraftBundleAskPolicy.Next.SKIP_MATERIAL;
+        }
+        // A bed's wool must come whole from the one chest asked: a chest with the planks alone is
+        // never asked (nor is one with the wool but not the planks: today's path runs instead).
+        int chosen = CraftBundleAskPolicy.chooseChest(plans, craft.mustComplete());
+        if (chosen < 0) {
+            if (craft.mustComplete() != null) {
+                LOGGER.info("Craft bundle: no one chest near {} completes {} ({} must come whole); keeping the per-item path",
+                        bot.getName().getString(), craft.singular(), craft.mustComplete());
+            }
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        CraftSupplyNeedPolicy.Plan plan = plans.get(chosen);
+        BundleChest chest = input.chests().get(chosen);
+        SupplyBundlePromptPolicy.Decision decision = SupplyBundlePromptPolicy.decide(plan);
+        if (decision != SupplyBundlePromptPolicy.Decision.ASK_ALL
+                && decision != SupplyBundlePromptPolicy.Decision.ASK_PARTIAL) {
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        // Each pooled line ("3 planks") becomes one ask per exact stack the chest holds of that pool.
+        List<SupplyWithdrawals.BundleAsk> asks = new ArrayList<>();
+        List<SupplyBundlePromptPolicy.Shown> askedShown = new ArrayList<>();
+        for (CraftSupplyNeedPolicy.Line line : plan.fromChest()) {
+            List<BundleStack> ofPool = new ArrayList<>();
+            for (BundleStack stack : chest.stacks()) {
+                if (stack.pool().equals(line.item())) {
+                    ofPool.add(stack);
+                }
+            }
+            int[] grantable = new int[ofPool.size()];
+            for (int i = 0; i < ofPool.size(); i++) {
+                grantable[i] = ofPool.get(i).grantable();
+            }
+            int[] takes = CraftBundleAskPolicy.splitLine(line.count(), grantable);
+            for (int i = 0; i < takes.length; i++) {
+                if (takes[i] > 0) {
+                    ItemStack sample = ofPool.get(i).stack().sample();
+                    asks.add(new SupplyWithdrawals.BundleAsk(sample, takes[i], takes[i]));
+                    askedShown.add(new SupplyBundlePromptPolicy.Shown(takes[i], sample.getName().getString()));
+                }
+            }
+        }
+        if (asks.isEmpty()) {
+            return CraftBundleAskPolicy.Next.CONTINUE;
+        }
+        List<SupplyBundlePromptPolicy.Shown> missing = new ArrayList<>();
+        for (CraftSupplyNeedPolicy.Line line : plan.missing()) {
+            missing.add(new SupplyBundlePromptPolicy.Shown(line.count(), poolDisplayName(line.item(), line.count())));
+        }
+        String purpose = CraftBundleAskPolicy.purposeText(craft.singular(), craft.plural(), amount, tableMustBeCrafted);
+        // A worker (the only caller past the thread check above) waits for the one answer.
+        SupplyWithdrawals.WaitMode mode = SupplyWithdrawals.WaitMode.UNTIL_ANSWERED;
+        // A /bot stop (or any abort of this bot's task) ends the worker's wait for the owner.
+        UUID botId = bot.getUuid();
+        java.util.function.BooleanSupplier abort = () -> TaskService.isAbortRequested(botId);
+        SupplyWithdrawals.BundleResult result = SupplyWithdrawals.withdrawBundle(bot, chest.pos(), asks, purpose,
+                missing, mode, abort);
+        if (result.kind() == SupplyWithdrawals.Kind.READY) {
+            // Permitted but out of reach: walk there once, then take; the second call checks reach itself.
+            moveNearBlock(bot, source, chest.pos(), STATION_REACH_SQ);
+            result = SupplyWithdrawals.withdrawBundle(bot, chest.pos(), asks, purpose, missing, mode, abort);
+        }
+        if (result.moved() > 0) {
+            // The plan counted the logs it asked for as planks: make them so, as the per-item path would.
+            ensurePlanksFromLogs(bot, CraftBundleAskPolicy.planksWanted(craft.recipe(), amount,
+                    countItem(bot, Items.STICK), tableMustBeCrafted));
+        }
+        CraftBundleAskPolicy.Next next = CraftBundleAskPolicy.afterBundle(result.kind(), result.why());
+        LOGGER.info("Craft bundle for {} ({}): chest={} asked={} missing={} result={} moved={} why={} next={}",
+                bot.getName().getString(), purpose, chest.pos().toShortString(),
+                SupplyBundlePromptPolicy.join(askedShown), SupplyBundlePromptPolicy.join(missing),
+                result.kind(), result.moved(), result.why(), next);
+        if (next == CraftBundleAskPolicy.Next.STOP_WITH_LINE) {
+            String line = CraftBundleAskPolicy.stopLine(purpose, askedShown, result.why());
+            if (shortfall != null) {
+                if (shortfall.message == null) {
+                    shortfall.message = line;
+                }
+            } else {
+                sendCraftTableNeededOnce(bot, source, line);
+            }
+        }
+        return next;
+    }
+
+    /**
+     * Server thread only (chests read as absent anywhere else). The bot's own counts per pool and,
+     * per chest near it (nearest first, in reach or not: a worker walks once for a yes), every
+     * stack of the pools this craft draws on with what the supply policy could grant of it
+     * ({@link SupplyWithdrawals#grantableEstimate}: allowlisted, above the reserve). Read-only.
+     */
+    private static BundleInput gatherBundleInput(ServerWorld world, ServerPlayerEntity bot, Predicate<ItemStack> match) {
+        Map<String, Integer> have = new HashMap<>();
+        InventoryIterator.stream(bot).forEach(slot -> {
+            ItemStack stack = slot.stack();
+            if (stack != null && !stack.isEmpty() && match.test(stack)) {
+                have.merge(bundlePool(stack), stack.getCount(), Integer::sum);
+            }
+        });
+        Map<BlockPos, List<BundleStack>> byChest = new LinkedHashMap<>();
+        for (PullCandidate candidate : findPullCandidates(world, bot, match, false)) {
+            int grantable = SupplyWithdrawals.grantableEstimate(world, candidate.sample(), candidate.count());
+            if (grantable <= 0) {
+                continue;
+            }
+            String pool = bundlePool(candidate.sample());
+            byChest.computeIfAbsent(candidate.chestPos(), k -> new ArrayList<>())
+                    .add(new BundleStack(candidate, pool, grantable));
+        }
+        List<BundleChest> chests = new ArrayList<>(byChest.size());
+        for (Map.Entry<BlockPos, List<BundleStack>> e : byChest.entrySet()) {
+            Map<String, Integer> pools = new HashMap<>();
+            for (BundleStack stack : e.getValue()) {
+                pools.merge(stack.pool(), stack.grantable(), Integer::sum);
+            }
+            chests.add(new BundleChest(e.getKey(), e.getValue(), pools));
+        }
+        return new BundleInput(have, chests);
+    }
+
+    private static boolean isLog(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS);
+    }
+
+    /** Coal or charcoal: either lights a torch. */
+    private static boolean isTorchFuel(ItemStack stack) {
+        return stack != null && (stack.isOf(Items.COAL) || stack.isOf(Items.CHARCOAL));
+    }
+
+    /** The blocks a furnace takes, as {@link #countCobble} counts them. */
+    private static boolean isStoneCraftingMaterial(ItemStack stack) {
+        return stack != null && (stack.isOf(Items.COBBLESTONE) || stack.isOf(Items.COBBLED_DEEPSLATE)
+                || stack.isOf(Items.BLACKSTONE));
+    }
+
+    /** The plan's key for a stack: its pool (planks, logs, torch fuel, stone) or its exact item id. */
+    private static String bundlePool(ItemStack stack) {
+        return CraftBundleAskPolicy.poolKey(Registries.ITEM.getId(stack.getItem()).toString(),
+                isPlank(stack), isLog(stack), isTorchFuel(stack), isStoneCraftingMaterial(stack));
+    }
+
+    /** The prompt's name for a plan item: the pools by name, anything else by its item name. */
+    private static String poolDisplayName(String key, int count) {
+        String pool = CraftBundleAskPolicy.poolDisplayName(key, count);
+        if (pool != null) {
+            return pool;
+        }
+        Identifier id = Identifier.tryParse(key);
+        if (id == null) {
+            return key;
+        }
+        return Registries.ITEM.getOptionalValue(id).map(item -> item.getName().getString()).orElse(key);
     }
 
     private static net.minecraft.item.Item resolveTiered(ToolMaterial mat,
@@ -1743,6 +2206,14 @@ public final class CraftingHelper {
                                    ServerCommandSource source,
                                    ServerPlayerEntity commander,
                                    int amount) {
+        // One combined chest ask for the planks, the iron ingot and the table's planks.
+        switch (askChestForKnownCraft(bot, source, Items.SHIELD, amount, s -> s.isOf(Items.IRON_INGOT), true)) {
+            case STOP_SILENT, STOP_WITH_LINE -> {
+                return 0;
+            }
+            default -> {
+            }
+        }
         if (!ensureCraftingStation(bot, source)) {
             sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft a shield.");
             return 0;
@@ -1761,9 +2232,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.SHIELD, crafts, crafts * 6, 0, reserveItems)) {
             return 0;
         }
-        consumePlanks(bot, crafts * 6);
-        consumeItem(bot, Items.IRON_INGOT, crafts);
-        distributeOutput(bot, Items.SHIELD, crafts);
+        if (commitCraft(bot, Items.SHIELD, crafts,
+                () -> consumePlanksOnServer(bot, crafts * 6)
+                        && consumeItemOnServer(bot, Items.IRON_INGOT, crafts)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, Items.SHIELD);
         return crafts;
     }
@@ -2425,7 +2898,7 @@ public final class CraftingHelper {
         switch (action) {
             case PLACE_NOW -> { }
             case STEP_TO_STAND -> stand = planned;
-            case RELOCATE -> stand = findRepositionStandClearOf(world, bot.getBlockPos(), placeAt, placeAt);
+            case RELOCATE -> stand = findRepositionStandClearOf(world, bot, placeAt, placeAt);
         }
         if (action != UtilityPlacementStandPolicy.Action.PLACE_NOW && stand == null) {
             LOGGER.info("Crafting table local reposition [{}]: no stand clear of place={} bot={}",
@@ -2479,7 +2952,7 @@ public final class CraftingHelper {
      * once centred, worker thread only:
      * callers are behind {@link CraftingStationPolicy#mayWalk}) so its hitbox stays inside the stand.
      */
-    private static void recenterOnStand(ServerPlayerEntity bot, BlockPos stand) {
+    public static void recenterOnStand(ServerPlayerEntity bot, BlockPos stand) {
         if (bot == null || stand == null) {
             return;
         }
@@ -2528,7 +3001,7 @@ public final class CraftingHelper {
         }
 
         BlockPos relocation = CraftingStationPolicy.mayWalk(onServerThread)
-                ? findPlacementRelocationStand(world, bot.getBlockPos(), origin)
+                ? findPlacementRelocationStand(world, bot, origin)
                 : null;
         if (relocation != null && !relocation.equals(bot.getBlockPos())) {
             attemptLog.noteRelocation(relocation);
@@ -2570,9 +3043,17 @@ public final class CraftingHelper {
             if (!world.isChunkLoaded(pos) || !world.isChunkLoaded(pos.down())) {
                 continue;
             }
+            if (inTunnelAhead(bot, pos)) {
+                logPlacementRejection(attemptLog, pos, "tunnel-keep-clear");
+                continue;
+            }
             BlockPos stand = findAdjacentStandCandidate(world, pos, reference, true);
             if (stand == null) {
                 logPlacementRejection(attemptLog, pos, "no-stand-to-carve");
+                continue;
+            }
+            if (inTunnelAhead(bot, stand)) {
+                logPlacementRejection(attemptLog, pos, "tunnel-keep-clear-stand");
                 continue;
             }
             if (!hasSolidSupport(world, pos.down())) {
@@ -2619,9 +3100,17 @@ public final class CraftingHelper {
                 logPlacementRejection(attemptLog, pos, "bot-occupies");
                 continue;
             }
+            if (inTunnelAhead(bot, pos)) {
+                logPlacementRejection(attemptLog, pos, "tunnel-keep-clear");
+                continue;
+            }
             BlockPos stand = findAdjacentStandCandidate(world, pos, reference, false);
             if (stand == null) {
                 logPlacementRejection(attemptLog, pos, "no-adjacent-stand");
+                continue;
+            }
+            if (inTunnelAhead(bot, stand)) {
+                logPlacementRejection(attemptLog, pos, "tunnel-keep-clear-stand");
                 continue;
             }
             return new PreparedPlacement(pos.toImmutable(), stand.toImmutable(), carved, relocated,
@@ -2650,13 +3139,15 @@ public final class CraftingHelper {
         return new ArrayList<>(ordered);
     }
 
-    private static BlockPos findPlacementRelocationStand(ServerWorld world, BlockPos botPos, BlockPos origin) {
+    private static BlockPos findPlacementRelocationStand(ServerWorld world, ServerPlayerEntity bot, BlockPos origin) {
         if (world == null || origin == null) {
             return null;
         }
+        BlockPos botPos = bot == null ? null : bot.getBlockPos();
         for (int radius = 1; radius <= LOCAL_PLACEMENT_RELOCATION_RADIUS; radius++) {
             BlockPos safe = SafePositionService.findSafeNear(world, origin, radius);
-            if (safe != null && isStandCellReady(world, safe) && (botPos == null || !safe.equals(botPos))) {
+            if (safe != null && isStandCellReady(world, safe) && (botPos == null || !safe.equals(botPos))
+                    && !inTunnelAhead(bot, safe)) {
                 return safe.toImmutable();
             }
         }
@@ -2673,10 +3164,11 @@ public final class CraftingHelper {
      * every radius. Searching around the place cell handed back the place cell (open air on grass),
      * which is how the reposition walked the bot onto its own table cell.
      */
-    private static BlockPos findRepositionStandClearOf(ServerWorld world, BlockPos botPos, BlockPos origin, BlockPos avoidPlace) {
+    private static BlockPos findRepositionStandClearOf(ServerWorld world, ServerPlayerEntity bot, BlockPos origin, BlockPos avoidPlace) {
         if (world == null || origin == null) {
             return null;
         }
+        BlockPos botPos = bot == null ? null : bot.getBlockPos();
         for (int r = 0; r <= LOCAL_PLACEMENT_RELOCATION_RADIUS; r++) {
             for (int dx = -r; dx <= r; dx++) {
                 for (int dz = -r; dz <= r; dz++) {
@@ -2688,6 +3180,9 @@ public final class CraftingHelper {
                         continue;
                     }
                     if (botPos != null && safe.equals(botPos)) {
+                        continue;
+                    }
+                    if (inTunnelAhead(bot, safe)) {
                         continue;
                     }
                     if (avoidPlace != null && UtilityPlacementStandPolicy.standOverlapsPlace(
@@ -2827,6 +3322,16 @@ public final class CraftingHelper {
         }
         BlockState state = world.getBlockState(pos);
         return state.isAir() || state.isReplaceable() || state.isOf(Blocks.SNOW);
+    }
+
+    /** A cell in the tunnel the bot is digging ({@link TunnelKeepClearService}): never a place or stand cell. */
+    private static boolean inTunnelAhead(ServerPlayerEntity bot, BlockPos cell) {
+        if (bot == null || cell == null) {
+            return false;
+        }
+        BlockPos at = bot.getBlockPos();
+        return TunnelKeepClearService.blocks(bot.getUuid(), at.getX(), at.getY(), at.getZ(),
+                cell.getX(), cell.getY(), cell.getZ());
     }
 
     private static BlockPos findAdjacentStandCandidate(ServerWorld world,
@@ -2990,6 +3495,14 @@ public final class CraftingHelper {
                                    net.minecraft.item.Item output,
                                    net.minecraft.item.Item input,
                                    int per) {
+        // One combined chest ask for the ingots (and the bucket's table planks).
+        switch (askChestForKnownCraft(bot, source, output, amount, s -> s.isOf(input), output.equals(Items.BUCKET))) {
+            case STOP_SILENT, STOP_WITH_LINE -> {
+                return 0;
+            }
+            default -> {
+            }
+        }
         if (output.equals(Items.BUCKET)) {
             if (!ensureCraftingStation(bot, source)) {
                 sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
@@ -3010,8 +3523,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, input, crafts * per);
-        distributeOutput(bot, output, crafts);
+        if (commitCraft(bot, output, crafts,
+                () -> consumeItemOnServer(bot, input, crafts * per)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, output);
         return crafts;
     }
@@ -3036,8 +3551,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.LEATHER, crafts * leatherPer);
-        distributeOutput(bot, output, crafts);
+        if (commitCraft(bot, output, crafts,
+                () -> consumeItemOnServer(bot, Items.LEATHER, crafts * leatherPer)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, output);
         return crafts;
     }
@@ -3048,6 +3565,15 @@ public final class CraftingHelper {
                                         int amount,
                                         net.minecraft.item.Item output,
                                         int per) {
+        // One combined chest ask for the cobblestone-like blocks (and the furnace's table planks).
+        switch (askChestForKnownCraft(bot, source, output, amount, CraftingHelper::isStoneCraftingMaterial,
+                output.equals(Items.FURNACE))) {
+            case STOP_SILENT, STOP_WITH_LINE -> {
+                return 0;
+            }
+            default -> {
+            }
+        }
         if (output.equals(Items.FURNACE)) {
             if (!ensureCraftingStation(bot, source)) {
                 sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft that.");
@@ -3068,8 +3594,10 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeCobble(bot, crafts * per);
-        distributeOutput(bot, output, crafts);
+        if (commitCraft(bot, output, crafts,
+                () -> consumeCobbleOnServer(bot, crafts * per)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, output);
         return crafts;
     }
@@ -3101,9 +3629,11 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForOutput(bot, source, Items.FISHING_ROD, crafts, 0, 0, reserveItems)) {
             return 0;
         }
-        consumeItem(bot, Items.STICK, crafts * 3);
-        consumeItem(bot, Items.STRING, crafts * 2);
-        distributeOutput(bot, Items.FISHING_ROD, crafts);
+        if (commitCraft(bot, Items.FISHING_ROD, crafts,
+                () -> consumeItemOnServer(bot, Items.STICK, crafts * 3)
+                        && consumeItemOnServer(bot, Items.STRING, crafts * 2)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
         recordCraftHistory(commander, Items.FISHING_ROD);
         return crafts;
     }
@@ -3120,8 +3650,9 @@ public final class CraftingHelper {
      * Pulls bundled copies of {@code match} into direct inventory slots until the direct supply covers
      * {@code needed} (or the bundles run dry).
      *
-     * <p>Mutation path — <b>server thread only</b>, same as its callers ({@code consumeItem} /
-     * {@code consumePlanks} decrement live stacks, so they are already server-thread bound).
+     * <p>Mutation path — <b>server thread only</b>, same as its callers ({@code consumeItemOnServer}
+     * / {@code consumePlanksOnServer} decrement live stacks inside a {@link #commitCraft} hop).
+     * Only extracts from bundles into slots: no walking, no chest, no wait.
      */
     private static void reachForItem(ServerPlayerEntity bot,
                                      java.util.function.Predicate<ItemStack> match,
@@ -3142,8 +3673,14 @@ public final class CraftingHelper {
         }
     }
 
-    private static void consumeItem(ServerPlayerEntity bot, net.minecraft.item.Item item, int needed) {
-        // See consumePlanks: bundled stacks are read-only views, so reach for them before decrementing.
+    /**
+     * Server thread only, from inside a {@link #commitCraft} lambda. Takes {@code needed} of
+     * {@code item} from the pack, bundled copies first pulled into real slots ({@link #reachForItem}:
+     * bundled stacks are read-only views, so a decrement on one is a no-op).
+     *
+     * @return false when the pack held too few: the commit then stops before any output
+     */
+    private static boolean consumeItemOnServer(ServerPlayerEntity bot, net.minecraft.item.Item item, int needed) {
         reachForItem(bot, stack -> stack.isOf(item), needed);
         int remaining = needed;
         for (int i = 0; i < bot.getInventory().size() && remaining > 0; i++) {
@@ -3158,28 +3695,167 @@ public final class CraftingHelper {
                 bot.getInventory().setStack(i, ItemStack.EMPTY);
             }
         }
+        return reportConsumeShortfall(bot, item.getName().getString(), needed, remaining);
     }
 
-    private static void distributeOutput(ServerPlayerEntity bot, net.minecraft.item.Item output, int count) {
-        debugChest("Distribute output item=" + output.getName().getString() + " count=" + count
-                + " emptySlot=" + bot.getInventory().getEmptySlot());
-        // After the craft: on the server thread this only drops a cheap stack, and an output that
-        // still does not fit is dropped below rather than walking to a chest. No per-craft reserve
-        // here (the ingredients are spent), but keepsStackForCraft still keeps an idle batch's
-        // BATCH_RESERVE in both calls, the forced retry included (finding 57).
-        makeRoomForOutput(bot, bot.getCommandSource(), output, count, 0, 0, Map.of(), false, true, true);
-        ItemStack stack = new ItemStack(output, count);
-        boolean added = bot.getInventory().insertStack(stack);
-        debugChest("InsertStack result added=" + added + " remaining=" + stack.getCount());
-        if (!added && !stack.isEmpty()) {
-            debugChest("InsertStack failed; retrying after offload.");
-            makeRoomForOutput(bot, bot.getCommandSource(), output, stack.getCount(), 0, 0, Map.of(), true, true, true);
-            boolean retryAdded = bot.getInventory().insertStack(stack);
-            debugChest("InsertStack retry added=" + retryAdded + " remaining=" + stack.getCount());
-            if (!retryAdded && !stack.isEmpty()) {
-                bot.dropItem(stack, false, false);
-            }
+    /**
+     * Server thread only, from inside a {@link #commitCraft} lambda. Takes {@code count} from the
+     * one slot a caller's scan chose, only while it still holds at least that many of {@code item}
+     * (the scan ran on the caller's thread, so the slot is checked again here).
+     */
+    private static boolean consumeSlotOnServer(ServerPlayerEntity bot, int slot, Item item, int count) {
+        if (slot < 0 || slot >= bot.getInventory().size() || count <= 0) {
+            return false;
         }
+        ItemStack stack = bot.getInventory().getStack(slot);
+        if (stack.isEmpty() || !stack.isOf(item) || stack.getCount() < count) {
+            LOGGER.warn("craft commit: slot {} of {} no longer holds {}x {}; this conversion is skipped",
+                    slot, bot.getName().getString(), count, item.getName().getString());
+            return false;
+        }
+        stack.decrement(count);
+        if (stack.isEmpty()) {
+            bot.getInventory().setStack(slot, ItemStack.EMPTY);
+        }
+        return true;
+    }
+
+    /** One WARN for a consume that came up short; its {@code remaining == 0} answer is the consume's. */
+    private static boolean reportConsumeShortfall(ServerPlayerEntity bot, String what, int needed, int remaining) {
+        if (remaining > 0) {
+            LOGGER.warn("craft commit: {} held only {} of the {} {} the craft counted on; no output is made",
+                    bot.getName().getString(), needed - remaining, needed, what);
+            return false;
+        }
+        return true;
+    }
+
+    /** The bot's server, for {@link SupplyServerHop}: abandon-safe, so a commit the caller gave up
+     *  on never runs late, and one already running is waited for rather than reported as failed. */
+    private static net.minecraft.server.MinecraftServer serverOf(ServerPlayerEntity bot) {
+        return bot != null && bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+    }
+
+    /**
+     * The one inventory step of a craft: {@code consumes} (the ingredient takes, which may reach
+     * into bundles but never walk) and the output's insert run together in ONE server-thread hop,
+     * so a worker's craft can never leave the output without its ingredients taken, or the
+     * ingredients taken without the output (the deferral "off-thread inventory mutation in
+     * CraftingHelper"). Separate hops would let a stall abandon the first and still run the
+     * second: output with no ingredients, a duplication bug.
+     *
+     * <p>Room for an output that does not fit is made afterwards, on the caller's thread, in the
+     * old hand-out's order: a normal make-room, an insert, then a forced make-room and an insert that
+     * drops the rest at the bot's feet. Off the server thread {@link #makeRoomForOutput} may walk to a
+     * chest; because the ingredients are already spent by then, it can never offload them (the
+     * review finding that a make-room before the consume, with no reserves, deposited the logs a
+     * plank craft was about to use). keepsStackForCraft still keeps an idle batch's BATCH_RESERVE.
+     *
+     * <p>The hop snapshots the pack first: a consume that reports too few ingredients, or one that
+     * throws, restores it, so an aborted craft takes nothing (not even an earlier ingredient of the
+     * same recipe) and makes nothing ({@link CraftCommitPolicy.Outcome#ABORTED}). A hop that did not
+     * complete ({@link SupplyServerHop.Status}) reports {@link CraftCommitPolicy.Outcome#TIMED_OUT}
+     * and the craft reports nothing made: true unless the hop was still running (UNFINISHED), which
+     * the log names.
+     *
+     * @param consumes server thread only: the takes, true when every one had enough
+     */
+    private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot, Item output, int count, BooleanSupplier consumes) {
+        if (bot == null || output == null || consumes == null || count <= 0) {
+            return CraftCommitPolicy.Outcome.ABORTED;
+        }
+        debugChest("Commit craft output=" + output.getName().getString() + " count=" + count
+                + " emptySlot=" + bot.getInventory().getEmptySlot());
+        net.minecraft.server.MinecraftServer server = serverOf(bot);
+        SupplyServerHop.Hop<CraftCommitPolicy.HopResult> first = SupplyServerHop.hop(server, () -> {
+            net.minecraft.entity.player.PlayerInventory inventory = bot.getInventory();
+            List<ItemStack> before = snapshotInventory(inventory);
+            try {
+                if (!consumes.getAsBoolean()) {
+                    restoreInventory(inventory, before);
+                    return CraftCommitPolicy.HopResult.ABORTED;
+                }
+            } catch (RuntimeException e) {
+                restoreInventory(inventory, before);
+                throw e;
+            }
+            ItemStack stack = new ItemStack(output, count);
+            boolean added = inventory.insertStack(stack);
+            debugChest("InsertStack result added=" + added + " remaining=" + stack.getCount());
+            return CraftCommitPolicy.HopResult.done(stack.getCount());
+        }, CraftCommitPolicy.HOP_TIMEOUT_MS);
+        CraftCommitPolicy.HopResult hop = first.status() == SupplyServerHop.Status.DONE ? first.value() : null;
+        CraftCommitPolicy.Outcome outcome = CraftCommitPolicy.outcome(hop);
+        if (outcome == CraftCommitPolicy.Outcome.TIMED_OUT) {
+            LOGGER.warn("craft commit: {}'s {}x {} did not complete (hop {}): {}",
+                    bot.getName().getString(), count, output.getName().getString(), first.status(),
+                    first.status() == SupplyServerHop.Status.UNFINISHED
+                            ? "it is still running and may yet finish; reported as not crafted"
+                            : "nothing was taken or made");
+            return outcome;
+        }
+        if (!CraftCommitPolicy.needsSecondHop(hop)) {
+            return outcome;
+        }
+        int leftover = placeLeftoverOutput(bot, server, output, hop.leftover(), false);
+        if (leftover > 0) {
+            placeLeftoverOutput(bot, server, output, leftover, true);
+        }
+        return outcome;
+    }
+
+    /**
+     * Makes room on the caller's thread, then inserts {@code leftover} of {@code output} in one hop;
+     * {@code forced} also drops what still does not fit. Returns what is left to place (0 when
+     * forced). A normal pass whose hop never ran hands the whole leftover to the forced pass; any
+     * other hop that did not complete loses that remainder (the ingredients are spent): ERROR.
+     */
+    private static int placeLeftoverOutput(ServerPlayerEntity bot, net.minecraft.server.MinecraftServer server,
+                                           Item output, int leftover, boolean forced) {
+        debugChest("InsertStack left " + leftover + "; making room (forced=" + forced + ")");
+        makeRoomForOutput(bot, bot.getCommandSource(), output, leftover, 0, 0, Map.of(), forced, true, true);
+        SupplyServerHop.Hop<Integer> hop = SupplyServerHop.hop(server, () -> {
+            ItemStack stack = new ItemStack(output, leftover);
+            boolean added = bot.getInventory().insertStack(stack);
+            debugChest("InsertStack retry added=" + added + " remaining=" + stack.getCount());
+            if (forced && !stack.isEmpty()) {
+                bot.dropItem(stack, false, false);
+                return 0;
+            }
+            return stack.getCount();
+        }, CraftCommitPolicy.HOP_TIMEOUT_MS);
+        if (hop.status() != SupplyServerHop.Status.DONE) {
+            boolean neverRan = hop.status() == SupplyServerHop.Status.TIMED_OUT
+                    || hop.status() == SupplyServerHop.Status.NOT_RUNNING
+                    || hop.status() == SupplyServerHop.Status.INTERRUPTED;
+            if (neverRan && !forced) {
+                // The insert provably did not run: hand the whole leftover to the forced pass.
+                LOGGER.warn("craft commit: placing {}'s leftover {}x {} did not run (hop {}); trying the forced pass",
+                        bot.getName().getString(), leftover, output.getName().getString(), hop.status());
+                return leftover;
+            }
+            LOGGER.error("craft commit: placing {}'s leftover {}x {} did not complete (hop {}); that output is lost",
+                    bot.getName().getString(), leftover, output.getName().getString(), hop.status());
+            return 0;
+        }
+        return hop.value() == null ? 0 : hop.value();
+    }
+
+    /** Server thread only: a deep copy of every slot, for {@link #restoreInventory}. */
+    private static List<ItemStack> snapshotInventory(net.minecraft.entity.player.PlayerInventory inventory) {
+        List<ItemStack> copy = new ArrayList<>(inventory.size());
+        for (int i = 0; i < inventory.size(); i++) {
+            copy.add(inventory.getStack(i).copy());
+        }
+        return copy;
+    }
+
+    /** Server thread only: puts every slot back as {@link #snapshotInventory} saw it. */
+    private static void restoreInventory(net.minecraft.entity.player.PlayerInventory inventory, List<ItemStack> snapshot) {
+        for (int i = 0; i < snapshot.size() && i < inventory.size(); i++) {
+            inventory.setStack(i, snapshot.get(i));
+        }
+        inventory.markDirty();
     }
 
     /**
@@ -3217,7 +3893,7 @@ public final class CraftingHelper {
      * places one) as before and always lets the craft go on. On the server thread
      * ({@link CraftingStationPolicy#mayOffloadToChest}) it never walks, places or fills a chest: it
      * drops one cheap stack that is not one of the craft's reserves, and with none it returns false.
-     * {@code afterCraft}: called from {@link #distributeOutput} once the ingredients are spent, so no
+     * {@code afterCraft}: called from {@link #placeLeftoverOutput} once the ingredients are spent, so no
      * refusal line (the caller drops the output that does not fit). {@code quiet}: a sub-craft whose
      * caller answers for it, so a refusal logs but sends no chat line. Any refusal before a craft sets
      * {@link #LAST_CRAFT_REFUSED_FULL_PACK} so the caller does not report missing ingredients.
@@ -3425,9 +4101,20 @@ public final class CraftingHelper {
         }
         List<BlockPos> chests = findNearbyChests(world, bot.getBlockPos(), CHEST_OFFLOAD_SEARCH_RADIUS, CHEST_OFFLOAD_SEARCH_YSPAN);
         if (chests.isEmpty()) {
-            BlockPos placed = ChestStoreService.placeChestNearBot(source, bot, false);
-            if (placed != null) {
-                chests = List.of(placed.toImmutable());
+            // Placing a chest may craft one, and that craft makes room by offloading again. Only the
+            // outermost offload may place: a nested one uses existing chests or gives up, so a full
+            // pack with no chest and no table ends in a refused craft instead of a StackOverflowError.
+            if (!OffloadChestGuard.tryEnter()) {
+                debugChest("Nested offload while a chest is being placed; not placing another.");
+                return false;
+            }
+            try {
+                BlockPos placed = ChestStoreService.placeChestNearBot(source, bot, false);
+                if (placed != null) {
+                    chests = List.of(placed.toImmutable());
+                }
+            } finally {
+                OffloadChestGuard.exit();
             }
         }
         if (chests.isEmpty()) {
@@ -3623,7 +4310,11 @@ public final class CraftingHelper {
         return total;
     }
 
-    private static void consumeCobble(ServerPlayerEntity bot, int needed) {
+    /**
+     * Server thread only, from inside a {@link #commitCraft} lambda: {@link #consumeItemOnServer}
+     * for the stone pool ({@link #countCobble}). False means too few: no output is made.
+     */
+    private static boolean consumeCobbleOnServer(ServerPlayerEntity bot, int needed) {
         int remaining = needed;
         for (int i = 0; i < bot.getInventory().size() && remaining > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
@@ -3638,6 +4329,7 @@ public final class CraftingHelper {
                 bot.getInventory().setStack(i, ItemStack.EMPTY);
             }
         }
+        return reportConsumeShortfall(bot, "cobblestone", needed, remaining);
     }
 
     private static int findItemInInventory(ServerPlayerEntity bot, net.minecraft.item.Item item) {
@@ -4102,19 +4794,30 @@ public final class CraftingHelper {
         return res.success() || bot.getBlockPos().getSquaredDistance(target) <= reachSq;
     }
 
+    private static final int PLANKS_PER_LOG = 4;
+
     private static void ensurePlanksFromLogs(ServerPlayerEntity bot, int neededExtra) {
         int planks = countPlanks(bot);
         if (planks >= neededExtra) {
             return;
         }
         int missing = neededExtra - planks;
-        int planksPerLog = 4;
-        int logsNeeded = (int) Math.ceil(missing / (double) planksPerLog);
+        int logsNeeded = (int) Math.ceil(missing / (double) PLANKS_PER_LOG);
 
         // Logs stashed in a bundle are invisible to the slot loop below and cannot be decremented in
-        // place — pull them into real slots first.
-        reachForItem(bot, s -> !s.isEmpty() && s.isIn(net.minecraft.registry.tag.ItemTags.LOGS), logsNeeded);
+        // place — pull them into real slots first (a bundle extraction is an inventory write: server
+        // thread; it moves nothing but bundle contents, so it is its own small hop).
+        int reach = logsNeeded;
+        if (!SupplyServerHop.call(serverOf(bot), () -> {
+            reachForItem(bot, s -> !s.isEmpty() && s.isIn(net.minecraft.registry.tag.ItemTags.LOGS), reach);
+            return true;
+        }, CraftCommitPolicy.HOP_TIMEOUT_MS, false)) {
+            LOGGER.warn("ensurePlanksFromLogs: the server did not reach into {}'s bundles in time; no logs converted",
+                    bot.getName().getString());
+            return;
+        }
 
+        // Each conversion (those logs out, their planks in) is one commit; see craftPlanks.
         for (int i = 0; i < bot.getInventory().size() && logsNeeded > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty() || !stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) {
@@ -4122,14 +4825,30 @@ public final class CraftingHelper {
             }
             int convert = Math.min(stack.getCount(), logsNeeded);
             Item plankItem = mapLogToPlank(stack.getItem());
-            stack.decrement(convert);
-            if (stack.isEmpty()) {
-                bot.getInventory().setStack(i, ItemStack.EMPTY);
+            CraftCommitPolicy.Outcome outcome = commitLogsToPlanks(bot, i, stack.getItem(), stack.getCount(), convert, plankItem);
+            if (!CraftCommitPolicy.continueScan(outcome)) {
+                break;
             }
-            int produced = convert * planksPerLog;
-            distributeOutput(bot, plankItem, produced);
+            if (outcome != CraftCommitPolicy.Outcome.CRAFTED) {
+                continue;
+            }
             logsNeeded -= convert;
         }
+    }
+
+    /**
+     * One log-to-plank conversion as one commit: {@code use} of {@code log} out of slot {@code slot}
+     * (checked again on the server thread) and the planks they make in; room for planks that do not
+     * fit is made after the logs are taken, as when the planks were handed out after the decrement.
+     */
+    private static CraftCommitPolicy.Outcome commitLogsToPlanks(ServerPlayerEntity bot,
+                                                                int slot,
+                                                                Item log,
+                                                                int held,
+                                                                int use,
+                                                                Item plankItem) {
+        int produced = use * PLANKS_PER_LOG;
+        return commitCraft(bot, plankItem, produced, () -> consumeSlotOnServer(bot, slot, log, use));
     }
 
     private static List<BlockPos> findStandableOptions(ServerWorld world, BlockPos center, int radius) {

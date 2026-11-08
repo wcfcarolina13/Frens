@@ -143,11 +143,15 @@ class CraftingStationPolicyTest {
                 .contains("ensureInventorySpaceForSubCraft("), "the pre-craft entry shares the sub-craft entry");
         assertTrue(bodyOf(source, "private static boolean ensureInventorySpaceForSubCraft(")
                 .contains("makeRoomForOutput("), "the pre-craft entry goes through the gated method");
-        String distribute = bodyOf(source, "private static void distributeOutput(");
-        assertEquals(2, count(distribute, "makeRoomForOutput("), "both output make-room calls are gated");
-        assertEquals(2, count(distribute, "true, true);") + count(distribute, "false, true);"),
-                "both are marked afterCraft");
-        assertTrue(distribute.contains("bot.dropItem(stack, false, false)"), "an output that does not fit is dropped");
+        // Output that did not fit: room is made after the craft (normal, then forced), through the
+        // gated method, marked afterCraft; what still does not fit is dropped.
+        String leftover = bodyOf(source, "private static int placeLeftoverOutput(");
+        assertEquals(1, count(leftover, "makeRoomForOutput("), "the output make-room goes through the gated method");
+        assertTrue(leftover.contains("forced, true, true);"), "marked afterCraft");
+        assertTrue(leftover.contains("bot.dropItem(stack, false, false)"), "an output that does not fit is dropped");
+        String commit = bodyOf(source, "private static CraftCommitPolicy.Outcome commitCraft(ServerPlayerEntity bot, Item output, int count, BooleanSupplier consumes) {");
+        assertTrue(commit.contains("placeLeftoverOutput(bot, server, output, hop.leftover(), false)")
+                && commit.contains("placeLeftoverOutput(bot, server, output, leftover, true)"), "normal, then forced");
     }
 
     @Test
@@ -537,8 +541,8 @@ class CraftingStationPolicyTest {
         assertFalse(body.contains("say("), "the sub-step table craft has no lines of its own");
         // Review I1: a hard-coded quiet lost the planks line for a non-strict craft, which then
         // only said it needed a table. The planks line comes from craftWithPlanks when not quiet.
-        assertTrue(body.contains("Items.CRAFTING_TABLE, amountRequested, quiet);"),
-                "the table craft passes the station's quiet through to craftWithPlanks");
+        assertTrue(body.contains("Items.CRAFTING_TABLE, amountRequested, quiet, false);"),
+                "the table craft passes the station's quiet through to craftWithPlanks (and never asks the chest itself)");
         String station = bodyOf(craftingHelperSource(), STATION_SIGNATURE);
         assertTrue(station.contains("craftCraftingTable(source, bot, source.getPlayer(), 1, quiet)"),
                 "the station hands its own quiet to the table sub-step");

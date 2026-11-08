@@ -202,7 +202,7 @@ public final class BotWakeUpDialogueService {
             // observed in the 1.1.132 latest.log audit (3 duplicate messages per bot).
             UUID botId = bot.getUuid();
             if (BotZzzSleepService.isInSleepCycle(botId)
-                    || BotZzzSleepService.isLoggedOff(botName)) {
+                    || BotZzzSleepService.isLoggedOffIn(server, botName)) {
                 LOGGER.info("Co-sleep: {} skipped — already in zzz-cycle", botName);
                 continue;
             }
@@ -272,7 +272,7 @@ public final class BotWakeUpDialogueService {
                     ServerPlayerEntity commander = CompanionCommunicationPolicy.resolveController(server, bot);
                     if (commander == null || !commander.getUuid().equals(retryPlayer.getUuid())) continue;
                     if (BotZzzSleepService.isInSleepCycle(botId)
-                            || BotZzzSleepService.isLoggedOff(bot.getName().getString())) continue;
+                            || BotZzzSleepService.isLoggedOffIn(server, bot.getName().getString())) continue;
                     if (TaskService.hasActiveTask(botId)) {
                         LOGGER.info("Co-sleep retry: {} still has active task, giving up", bot.getName().getString());
                         continue;

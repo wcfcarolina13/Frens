@@ -36,9 +36,9 @@ class RespawnHandlingWiringTest {
 
     @Test
     void unregisterAndSessionResetInvalidateQueuedWorkWithoutDroppingOtherCleanup() throws IOException {
-        String unregister = method("unregisterBot");
+        String unregister = block(source(), "public static void unregisterBot(ServerPlayerEntity bot, boolean saveFirst)");
         int forget = unregister.indexOf("RESPAWN_HANDLING.forget(uuid)");
-        assertTrue(forget >= 0 && forget < unregister.indexOf("BotPersistenceService.removeBot(bot)"));
+        assertTrue(forget >= 0 && forget < unregister.indexOf("BotPersistenceService.removeBot(bot, saveFirst)"));
         assertTrue(unregister.contains("ToolSelector.forgetBot(uuid)"));
         String reset = method("resetAll");
         assertTrue(reset.contains("RESPAWN_HANDLING.reset()"));

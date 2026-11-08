@@ -110,4 +110,22 @@ class BotSleepLogoffPolicyTest {
         assertTrue(BotSleepLogoffPolicy.isDaytime(24_000 + 100));
         assertFalse(BotSleepLogoffPolicy.isDaytime(-1));
     }
+
+    @Test
+    void loggedOffNameMatchIgnoresCase() {
+        java.util.List<String> names = java.util.List.of("Jake", "Bob");
+        assertTrue(BotSleepLogoffPolicy.containsNameIgnoreCase(names, "jake"));
+        assertTrue(BotSleepLogoffPolicy.containsNameIgnoreCase(names, "BOB"));
+        assertFalse(BotSleepLogoffPolicy.containsNameIgnoreCase(names, "Silas"));
+        assertFalse(BotSleepLogoffPolicy.containsNameIgnoreCase(names, null));
+        assertFalse(BotSleepLogoffPolicy.containsNameIgnoreCase(null, "Jake"));
+    }
+
+    @Test
+    void logoffEntryBelongsOnlyToItsOwnSave() {
+        assertTrue(BotSleepLogoffPolicy.belongsToWorld("abc123", "abc123"));
+        assertFalse(BotSleepLogoffPolicy.belongsToWorld("abc123", "def456"));
+        // Entries written before the key existed keep the old any-world behaviour.
+        assertTrue(BotSleepLogoffPolicy.belongsToWorld(null, "def456"));
+    }
 }
