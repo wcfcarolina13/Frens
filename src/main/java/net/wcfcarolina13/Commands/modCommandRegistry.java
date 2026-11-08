@@ -195,6 +195,15 @@ public class modCommandRegistry {
         return name == null ? "" : name.toLowerCase(java.util.Locale.ROOT);
     }
 
+    /** Usage text for a bad pathfinder mode; the removed classic finder gets a line of its own. */
+    private static String pathfinderUsage(String mode, String args) {
+        String usage = "Usage: /bot config pathfinder " + args;
+        if ("classic".equals(mode) || "bidir".equals(mode)) {
+            return "The classic pathfinder was removed. Unified is the default and baritone the fallback. " + usage;
+        }
+        return usage;
+    }
+
     private static String describePathFinder(net.wcfcarolina13.PathFinding.PathFinderChoice choice) {
         if (choice == null) {
             return "unified (default)";
@@ -202,7 +211,6 @@ public class modCommandRegistry {
         return switch (choice) {
             case UNIFIED -> "unified (default)";
             case BARITONE -> "baritone (opt-in fallback)";
-            case BIDIR -> "classic (old)";
         };
     }
 
@@ -690,7 +698,7 @@ public class modCommandRegistry {
                                                                     net.wcfcarolina13.PathFinding.PathFinderChoice.parse(mode);
                                                             if (choice == null && !"default".equals(mode)) {
                                                                 context.getSource().sendFeedback(
-                                                                        () -> Text.literal("Usage: /bot config pathfinder <unified|baritone|classic|default> <bot>"), false);
+                                                                        () -> Text.literal(pathfinderUsage(mode, "<unified|baritone|default> <bot>")), false);
                                                                 return 0;
                                                             }
                                                             net.wcfcarolina13.PathFinding.PathFinderOverrides.set(target.getUuid(), choice);
@@ -704,14 +712,14 @@ public class modCommandRegistry {
                                                             return 1;
                                                         }))
                                                 .executes(context -> {
-                                                    // 1.1.261: all three are saved as an explicit pick (unified is the default,
-                                                    // baritone the opt-in fallback, classic still selectable).
+                                                    // 1.1.261: saved as an explicit pick (unified is the default, baritone the
+                                                    // opt-in fallback; classic was removed in Slice D).
                                                     String mode = StringArgumentType.getString(context, "mode").toLowerCase();
                                                     net.wcfcarolina13.PathFinding.PathFinderChoice choice =
                                                             net.wcfcarolina13.PathFinding.PathFinderChoice.parse(mode);
                                                     if (choice == null) {
                                                         context.getSource().sendFeedback(
-                                                                () -> Text.literal("Usage: /bot config pathfinder <unified|baritone|classic> [bot]"), false);
+                                                                () -> Text.literal(pathfinderUsage(mode, "<unified|baritone> [bot]")), false);
                                                         return 0;
                                                     }
                                                     net.wcfcarolina13.PathFinding.PathFinder.ACTIVE = choice;

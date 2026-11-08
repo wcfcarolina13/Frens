@@ -25,7 +25,7 @@ public class SharedConfig {
     public Boolean botsLogOffWhenCantSleep;
     /** Legacy flag, still sent for older peers. Applying ignores it: the finder follows {@link #pathfinder}. */
     public Boolean baritonePathfinderEnabled;
-    /** Saved finder choice since 1.1.261: "unified", "baritone", "classic", or null for the default. */
+    /** Saved finder choice since 1.1.261: "unified", "baritone", or null for the default ("classic" from older servers reads as the default). */
     public String pathfinder;
     /** Null on older peers, whose non-null token is treated as an explicit choice. */
     public Boolean pathfinderExplicitlySet;
