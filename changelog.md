@@ -27,6 +27,12 @@ A 1.1.296+ client on an older Frens server showed "New bots: Ask" in the AI setu
 - `merge`: GOOD_AT and BAD_AT of the same task are opposites, like LIKES/DISLIKES. Writing one removes the other, also when it replaces a held BAD_AT/GOOD_AT of another task. A weaker incoming fact that is dropped removes nothing.
 - **Costs (rulings I made inside Bradley's ruling):** the allow-list misses execution failures phrased another way (no BAD_AT, which is the safe miss) and has to be extended when a skill gets a new message. GOOD_AT now needs completions ≥ execution failures for that task, so a bot with 3 completions and 4 stuck failures of mining no longer gets GOOD_AT mining. The opposition also applies to the model's side-channel facts: an INFERRED BAD_AT X (confidence ≤ 0.6) removes a SEEN GOOD_AT X. Thresholds of 3 per day mirror GOOD_AT and are not field-tuned.
 - **Limits:** unit tests only (9 new, Tests 3857 → 3866). The ticket-to-event path through `SkillManager` and `TaskService.complete` has no unit test (server types). Needs a sandbox check with souls and relations on: make one bot fail the same skill 3 times in one day with a stuck-type message (for example woodcut on an unreachable tree), sleep through the night, and `mind.json` should show `BAD_AT woodcut` with source SEEN and no `GOOD_AT woodcut`. Three "No valid trees nearby" failures should give nothing.
+## `/bot place chest <n>` puts the second chest beside the first (unreleased, 2026-11-05)
+
+1.1.295 review minor: `attemptAdjacentChest` built its target with the place cell `candidate.offset(opposite)`, which is the anchor itself (the chest just placed). The free neighbour it checked with `isAir` was never the cell it placed into. Read from the code: from the second chest on, every try aimed at an occupied cell, so the command placed one chest and then answered "I can't reach that spot."
+
+- The target now clicks the anchor on its side facing the step and places into the neighbour. The cell math is `AdjacentChestPolicy` (2 tests, Tests 3857 → 3859).
+- **Limits:** not run in game. Whether two adjacent chests merge into a double chest is left to vanilla's placement (bot yaw and the clicked face), unchanged. Needs a sandbox check: `/bot place chest 2` and `/bot place chest 3` while looking at the ground place 2 and 3 chests side by side with no "I can't reach that spot."
 
 ## Repository clean-up: public and private split (2026-11-04)
 
