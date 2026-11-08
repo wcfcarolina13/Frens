@@ -214,6 +214,39 @@ class SoulEventObserverTest {
     }
 
     @Test
+    void combatHurtListsTheOtherSoulWitnessesAfterTheOwner() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+        UUID peer = UUID.randomUUID();
+        UUID soulless = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+        sink.reject(soulless);
+
+        observer.noteOwnerDamage(bot, owner, true, "minecraft:overworld", "plains", 4.0F, "zombie", 10L,
+                List.of(bot, peer, soulless, peer));
+        assertEquals(List.of(owner, peer), sink.events().get(0).participants());
+    }
+
+    @Test
+    void environmentalHurtListsOnlyTheOwner() {
+        CapturingSink sink = new CapturingSink();
+        SoulEventObserver observer = new SoulEventObserver(sink, 100L);
+        UUID bot = UUID.randomUUID();
+        UUID peer = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+
+        for (String source : List.of("fall", "lava", "drown", "")) {
+            observer.noteOwnerDamage(bot, owner, true, "minecraft:overworld", "plains", 4.0F, source, 10L,
+                    List.of(bot, peer));
+        }
+        for (SoulTypes.SoulEvent e : sink.events()) {
+            assertEquals(List.of(owner), e.participants(), e.facts().toString());
+        }
+        assertEquals(4, sink.events().size());
+    }
+
+    @Test
     void disabledOrUnboundSinkIsANoOp() {
         CapturingSink sink = new CapturingSink();
         sink.setAccepts(false);
@@ -391,14 +424,19 @@ class SoulEventObserverTest {
         private final List<SoulTypes.SoulEvent> events = new ArrayList<>();
         private final List<Integer> newDays = new ArrayList<>();
         private boolean accepts = true;
+        private final java.util.Set<UUID> rejected = new java.util.HashSet<>();
 
         void setAccepts(boolean accepts) {
             this.accepts = accepts;
         }
 
+        void reject(UUID botId) {
+            rejected.add(botId);
+        }
+
         @Override
         public boolean accepts(UUID botId) {
-            return accepts;
+            return accepts && !rejected.contains(botId);
         }
 
         @Override
