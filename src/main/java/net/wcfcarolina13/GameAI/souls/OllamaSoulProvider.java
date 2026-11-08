@@ -90,8 +90,10 @@ public final class OllamaSoulProvider implements SoulModelProvider {
                     failureResult(SoulTypes.FailureCode.INTERNAL, 0L)), () -> { });
         }
 
+        // Not baseUri.resolve("/api/chat"): an absolute path resolve drops a path prefix such
+        // as a reverse proxy at /ollama. The policy keeps it and strips trailing slashes.
         HttpRequest httpRequest = HttpRequest.newBuilder()
-                .uri(baseUri.resolve("/api/chat"))
+                .uri(OllamaEndpointPolicy.endpoint(baseUri, "/api/chat"))
                 .timeout(request.timeout())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -112,7 +114,7 @@ public final class OllamaSoulProvider implements SoulModelProvider {
     @Override
     public CompletableFuture<Boolean> health() {
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(baseUri.resolve("/api/tags"))
+                .uri(OllamaEndpointPolicy.endpoint(baseUri, "/api/tags"))
                 .timeout(HEALTH_TIMEOUT)
                 .GET()
                 .build();

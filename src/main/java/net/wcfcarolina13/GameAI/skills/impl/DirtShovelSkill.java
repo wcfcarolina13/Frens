@@ -172,7 +172,8 @@ public final class DirtShovelSkill implements Skill {
                 // detect() only inspects the block itself; lava touching it would pour out once it
                 // breaks. Leave that block as a skin over the lava and mine the others.
                 BlockPos lavaNextToTarget = lavaTouching(player, detectedPos);
-                if (lavaNextToTarget != null) {
+                boolean generatorCell = lavaNextToTarget != null && isGeneratorCell(player, detectedPos);
+                if (lavaNextToTarget != null && !generatorCell) {
                     LOGGER.info("Leaving {} at {}: lava behind it at {}", label, detectedPos, lavaNextToTarget);
                     if (excluded != null) {
                         excluded.add(detectedPos);
@@ -354,6 +355,9 @@ public final class DirtShovelSkill implements Skill {
                     SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.y", minedPos.getY());
                     SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.z", minedPos.getZ());
                     SharedStateUtils.setValue(context.sharedState(), "lastShovelStatus", "success");
+                }
+                if (generatorCell) {
+                    waitForGeneratorCell(player, detectedPos);
                 }
                 return SkillExecutionResult.success(result);
             }
@@ -1069,6 +1073,30 @@ public final class DirtShovelSkill implements Skill {
             }
         }
         return null;
+    }
+
+    /** Waits, bounded, for a generator's next block, so the job does not read an empty cell as done. */
+    private void waitForGeneratorCell(ServerPlayerEntity player, BlockPos pos) {
+        long deadline = System.currentTimeMillis() + net.wcfcarolina13.GameAI.skills.LavaGeneratorPolicy.REGROW_WAIT_MS;
+        while (System.currentTimeMillis() < deadline && !SkillManager.shouldAbortSkill(player)
+                && !player.getEntityWorld().getBlockState(pos).isOf(Blocks.COBBLESTONE)) {
+            try {
+                Thread.sleep(100L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    /** A cobblestone generator's cell: its lava belongs there, see {@link net.wcfcarolina13.GameAI.skills.LavaGeneratorPolicy}. */
+    private boolean isGeneratorCell(ServerPlayerEntity player, BlockPos pos) {
+        boolean touchesWater = false;
+        for (Direction dir : Direction.values()) {
+            touchesWater |= player.getEntityWorld().getFluidState(pos.offset(dir)).isIn(net.minecraft.registry.tag.FluidTags.WATER);
+        }
+        return net.wcfcarolina13.GameAI.skills.LavaGeneratorPolicy.isGeneratorCell(
+                player.getEntityWorld().getBlockState(pos).isOf(Blocks.COBBLESTONE), true, touchesWater);
     }
 
     /** Mines {@code pos} with the same 10 s budget as the main loop; null on timeout or error. */
