@@ -569,6 +569,13 @@ public final class HealingService {
      *         cancelled (finding 42)
      */
     private static boolean consumeFood(ServerPlayerEntity bot, int slot) {
+        // One server-thread hop for swap, select and use (inline when already there). Callers
+        // include skill workers (auto-eat); split across threads, a select that timed out left the
+        // previous item in hand and useSelectedItem then used it (bucket, pearl, bow).
+        return BotActions.callOnServerThread(bot, () -> consumeFoodOnServer(bot, slot), 1500L, false);
+    }
+
+    private static boolean consumeFoodOnServer(ServerPlayerEntity bot, int slot) {
         if (bot.isUsingItem()) {
             return false;
         }

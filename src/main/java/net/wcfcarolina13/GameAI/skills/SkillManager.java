@@ -112,6 +112,9 @@ public final class SkillManager {
      * @return the state to hand to {@link #resumeFollowMode}; never null
      */
     public static FollowResumeState suspendFollowMode(ServerPlayerEntity botPlayer) {
+        if (botPlayer != null) {
+            net.wcfcarolina13.GameAI.services.FollowResumeVeto.clearOnSuspend(botPlayer.getUuid());
+        }
         if (botPlayer == null || BotEventHandler.getCurrentMode(botPlayer) != BotEventHandler.Mode.FOLLOW) {
             return new FollowResumeState(null, null, 0.0D, true);
         }
@@ -139,6 +142,12 @@ public final class SkillManager {
             return;
         }
         if (resume.fixedGoal() == null && resume.followUuid() == null) {
+            return;
+        }
+        // "/bot follow stop" or "/bot stay" during the task: the player's word outlives the task.
+        if (net.wcfcarolina13.GameAI.services.FollowResumeVeto.consume(botPlayer.getUuid())) {
+            LOGGER.info("[FollowAssert] task-resume skipped bot={} reason=player-stopped-follow-during-task",
+                    botPlayer.getName().getString());
             return;
         }
         // Callers complete their ticket first. A task that started in the gap owns the bot now:
@@ -303,6 +312,10 @@ public final class SkillManager {
                 botPlayer.setPitch(0);
             }
             boolean success = result != null && result.success() && !abortRequested;
+            if (!success && !abortRequested && result != null) {
+                // Read by the soul observer to tell "got stuck" from "no trees here" (BAD_AT).
+                ticket.noteFailureMessage(result.message());
+            }
             // Complete before resuming follow: setFollowMode refuses while this ticket is still
             // active, which used to chat "Busy with another task right now." and drop the follow.
             TaskService.complete(ticket, success);
