@@ -11,6 +11,7 @@ Same gap as the `/bot craft` fix: the Quick Store / Quick Fetch worker (`ChestRe
 - **Cost:** a following bot stops following for the trip and picks it up after; an aborted trip leaves follow off.
 - **Not changed:** `SurfaceRecoveryService` (runs from flee; a different case).
 - Tests 3857 → 3858 (`QuickStoreFollowWiringTest`, source-reading). **Sandbox check:** with the bot following, Quick Store into a chest 10 blocks away: it walks there without snapping back, stores, follows again; `/bot stop` mid-walk stops it.
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
