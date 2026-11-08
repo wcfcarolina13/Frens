@@ -108,6 +108,72 @@ public final class PlayerBuiltStructureScanner {
         return false;
     }
 
+    /**
+     * A wooden door near the bot whose far side opens to the sky: its lower half, its facing axis,
+     * and which way along that axis is the far side from the bot (+1 or -1).
+     */
+    public record SkyDoor(BlockPos lowerHalf, boolean facesAlongX, int farSign) {
+    }
+
+    /**
+     * The nearest wooden door within {@link ShelterDoorExitPolicy#DOOR_RADIUS} of {@code feet}
+     * (feet Y -1..+1) whose lower half is there and whose far side from the bot, 1 or 2 cells out
+     * along the door's facing axis, is open to the sky. A door between two rooms has roof on its
+     * far side, so it never counts. For break-free, before mining out.
+     */
+    public static SkyDoor findSkyDoor(ChunkBlockReader reader, BlockPos feet) {
+        if (reader == null || feet == null) {
+            return null;
+        }
+        int r = ShelterDoorExitPolicy.DOOR_RADIUS;
+        SkyDoor best = null;
+        int bestDistSq = -1;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    int x = feet.getX() + dx;
+                    int y = feet.getY() + dy;
+                    int z = feet.getZ() + dz;
+                    BlockState state = reader.state(x, y, z);
+                    if (state == null || !state.isIn(BlockTags.WOODEN_DOORS)
+                            || !state.contains(Properties.DOUBLE_BLOCK_HALF)
+                            || state.get(Properties.DOUBLE_BLOCK_HALF) != DoubleBlockHalf.LOWER
+                            || !state.contains(Properties.HORIZONTAL_FACING)) {
+                        continue;
+                    }
+                    int distSq = dx * dx + dy * dy + dz * dz;
+                    if (!ShelterDoorExitPolicy.nearer(distSq, bestDistSq)) {
+                        continue;
+                    }
+                    boolean alongX = state.get(Properties.HORIZONTAL_FACING).getAxis()
+                            == net.minecraft.util.math.Direction.Axis.X;
+                    int far = alongX ? ShelterDoorExitPolicy.farSign(x, feet.getX())
+                            : ShelterDoorExitPolicy.farSign(z, feet.getZ());
+                    if (far == 0 || !farSideOpensToSky(reader, x, y, z, alongX, far)) {
+                        continue;
+                    }
+                    best = new SkyDoor(new BlockPos(x, y, z), alongX, far);
+                    bestDistSq = distSq;
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Sky at the door's top half 1 or 2 cells out on the far side (heightmap reads only). */
+    private static boolean farSideOpensToSky(ChunkBlockReader reader, int x, int lowerY, int z,
+                                             boolean alongX, int far) {
+        int topY = JoinEnclosurePolicy.doorTopY(lowerY, false);
+        for (int d = 1; d <= 2; d++) {
+            int cx = alongX ? x + far * d : x;
+            int cz = alongX ? z : z + far * d;
+            if (JoinEnclosurePolicy.doorCellOpensToSky(reader.surfaceY(cx, cz), topY)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** A block a player builds a house with: planks, stairs, slabs, glass, bricks, doors, beds, chests. */
     public static boolean isPlayerBuiltBlock(BlockState state) {
         return state != null

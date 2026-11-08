@@ -8,6 +8,623 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 
 - Cost: one uncontended lock per recorded move; these are recorded once per step, not per tick.
 - Tests 3857 → 3863 (3 per class, including an 8-thread race that fails without the lock). No sandbox check needed.
+## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
+
+Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
+
+- **Included:** #2, #3, #6, #7, #9, #11, #16, #17, #20, #21, #23, #24, #27, #28, #30 (base of #34), #31 (handoff), #33, #34, #39, #42, #43, #44, #46, #47, #49, #50, #51, #52, #54, #56 (base of #65; regression check only), #58, #59, #60, #61, #63, #64, #65, #66, #68, #70.
+- **Left out (not proven or needing a ruling):** #1 (outside contribution, conflicts with main), #4 and #10 (regression check only), #5, #12, #53 (need a second player), #8 (Bradley's call), #13 and #29 (#29 never triggered), #14 (container fetch rulings), #15 and #40 (never triggered), #18, #19, #22, #25, #26 (no behaviour change; next wave), #32 (GUI, unchecked), #41 and #55 (drafts), #57 (mining overshoot remains), #62 (not opened in game), #67 (not reached), #69 (runbook docs), #71 (needs Bradley in game).
+- **Ruling (Bradley, 2026-11-08):** ship the proven set now rather than wait for one more wave. Cost if wrong: the unproven PRs now conflict with main on changelog.md and must be updated before the next wave; #56 ships with only a regression check because #65 sits on it.
+- **Release fix:** co-sleep (`BotWakeUpDialogueService`, both checks) now uses `isLoggedOffIn(server, …)`, the should-fix from the #2 review: a bot logged off in world A was skipped as "already in zzz-cycle" in world B. Cost: none.
+- **Entries for PRs that left the changelog to the release wave:**
+  - #2: auto-spawn leaves a bot that logged off for the night to the dawn wake; logoff entries record their save. Cost: a daytime logged-off bot returns within 2 s at its logoff spot, not its spawn point; two same-named bots in two worlds still share one entry.
+  - #3: break-free leaves a house by a wooden door that opens to the sky before mining out. Cost: a bot two rooms deep still mines out; the door is left open; a failed attempt adds up to 6 s.
+  - #58: the "AI chat is off" notice names /bot and the Guide first, AI setup second.
+  - #59: `/bot mine_block` needs `/bot debug on`.
+  - #60: the Stripmine, Ascent and Descent Guide cards say to confirm with the Go To key. Checked at GUI scale 4 only.
+  - #61: mining works a cobblestone generator (cobblestone with lava and water beside it) and waits up to 4 s for the next block. Cost: 5 of 40 in the sandbox before the bot drifts off; cobblestone between lava and water in a cave can now be mined and release lava.
+  - #63: scaffold descent force-positions only within 2 blocks of the column with feet and head clear (backlog "suffocation during scaffold descent"). Cost: a skipped drop can leave scaffold (99 of 101 removed in the sandbox).
+  - #64: the follow planner tries every height for a direction, so a following bot climbs stairs to another floor. Cost: up to 3x neighbours per cell on a worker; natural-terrain catch-up over 5 runs was 11.7 s with it and 14.0 s without.
+- **Tests:** 3857 → 4228 (cloud: only the root-container `SoulStoreTest.persistCursorFailure…` fails).
+- **Field checks:** Phase for 1.1.299 on Nirn (to be added to the field checklist by the Mac release step).
+
+## "New bots" button hidden on a server that can't take the answer (unreleased, 2026-11-05)
+
+A 1.1.296+ client on an older Frens server showed "New bots: Ask" in the AI setup checklist, and a click did nothing: the old server drops the unknown `SET_NEW_BOT_SOUL` action without a reply (1.1.296 deferral). The client could not tell "old server" from "not answered yet", since both send no `newBotSoul` field.
+
+- The status `viewer` block gets `canSetNewBotSoul`, sent as true by a current server to an operator or the host. Old servers never send it, so it reads false and `AiSetupChecklistPolicy.newBotSoul` returns HIDDEN. The redacted player view always clears it.
+- **Cost (chosen over a disabled button with an "update the server" tooltip):** on an old server the operator does not learn the setting exists. The alternative needed a new label set and tooltip that I could not check for fit at GUI scale 5 from a cloud session. Old client on a new server: the extra JSON field is ignored, no change.
+- **Limits:** unit tests only (3 new, Tests 3857 → 3860). Not checked in game. Needs a sandbox check: a current client against a pre-1.1.296 server shows no "New bots" button in step 4, and against a current server the button still appears and toggles.
+
+## A bot's second End exit comes back like the first (unreleased, 2026-11-05)
+
+1.1.295 deferral: since 1.1.295 a bot that walks into the End exit portal answers vanilla's credits path itself, but vanilla then marks it `seenCredits`, so its second exit took the ordinary portal teleport. That reaches `teleportTo`, which reads as an external teleport: follow cleared and the task ended with "External teleport detected."
+
+- Checked against the 1.21.11 yarn jar first: `ServerPlayerEntity.seenCredits` is a public field; `EndPortalBlock.onEntityCollision` detaches only while it is false; `detachForDimensionChange` sets it; `copyFrom` carries it to the respawned entity; the player save keeps it.
+- `createFakePlayer` resets it to false after `detachForDimensionChange` (before the self-respawn, so `copyFrom` carries false) and after `readCustomData` (saves from 1.1.295-1.1.298 can hold true). The decision is `EndCreditsPolicy` (5 tests, Tests 3857 → 3862). Carpet's and real players untouched.
+- **Chosen over** the deferral's suggestion (reset on the cross-dimension `teleportTo` path): resetting there still lets the second exit take the teleport path and only fixes the third, so every other exit would still fail.
+- **Cost:** none in play, since a bot has no client to show credits. The saved `seenCredits` for Frens bots now always reads false.
+- **Limits:** unit tests only, not run in game. Needs a sandbox check: one bot exits the End twice (and once more after a world reload); each exit keeps follow, shows "Task ended: changed dimension." once when a task ran, and never logs "External teleport detected."
+
+## BAD_AT from repeated execution failures (unreleased, 2026-11-05)
+
+1.1.213-1.1.214 deferral, "`BAD_AT` from repeated `TASK_FAILED`", built to Bradley's 2026-11-05 ruling (carry the failure reason first, then infer). A failed task's soul event carried no reason, and most skill failures are about the surroundings ("No valid trees nearby", "Missing hoe", "paused due to nearby threat"), so counting raw failures would have called a bot bad at woodcut for standing in a desert.
+
+- `SkillManager` puts the skill's failure text on the ticket (`TaskTicket.noteFailureMessage`, only when the skill failed with no abort). `SoulEventObserver` journals `failure=execution` on the TASK_FAILED event when `SoulTaskFailurePolicy` reads the text as the bot's own trouble. It uses an allow-list of the phrasings the skills use for that: stuck, stalled, failed to advance, could not reach, can't return, timed out, still in water, reached step limit, could not finish, unable to clear, lost fishing rod. Anything else, including crashes and new phrasings, does not count.
+- `SoulRelationOps.fromJournal` (the daily fold, only with relations on) makes `<bot> BAD_AT <task>` from at least 3 execution failures of one task with more failures than completions, at the same SEEN confidence and salience as GOOD_AT. Mixed evidence: per task, completions ≥ failures can only give GOOD_AT, more failures only BAD_AT. One of each per fold.
+- `merge`: GOOD_AT and BAD_AT of the same task are opposites, like LIKES/DISLIKES. Writing one removes the other, also when it replaces a held BAD_AT/GOOD_AT of another task. A weaker incoming fact that is dropped removes nothing.
+- **Costs (rulings I made inside Bradley's ruling):** the allow-list misses execution failures phrased another way (no BAD_AT, which is the safe miss) and has to be extended when a skill gets a new message. GOOD_AT now needs completions ≥ execution failures for that task, so a bot with 3 completions and 4 stuck failures of mining no longer gets GOOD_AT mining. The opposition also applies to the model's side-channel facts: an INFERRED BAD_AT X (confidence ≤ 0.6) removes a SEEN GOOD_AT X. Thresholds of 3 per day mirror GOOD_AT and are not field-tuned.
+- **Limits:** unit tests only (9 new, Tests 3857 → 3866). The ticket-to-event path through `SkillManager` and `TaskService.complete` has no unit test (server types). Needs a sandbox check with souls and relations on: make one bot fail the same skill 3 times in one day with a stuck-type message (for example woodcut on an unreachable tree), sleep through the night, and `mind.json` should show `BAD_AT woodcut` with source SEEN and no `GOOD_AT woodcut`. Three "No valid trees nearby" failures should give nothing.
+
+## `/bot place` from a distance walks over on a worker (unreleased, 2026-11-05)
+
+- **Problem.** 1.1.295 stopped `/bot place` freezing the tick by trying only in reach on the server thread (Brigadier runs commands there), so a target out of reach just got "I can't reach that spot." (deferral in RALPH_TASK.md).
+- **Change.** `executePlaceGeneric` runs the in-reach pass on the server thread as before (`runPlaceLoop`). When that pass stops only because the spot is out of reach (`PlacePosPolicy.handOffToWorker`), it takes a `TaskService.beginSkill("place")` ticket and submits the rest of the run to `skillExecutor` (the `/bot craft` pattern); there `attemptPlacement` may walk (10 attempts, as before 1.1.295). The command returns 1 at once with no start line (`/bot craft` has none either). End-of-run lines moved to `PlacePosPolicy.reportLines` (stops: DONE, NO_ITEMS, OUT_OF_REACH, ABORTED, ERROR). If another task holds the slot: the server-pass result plus "Another task is already running, so I can't walk over."
+- **Threading.** Walking runs on the worker. Rotation, the gated snow clear and the inventory slot lookup now go through `BotActions.callOnServerThread` (inline on the server thread); `placeBlockAt` already did. The report is sent via `server.execute`. `/bot stop` sets the abort latch: checked before each item and before each walk; the ticket completes in `finally`.
+- **Cost.** In reach: unchanged (one attempt per item on the server thread). Out of reach: one worker run per command.
+- **Limits.** For chests, the fallback adjacent-to-target cells each get up to 10 walking attempts on the worker after the main target fails (bounded, `/bot stop` ends it). A worker run that still can't reach says "I can't reach that spot." as before.
+- **Tests.** 3859 → 3862 (`PlacePosPolicyTest` 11 → 14: hand-off gate, report lines per stop, worker-hop and server-thread wiring). Known failures only (`SoulStoreTest.persistCursorFailure…`, `SoulStoreTest.closeShutsDown…`).
+- **Sandbox check needed.** `/bot place chest` at a spot ~10 blocks from the bot: it walks over, places, says "Placed 1 chest.", and the server tick never stalls; `/bot stop` mid-walk ends it without a placement; `/bot place chest 2` in reach still places both at once.
+
+## `/bot place chest <n>` puts the second chest beside the first (unreleased, 2026-11-05)
+
+1.1.295 review minor: `attemptAdjacentChest` built its target with the place cell `candidate.offset(opposite)`, which is the anchor itself (the chest just placed). The free neighbour it checked with `isAir` was never the cell it placed into. Read from the code: from the second chest on, every try aimed at an occupied cell, so the command placed one chest and then answered "I can't reach that spot."
+
+- The target now clicks the anchor on its side facing the step and places into the neighbour. The cell math is `AdjacentChestPolicy` (2 tests, Tests 3857 → 3859).
+- **Limits:** not run in game. Whether two adjacent chests merge into a double chest is left to vanilla's placement (bot yaw and the clicked face), unchanged. Needs a sandbox check: `/bot place chest 2` and `/bot place chest 3` while looking at the ground place 2 and 3 chests side by side with no "I can't reach that spot."
+
+## Cook cycle walks back to the furnace after losing reach (unreleased, 2026-11-05)
+
+- **Problem:** deferred minor from the 1.1.291 review. `SmeltingService.cookAllFoodSync` (the cook hobby and HuntSkill's post-hunt cook) checks furnace reach on every 2 s poll and before taking the final output. A bot pushed, knocked back or wandered out of reach mid-cook logged "can no longer interact with furnace" and quit the batch; the final-output step then skipped silently, so the cooked food stayed in the furnace.
+- **Change:** on lost reach (poll or final output) the worker asks the new pure `FurnaceReachRecoveryPolicy`: in the furnace's world and fewer than 2 walk-backs used this cycle → walk back to the approach cell (same `MovementService.execute` + nudge as the first approach, now shared in `walkToFurnaceApproach`) and retry; otherwise stop with the old log line. Another dimension, an interrupted worker or a stopping server never walks.
+- **Threading:** the walk runs on the cook worker (`AMBIENT_EXECUTOR` / the hunt skill thread), never the server thread; furnace and inventory work stays in the existing `server.execute` blocks.
+- **Cost:** at most 2 extra walks per cook cycle; walk time counts toward the batch/total timeouts.
+- **Limits:** `/bot cook` (`startBatchCookInternal`) and `startCollectFinishedFood` do not wait for the cook, so they have no mid-cook phase and are unchanged. The per-item load step still skips an item type on lost reach rather than walking. A bot pulled away repeatedly (follow command, mob shoves) gets its 2 walk-backs and then stops.
+- **Tests:** 3857 (1 expected SoulStoreTest failure) → 3864 (same 1 expected failure) (`FurnaceReachRecoveryPolicyTest`, 7).
+- **Sandbox check:** start a cook hobby or post-hunt cook, `/tp` the bot ~8 blocks from the furnace mid-batch; it should log "lost reach of furnace … walking back (1/2)", return, and collect the output. Teleport it to the Nether mid-cook: it should stop without walking.
+
+## Supply grants and chat-hint receipts are owner-only too (unreleased, 2026-11-05)
+
+Follow-up to the soul store 0600 change: `SupplyRequestService` (the supply "Always" grants: owner UUIDs per chest) and `GroupChatHint` (player UUIDs that saw the group-chat hint) also named their temp files and wrote them at the umask default. Both now call `StoreFileModePolicy.restrictToOwner` on the temp file before the move. Same limits: existing files switch on their next save, Windows unchanged, never fails a save. No new tests (the policy's own tests cover the call); Tests unchanged.
+
+## Store files owner-only (0600) on POSIX (unreleased, 2026-11-05)
+
+- **Changed: soul store files are now created owner read/write only (`rw-------`) on Linux and macOS.** Closes the 1.1.291 review deferral "0600 store file mode". `soul.json`, `knowledge.json`, `mind.json`, trimmed `events.jsonl`, corrupt-tail rewrites and newly created transcripts (`active.jsonl`, `events.jsonl`) hold player UUIDs and owner data; their temp files were created by name at the umask default (usually 0644). `SoulStore.atomicReplace` now sets the mode on the temp file before the move, and `appendLine` sets it once when it creates a file. Decision and best-effort apply live in the new pure `StoreFileModePolicy` (POSIX view present → restrict; otherwise or on any error, DEBUG log and continue; a save never fails over permissions).
+- **Found: the eight fingerprinted registries were already 0600.** Furnaces, beehives, crafting/hunt history, hunt settings, fortifications, villages and bot world state write through `Files.createTempFile`, which the JDK creates `rw-------` on POSIX, and the atomic move keeps that mode, so they needed no change. A test now pins that JDK behaviour.
+- **Limits:** an existing transcript keeps its mode until it is rewritten (append does not touch an existing file; archives are renames). Soul directories keep the umask default, so bot UUIDs stay visible as folder names. Windows is unchanged. Not touched: `SupplyRequestService` and `GroupChatHint` (by-name temp files, not part of the 1.1.291 store set) and config files edited by hand.
+- **Tests:** 3857 → 3863 (`StoreFileModePolicyTest` 5, `SoulStoreTest` +1; POSIX cases skip elsewhere).
+- **Sandbox check needed:** on the Mac, start a save with a soul bot, talk to it, then `ls -l` its `frens/souls/v1/<bot>/soul.json` and `conversations/<player>/active.jsonl` in the world folder: both `-rw-------`. The game must still save and reload the soul normally.
+
+## A bot's death is noted in its soul journal as a respawn (unreleased, 2026-11-05)
+
+From the 1.1.295 deferral "`AFTER_RESPAWN` does not fire for real deaths or `/kill` (worth knowing why)". Why, from the code and the Fabric jar: Fabric fires `AFTER_RESPAWN` only at the end of `PlayerManager.respawnPlayer`, and a dead Frens bot never goes there. `createFakePlayer.onDeath` revives the same entity (health 20, then `kill` schedules a disconnect that `FakeClientConnection` ignores), and `BotEventHandler.ensureRespawnHandled` runs the reset 5 ticks later and logs "AFTER_RESPAWN did not fire". So the WARN is the normal death path, not a fault. Only the End exit reaches `respawnPlayer` (through the self-sent PERFORM_RESPAWN).
+
+- The fallback skipped the soul respawn note the listener makes (`RespawnResetPolicy.plan(false).noteSoulRespawn()` is true for a death). It now makes it, after the reset, behind the same flag.
+- **Left alone, needs a ruling:** the fallback also skips `AutoFaceEntity.handleBotRespawn` (task abort, auto-face restart: deaths already stop the task since 1.1.295, and the same entity keeps its loop), `BotPersistenceService.onBotRespawn` (on a death it calls `onBotJoin`, which restores saved state: running it after a real death could restore items the bot just dropped), and `botSpawnCount++`. The WARN text stays because `RespawnHandlingWiringTest` (also edited by open PR #4) matches it.
+- Tests 3857 → 3859 (`DeathSoulRespawnWiringTest`, source-reading). **Sandbox check:** with souls on, kill a bot; its journal (`events.jsonl`) gets a RESPAWN event after the DEATH one.
+
+## Despawn really removes the bot from PlayerManager (2026-11-05)
+
+Fixes the 1.1.296 deferral "Fakeplayer still present after removal attempt on every despawn". The warning was true, not a check that ran too early.
+
+- **Cause.** `BotPersistenceService` looked up `PlayerManager#remove` by reflection with the names `remove`, `removePlayer`, `method_2984`, `method_14576`. `remove` only exists in the dev (yarn) runtime. In a release jar the lookup matched `method_14576`, which in 1.21.11 is `sendCommandTree`; `remove` is `method_14611` (checked in the loom `mappings.tiny`). `createFakePlayer.kill()` does not help: it schedules `networkHandler.disconnect`, which ends in `connection.handleDisconnection()`, and `FakeClientConnection` overrides that as a no-op, so `ServerPlayNetworkHandler.onDisconnected` → `cleanUp` → `PlayerManager.remove` never runs (read with javap). The fallback then took the bot out of the `players` list by hand but left it in `playerMap`, so `getPlayer(uuid)` still returned it and the WARN fired. Each despawn, logoff, sleep logoff and travel left a stale `playerMap`, stats and advancement entry and sent no tab-list removal packet.
+- **Change.** Call `server.getPlayerManager().remove(bot)` directly (Loom remaps it), only while this exact entity is still in the map or the list. Presence is judged by identity, so a newer same-UUID entity (travel respawn) is no longer read as "still present". The hand list removal and the method-name scan are gone. Decision in the new pure `BotRemovalPolicy`.
+- **Cost.** Release builds now do what dev builds already did: vanilla `remove` saves the bot's `.dat`, counts a leave stat and sends `PlayerRemoveS2CPacket`.
+- **Death with auto-respawn off:** `onBotDeath` deletes the `.dat`, and the following `unregisterBot` now ends in `PlayerManager.remove`, which saves it again (post-drop inventory, death position); a "yes" would then restore the bot at the death spot instead of the fresh-start chain (dev builds already did this). The death handler in `Frens.java` now deletes the `.dat` again after `unregisterBot`, the order `/bot forget` uses (found by the independent review).
+- **Tests** 3857 → 3861 (`BotRemovalPolicyTest`, 4). Known `SoulStoreTest.persistCursorFailure…` failure unchanged.
+- **Sandbox check needed:** `/bot despawn`, sleep logoff and a travel in a release jar: no WARN, the bot leaves the tab list, `/bot spawn` of the same name works, inventory survives.
+
+## Follow no longer steers a bot while `/bot craft` walks it (unreleased, 2026-11-05)
+
+Found while checking the `/bot place` worker hop: nothing in the follow tick checks for an active task. Only `SkillManager.runSkill` (and `TaskService.runAmbient`) move the bot out of FOLLOW with `suspendFollowMode`. `/bot craft` runs `CraftingHelper` on a worker with a ticket but outside `runSkill`, so while it walked the bot to a table or furnace the follow tick kept writing movement inputs, and could stop it or teleport it back to the owner.
+
+- The craft worker now attaches its thread to the ticket, suspends follow before the work, reads the abort before `complete`, completes the ticket, then resumes follow unless the task was aborted (the same order as `runAmbient`).
+- **Not fixed here (same gap):** chest Quick Store / Quick Fetch (`ChestRegistryNetworkManager`, walks on `CompletableFuture.runAsync` with no ticket) and `SurfaceRecoveryService` (called from flee). The `/bot place` worker gets the same fix on its own branch.
+- **Cost:** a following bot stops following for the length of the craft and picks follow back up after; an aborted craft leaves follow off (as skills do).
+- Tests 3857 → 3858 (`CraftCommandFollowWiringTest`, source-reading). **Sandbox check:** with the bot following, `/bot craft` something that needs a crafting table a few blocks away: the bot walks to it without jittering or snapping back, crafts, then follows again.
+
+## Hand-dig stair escape for a bot with no blocks (2026-11-05, unreleased, branch `claude/hand-dig-stair`)
+
+Backlog P2 (1.1.236 / 1.1.239 handoffs). Surface recovery climbs by pillaring. With no scaffold blocks, `CollectDirtSkill.executeUpwardStep` could only mine overhead and jump in place, which never gains height. It then stalled after 6 no-progress steps and backed off for 30 s to 10 min.
+
+- **New `HandDigStairPolicy`** (pure, `GameAI/services`). It takes a snapshot of cells around the bot, given as offsets from the feet. Each cell is air, solid, falling, water, lava or unbreakable, with on-ground break ticks for the best carried tool. Each step it mines the bot's own overhead cell (room to jump), then the two cells in front above the tread, top-down per column. The bot then steps up onto the tread. It refuses a direction when: lava or water is in a cut cell or touches a mined cell; a falling block (sand, gravel, concrete powder; minecraft.wiki/w/Falling_block) sits directly above a mined cell that is not itself cut; a cut cell is unbreakable or protected, or slower than 200 ticks; or the tread is not a usable step (see the review fixes below: it must collide *and* present a full cube top face at y=1.0). A lava tread refuses as lava. When every direction refuses, it reports the worst reason in this order: step limit, lava, water, falling, unbreakable, too slow, no tread; when every direction refuses only for "no tread" and a cell beside the bot is walkable, it decides to walk instead.
+- **Wiring, one production file** (`CollectDirtSkill`). When the bot carries no `ScaffoldService.SCAFFOLD_BLOCKS` item, `executeUpwardStep` runs `executeHandDigStairStep` instead of the pillar. The step reads the snapshot on the server thread (5x5x5 cells, floor row included). It mines with the existing `mineStraightStairBlock` (MiningTool, which keeps its reach, protection and retry checks), then walks or jumps onto the tread for at most 2.5 s on the worker thread. It is capped at 12 steps per ascent and checks `TaskService.isAbortRequested` between cells. A refusal ends the ascent with "Hand-dig stair refused: <reason>", so the 1.1.239 back-off takes over. A mining miss or a step with no climb counts as no progress, as before. Bots that carry blocks still pillar exactly as before.
+- **Rulings (cost if wrong).**
+  - *Stone by hand is allowed.* The wiki puts it at 1.5 hardness x5 = 7.5 s, 150 ticks; the cap is 200 ticks, under MiningTool's 12 s failsafe. Being stuck is worse than a slow climb. Cost if wrong: about 22 s per step with no pickaxe, and the stone drops nothing. Deepslate by hand (300) and obsidian are refused.
+  - *The preferred direction wins whenever it is valid*, so the staircase stays straight. Only when it refuses does the cheapest valid direction win. Cost if wrong: digging stone when dirt was beside it.
+  - *Water refuses like lava.* Cost if wrong: a bot in a damp pit waits for the back-off, but a flooded pocket can usually be swum out of.
+  - *Three cells per step, not two.* Jumping onto the tread also needs the bot's own overhead cell clear.
+- **Review fixes (same day, two should-fix findings from an independent review).**
+  - *A tread must have a full cube top face.* Any non-empty collision shape used to count as a tread, so a fence or wall (collision top at 1.5), a bottom slab or an open trapdoor qualified; the bot cannot step onto those and jumped at them until "No progress". `Cell` now carries `fullTop` (Minecraft-free: the snapshot computes it on the server thread as `shape.getMax(Y) <= 1.0 && Block.isFaceFullSquare(shape, UP)`), with `Cell.partial(ticks)` for such colliders; `planFor` uses `usableTread()` (collides and `fullTop`) so they refuse as NO_TREAD and another direction is cut. A partial block in a *cut* cell is still mined like any solid cell. Top slabs, upside-down stairs and closed top trapdoors keep counting as treads.
+  - *A wide floor walks to a wall instead of failing.* A bot with 0 blocks at the centre of a 3x3 pocket or on a ravine bottom was refused "no tread" on its first step (before this branch it at least bare-jumped). `decide` now has a third outcome, `Decision.walkToward`: when every direction refused only for NO_TREAD (the least severe reason, so this is exact) it picks the first direction in preference order whose feet and head cells are air and whose floor cell collides (no fence, water, overhang, drop or liquid floor); fenced in or floorless on every side still refuses NO_TREAD, and the step limit still wins. `executeHandDigStairStep` walks that one cell on the worker thread with the same bounded 2.5 s move helper as the step-up (`moveTowardCellBounded`, no jump) and returns "No progress - will retry", so the existing no-progress cap (6 for surface recovery) still bounds a floor too wide to reach a wall. Hand-dig steps are not counted for a walk.
+- **Review fixes, second pass (same day: the two known limits the first pass left open).**
+  - *The hand-dig step now runs the pillar path's hazard checks.* It used to skip `MiningHazardDetector.detect` and `FallingBlockStabilizer`, and the policy only looks at the six faces of each cut cell, so lava or gravel two cells away, an ore, a chest, a mineshaft or a protected zone in the cut went unchecked. `executeHandDigStairStep` now takes the ascent's `ServerCommandSource` and, in the pillar path's order: (1) before the first mine, `MiningHazardDetector.detect` over every planned cut cell (torches filtered out, as `executeUpwardStep` step 1 does; `detect` hops to the server thread itself), with the stand cell as the step target so the drop scan runs under it; adjacent warnings go to chat, and a blocking hazard takes the same route as the pillar path (`WorkDirectionService.setPausePosition`, `SkillResumeService.flagManualResume`, the hazard's chat line, `failure(hazard.failureMessage())`), before the step is counted. (2) The mine loop. (3) After the last mine and before the step-up, `FallingBlockStabilizer.stabilizeAndReclear` with the stand cell as focus and the cut cells as volume, the same passable/torch/mine callbacks as step 3 of the pillar path. One deliberate difference: the pillar path ignores the stabilizer's result; here `false` (blocks still falling after 5 s, or a refill the re-clear could not mine) returns "No progress - will retry", so the bot snapshots the cells again instead of jumping into them. `HandDigStairWiringTest` (4 source-reading tests, `*WiringTest` precedent) pins the detector before the first mine, the failure route, the stabilizer between the mine loop and the step-up, and the `source` hand-off.
+  - *WATER treads are tested.* `HandDigStairPolicyTest` gains three tests: water in front at tread height is NO_TREAD (not a liquid refusal, since the bot never mines it) and another direction is cut; water in any of the three cut cells refuses WATER_EXPOSED, and in the shared overhead cell refuses every direction; the pocket walk never steps onto a water floor (it takes the next direction with a solid floor, and refuses NO_TREAD when every neighbouring floor is water).
+- **Limits.** It digs only the four cardinal directions. Mob threats are left to the existing `shouldAbortSkill`. It does not place torches or remember the staircase. Only surface recovery and the `collect_dirt` ascent use it. MovementService's terrain-move path (`TerrainMovePolicy`) is unchanged, because MovementService is in open PRs; a no-blocks fallback there would go beside `PLACE` in its terrain-move chooser. The two limits the first review left open (no `MiningHazardDetector.detect` / `FallingBlockStabilizer` on the hand-dig path; no WATER tread test) are fixed in the second pass above.
+- **Tests 3857 → 3904** (+43 `HandDigStairPolicyTest`: 26 from the first pass, 14 for the review fixes, 3 WATER tread tests; +4 `HandDigStairWiringTest`). The run still has the known `SoulStoreTest` failure(s) (persistCursorFailure…).
+- **Sandbox check (not yet run).** Put a bot with an empty inventory and a stone pickaxe in a 3-deep pit in stone, then let surface recovery trigger. It should log "Hand-dig stair step 1/12 … 3/12" and climb out. Then dig a pit with lava one block behind the east wall at head height and face the bot east. It should cut another direction. With lava above its own head cell, it should log "Hand-dig stair refused … LAVA_EXPOSED" and stop. For the review fixes: put the bot at the centre of a 3x3 pocket 3 deep in stone; it should log "no tread on any side … walking one cell EAST" once, then "Hand-dig stair step 1/12". Put a fence against the east wall at floor level; it should cut another direction, not jump at the fence. For the second pass: put a coal ore block in the east wall at head height (a cut cell); the bot should say "I found coal!", log "Hand-dig stair hazard … Mining paused: I found coal!" and stop without mining it, with manual resume flagged. Put gravel two cells above the east cut (dy=4, outside the policy's face check) over a 1-wide gap; after the cut the log should show the stabilizer wait, not a jump into falling gravel.
+
+## A full pack with no chest or table no longer crashes the craft (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server. A bot with a full pack, no chest and no
+crafting table nearby recursed until `StackOverflowError`. Placing an offload chest can craft one,
+the craft makes room by offloading, and that offload places (and crafts) another chest. A woodcut
+with a full pack crashed at its end ("Skill 'woodcut' crashed: StackOverflowError"), and
+`/bot craft chest` nested 373 table crafts before it aborted. Plain main does the same.
+
+Only the outermost offload on a thread may place a chest now (`OffloadChestGuard`). A nested
+offload uses chests that are already there or gives up. The same woodcut now ends with
+"Cut 4 tree(s)", and the craft nests 3 deep instead of 373.
+
+Costs and limits:
+- In that corner (full pack, no chest, no table) `/bot craft chest` still fails. The bot can place
+  two crafting tables first, one per nesting level. Its line now names the cause ("My pack is
+  full, so I can't turn my logs into planks. Make some room and ask again.", `PlanksShortLinePolicy`)
+  instead of "I need 4 planks per craft.". Dropping a cheap stack to make room,
+  as the server-thread path already does, would fix the outcome but changes what bots throw away
+  mid-task, so it is left as a decision.
+- The guard is per thread, so two bots crafting at once don't block each other.
+
+Tests: `OffloadChestGuardTest` (3), `PlanksShortLinePolicyTest` (2).
+
+## CraftingHelper commits each craft in one server-thread step (2026-11-05, unreleased)
+
+Stacked on the combined chest ask (PRs #34 and #39). Closes the deferral "off-thread inventory mutation in CraftingHelper": `/bot craft` and the skills run `CraftingHelper` on a worker, and every craft tail there decremented the ingredient stacks and inserted the output on that worker. Now `commitCraft(bot, output, count, consumes)` does the whole inventory step in ONE `SupplyServerHop.call` hop: the lambda's consumes (`consumeItemOnServer`, `consumePlanksOnServer`, `consumeCobbleOnServer`, `consumeSlotOnServer`, which may reach into bundles but never walk) and then `insertStack` of the output. The 21 craft tails (ladders, beds, white wool, `craftWithPlanks` incl. chest and table, sticks, torches with the coal-then-charcoal choice, doors, fences, leads, bundles, leather, saddles, both fishing-rod items, the tool craft, shields, `craftSimple` for buckets and shears, leather armor, `craftCobbleBlock` for furnaces, fishing rods) and the two log-to-plank loops (`craftPlanks`, `ensurePlanksFromLogs`: one commit per slot, the slot checked again on the server thread) go through it; `distributeOutput` is gone. One hop, not two: separate hops could abandon the consume and still run the insert, output with no ingredients. `SupplyServerHop` rather than `BotActions.callOnServerThread` (changed in review): it is abandon-safe by an atomic claim, so a task that had not started when the wait ran out never runs, and a task already running is waited for instead of being reported as failed.
+
+What stays on the caller's thread: making room (`makeRoomForOutput`, which off the server thread may walk to a chest to offload), only for output that did not fit and only after the commit hop, and the supply-ask waits (`askChestForCraftMaterials`, `withdrawFromNearbyChests`), which run before any commit.
+
+Costs and limits. A worker now waits for the server once per craft, plus once or twice more when the output does not fit, each up to `CraftCommitPolicy.HOP_TIMEOUT_MS` = 5000 ms. A first hop that does not complete (abandoned unstarted, threw, or still running a second timeout later; the WARN names which) reports 0 crafted. A leftover hop that does not complete is the one case where output is lost (one ERROR with the count): the ingredients are already spent.
+
+Review fixes (before merge):
+- *Room is made after the consume, never before.* A make-room before the hop had no reserves, so on a worker with a full pack it could walk to a chest and deposit every cheap stack, including the logs or planks the craft was about to use. The craft then aborted where it used to succeed (`/bot craft planks 4`, full pack, chest nearby). Room is now made only for output that did not fit, after the ingredients are spent, in the old hand-out's order: normal make-room, insert, forced make-room, insert-or-drop, each make-room on the caller's thread.
+- *An aborted craft takes nothing.* The hop snapshots every slot first. A consume that falls short (e.g. a second ingredient only in a bundle that cannot be extracted into a full pack), or one that throws, restores the snapshot, so no earlier ingredient of the same recipe is eaten.
+- *The log says how a hop ended* (`SupplyServerHop.hop` is now public with its `Status`).
+
+Behaviour changes:
+- A consume that comes up short now makes nothing. Before, `consumeItem` and `consumeCobble` were void and the output was handed out regardless, and the tool and shield crafts ignored `consumePlanks`'s answer. The three plank tails keep their "I couldn't reserve planks" line. Other tails return 0 with a WARN in the log; `/bot craft` speaks only when something was made, so the player hears nothing for that case.
+- In `craftPlanks`, a slot that changed between the worker's scan and the hop is skipped, not crafted from.
+
+Pure tests in `CraftCommitPolicyTest`. `CraftingCommitWiringTest` pins:
+- every tail commits through the helper;
+- one hop holds the snapshot, the consumes, the rollback and the insert;
+- no make-room runs before it;
+- no `decrement`/`setStack`/`insertStack` remains outside the server-only bodies and the commit hops;
+- nothing inside a hop sleeps, walks, makes room or touches a chest.
+
+## Chest asks while crafting: the one combined ask now covers the other worker crafts (2026-11-05, unreleased)
+
+Stacked on the tool-craft wiring below (PR #34), which left ladders, beds, torches, shields, `craftWithPlanks`, `craftSimple` and `craftCobbleBlock` pulling per item. They now take the same one-ask path: `CraftingHelper.askChestForToolMaterials` became a thin wrapper over a shared `askChestForCraftMaterials(bot, source, CraftAsk, shortfall)`, and `askChestForKnownCraft(bot, source, output, amount, match, needsTable)` feeds a craft from `CraftBundleAskPolicy`'s recipe table into it. Nothing in the flow itself changed: the same server-thread gather (`gatherBundleInput`, now pooling the bot's own stacks with the same `bundlePool` as the chest's), the same pure plan per chest, the same chest choice, line split, `SupplyWithdrawals.withdrawBundle` with `WaitMode.UNTIL_ANSWERED`, the same wait, refusal and no-answer lines (`CraftBundleAskPolicy.stopLine`), and the same review rules from #34 (a lapsed prompt is `NO_ANSWER`, not a No; lines already moved are carried, never re-asked; a server-thread caller returns `CONTINUE` before the gather and keeps the per-item pulls). An empty plan, no chest, nothing grantable or an item outside the table keep today's path exactly.
+
+- **Crafts that now bundle (worker threads; `/bot craft <bot> …`).** Ladders (`craftLadders`: sticks, or the planks or logs they come from, plus the table's planks when none is near; the recipe-permission check moved above the ask so a recipe the bot may not craft is never asked for, which also means a missing recipe now answers before a missing table). Torches (`craftTorches`: coal or charcoal as one pool, `TORCH_FUEL`, and sticks; a 2×2 recipe, so no table joins). Shields (`craftShield`: 6 planks + 1 iron ingot + table). Buckets and shears (`craftSimple`: 3 or 2 iron ingots; the bucket's table joins, shears are 2×2). Furnaces (`craftCobbleBlock`: 8 of the `STONE_CRAFTING` pool, cobblestone, cobbled deepslate or blackstone, mixed as `consumeCobble` already mixes them, plus the table). Chests and crafting tables from `/bot craft` (`craftWithPlanks`, new `askChest` flag: 8 or 4 planks; a chest's own table joins, a table craft never asks for a table). Beds (`craftBed`: wool and planks in one ask; the colour is `CraftBundleAskPolicy.chooseBedWool`, the first colour the bot holds 3 per bed of, else the first one chest completes, since matching wool split across two chests is no bed; no completable colour keeps today's path, which also tries string; the bed's 16 colours are filtered by `hasRecipePermission` before the ask, so a bed the bot may not craft never takes its materials first). `craftWithPlanks` likewise checks the permission before its ask (torches and ladders already did). Off the server thread the old colour choice saw the inventory alone (`countItemsInInventoryAndNearbyChests` counts chests on the server thread only), so a worker bed craft can now reach wool that is only in a chest.
+- **What the owner sees.** `Jake asks to take 1 Oak Log from the chest at 10, 64, 10 to make 3 ladders.` (7 sticks are two stick crafts, 4 planks, one log; a chest that also has sticks is asked for `7 Stick` instead, since sticks as they are beat making them.) `… 2 Coal and 2 Stick … to make 8 torches.` `… 3 White Wool and 2 Oak Log … to make a bed and a crafting table.` `… 3 Iron Ingot … to make a bucket.` The purpose now carries each craft's plural (`purposeText(singular, plural, amount, withTable)`: "8 torches", "2 pairs of shears"); the tool wording is unchanged.
+- **Crafts that still pull per item, and why.** The station sub-step's table (`ensureCraftingStation` → `craftCraftingTable` → `craftWithPlanks` with `askChest=false`): it runs inside every other craft, including doors, fences and the rest that have no ask of their own, and a craft that does ask has already counted the table's planks, so asking there would be a second prompt for the same planks. Doors, fences, fishing rods, leads, saddles, bundles, leather armour, planks, sticks and the on-a-stick items were not in scope and keep `withdrawFromNearbyChests`. The idle stone upgrade (server thread) keeps the per-item path, as in #34.
+- **Recipes added to the table** (`CraftBundleAskPolicy.known`, each against the 1.21.11 recipe data `data/minecraft/recipe/<id>.json` and the wiki page): ladder 7 sticks → 3 ([Ladder](https://minecraft.wiki/w/Ladder)); torch 1 coal or charcoal + 1 stick → 4 ([Torch](https://minecraft.wiki/w/Torch)); shield 6 planks (`#wooden_tool_materials`) + 1 iron ingot ([Shield](https://minecraft.wiki/w/Shield)); bucket 3 iron ingots ([Bucket](https://minecraft.wiki/w/Bucket)); shears 2 iron ingots ([Shears](https://minecraft.wiki/w/Shears)); furnace 8 `#stone_crafting_materials` ([Furnace](https://minecraft.wiki/w/Furnace)); chest 8 planks ([Chest](https://minecraft.wiki/w/Chest)); crafting table 4 planks ([Crafting Table](https://minecraft.wiki/w/Crafting_Table)); bed 3 matching wool + 3 any planks (`bedCraft`, [Bed](https://minecraft.wiki/w/Bed)). The tool recipe is `toolRecipe(headKey, headCount, stickCount)`; `toolRecipes` now delegates to the general `craftRecipes(targetId, recipe, amount, withTable)`. `planksWanted(recipe, amount, sticksHeld, withTable)` replaces the tool craft's inline sum for turning taken logs into planks (same result for tools).
+- **Threading.** Unchanged from #34: the gather and every transfer on the server thread, the plan on the caller's thread, the wait a worker poll. `tableAvailableWithoutCrafting` is read once more per bed craft (the ask and the old flow each check it).
+- **Cost.** One extra server hop per bundled craft that has a chest near, one prompt instead of two to four, the same two INFO lines per bundle as #34 (`frens-supply` and `crafting-helper`). The policy's recipe table is built once per class load.
+- **Review fixes (same day, before merge).** (1) Torches asked twice: the bundle can grant *charcoal* from the `TORCH_FUEL` pool, and the old `ensureItemAvailable(COAL, craftsNeeded)` that followed ignored held charcoal and opened a second per-item prompt for coal whenever a chest had any. `craftTorches` now pulls only `CraftBundleAskPolicy.torchFuelShortfall(craftsNeeded, coalHeld, charcoalHeld)`, coal first, then charcoal for what coal could not cover; with nothing held that is the old coal-first pull. (2) The bed took planks from the wrong chest: with chest A (nearer) holding planks only and chest B the 3 blue wool, `chooseBedWool` picked blue via B but `chooseChest` took A as the first chest with anything, the bot pulled A's planks, the wool stayed in B and the craft failed holding the planks. `KnownCraft` now carries `mustComplete` (the wool for `bedCraft`, `null` for every other craft) and `chooseChest(plans, mustComplete)` never asks a chest whose plan still misses that line; since no single chest then completes both the wool and the planks, it asks nothing (`-1`, today's per-item path, one INFO line) rather than taking a partial set — only a complete plan is asked, the first in nearest-first order. Other crafts keep the plain rule. (3) The recipe-permission check ran after the withdrawal in the bed path and in `craftWithPlanks`, so with a datapack that removed the recipe the bot took the materials and then said "I don't know how to craft that": both now check before the ask, as ladders do (the bed filters its colours up front and drops the post-ask check).
+- **Limits / left.** Known: a partially granted wool line (the owner allows the planks but the service refuses part of the wool, or a reserve cuts it) leaves `chosen == null` after the ask, so the post-ask per-item wool withdraw does not run for that colour; the craft then reports the missing wool as before. A bed whose wool and planks sit in two different chests is not bundled (see the review fix above): a worker cannot see chest wool in the per-item path either, so the bed reports missing wool without taking anything, as before this branch. After a bundle the old per-item sub-steps still run and can log a refused request when counts come up short, as in #34. Furnace blocks are pooled as the vanilla tag's three members `countCobble` knows, not the tag itself. The known-table's words are English only, like the rest of the helper's lines.
+- **Tests:** 3937 → 3954 (`CraftBundleAskPolicyTest` +15, the two review fixes add the two-chest bed choice and the torch fuel shortfall, and +13: the table against the vanilla counts, the bed recipe, the ladder sandbox plan (logs only, logs and sticks, planks and a table), torches (fuel pool, planks for the stick, missing fuel is a partial ask), shield, bucket and shears, furnace and the new pools' keys and names, chest and table, the tool recipes equal the general ones, the bed-wool choice, a bed plan, `planksWanted`, the plurals; `CombinedChestAskWiringTest` +2 and the generic body: the tool ask is a wrapper, each of the seven call sites asks before its station and its per-item pulls, the table sub-step never asks, `/bot craft chest|crafting_table` do, the bed's colour choice, every craft stops after a No, the permission check precedes the ask for torches, the bed and `craftWithPlanks`, the torch pulls only the fuel shortfall, the chest choice carries `mustComplete`; `CraftingStationPolicyTest` follows the new `craftWithPlanks(…, quiet, askChest)` call of the station sub-step). The only failure is the known root-only `SoulStoreTest.persistCursorFailure…`.
+- **Sandbox check (not run: cloud session).** A bot with an empty pack told `/bot craft <bot> ladders 3` next to an owner chest with at least 17 oak logs (reserve 16) and a crafting table in reach: one prompt, `… asks to take 1 Oak Log from the chest at … to make 3 ladders.`; on `[Allow once]` the log shows `request-bundle … outcome=OPENED`, one `transfer … moved=1`, `withdraw-bundle … result=MOVED moved=1`, then `ensureSticks` makes 8 sticks from the 4 planks and 3 ladders appear; with sticks in the chest too the prompt asks for `7 Stick`; with planks instead of logs, `4 Oak Planks`. Also worth a look: `torches 8` with coal and sticks in the chest (`2 Coal and 2 Stick`, no table needed), `bed` with white wool and logs and no table near (`3 White Wool and 2 Oak Log … to make a bed and a crafting table`), `shield` (`6 Oak Planks and 1 Iron Ingot`), `bucket`, `furnace` with cobblestone, `chest`, and a `[No]` on any of them ends that craft with the one `Okay, I won't take …` line.
+
+## Chest asks while crafting: the one combined ask is wired into the tool craft (2026-11-05, unreleased)
+
+Stacked on the pure layer below (PR #30). Bradley's ruling of 2026-10-23: a crafting bot short of materials works out everything the craft needs and asks the chest once; one approval covers the set. This wires it for the most common worker craft, the tool craft (`craftToolWithMaterial`: every pickaxe/axe/shovel/hoe/sword from `ToolProvisionService`, the idle stone upgrade and `/bot craft`). Nothing else changes: ladders, beds, torches, shields and the rest still pull per item.
+
+- **The flow one craft now takes.** Before the station and the stick sub-step, `CraftingHelper.askChestForToolMaterials` gathers in one server-thread read (`gatherBundleInput`, through `SupplyServerHop` from a worker) the bot's own counts per pool (planks, logs, sticks, the head item) and, per chest within `CHEST_SEARCH_RADIUS` (in reach only on the server thread), every stack of those pools with what the supply policy could grant of it (`grantableEstimate`, the 16-per-material reserve already out). The recipe lookup is the hard-coded one the helper already uses (`CraftBundleAskPolicy.toolRecipes`: tool = heads + sticks, 2 planks → 4 sticks, 1 log → 4 planks, 4 planks → table), wrapped in a synthetic set that adds a crafting table when none is near. `CraftSupplyNeedPolicy.plan` runs per chest on the caller's thread; `CraftBundleAskPolicy.chooseChest` picks the first complete plan, else the nearest chest with anything to give. Each pooled line ("7 planks") is split across that chest's exact stacks (`splitLine`), and `SupplyWithdrawals.withdrawBundle` (new facade method) runs the ask: per line the same ticket logic as a single withdrawal, then ONE `SupplyRequestService.requestBundle` (new entry point, one `readChest`, `ledger.openBundle`, one prompt in `SupplyBundlePromptPolicy`'s words with the same three buttons). On yes every granted line is redeemed through the unchanged `redeem` → `transferNow`; taken logs become the planks the plan counted on (`ensurePlanksFromLogs`); then the existing station, stick and plank steps find everything in the pack and the craft runs.
+- **What the owner sees** (sandbox target, empty bot, a chest with logs and sticks, a table near): `Jake asks to take 1 Oak Log and 2 Stick from the chest at 10, 64, 10 to make a wooden pickaxe. [Allow once] [Always: common supplies, this chest] [No]`. With no table near: `… 2 Oak Log and 2 Stick … to make a wooden pickaxe and a crafting table.` A chest with planks is asked for planks, not logs; a bot holding logs makes its own planks and asks only for sticks. The reply to a bundle names every line (`Allowed: Jake may take 1 Oak Log and 2 Stick from that chest, this once.`).
+- **WaitMode.** The facade already had `WaitMode.UNTIL_ANSWERED`, which `withdrawFromNearbyChests` never used. The bundle uses it off the server thread: the worker polls the ledger every 500 ms (never the world) until the one prompt settles or its 30 s lifetime (+2 s slack) runs out, with `/bot stop` (`TaskService.isAbortRequested`) ending the wait, then takes every granted line in one more server step. That step runs only the lines the first step left waiting or ready (`SupplyWithdrawalPolicy.bundleLineSettled`): a line already moved or refused keeps its result. On the server thread nothing is asked at all: `askChestForToolMaterials` returns `CONTINUE` before the gather and the per-item pulls run exactly as on main. The one server-thread caller is the idle stone upgrade (`BotIdleHobbiesService.maybeHandleIdleStoneToolUpgrades`, from `onServerTick`); it cannot wait, and it retries no sooner than 120 s, after the 60 s grant has expired, so a prompt it opened would never be redeemed and would reopen on every retry. Only worker-thread crafts get the combined ask.
+- **No, or no answer: one line, and no other material is tried behind the owner's back.** `SupplyWithdrawals.BundleResult.why()` (`BundleWhy`: owner declined / no answer / other) drives `CraftBundleAskPolicy.afterBundle`. `Okay, I won't take 1 Oak Log and 2 Stick from the chest, so I can't make a wooden pickaxe right now.` / `No answer about … so I'll leave a wooden pickaxe for now.` Throttled through `sendCraftTableNeededOnce` for automatic crafts; a strict `/bot craft stone_axe` carries it as its shortfall line. `craftToolWithMaterial` returns the new `SUPPLY_DECLINED` sentinel and `craftToolMaterialAware` stops there. Busy, no owner, chest unreadable or the service down keep today's per-item path and today's lines.
+- **Rulings made here (to confirm):** (1) A material no nearby chest can complete (its head, or for wood planks-or-logs, still missing after the chest) is skipped without asking for its sticks, so a bare `/bot craft pickaxe` no longer asks for sticks "to make a diamond pickaxe" on its way down to wood (cost if wrong: a bot that could have had the head from a second ask elsewhere skips the material). (2) The table's four planks join the same ask when no table is near. (3) The nearest complete chest beats a nearer partial one; with none complete, the partial ruling of PR #30 applies (ask for what the nearest chest has, name the rest). (4) A refused or lapsed bundle ends the whole tool craft, not just one material.
+- **Threading.** World and chest reads, the item-key and stock reads, the ledger open, the prompt and every transfer run on the server thread (`requestBundle`/`transferNow` refuse off it, as before). The plan, the chest choice and the line split are pure and run on the caller's thread. The wait is a worker-thread poll of the synchronized ledger; `SupplyWithdrawalPolicy.effectiveMode` still turns `UNTIL_ANSWERED` into `NONE` on the server thread with one WARN. `ensurePlanksFromLogs` after a move runs where the existing `ensurePlanksAvailable` already ran it (the caller's thread).
+- **Cost.** One extra server hop per tool craft that has a chest near (the gather), one prompt instead of two to four, one INFO line per bundle in `frens-supply` (`withdraw-bundle …`, `request-bundle …`) and one in `crafting-helper` (`Craft bundle for …`).
+- **Review fixes (same day, before merge).** (1) *"No answer" was unreachable; a lapsed prompt read as the owner's refusal.* The wait saw `pending=false` the moment the 30 s prompt expired and settled; the settle step then found a live ticket (90 s lifetime) neither permitted nor pending, dropped it (`DROP_NOT_PERMITTED`) and reported `OWNER_DECLINED`, so the bot said "Okay, I won't take …" to a question nobody answered. The ledger sets its reject cooldown on an explicit No only, so `bundleWhyOfTicket(step, rejectCooling)` now reports `OWNER_DECLINED` only while `SupplyRequestLedger.isRejectCoolingDown` (new query, through `SupplyRequestService.isRejectCoolingDown`) is active for that bot, chest and item id, else `NO_ANSWER` ("No answer about … so I'll leave … for now"). (2) *A line already moved could be asked for again.* The settle step re-ran every line: a line a live grant covered in the first step (MOVED, ticket dropped) had no ticket and nothing pending, so it was requested again for items the bot already held and left a new prompt open. `bundleStep` now takes the step before the wait and carries every settled line (`bundleLineSettled`: MOVED or REFUSED) with its own why (`BundleResult.lineWhys`, new); a timeout or abort after the first step refuses only the unsettled lines (`BundleResult.unsettledRefused`) instead of reporting `moved=0` for a set that partly moved. (3) *The server-thread caller never redeemed*: see WaitMode above; the idle stone upgrade keeps the per-item path. (4) `requestBundle` merges lines by exact item, which shifted the ledger's outcome indices against the asks; `bundleStep` now looks each ask's outcome up by `ItemKey`.
+- **Known limits (left as is).** The stop line names the requested quantities, not the approved ones (a normalized "2 Stick" ask the owner saw as 2 is read back from the ask). A mixed-result set says "I won't take <all lines>" even when one line moved and another was refused. `ensurePlanksFromLogs` after a move mutates the inventory on the caller's thread, the pre-existing pattern of `ensurePlanksAvailable`. Two asks for the same exact item in one bundle share one ticket and one grant; `CraftingHelper` never builds such a pair (`findPullCandidates` aggregates per exact item per chest).
+- **Limits / left.** Only the tool craft is bundled; `craftLadders`, `craftBed`, `craftTorches`, `craftShield`, `craftWithPlanks`, `craftSimple`, `craftCobbleBlock` still ask per item through `withdrawFromNearbyChests` (unchanged, `WaitMode.NONE`). The recipe function is the helper's own table, not the recipe manager. After a bundle the old per-item sub-steps still run and can log a refused request when counts come up short (the prompt cooldown blocks a second prompt). `CHEST_PULL_PENDING` is not updated by the bundle: a later per-item pull redeems the bundle's tickets through the facade's ticket book instead. A chest that is 17+ blocks away by the time the owner answers is walked to once (`moveNearBlock`), not re-chosen.
+- **Tests:** 3901 → 3937 (+36: `CraftBundleAskPolicyTest` 20 (the sandbox plan, the table, planks over logs, own logs first, hopeless materials, chest choice, line split, the words), `SupplyBundleWithdrawalPolicyTest` 10 (the kinds, the whys, the explicit-No-versus-lapse rule and the settled-line rule from the review), `SupplyRequestLedgerBundleTest` +1 (`isRejectCoolingDown` after a No, not after a lapse), `CombinedChestAskWiringTest` 5 (now also the server-thread early return, the carried lines, the cooldown check and the item-key lookup)). `SupplyEntryPointTest` now guards `requestBundle`/`evaluateBundleRequest` and lists `withdrawBundle` as the facade's fourth public static; `ToolSearchCancellationWiringTest` follows the shared wait loop (`awaitAnswer` is now generic, the single-item wait delegates to it). `SupplyBypassClosedTest` unchanged: no new container access (the gather reuses `findPullCandidates`). The only failure is the known root-only `SoulStoreTest.persistCursorFailure…`.
+- **Sandbox check (not run: cloud session).** A bot told to craft a wooden pickaxe with an empty inventory, next to an owner chest holding at least 18 logs and 18 sticks (the material reserve is 16 of each) and a crafting table in reach: `/bot craft <bot> wooden_pickaxe` asks once (`… 1 Oak Log and 2 Stick … to make a wooden pickaxe.`); on `[Allow once]` the log shows `request-bundle … outcome=OPENED`, two `transfer … moved=` lines, `withdraw-bundle … result=MOVED moved=3`, and the bot crafts; on `[No]` it says the one `Okay, I won't take …` line and stops; left unanswered 30 s it says the `No answer about …` line. Also worth a look: the same with no table near (asks for 2 logs), a chest with planks only (asks for 5 planks), and `/bot craft <bot> pickaxe` with that chest (diamond, iron and stone are skipped silently, wood is asked).
+
+## Chest asks while crafting: the pure layer of "one combined ask" (2026-11-05, unreleased, not wired)
+
+Backlog P2 (M), ruled 2026-10-23: the bot works out everything a craft needs and asks the chest once; one approval covers the set. This commit builds and tests the decisions only. Nothing calls them yet, so in-game behaviour is unchanged.
+
+- **`CraftSupplyNeedPolicy`** (new, pure): plans one craft (or a set of needs) against a recipe function (one chosen variant per item; variant choice stays in `CraftingHelper`), what the bot carries, and what the chest could grant (`grantableEstimate`, reserve already out). Per ingredient: what the bot carries, then a craft from its own stock alone if that covers it fully, then the chest as-is ("3 planks", not "1 log"), then a craft with the chest, then missing. Batch surplus is reused. Depth cap 3 and 6 lines; overflow lines go to missing, flagged `truncated`; cycles and uncraftable items count as missing.
+- **`SupplyRequestLedger.openBundle`** (new method): one pending prompt holds a list of lines. `respond` grants or refuses every line at once. A No puts each item on reject cooldown and withdraws each grant. The grants are still one per item, spent through the unchanged `consumeGrant`, so the transfer path does not change. Lines the policy refuses, lines a live grant already covers, and lines the owner recently refused are left out and say why. `Response` gains `lines` and keeps a two-argument constructor. A single-item `open` is still its own path; a one-line bundle decides the same way (tested).
+- **`SupplyBundlePromptPolicy`** (new, pure): the decision (nothing needed / ask all / ask partial / nothing to ask) and the text: "Jake asks to take 3 Oak Planks and 2 Stick from the chest at 10, 64, 10 to make a Wooden Pickaxe. Still missing: 3 Iron Ingot." A single line with no purpose and nothing missing keeps today's `SupplyChestRules.promptText` wording. Also the hover text, the replies and the "chest has none of it" line.
+- **Rulings made (to confirm):** (1) Partial chest: ask only for what the chest has and name what's still missing in the same prompt. Cost if wrong: the bot takes part of a set it can't finish yet. (2) The bot crafts from its own stock before asking: if it carries logs, it makes planks instead of asking for the chest's planks. Cost if wrong: the bot spends its own logs. (3) A recently refused item is dropped from a bundle, not re-asked. (4) "Always" covers every eligible line, including ones refused earlier, as `open` does.
+- **Limits / left for the wiring PR:** `CraftingHelper` must build the recipe function from the recipe manager and the chest counts, replace the per-material `withdrawFromNearbyChests` calls in `ensure*` with one planned ask, and carry a WaitMode to `craftGeneric`. `SupplyWithdrawals` and `SupplyRequestService` need a bundle request/prompt/redeem (one prompt, one ticket, per-line `transferNow`). Each skill caller then picks a WaitMode. That is more than six production files, and `CraftingHelper` is shared, so it is a separate change.
+- **Tests:** 3857 → 3901 (+44: `CraftSupplyNeedPolicyTest` 19, `SupplyBundlePromptPolicyTest` 8, `SupplyRequestLedgerBundleTest` 17). The existing `SupplyRequestLedgerTest` passes unchanged. The only failure is the known root-only `SoulStoreTest.persistCursorFailure…`.
+- **Sandbox check:** none needed for this commit, which has no runtime callers. The wiring PR needs one: a wooden pickaxe from a chest that has planks only, one that has planks and sticks, and one that is partly stocked.
+
+## "/bot follow stop" or "/bot stay" during a task is no longer undone when the task ends (unreleased, 2026-11-05)
+
+Found by the independent review of the craft/Quick Store follow fixes, pre-existing for every skill: a task takes the bot out of FOLLOW when it starts (`SkillManager.suspendFollowMode`) and restores follow when it ends (`resumeFollowMode`). During the task the bot is not in FOLLOW, so `/bot follow stop` found nothing to stop, and the resume then restarted follow against the player's instruction.
+
+- New `FollowResumeVeto` (pure, per bot). `/bot follow stop` and `/bot stay` record a veto while a task holds the bot; `resumeFollowMode` consumes it and stays idle (log `task-resume skipped ... reason=player-stopped-follow-during-task`); each new suspend clears a stale veto. `/bot stop` already aborts the task, and the follow toggle already aborts and sets follow itself, so neither needed it.
+- **Cost:** none expected; a veto is only recorded while a task runs and applies to that task's resume.
+- Tests 3857 → 3861 (`FollowResumeVetoTest`, including source-reading wiring). **Sandbox check:** the bot following you, start a skill (e.g. woodcut), `/bot follow stop` mid-task: when the task ends the bot stays put.
+
+## Static maps shared across threads made safe (2026-11-05, unreleased)
+
+An audit of the 102 static `HashMap`/`HashSet`/`ArrayList` fields found four that more than one
+thread writes. Skills run on per-bot worker threads, so two bots on the same skill write these
+at once. The rest are filled once at class load, client-only, server-thread-only or already
+locked.
+- `HotbarLockService`: the ride-sync tick (server thread) locks a bot's hotbar slot while skills
+  read the lock from workers (`FarmSkill`, `BotActions.selectHotbarSlot` from dirt, hunt and
+  woodcut), and an expired lock was cleared from the worker. It had three problems:
+  - a server-thread `put` raced a worker `remove` on a plain map;
+  - slot, expiry and reason sat in three maps, so a worker could see a lock with no slot yet;
+  - expiry cleared unconditionally, which could delete a fresh lock set in between.
+  The state now lives in a new pure `HotbarLockTable`: one immutable record per bot in a
+  `ConcurrentHashMap`, removed on expiry only if it is still the record that was read.
+- `WoolSkill` (`LAST_SEEN_SHEEP`, `EXPLORED_ZONES`), `CollectDirtSkill`
+  (`LAST_INVENTORY_FULL_MESSAGE`, `LAST_ESCAPE_ATTEMPT`) and `RoofAccessService.roofPillars`
+  (build worker) are now `ConcurrentHashMap`s. Keys are per bot and each bot runs one skill at a
+  time, so the swap is enough for the outer maps. No key or value is ever null (checked at
+  every call). Inner collections were made safe too: `/bot stop` interrupts a worker and a new
+  skill can start for the same bot while the old one unwinds. The wool explored-zones map is a
+  `ConcurrentHashMap`, and the roof-pillar list is a `CopyOnWriteArrayList` (a handful of
+  entries).
+
+Left as is (cosmetic): two log-cooldown races can let one extra "HotbarLock: blocked" line through
+inside 40 ticks, or hold back the first one for up to 40 ticks. Roof descent now reads the last
+pillar from a snapshot, so a pillar removed by the old worker can't make it throw.
+
+Costs and limits: the failure was rare (two bots on the same skill at the same moment, or a hotbar
+lock expiring as ride sync re-locks it), so no field report maps to it. Its symptom would have
+been a lost lock, a lost cooldown, or a corrupted map throwing from a skill. Tests:
+`HotbarLockTableTest` (7, including a source check that the five fields are concurrent). No
+sandbox check needed beyond the usual: hotbar lock behaviour is unchanged when only one thread
+touches it.
+
+Also: the hotbar lock map is cleared at SERVER_STOPPED (`HotbarLockService.resetSession`). A singleplayer quit keeps it while the next world's ticks restart at 0, so a lock taken late in one world held a bot's slot for hours in the next.
+
+## Skill workers no longer spawn entities, set blocks or teleport off-thread (2026-11-05, unreleased)
+
+An audit of skill code for world, inventory and entity changes made straight from a skill worker
+found these, none of them on the existing "pre-existing deferred" list (`MovementService` tool
+swaps, desperate eat, `CraftingHelper`/`BotActions` inventory swaps, `rescueFromBurial`,
+`moveRelative`). Each now runs on the server thread through `BotActions.callOnServerThread`,
+which runs inline when already there:
+- **`FlareSkill`** spawned the firework entity and split its stack on the worker, the same
+  off-thread `spawnEntity` class as the C2ME `ConcurrentModificationException` crash fixed
+  earlier. The slot is now re-checked on the server thread (the walk to open sky took time).
+- **`TorchPlacer.placeTorch` / `replaceTorchAt`** set the torch block, swapped the hotbar and
+  decremented the stack from the dirt, strip-mine and shovel workers. Both now hop, which covers
+  all 9 call sites.
+- **Planting:** `FarmSkill` (plant, repair replant, water pickup), `HarvestCropSkill` (replant,
+  plant empty farmland) and `PlantSeedsSkill` called `interactBlock` from the worker. That call
+  sets blocks and shrinks the held stack. A new `BotActions.interactBlockAndSwing` does the use
+  and the swing on the server thread. The water pickup runs as one hop.
+- **`HovelPerimeterBuilder`** teleported the bot onto a pillar top from the shelter worker (two
+  sites). This is now `snapToOnServer`.
+- **Drops:** `HuntSkill.jettisonDisposables` and `ShelterSkill.ensurePickupSlot` spawn item
+  entities. Both now hop, synchronously, because the callers check free space right after.
+- **`WoodcutSkill.craftPlanksForScaffold`** edited the inventory on the worker. It also lost
+  planks when the inventory was full: logs were taken, and the planks `insertStack` could not fit
+  were discarded. It now hops, drops any leftover planks at the bot's feet with a warn
+  line, and counts only planks that went in.
+
+Costs and limits:
+- Each hop waits for the server thread for up to 0.75–1.5 s. If the tick is that late, the call
+  reports failure (no flare, `FAILED` torch, `FAIL` interaction, 0 planks). The queued task is
+  cancelled if it has not started (`ServerThreadCallPolicy`), so only work already running at
+  that moment completes after the failure. Worst case: a flare launches while the skill reports
+  it could not. A late hovel pillar snap is retried once. If it misses again, the bot carries on
+  uncentred, as it already does when no perch resolves.
+- `ShelterSkill.ensurePickupSlot` uses `BotActions.callOnServerThread` rather than the skill's
+  own `callOnServer`. The latter gave up after 200 ms without cancelling, so a late tick could
+  drop build blocks after the skill had moved on.
+- Hotbar selection before these calls (`selectHotbarSlot`, `ensureHotbarItem`, `selectBestTool`)
+  still runs on the worker. That is the recorded inventory-swap deferral, unchanged.
+
+Tests: `OffThreadMutationWiringTest` (6, source wiring, including no sleep inside the new hops). Needs a sandbox smoke test: `/bot skill
+flare`; dirt or strip-mine in the dark (torches go up); farm and harvest (seeds planted,
+replanted); a hovel build with a roof pillar; woodcut needing scaffold planks with a nearly full
+inventory (watch for `Scaffold planks: inventory full, dropped`).
+
+## Hotbar selectors run on the server thread (2026-11-05, unreleased)
+
+Closes the "off-thread inventory mutation in `BotActions`" deferral (1.1.2xx deferred list). In
+1.1.289, `selectHarvestToolOrHands` started hopping to the server thread. The other public
+selectors now do the same: `selectBestWeapon`, `selectBestMeleeWeapon`, `selectBestTool`,
+`ensureHotbarItem` and `selectHotbarSlot`. They swap stacks and change the selected slot, and
+skills call them from workers. That covers fishing, woodcut and woodcut cleanup axe equipping,
+wool shears, farm mining, hunt melee weapons, and every placement path that selects a hotbar slot
+first. Each now runs inline on the server thread and waits for it (up to 750 ms) from a worker.
+A server task that has not started when the wait ends is cancelled.
+
+Costs and limits:
+- From a worker, each call now waits for the next server tick (about 50 ms at 20 TPS), so a
+  placement that selects and then places waits about two ticks instead of one.
+- If the server stalls for more than 750 ms, the selection is skipped (false, or no change for
+  `selectHotbarSlot`) and the caller carries on with what is in hand, as for harvest tools today.
+- Eating: `HealingService.consumeFood` (auto-eat, also the recorded "desperate eat swaps slots on
+  the worker" deferral) and `HuntSkill.consumeInventoryFood` now swap, select and use in one
+  server-thread hop. Split across threads, a selection that timed out would have left the old
+  item in hand, and `useSelectedItem` would have used it: emptied a bucket, thrown a pearl, drawn
+  a bow. Found in review.
+- `CraftingHelper`'s own inventory swaps, and the local `selectHotbarSlot`/`swapStacks` helpers
+  in `FarmSkill`, `HarvestCropSkill` and `PlantSeedsSkill`, are not changed here.
+
+Tests: `BotActionsSelectorHopWiringTest`. Needs a sandbox smoke test: fish, woodcut, shear sheep,
+hunt, and place blocks (shelter or bridge), watching for wrong-item use or slowed placement.
+
+## Farming skills' private hotbar helpers run on the server thread (2026-11-05, unreleased)
+
+`FarmSkill`, `HarvestCropSkill` and `PlantSeedsSkill` keep their own hotbar helpers outside
+`BotActions`, and these changed the inventory from the skill worker:
+- `selectHotbarSlot` sets the selected slot and the hand stack, and syncs the screen handler;
+- `ensureHotbarAccess`, `ensureSeedHotbar`, `findAnySeedHotbarSlot` and `ensureAnySeedHotbar`
+  swap a stack into the hotbar.
+
+Each now runs on the server thread, inline when already there. That covers the farm water and
+seed paths, harvest replanting and plant-seeds. On a timeout (750 ms) the slot helpers return
+-1, which the callers already handle as "item unavailable", and selection is skipped.
+
+Review fixes: callers end their planting pass on -1 ("Seeds disappeared", "no seeds available"),
+so a single server stall over 750 ms (autosave, chunk generation) would have ended planting for
+the run. The slot lookups now go through the new
+`BotActions.callOnServerThreadRetrying`/`ServerThreadCallPolicy.callRetrying`, which retries
+once on a timeout and never retries a real answer. Only two stalls in a row read as "no
+seeds". `FarmSkill.ensureHotbarAccess` returns a slot that is already in the hotbar before any
+hop. `ScaffoldSlotPolicy.resolveHotbarTarget` returns that slot whatever the lock, so this saves
+the hop in the stray-water scan and most bucket re-selects.
+
+Costs and limits: about one server tick per helper call from a worker. The interactions after
+them are already hopped by the off-thread mutation fix (planting) or already ran in
+`server.execute` (water scooping). Tests: `FarmHotbarHelperHopWiringTest` (2), `ServerThreadCallRetryTest` (4). Needs a sandbox smoke
+test: farm (till, plant, water), harvest with replant, plant seeds from the main inventory.
+
+## Three server-thread freezes removed (2026-11-05, unreleased)
+
+From an audit of code that sleeps or waits on the server thread:
+- **"Map village" froze the server for 5 s and lost the villagers.**
+  - The cause: the packet handler runs on the server thread, and
+    `VillageFortificationLayoutService.detectVillagePositions` posted the villager scan to
+    `server.execute` and then waited 5 s for it. A task posted to the waiting thread cannot run, so
+    every call waited the full 5 s and built the layout with no villagers.
+  - The fix: the scan now goes through `ServerThreadCallPolicy.call`, which runs inline on the
+    server thread and still hops from a worker.
+- **Feeding a hurt mount froze the tick for up to ~1 s.** Ride sync calls
+  `AnimalFeedingService.feedIfNeeded` from the server tick. Its loop fed up to 6 items with
+  `Thread.sleep(160)` between them. On the server thread it now feeds one item, then schedules the
+  next about 3 ticks later (`TaskService.runOnServerAfterTicks`) while the animal is still hurt, up
+  to the same 6. Workers keep the old loop.
+- **`/bot come` with "teleport during skills" on froze for seconds.** Within 30 blocks the
+  movement service walks before it teleports, and the command runs on the server thread, where
+  that walk sleeps (up to ~2.4 s direct walk plus 3 s pursuit). Within 30 blocks (new
+  `ComeTeleportPolicy`, the same band `MovementService.moveTo` uses), `/bot come` now uses the
+  tick-driven come-walk, as it does when teleport is off. Farther, it still teleports.
+
+Costs and limits:
+- A near `/bot come` with teleport on no longer falls back to a teleport when the walk is blocked.
+  It keeps re-planning, like follow, until it arrives or you call it again from farther away.
+- Mount feeding paces at ~150 ms instead of 160 ms.
+- Not changed here:
+  - the return-to-base door traverse (recorded deferral, waiting for the WARN tripwire's
+    evidence);
+  - the respawn restart sleep (the area of the earlier open PR on respawn).
+
+Tests: `ServerThreadNoBlockTest` (4). Needs a sandbox check:
+- "Map village" from the base UI near a village: no freeze, and villagers in the layout.
+- Mount a hurt horse with its food: no hitch, several feeds.
+- `/bot come` with teleport on from 10 blocks: the bot walks, no freeze.
+
+## Hunt and fishing sessions belong to their world (2026-11-05, unreleased)
+
+`config/frens/hunt_sessions.json` and `fishing_sessions.json` hold one entry per bot for every
+save, keyed by the bot's UUID alone. So a hunt paused at sunset in world A showed up in world B
+(same bot names, same UUIDs):
+- `SkillResumeService.isHeldForSunrise` kept resume records alive;
+- the sunset service tried an auto-resume every sunrise;
+- the soul snapshot reported a hunt from another world;
+- a resumed hunt walked to world A's hunt origin.
+
+Saving in B also overwrote A's session.
+
+Entries are now keyed `worldKey|botId` (`SessionWorldKeyPolicy`, the save fingerprint from
+`BotWorldStateService.currentWorldKey`). Lookups use only this world's entry. The file format is
+unchanged otherwise.
+
+Costs and limits:
+- Entries written before this change are keyed by the bot id alone. They still match in any world
+  (the old behaviour) until that bot's next save replaces them with this world's key, so a stale
+  legacy session can appear once more after the upgrade. Sessions also expire after 24 h.
+- Before a server is up (no current world), the bare id is used.
+
+Tests: `SessionWorldKeyPolicyTest` (4). Needs a sandbox check: start a hunt in world A, let sunset
+pause it, quit, open world B. No resume at B's sunrise. Return to A: it resumes there.
+
+## Save files written atomically; corrupt ones quarantined instead of wiped or crashing (2026-11-05, unreleased)
+
+A read-only audit of the stores under `config/frens/` and the per-world inventory snapshots found three loss paths: files were rewritten in place (a crash or a full disk mid-write left a truncated file), a truncated file then threw Gson's `JsonSyntaxException` out of a load that caught only `IOException`, and several loads reset their in-memory state on any failure so the next save wrote an empty store over the file that had failed to load. `settings.json5` (bot ownership, profiles, spawn points, controls, quest memory) was the worst case: its parse error escaped `Frens.CONFIG`'s static initialiser and the game would not launch, and an empty file made `fromJson` return null and NPE the same way.
+
+New `GameAI/services/AtomicStoreWriter` (pure `java.nio`, unit-tested): the content goes to a temp sibling in the same directory, is `force(true)`d, then renamed over the target with `ATOMIC_MOVE`; `AtomicMoveNotSupportedException` or `AccessDeniedException` (Windows antivirus or indexer holding the target) falls back to a plain replacing move once; the temp file is deleted on every failure path and the `IOException` reaches the caller, which keeps its own logging. `writeString`, `writeBytes`, `write(Body)` and `writeWithBackup(target, backup, body, onBackupFailure)`. The pre-existing inline copies of the pattern (`BotWorldStateService`, `FortificationPersistenceService`) were left alone.
+
+Loads mirror `FortificationPersistenceService`: catch `IOException | RuntimeException`, hand the file to `UnreadableStoreFile.quarantineIfCorrupt` (a corrupt file is renamed to `<name>.bad-<stamp>` and the store starts empty; a file that could not be read for I/O reasons is left in place and a `loadFailed` gate refuses every save for the session, so the unreadable original is never overwritten). Stores changed:
+
+- `ManualConfig`: saves through the writer; an empty file is treated as corrupt; nothing escapes `load()` (ERROR log, quarantine, defaults). A quarantined settings file means bot ownership and controls start from defaults for that launch, with the original kept beside it.
+- `BotHomeService`, `BotChestRegistryService`: writer plus the load gate, so the debounced save or next flush cannot wipe homes, bases and chest claims of every world.
+- `ProtectedZoneService`, `LockableBlockService`: writer, a save lock, per-world failed sets, and the parse exception no longer escapes the `SERVER_STARTED` lambda (which has no try/catch and would abort server start). `LockableBlockService.saveAllWorlds` at shutdown can no longer write `[]` over a file that failed to load.
+- `MountPersistenceService`: writer, a `LOCK` around load and flush, `volatile loaded`, concurrent maps for the state (recordMount and clear run from join and leave hooks); a half-parsed file is dropped rather than written back.
+- `NavigationArtifactService` pending travels: writer plus the gate; the parse exception no longer escapes server start.
+- `FishingSessionService`, `HuntSessionService`: `flush()` serialised `DATA` outside `LOCK` while mutators held it; it now serialises and writes under the lock.
+- `BotInventoryStorageService`: the snapshot is written to a temp file and forced first; only then is the still-intact primary copied to `.bak` and the temp renamed over the primary, so a failed write leaves both copies as they were (before, two failures in a row destroyed both). The audit suggested renaming the primary to `.bak` instead of copying; that was not done because `delete()` leaves `.bak` behind and the loader ignores a lone `.bak`, so a crash between the two renames would have lost the snapshot. `snapshotItemCount` returns -1 for an unreadable file and the empty-save guard now protects it (it used to count 0, let the empty save through, and the copy step then overwrote the good `.bak` with the unreadable primary).
+
+Costs and limits: one `fsync` per save (milliseconds on an SSD; these stores save on debounce, on change or at shutdown, not per tick). A crash during a write can leave an orphaned `<name>.<random>.tmp` beside the store, harmless. A corrupt file is kept as `.bad-<stamp>` and the admin join notice lists it; the store does start empty for that session. Not touched: `BotZzzSleepService` (owned by another open PR) and the low-stakes stores (BotDeathRecord, Shelter, PlayerAlliance, WoodcutKnowledge, PassageAnchor, NavHazardCache). Tests: `AtomicStoreWriterTest` (replace, no `.tmp` left on success or failure, target never truncated, backup ordering) and `AtomicStoreWiringTest` (each store saves through the writer, catches `RuntimeException`, quarantines, gates saves). The sandbox runs as root, so the failure tests use a directory in the target's place rather than an unwritable directory.
+
+Review fix: the inventory `.bak` is refreshed only from a primary that can be read. Otherwise a save made after restoring from `.bak` would first copy the unreadable primary over the good backup, and a crash before the rename would leave no readable copy. The cost is one extra read of the small primary file per save.
+
+Review fixes:
+- *Only a parse failure quarantines.* In `ManualConfig`, `NavigationArtifactService`, `ProtectedZoneService` and `LockableBlockService`, the catch also covered migrations, world reads and the adoption-path write. A disk-full error on that write, or an exception after a good parse, would have quarantined a good file, or refused saves for the session with a misleading "could not read" notice. Now only the read and parse go to quarantine. A later step logs an ERROR and keeps what was read.
+- *The Windows fallback keeps the new content.* A non-atomic replace deletes the target before renaming. If the delete succeeds (an antivirus holding the file with share-delete) and the rename fails, neither file would have existed. The temp is now kept and its path is named in the error.
+- *Replaced files keep their POSIX permissions.* `createTempFile` makes the temp 0600, which would have silently dropped group/world read bits.
+- `MountPersistenceService` skips a JSON-null entry instead of refusing saves for the session.
+- Pending travels: each entry's post-arrival restore has its own try. A restore that still fails part-way refuses saves for the session, so the file is never rewritten without the entries that were not restored.
+- Permissions are copied to the temp after the write. Copying a read-only target's mode first made the write itself fail.
+
+Costs noted in review: each save now forces the temp file to disk on the calling thread. Inventory autosave runs about every 30 s per bot on the server thread, so that is a few ms per bot per save on a slow disk. The inventory save also reads the small primary once to decide on the backup.
+
+## Leaving a world no longer carries bot cooldowns into the next one (2026-11-05, unreleased)
+
+In singleplayer, quitting a world and opening another (or the same one) keeps the game process
+and every static field. The new integrated server restarts its tick counter at 0 and the bots keep
+their UUIDs. So per-bot gates stored as "not before tick N" or "already done on day N" in the old
+world held behaviour back in the new one for as long as the old world had run. These are now
+cleared at SERVER_STOPPED (`resetSession()` on each service):
+- sunset return and sunrise resume day gates (world A at day 40 suppressed both until day 40 in
+  world B);
+- emergency rescue cooldowns and pending arrivals;
+- mutual-aid gates, including the asked food chest (an old-world position), pending hand-offs and
+  engagements;
+- auto-hunt, auto-cook and fall-safety decision gates;
+- post-combat state (old-world positions the drop sweep could target);
+- every per-bot flee and shelter map, including shelter cooldowns, linger and exit ticks and the
+  active shelter.
+
+`DurabilityFallbackService`'s executor is now restarted at SERVER_STARTED like the others.
+Before, it was `final` and shut at SERVER_STOPPING, so after one world reload the durability
+fallback rejected every task for the rest of the game session.
+
+Costs and limits:
+- Clearing at stop drops nothing a new world could use. Shelters are restored from their own
+  store.
+- Review fix: skill-resume records are NOT cleared. The sunrise resume record is keyed on
+  persisted world time and dispatched with the new server's source, so a bot stopped at sunset
+  still resumes at sunrise after the player rejoins the same world. Also cleared, per the
+  review: mutual-aid check cooldowns and interaction ticks, the sunset pending sleep and active
+  sessions, and the combat flags.
+- Left out of this change:
+  - the hotbar lock map (it lives in the class rewritten by the open static-map PR, which takes
+    the same reset);
+  - hunt and fishing session files keyed by bot only, not by world (a persistence change, done
+    separately);
+  - memory-only references and low-impact tick maps (tree escape, powder snow, elytra).
+
+Tests: `SessionResetWiringTest` (3). Needs a sandbox check: play a world past day 2 with bots
+following, quit to title, open another world, and confirm the sunset return still fires on its
+first evening and `/bot` skills that use the durability fallback still work.
+
+## Voice engines and the model installer no longer hang or leave processes behind (2026-11-05, unreleased)
+
+Six confirmed outbound-I/O and child-process findings from a read-only audit of `GameAI/souls`, fixed on branch `claude/voice-io-deadlines`. No gameplay change, no config change, no version bump.
+
+**Dreamsleeve ack read is bounded.** `DreamsleeveVoiceEngine.sendRequest` connected and then did a blocking `channel.read(ack)` on the UNIX socket with no timeout, so a `tts_server.py` that accepted a request and never answered parked the single engine thread for good and voice went silently dead with nothing in the log. The channel is now non-blocking and connect, write and ack are each polled at 20 ms under one deadline, the same `synthTimeoutMs` deadline that `awaitRenderedFile` then continues with, so a line still costs at most the configured synth timeout even when the server is wedged, and the timeout kills and restarts the server like any other synth failure. The ack is still awaited rather than skipped, because the server writes it after taking the request and closing early would hand the Python side a broken pipe on every line. The fire-and-forget warm-up waits at most 2 s for its ack and swallows the timeout like its I/O errors. `DreamsleeveAckDeadlineTest` drives the new static `sendRequestLine` against a real UNIX socket: a silent server times out at the deadline, an acking server gets the request intact.
+
+**Engine `close()` kills directly.** All three engines (`PiperVoiceEngine`, `DreamsleeveVoiceEngine`, `PocketVoiceEngine`) submitted the kill to the engine thread, waited 1 s and then called `shutdownNow()`, which drops queued tasks. With a synth in flight the kill never ran, so warm Piper processes, `pocket-tts serve` and `tts_server.py` outlived a world reload and even JVM exit. The closer thread now calls `killAll()` / `killProcess()` itself after the executor wait, always, since `destroyForcibly` is thread-safe and idempotent. Piper's process map became a `ConcurrentHashMap` and the process handles are `volatile` so the closer walks a consistent snapshot. Cost: nothing on the hot path, one extra pass over the map at close.
+
+**Piper stdout read cannot block past the timeout.** `readLineWithDeadline` used `ready()` then `readLine()` on a `BufferedReader`, which blocks on a partial line and ignores interrupts. It now reads the raw pipe byte by byte through `available()` under the deadline (new pure helper `DeadlineReads.readLine`, mirroring `PiperInstaller.smokeTest`), decodes UTF-8 at the newline so paths with non-ASCII characters survive, skips blank lines as before, and fails fast when the child has exited with an empty pipe instead of waiting out the deadline.
+
+**Ollama detection cannot spin forever.** `OllamaModelInstaller.detect()` cast `openConnection()` to `HttpURLConnection`, which throws `ClassCastException` for a `file:` or `ftp:` base URL, and the `catch (IOException)` missed it, so the model-manager screen's detect thread died and the screen sat in DETECTING with no way out. The scheme is now validated up front (one check shared with `SoulSettings`), a rejected scheme reads as unreachable with a warning, and the HTTP block catches `RuntimeException` as well. A pull with a bad scheme fails with the same user-showable text, "The Ollama URL must use HTTP or HTTPS."
+
+**tar output is discarded.** `PiperInstaller.extract` started `tar` with `redirectErrorStream(true)` and nobody read the pipe, so more than 64 KB of output blocked tar until the 120 s timeout. Both streams now go to `Redirect.DISCARD` at the OS level. The failure message was fixed text already, so nothing is lost.
+
+**One Ollama endpoint builder.** `OllamaSoulProvider` used `baseUri.resolve("/api/chat")`, which drops a path prefix (a reverse proxy at `/ollama`), while the installer concatenated `base + "/api/..."`, so a trailing slash gave `//api/pull`. New pure `OllamaEndpointPolicy.endpoint(base, path)` strips trailing slashes, keeps a path prefix, substitutes the local daemon for a blank base and rejects non-HTTP schemes. Both callers and `SoulSettings` use it. `FilingSystem/ManualConfig.java` was deliberately not touched (two other open PRs change it).
+
+Limits: unbounded response reads and model-pull cancellation on stop are out of scope. The direct kill covers close paths only; a hard JVM kill still orphans a child, as before. Tests: `OllamaEndpointPolicyTest` (7), `DeadlineReadsTest` (9, fake stream and fake clock), `VoiceEngineShutdownWiringTest` (7, source wiring for the direct kill, the non-blocking ack, the byte-wise Piper read, the tar discard and the detect guard), `DreamsleeveAckDeadlineTest` (3, real UNIX socket, skipped where the JDK lacks them).
+
+Review fixes:
+- The Dreamsleeve warm-up ack now waits up to 120 s, not 2 s. If the server acks only after loading its model and rendering, a short wait would have sent the first real line into the load, timed it out, killed the server and looped. The wait runs on the engine thread. The old read had no bound.
+- A base URL pasted with a trailing `/api` is accepted, as the old `resolve()` call allowed.
+- The UNIX-socket test skips cleanly where there is no `/tmp`.
+
+## One bot's error no longer skips the others in the survival loops (2026-11-07, unreleased)
+
+Follow-up to the tick-handler guard (#56, which this branch is stacked on). That guard stops a
+failing handler crashing the server, but a failure still skips the rest of that handler's loop:
+every bot after the failing one. Three loops now guard each bot separately (`TickGuard.perBot`):
+- hazard escape (`BotHazardService`: standing in fire, on magma, near pufferfish);
+- eating (`BotEventHandler.tickHunger`);
+- autosave (`BotPersistenceService`). Here a failure for one bot used to skip the autosave of
+  every bot after it, the `LAST_SAVE_TICK` prune and the mount autosave, and a bot that failed
+  every tick would keep the later bots from being autosaved.
+
+Costs and limits:
+- The other ~55 tick loops still skip the remaining bots on a failure. These three were picked
+  because a skipped tick there costs health or saved data; the rest are dialogue, hobbies and
+  reactions, where a skipped tick is cosmetic. Wrapping them means editing each service, and many
+  of those files are in other open PRs.
+- The once-a-minute log limit is per loop, not per bot: if two bots fail in the same loop within a
+  minute, only the first is named and the second shows in the held-back count.
+
+Tests: `TickGuardTest` (4).
+
+## One failing handler no longer crashes the server (2026-11-05, unreleased)
+
+Fabric does not catch exceptions in event handlers. One escaping an END_SERVER_TICK handler, or
+the damage or death callbacks, ends `MinecraftServer.tick` and crashes the server (a "Ticking
+entity" crash for damage). An audit found about 60 such handlers registered by the mod and only
+about 9 that caught anything. No live crash was found, but any latent null or removed-entity bug
+in, say, hazard rescue, hunger, mutual aid or idle hobbies would have taken the whole server
+down.
+
+All of them now go through `TickGuard`. A RuntimeException is logged, with its stack trace the
+first time and then at most once a minute per handler with a count (`TickGuardLogPolicy`), and the
+server keeps ticking. This covers:
+- the 57 END_SERVER_TICK handlers in Frens.java, plus the group chat hint and supply request
+  ticks (59 in all);
+- ALLOW_DAMAGE (falls back to vanilla: the damage goes ahead);
+- AFTER_DAMAGE (the bot's apology for hitting a player);
+- AFTER_DEATH;
+- UseEntityCallback and AttackEntityCallback (both fall back to PASS, so the use or attack goes
+  ahead as vanilla would).
+
+A test fails if a new END_SERVER_TICK registration skips the guard, or if any of the five
+damage, death and entity callbacks in Frens.java loses it.
+
+Costs and limits:
+- A failing handler skips the rest of its own work for that tick: every bot after the failing
+  one in that handler's loop. That is not one bot only. Per-bot isolation inside the larger loops
+  (hazards, hunger, persistence autosave) is a follow-up.
+- A handler that keeps failing logs one ERROR a minute rather than crashing, so watch for
+  `frens-tick-guard` lines.
+- Errors such as OutOfMemoryError still propagate.
+
+Tests: `TickGuardTest` (3).
+
+## A drop sweep comes back for the drops after making room (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server. With a full pack, a drop sweep makes room
+by crafting a bundle, which can walk the bot to a crafting table. The sweep then looks for drops
+around the bot, not where it started. In the headless run the table was about 27 blocks from the
+drop, outside the 20-block radius, so the sweep ended (a DEBUG "no drops within radius" line) and
+the drop that started it stayed on the ground.
+
+After making room, a sweep that is more than half its radius from where it started now walks back
+there before it looks again (`SweepReturnPolicy`). Headless, the same setup logged "walked back to
+the sweep start … (arrived)" and picked up the 16 cobblestone.
+
+Costs and limits:
+- One extra walk when making room moved the bot more than half the radius; none when the bundle
+  was packed in place.
+- If there is no path back, it logs one line and the sweep continues from where the bot is.
+- The walk counts toward the sweep's time budget.
+
+Tests: `SweepReturnPolicyTest` (2).
+
+## A boxed-in bot answering /bot come crafts a pickaxe instead of digging bare-handed (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server (backlog: "Come tool crafting
+(verification)"). A bot sealed in stone with 4 oak logs, told to `/bot come`, launched the
+recovery stripmine and dug every block with bare hands (7.5 s a block, no cobblestone).
+
+Tool provisioning (`ToolProvisionService.ensurePickaxe`) only crafts a tool whose recipe is in
+the requester's crafting history, and that history is recorded against the player who gave the
+order, not the bot. The come-recovery skill ran with no request source, so it read the bot's
+own history, which held nothing useful. It now carries the commander as the request source, like
+a skill the player starts directly. Headless, the same setup crafted a table, sticks and a wooden
+pickaxe, then mined at 1.15 s a block and reached the commander.
+
+Costs and limits:
+- The two recovery skills (`stripmine`, `collect_dirt`) use the request source only for tool and
+  torch provisioning (`ensurePickaxe`, `ensureToolForKeyword`, `ensureTorches`), so the change
+  is limited to those crafts now being allowed by the commander's history, as for the same skill
+  typed by the player.
+- With no commander (none online) it falls back to the old behaviour.
+- A bot still won't craft a tool its commander has never crafted. That gate is unchanged.
+
+Tests: `ComeRecoveryRequestSourceWiringTest` (1).
 
 ## Repository clean-up: public and private split (2026-11-04)
 
@@ -2852,6 +3469,7 @@ per item → batch review → fix wave → re-review.
   pillar; `/bot come` on cooldown with hobbies off and a full inventory near a registered chest → one
   offload walk, then travel; a hand-packed diamond pickaxe in a bundle → mining pulls it out; no chest
   anywhere, leaves/sticks in inventory, furnace nearby → "dropped fuel into a furnace instead".
+
 ## Backlog run: bundle-aware inventory, Spells key → inventory tab, Silas persona, pillar-failure diagnostics, travel-wait; 1.1.204 (2026-09-04)
 
 Bradley asked for the six items I had listed as workable without him, in the order recommended.
@@ -9768,6 +10386,7 @@ Complements the existing `SkillResumeService` prompt ("I died. Should I continue
 - **Small shelter wall-mining follow-up (active footprint hardening + diagnostics):** After a fresh `latest.log` repro still showed `movement obstruction mine` chewing through newly placed `small_shelter` cobblestone wall columns, hardened the active construction guard instead of relying only on exact planned-block membership. `ConstructionProtectionService` now logs activation/clear events, tracks the schematic footprint bounds for the active task, and exposes a protection reason so movement logs can explain *why* a block was skipped. `BuildSchematicSkill` now passes the real perimeter build stations into the protection scope, and `ConstructionRecoveryService` now refuses to path directly into protected target cells during reach recovery (so it stops trying to stand inside the live shell and provoking obstruction mining in the first place). `MovementService` obstruction mining now logs `movement obstruction skip ... protection=...` when a candidate belongs to the active build. Verified with `./gradlew build -x test` (success; only the pre-existing `CraftingResultSlotMixin` warning remains).
 - **Incomplete schematic doorway spam fix (`small_shelter` follow-up):** Diagnosed the bizarre multi-door `small_shelter` result from runtime logs and confirmed the built-in blueprint in `SimpleSchematicBuilder` was sane. The malformed result came from an incomplete shell (`71/96` placed, with remaining `NO_SUPPORT` / `NO_LOS` / `OUT_OF_REACH` failures) followed by doorway post-processing that treated many unfinished 2-block wall gaps as valid entrances. Hardened `DoorwayAccessService` so doorway detection now requires a real supported opening with solid side jambs, and updated `BuildSchematicSkill` to skip doorway clearing/door placement entirely when a schematic finishes too incomplete to trust the perimeter. Final verification: `./gradlew build -x test` succeeds; only the pre-existing `CraftingResultSlotMixin` warning remains.
 - **Small schematic anti-self-sabotage hardening:** Added `ConstructionProtectionService` so active schematic footprints are registered per bot and generic movement obstruction mining will no longer chew through planned structure/support blocks during an in-progress build. `ScaffoldService` now publishes tracked scaffold positions into shared per-bot memory for the duration of a build and clears them correctly on teardown, letting movement/recovery code distinguish temporary supports from disposable terrain. `BuildSchematicSkill` now activates/clears that protection scope automatically around execution and also nudges generic fallback material order to prefer cobblestone before dirt for structure substitutions. On top of the mining guard, `ConstructionRecoveryService` now looks for stable nearby reach stances outside protected build cells before it tries to walk straight at an upper target, and schematic no-progress recovery in `BuildSchematicSkill` now rotates through precomputed perimeter build stations instead of sometimes picking the footprint centroid as a vantage point. This makes small shelter / small schematic roof work behave more like hovel/fortify perimeter building instead of pathing into its own active shell. Verified with repeated `./gradlew build -x test` runs (success; only existing mixin warning remains).
+
 ## 2026-03-06
 - **Generic schematic anchor resolution pass:** Tightened `BuildSchematicSkill` so preview-targeted builds no longer treat raw `targetY` as a literal schematic origin. The skill now detects the terrain floor under the requested build center, treats schematic layer `Y=0` as the default grade plane when present (falling back to the lowest occupied layer otherwise), preserves intentional upward offsets from locked previews, and resolves the final origin from that anchor before moving to the build corner. This gives `small_shelter` and other schematic builds a reusable site-prep baseline instead of repeatedly trying to place their first support layer into/under the ground. Follow-up cleanup in the same file removed a dead constant/import and replaced the `Map.merge(..., Integer::sum)` calls with null-safe lambdas so the file stays clean under current diagnostics. Build verified with `./gradlew build -x test`.
 - **Locked construction preview controls (first pass):** Construction previews can now be locked in place from the client so players can walk around them in 3D before committing. While a preview is active, `;` toggles lock/unlock. When locked, arrow keys nudge the preview by exactly 1 block in player-relative directions; `Shift+Up/Down` moves it vertically; and `Shift+Left/Right` rotates schematic-based builds in 90° steps. The preview HUD now shows lock state plus the new control legend, and locked previews no longer disappear just because the player turns the camera to inspect them.
@@ -9777,6 +10396,7 @@ Complements the existing `SkillResumeService` prompt ("I died. Should I continue
 - **Construction preview UX + looked-at bot wording polish:** Cleaned up the looked-at companion task text so raw build nouns now render as natural phrases (for example `building shelter` instead of awkward `is shelter` wording) via the shared task-name humanizer in `BotTaskPeekNetworkManager`. The client now also shows a persistent top-of-screen preview hint while a construction placement preview is active, including the selected structure label plus confirm/cancel guidance, instead of relying on short-lived actionbar flashes.
 - **Preview entry cleanup:** Removed the repeated delayed actionbar resend workaround from both construction preview entry points (`ConstructionScreen` and `BotPlayerInventoryScreen`) now that preview instructions are state-driven and persist until the player confirms or cancels placement.
 - **Hovel efficiency pass 1 (rollback-safe):** Started the first narrow optimization pass in `HovelPerimeterBuilder` without deleting the old path. Added explicit feature toggles for the new behavior, cached repeated floor-height scans at the same center point, reordered leveling stations by proximity to reduce unnecessary walking, and narrowed foundation-beam retries so repair passes focus only on corners that are still actually missing beam blocks while reusing known-good scaffold bases where possible. Follow-up compile cleanup removed a dead-code null check and replaced a few fallback corner positions with explicit `BlockPos` construction so the optimized pass builds cleanly under current diagnostics. Build verified with `./gradlew build -x test`, and the refreshed `frens-1.1.0-release+1.21.11.jar` was copied into the Prism instance mods folder for playtesting.
+
 ## 2026-03-05
 - **Construction menu readability + compact panel pass:** Refactored `ConstructionScreen` away from its floating full-screen text/buttons into a compact Base-style panel with a fixed header, darker in-panel background treatment, clipped scrollable content region, visible draggable scrollbar, and a reserved footer/help lane so section headings stay readable in bright or dark environments and hovered help text no longer collides with scrolled content or the Back button. Added an always-visible **Bases** quick link in the Construction footer and a reciprocal **Builds** quick link in `BaseManagerScreen` so players can hop between the two related menus without digging back through the inventory overlay.
 - **Construction preview/recovery UX pass (hovel anchor sync + no-bots restore flow):** Tightened three related construction/recovery pain points. `ConstructionScreen` actions now close fully back to gameplay instead of dropping players back into the inventory overlay, so selecting a construction job immediately returns control for world placement/inspection. Hovel placement now logs its full coordinate chain (look hit, preview center, safe goal, requested anchor, detected floor, resolved build center, and wall/roof blueprint bounds) and `shelter_look hovel` now passes the exact looked-at preview center into `ShelterSkill`, using the same forward-offset anchor math as the client preview plus a 9x9 hovel radius so the actual build footprint lines up with the visible preview instead of drifting to wherever the bot happened to stop. The client-side hovel preview now also snaps to the same floor scan the builder uses. Added a temporary missing-bots recovery flow in `FrensClient`: when known bot aliases exist but none are present in the current world, a short top-of-screen hint appears and `[-]` temporarily opens a lightweight restore menu that respawns a remembered bot in **Admin** mode without making the player remember/type the alias manually.
@@ -9787,6 +10407,7 @@ Complements the existing `SkillResumeService` prompt ("I died. Should I continue
 - **Actions menu follow-up (selective tooltips + Collect Dirt promotion + two-column trial):** Refined `BotPlayerInventoryScreen` after the first Actions cleanup pass by restoring **selective** player-helpful tooltips for non-obvious Actions rows (for example tether/leash behaviors, sunset return, cleanup, construction/base helpers, and `Collect Dirt`) without bringing back noisy duplicate hover text on obvious rows like Stop/Guard/Sleep. Promoted **Collect Dirt** to a first-class skill row instead of leaving it visually nested under Farming, and gave it its own distinct dirt icon. Also added a section-aware **two-column trial layout** for the full-width Actions tab: section headers and parameter-heavy rows stay full width, while simpler rows render in two columns to use the empty middle space more effectively. Scroll, hit-testing, and hover behavior were updated to match the new visual row model, and the build/deploy flow was re-verified after the experiment.
 - **Actions/tooltip UX cleanup (inventory + settings follow-up):** Reworked `BotPlayerInventoryScreen` so the **Actions** tab now uses the full overlay width while the Conversation pane stays visible only for **Dialogue** and **Admin**. Removed redundant hover tooltips from the quick grid and plain action rows, added grouped section headers plus clearer row icons in the expanded Actions list, wrapped long tooltip text to stay on-screen, and corrected the footer switch hint to the real `[` / `]` controls. Bot switching in the open overlay now uses the active header layout instead of a hard-coded `Conversation` width, which fixes the cramped hit area that could behave like a close click. Follow-up tooltip polish also raised hover delay slightly to 1.7s, resets tooltip timers when users click/scroll/toggle through controls, removed the ambiguous mini cycle glyph from `BotControlScreen` value chips, and brought the same delay/reset behavior to `AdminPlayerSettingsScreen`.
 - **Tooltip timing + guide/docs clarity pass (settings/admin/roadmap/regroup):** Reduced delayed hover tooltips from 2.5s to 1.5s across `BotControlScreen`, `AdminPlayerSettingsScreen`, and `BotPlayerInventoryScreen` so help text appears faster and more consistently. Rewrote vague settings/admin tooltip copy (notably Force-Place, recruitment, LLM/voice toggles, and learning-mode permissions) in plainer player-facing language. Added richer learning-mode help text in `BotPlayerInventoryScreen`, including operator-only explanation and roadmap pointer, and added a dedicated **Learning Mode (Admin)** topic to `BotGuideScreen`. Expanded the in-game roadmap topic with verified current/active/future buckets, refreshed shortcut docs (including proper single `\` display), and normalized visible spell/guide/hotkey wording to prefer **Regroup** while keeping legacy `/bot come` behavior intact. Synced external docs in `README.md` and `COMPANION_QUESTING_GUIDE.md` to reflect current optional AI/LLM infrastructure, Learning Mode v1, Goat Horn regroup access, and the high-level roadmap. Build/deploy re-verified after this pass.
+
 ## 2026-03-04
 - **Global dialogue mode controls + roadmap disclosure:** Added new world-level toggles in `BotControlScreen` and persisted config (`ManualConfig`) for **Global Text Dialogue** and **Global Voiced Dialogue** so users can disable text, voice, or both from general settings. Runtime gating now applies centrally: `ChatUtils` suppresses bot dialogue text when global text is off, overhead hologram text is suppressed through `CompanionOverheadDialogueService`, and voiced subtitle holograms are suppressed in `BotDialoguePlayer` when text is disabled. Voice playback now also honors a new global voiced toggle in addition to per-bot voiced settings. Implemented voice-only fallback behavior for missing mapped clips: when text is off but voice is on and a line has no mapped voice clip, chat text is still sent as fallback. Added the requested disclosure that current voice lines use a male voice set in the voiced-dialogue tooltip, and added a new high-level **Roadmap (High-Level)** guide topic in `BotGuideScreen` covering dialogue controls and alternate-voice prioritization on request.
 - **Microcopy consistency pass (Admin/Guide/Controls):** Polished wording across `BotPlayerInventoryScreen`, `AdminPlayerSettingsScreen`, `BotControlScreen`, and `BotGuideScreen` for clearer, consistent terminology. Key updates include renaming **Player Settings** to **Player Permissions** where applicable, standardizing recruitment/learning/admin action labels, tightening tooltip phrasing (including ascent `☀` defaults), and clarifying guidance copy in Bot Controls and Guide entries.
@@ -9868,6 +10489,7 @@ Complements the existing `SkillResumeService` prompt ("I died. Should I continue
 - **FortifyVillageSkill refactoring — FortifyEntombmentHelper extraction**: Extracted entombment recovery state tracking, surface-escape retry tracking, and carve-column cooldown management from `FortifyVillageSkill` (9901→9593 lines) into new `FortifyEntombmentHelper` (411 lines). Moved: `EntombmentRecoveryState`, `SurfaceEscapeRetryState` inner types; 4 constants; 3 state maps; 21 methods including `noteEntombment*`, `shouldPreferEntombmentEscape`, `isFortifyEntombmentCandidate`, `shouldSkipRepeatedSurfaceEscape`, surface-escape retry tracking, carve-column cooldown, and `isSealedFortifyEntombmentSurfaceEscapeCell`. Helper receives shared context (layout, nav scope, movement epoch) via setter methods called from `beginFortifyNavScope`/`endFortifyNavScope` and layout setters. `fortifyContextPrefix` became a static utility on the helper. All 35+ external call sites in the skill now delegate to `entombmentHelper.*`. Trivial predicate delegates (`isTrapLikeCell`, `canStandAt`, `isInsideCurrentFortificationHull`, `isAdjacentToCurrentFortificationHull`) duplicated in helper for self-containment.
 - **FortifyVillageSkill refactoring — FortifySkillTypes extraction**: Extracted all 9 private inner enums, 16 records, and 5 inner classes from `FortifyVillageSkill` (9593→9246 lines) into new package-private `FortifySkillTypes.java` (~300 lines). Moved: enums `FortifyNavMode`, `FortifyCleanupKind`, `CleanupState`, `NavBreakRejectReason`, `ReplaceFailureKind`, `TowerPillarOutcome`, `TowerStepOutcome`, `TowerReturnOutcome`, `TowerScaffoldSideOutcome`; records `NavBreakCandidateEval`, `CavityCheckResult`, `DeferredRepair`, `ReplaceBlockResult`, `TowerStepAttemptResult`, `TowerReturnAttemptResult`, `TowerSummitStepCandidate`, `TowerSummitRoamResult`, `TowerHardResetResult`, `FortifyNavProgressWindow`, `TowerNavCandidate`, `ApproachCandidateEval`, `ScaffoldTeardownResult`, `SurfaceProfile`, `StartupRecoveryResult`, `MoatDigResult`; classes `DeferredCleanupTask`, `FortifyCarveSession` (constant `FORTIFY_CARVE_MAX_BLOCKS_PER_EPISODE` absorbed), `FortifyNavRuntimeScope`, `TowerNavAttemptState`, `ScaffoldLedger`. All types are package-private; accessible unchanged from FortifyVillageSkill in the same package. Build verified: BUILD SUCCESSFUL in 8s.
 - **FortifyVillageSkill refactoring — FortifyCleanupHelper extraction**: Extracted the deferred cleanup queue, throttle timestamp, 3 constants, and 9 pure queue-management methods from `FortifyVillageSkill` (9246→9161 lines) into new `FortifyCleanupHelper` (143 lines). Moved constants: `BACKOFF_BASE_MS=250`, `BACKOFF_MAX_MS=1000`, `PROCESS_MIN_INTERVAL_MS=350`. Moved methods: `queue` (was `queueDeferredCleanupTask`), `queueCarveRepairs` (was `queueDeferredCarveRepairs`), `noteSkip`, `noteImmediateRetry`, `noteResolved`, `checkAndUpdateThrottle` (new, replaces inline throttle logic in processDeferredFortifyCleanupQueue), `isForcedContext`, `allowActiveRecovery`, static `incrementReason`, static `formatReasonSummary`. Skill adds `private final FortifyCleanupHelper cleanupHelper = new FortifyCleanupHelper()` and delegates all 32 call sites. `processDeferredFortifyCleanupQueue` stays in skill (calls `digBlock`, `sleepQuiet`, `tryReplaceMinedBlock`). Build verified: BUILD SUCCESSFUL in 3s.
+
 ## 2026-02-26
 - **Movement & Stuck Recovery Consolidation**: 
   - Extracted the massive 7-step stuck recovery fallback chain (open door, traverse doorway, door escape, step up, local unstick, sidestep, mine obstruction) from `nudgeTowardUntilClose` and `pursuitUntilClose` into a single, shared `executeStuckRecoveryHeuristics` method in `MovementService`. This removes ~150 lines of duplicated code and ensures all short-range movement uses the exact same, predictable recovery logic.

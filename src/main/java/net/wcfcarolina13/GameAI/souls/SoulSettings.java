@@ -43,9 +43,8 @@ public record SoulSettings(boolean enabled, boolean valid, String validationErro
             return new SoulSettings(enabled, false, "Configure a local soul model first.",
                     provider, model, baseUri, Duration.ofSeconds(timeoutSeconds), queueCapacity);
         }
-        String scheme = baseUri.getScheme();
-        if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
-            return new SoulSettings(enabled, false, "The Ollama URL must use HTTP or HTTPS.",
+        if (!OllamaEndpointPolicy.isSupportedScheme(baseUri.getScheme())) {
+            return new SoulSettings(enabled, false, OllamaEndpointPolicy.SCHEME_ERROR,
                     provider, model, baseUri, Duration.ofSeconds(timeoutSeconds), queueCapacity);
         }
         return new SoulSettings(enabled, true, "", provider, model, baseUri,
