@@ -7619,6 +7619,8 @@ public class BotEventHandler {
 	            BotLifecycleService.clear();
 	            BotRegistry.clear();
 	            net.wcfcarolina13.PlayerUtils.ToolSelector.resetSession();
+            // Hotbar locks hold "until tick N"; the next world's ticks restart at 0.
+            net.wcfcarolina13.GameAI.services.HotbarLockService.resetSession();
 		            BotCommandStateService.clearAll();
 		            BotRescueService.reset();
 		            BotStuckService.resetAll();
