@@ -147,6 +147,8 @@ public final class BotControlApplier {
             }
         }
 
+        long newestSaved = BotWorldStateService.newestSavedAtMs(server);
+        int quietSkips = 0;
         AtomicInteger baseline = new AtomicInteger(-1);
         AtomicInteger dispatched = new AtomicInteger(0);
         AtomicInteger skipped = new AtomicInteger(0);
@@ -154,6 +156,20 @@ public final class BotControlApplier {
         for (String rawAlias : candidates) {
             if (rawAlias == null || rawAlias.equalsIgnoreCase("default")) {
                 continue;
+            }
+            if (Frens.CONFIG.getBotSpawn(rawAlias, currentWorldKey) == null
+                    && Frens.CONFIG.getEffectiveBotControl(rawAlias, currentWorldKey) == null) {
+                // Known only from the world-state store (the settings file was reset or never had
+                // it): bring back only a bot active in this world's last session, never one put away.
+                var entry = BotWorldStateService.currentEntry(server, rawAlias).orElse(null);
+                if (entry != null && !AutoSpawnActivityPolicy.bringBack(entry.shelved(), entry.savedAtMs(), newestSaved)) {
+                    if (Boolean.TRUE.equals(entry.shelved())) {
+                        Frens.LOGGER.info("Auto-spawn skipped for {}: put away with /bot despawn in this world", rawAlias);
+                    } else {
+                        quietSkips++;
+                    }
+                    continue;
+                }
             }
             // Only a lower-case key (from the world-state store) needs its spelling looked up.
             String alias = rawAlias.equals(rawAlias.toLowerCase(Locale.ROOT)) ? spelledName(server, rawAlias) : rawAlias;
@@ -243,6 +259,10 @@ public final class BotControlApplier {
             };
             server.execute(task);
             queuedAny = true;
+        }
+        if (quietSkips > 0) {
+            Frens.LOGGER.info("Auto-spawn skipped {} bot(s) known only from the world-state store and not active in this world's last session",
+                    quietSkips);
         }
         if (queuedAny) {
             // Runs after every per-alias task above (server.execute is FIFO on the server thread).
