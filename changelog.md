@@ -193,6 +193,49 @@ sandbox check needed beyond the usual: hotbar lock behaviour is unchanged when o
 touches it.
 
 Also: the hotbar lock map is cleared at SERVER_STOPPED (`HotbarLockService.resetSession`). A singleplayer quit keeps it while the next world's ticks restart at 0, so a lock taken late in one world held a bot's slot for hours in the next.
+## Skill workers no longer spawn entities, set blocks or teleport off-thread (2026-11-05, unreleased)
+
+An audit of skill code for world, inventory and entity changes made straight from a skill worker
+found these, none of them on the existing "pre-existing deferred" list (`MovementService` tool
+swaps, desperate eat, `CraftingHelper`/`BotActions` inventory swaps, `rescueFromBurial`,
+`moveRelative`). Each now runs on the server thread through `BotActions.callOnServerThread`,
+which runs inline when already there:
+- **`FlareSkill`** spawned the firework entity and split its stack on the worker, the same
+  off-thread `spawnEntity` class as the C2ME `ConcurrentModificationException` crash fixed
+  earlier. The slot is now re-checked on the server thread (the walk to open sky took time).
+- **`TorchPlacer.placeTorch` / `replaceTorchAt`** set the torch block, swapped the hotbar and
+  decremented the stack from the dirt, strip-mine and shovel workers. Both now hop, which covers
+  all 9 call sites.
+- **Planting:** `FarmSkill` (plant, repair replant, water pickup), `HarvestCropSkill` (replant,
+  plant empty farmland) and `PlantSeedsSkill` called `interactBlock` from the worker. That call
+  sets blocks and shrinks the held stack. A new `BotActions.interactBlockAndSwing` does the use
+  and the swing on the server thread. The water pickup runs as one hop.
+- **`HovelPerimeterBuilder`** teleported the bot onto a pillar top from the shelter worker (two
+  sites). This is now `snapToOnServer`.
+- **Drops:** `HuntSkill.jettisonDisposables` and `ShelterSkill.ensurePickupSlot` spawn item
+  entities. Both now hop, synchronously, because the callers check free space right after.
+- **`WoodcutSkill.craftPlanksForScaffold`** edited the inventory on the worker. It also lost
+  planks when the inventory was full: logs were taken, and the planks `insertStack` could not fit
+  were discarded. It now hops, drops any leftover planks at the bot's feet with a warn
+  line, and counts only planks that went in.
+
+Costs and limits:
+- Each hop waits for the server thread for up to 0.75–1.5 s. If the tick is that late, the call
+  reports failure (no flare, `FAILED` torch, `FAIL` interaction, 0 planks). The queued task is
+  cancelled if it has not started (`ServerThreadCallPolicy`), so only work already running at
+  that moment completes after the failure. Worst case: a flare launches while the skill reports
+  it could not. A late hovel pillar snap is retried once. If it misses again, the bot carries on
+  uncentred, as it already does when no perch resolves.
+- `ShelterSkill.ensurePickupSlot` uses `BotActions.callOnServerThread` rather than the skill's
+  own `callOnServer`. The latter gave up after 200 ms without cancelling, so a late tick could
+  drop build blocks after the skill had moved on.
+- Hotbar selection before these calls (`selectHotbarSlot`, `ensureHotbarItem`, `selectBestTool`)
+  still runs on the worker. That is the recorded inventory-swap deferral, unchanged.
+
+Tests: `OffThreadMutationWiringTest` (6, source wiring, including no sleep inside the new hops). Needs a sandbox smoke test: `/bot skill
+flare`; dirt or strip-mine in the dark (torches go up); farm and harvest (seeds planted,
+replanted); a hovel build with a roof pillar; woodcut needing scaffold planks with a nearly full
+inventory (watch for `Scaffold planks: inventory full, dropped`).
 
 ## Repository clean-up: public and private split (2026-11-04)
 

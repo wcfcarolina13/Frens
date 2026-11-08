@@ -155,6 +155,24 @@ public final class BotActions {
                 server.isOnThread(), server::execute, action, Math.max(250L, timeoutMs), fallback);
     }
 
+    /**
+     * Uses the main-hand item on {@code hit} (plant, replant, till-style interactions) and swings
+     * when accepted, always on the server thread: interactBlock sets blocks and shrinks the held
+     * stack, and skills call this from their workers. Inline when already on the server thread;
+     * {@link net.minecraft.util.ActionResult#FAIL} if the server thread does not answer in time.
+     */
+    public static net.minecraft.util.ActionResult interactBlockAndSwing(ServerPlayerEntity bot,
+            net.minecraft.server.world.ServerWorld world, net.minecraft.util.hit.BlockHitResult hit) {
+        return callOnServerThread(bot, () -> {
+            net.minecraft.util.ActionResult result = bot.interactionManager.interactBlock(
+                    bot, world, bot.getMainHandStack(), net.minecraft.util.Hand.MAIN_HAND, hit);
+            if (result.isAccepted()) {
+                bot.swingHand(net.minecraft.util.Hand.MAIN_HAND, true);
+            }
+            return result;
+        }, 1000L, net.minecraft.util.ActionResult.FAIL);
+    }
+
     public static void moveForward(ServerPlayerEntity bot) {
         runOnServerThread(bot, () -> moveRelative(bot, STEP_DISTANCE, false, 0, 0), 750L);
     }
