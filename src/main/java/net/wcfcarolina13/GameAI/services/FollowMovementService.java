@@ -504,6 +504,14 @@ public final class FollowMovementService {
         // Guard and patrol also measure the drop from the ground they guard: a stair of 1-block steps
         // down into a pit is refused from its second tread (DropGuardExemptionPolicy.refusesStep).
         Integer referenceY = stayOutOfHoles ? guardReferenceY(bot) : null;
+        if (referenceY != null && !guardTargetDownThere(world, referenceY, targetPos)
+                && DropGuardExemptionPolicy.refusesStep(standLevelAt(world, bot.getBlockPos(), bot.getBlockY()),
+                        bot.getBlockY(), referenceY, false)) {
+            // Feet already over the hole, held up only by the edge of the tread beside it: any
+            // forward push tips the bot in. Stand still; the next target move comes from solid ground.
+            BotActions.stop(bot);
+            return true;
+        }
         boolean belowReference = referenceY != null
                 && DropGuardExemptionPolicy.refusesStep(standLevelAt(world, front, Math.max(bot.getBlockY(), referenceY)),
                         bot.getBlockY(), referenceY, false);
@@ -525,11 +533,18 @@ public final class FollowMovementService {
         }
 
         BlockPos safeBypass = selectDropoffBypassCandidate(world, bot.getBlockPos(), front, BlockPos.ofFloored(targetPos),
-                referenceY != null ? DropGuardExemptionPolicy.minBypassStandY(referenceY) : Integer.MIN_VALUE);
+                referenceY != null
+                        ? Math.max(DropGuardExemptionPolicy.minBypassStandY(referenceY), bot.getBlockY())
+                        : Integer.MIN_VALUE);
         if (safeBypass != null) {
             LookController.faceBlock(bot, safeBypass);
             BotActions.sprint(bot, false);
-            BotActions.autoJumpIfNeeded(bot);
+            // Guard and patrol sidestep on their own level without a hop: in a 1-wide stair the
+            // hop carried the bot over the next tread and on down into the pit (sandbox trace
+            // 2026-11-08, Bradley's go on option 1).
+            if (referenceY == null) {
+                BotActions.autoJumpIfNeeded(bot);
+            }
             BotActions.applyMovementInput(bot, Vec3d.ofCenter(safeBypass), 0.18D);
         } else {
             // No safe bypass — try elytra descent if available, with cooldown
@@ -580,9 +595,7 @@ public final class FollowMovementService {
             return false;
         }
         int standAhead = standLevelAt(world, column, Math.max(bot.getBlockY(), referenceY));
-        BlockPos targetBlock = BlockPos.ofFloored(targetPos);
-        boolean targetDownThere = referenceY - targetPos.y >= DropGuardExemptionPolicy.GUARD_MIN_DEPTH
-                && isGroundedTwoHighClearance(world, targetBlock);
+        boolean targetDownThere = guardTargetDownThere(world, referenceY, targetPos);
         int currentLevel = standLevelAt(world, bot.getBlockPos(), bot.getBlockY());
         boolean refused = DropGuardExemptionPolicy.refusesStep(standAhead, currentLevel, referenceY, targetDownThere);
         if (!DropGuardExemptionPolicy.haltInAir(true, false, false, refused)) {
@@ -600,6 +613,12 @@ public final class FollowMovementService {
 
     /** Bots whose current airborne stretch already logged a halt (cleared once they are on the ground). */
     private static final java.util.Set<UUID> AIRBORNE_HALT_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Guard and patrol: the target stands at least {@link DropGuardExemptionPolicy#GUARD_MIN_DEPTH} below the guarded ground. */
+    private static boolean guardTargetDownThere(ServerWorld world, int referenceY, Vec3d targetPos) {
+        return referenceY - targetPos.y >= DropGuardExemptionPolicy.GUARD_MIN_DEPTH
+                && isGroundedTwoHighClearance(world, BlockPos.ofFloored(targetPos));
+    }
 
     /** The Y of the ground a guarding or patrolling bot holds: its guard point's block Y. */
     private static Integer guardReferenceY(ServerPlayerEntity bot) {
