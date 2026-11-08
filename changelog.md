@@ -7,6 +7,7 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 - `FortifyVillageSkill`: inlined the single-caller wrappers `isCarveEligibleForBreakAttempt` and `attemptFinalizeCarveTransaction` (call sites now call `carveHelper.*` directly) and deleted the 3-arg `tryBreakThroughObstacle` overload, which had no callers (1.1.210 review Minor 3).
 - Kept the 4-arg `tryBreakThroughObstacle(bot, world, target, causeContext)`: it has four callers (patch-start preflight, breakthrough fallback, two in the stuck-recovery loop), so the backlog's "single-caller" note did not hold for it. None of the four are `FortifySkillOps` interface methods.
 - Pure refactor, no behaviour change. Tests 3857 before and after (only the known root-container `SoulStoreTest.persistCursorFailure…` failure; `closeShutsDown…` flaked once under memory pressure and passed on rerun).
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
