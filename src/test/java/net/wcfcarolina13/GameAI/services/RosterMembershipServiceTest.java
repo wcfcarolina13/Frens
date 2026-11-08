@@ -34,4 +34,11 @@ class RosterMembershipServiceTest {
         assertEquals("Bob", saved.get(1));
         assertEquals("Zed", saved.get(2));
     }
+
+    @Test
+    void preferredSpellingKeepsFirstUnlessItIsTheLowerCasedOne() {
+        assertEquals("Abby", RosterMembershipService.preferredSpelling("abby", "Abby"));
+        assertEquals("Abby", RosterMembershipService.preferredSpelling("Abby", "abby"));
+        assertEquals("AbBy", RosterMembershipService.preferredSpelling("AbBy", "ABBY"));
+    }
 }
