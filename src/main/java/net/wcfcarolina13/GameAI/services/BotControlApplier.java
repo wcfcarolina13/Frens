@@ -147,6 +147,8 @@ public final class BotControlApplier {
             }
         }
 
+        long newestSaved = BotWorldStateService.newestSavedAtMs(server);
+        int quietSkips = 0;
         AtomicInteger baseline = new AtomicInteger(-1);
         AtomicInteger dispatched = new AtomicInteger(0);
         AtomicInteger skipped = new AtomicInteger(0);
@@ -167,6 +169,19 @@ public final class BotControlApplier {
                 // Check BotWorldStateService for position in this world
                 hasWorldState = BotWorldStateService.loadState(server, alias).isPresent();
                 if (!hasWorldState) continue;
+            }
+            if (spawn == null && Frens.CONFIG.getEffectiveBotControl(alias, currentWorldKey) == null) {
+                // Known only from the world-state store (the settings file was reset or never had
+                // it): bring back only a bot active in this world's last session, never one put away.
+                var entry = BotWorldStateService.currentEntry(server, alias).orElse(null);
+                if (entry != null && !AutoSpawnActivityPolicy.bringBack(entry.shelved(), entry.savedAtMs(), newestSaved)) {
+                    if (Boolean.TRUE.equals(entry.shelved())) {
+                        Frens.LOGGER.info("Auto-spawn skipped for {}: put away with /bot despawn in this world", alias);
+                    } else {
+                        quietSkips++;
+                    }
+                    continue;
+                }
             }
             ServerPlayerEntity existing = server.getPlayerManager().getPlayer(alias);
             String normalizedAlias = alias.toLowerCase(Locale.ROOT);
@@ -243,6 +258,10 @@ public final class BotControlApplier {
             };
             server.execute(task);
             queuedAny = true;
+        }
+        if (quietSkips > 0) {
+            Frens.LOGGER.info("Auto-spawn skipped {} bot(s) known only from the world-state store and not active in this world's last session",
+                    quietSkips);
         }
         if (queuedAny) {
             // Runs after every per-alias task above (server.execute is FIFO on the server thread).

@@ -6002,6 +6002,10 @@ public class modCommandRegistry {
             }
             // Save first: removal alone lost everything since the last autosave.
             BotEventHandler.unregisterBot(bot, true);
+            if (!sessionOnly) {
+                // Also kept with the bot's world position, so a settings reset does not bring it back.
+                net.wcfcarolina13.GameAI.services.BotWorldStateService.markShelved(server, bot.getName().getString(), true);
+            }
             successes++;
         }
         if (!sessionOnly && !targets.isEmpty()) {

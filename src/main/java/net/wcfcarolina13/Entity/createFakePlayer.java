@@ -71,6 +71,27 @@ public class createFakePlayer extends ServerPlayerEntity {
         return new createFakePlayer(server, world, profile, options, isAShadow);
     }
 
+    /** {@link BotIdentityRecoveryPolicy}: the UUID in this bot's newest inventory snapshot, or null. */
+    private static String recoverSavedUuid(MinecraftServer server, String username) {
+        try {
+            var cache = server.getApiServices().nameToIdCache();
+            java.util.List<BotIdentityRecoveryPolicy.Candidate> candidates = new java.util.ArrayList<>();
+            for (String raw : net.wcfcarolina13.GameAI.services.BotInventoryStorageService.snapshotUuidsForAlias(server, username)) {
+                String cached = null;
+                try {
+                    cached = cache.getByUuid(UUID.fromString(raw)).map(e -> e.name()).orElse(null);
+                } catch (IllegalArgumentException notAUuid) {
+                    continue;
+                }
+                candidates.add(new BotIdentityRecoveryPolicy.Candidate(raw, cached));
+            }
+            return BotIdentityRecoveryPolicy.pick(username, candidates);
+        } catch (RuntimeException e) {
+            LOGGER.debug("UUID recovery for {} failed: {}", username, e.toString());
+            return null;
+        }
+    }
+
     /**
      * Spawns a fake player. The returned future completes on the server thread once the bot has
      * connected. Offline/integrated servers spawn synchronously, so the future is already done on
@@ -93,7 +114,14 @@ public class createFakePlayer extends ServerPlayerEntity {
         if (gameProfile == null) {
             String configuredUuid = Frens.CONFIG.getBotProfileUuid(username);
             if (configuredUuid == null || configuredUuid.isBlank()) {
-                gameProfile = new GameProfile(UUID.randomUUID(), username);
+                // The settings file has no UUID for this bot (new, or the file was reset): reuse the
+                // one its inventory snapshot keeps, so a reset does not make it a different player.
+                String recovered = recoverSavedUuid(server, username);
+                if (recovered != null) {
+                    LOGGER.info("Bot {} has no saved profile in the settings; reusing UUID {} from its inventory snapshot",
+                            username, recovered);
+                }
+                gameProfile = new GameProfile(recovered != null ? UUID.fromString(recovered) : UUID.randomUUID(), username);
                 try {
                     Frens.CONFIG.setBotProfile(gameProfile.name(), gameProfile.id().toString());
                     Frens.CONFIG.save();

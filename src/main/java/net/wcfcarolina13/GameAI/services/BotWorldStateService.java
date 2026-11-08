@@ -287,9 +287,21 @@ public final class BotWorldStateService {
      * before this field existed. Auto-spawn spawns under it when the settings file had to be reset, so a bot does
      * not come back as a lower-case, different player.
      */
-    public static record BotState(double x, double y, double z, float yaw, float pitch, String name) {
+    /**
+     * {@code savedAtMs}: when the entry was last written (0 in older entries); entries are refreshed
+     * while the bot is online, so it is about when the bot was last in this world. {@code shelved}:
+     * true once the bot was despawned for good here (null in older entries). Both let auto-spawn,
+     * after the settings file was reset and lost its spawn flags, bring back only the bots that were
+     * active in this world (AutoSpawnActivityPolicy).
+     */
+    public static record BotState(double x, double y, double z, float yaw, float pitch, String name,
+                                  long savedAtMs, Boolean shelved) {
         public BotState(double x, double y, double z, float yaw, float pitch) {
-            this(x, y, z, yaw, pitch, null);
+            this(x, y, z, yaw, pitch, null, 0L, null);
+        }
+
+        public BotState(double x, double y, double z, float yaw, float pitch, String name) {
+            this(x, y, z, yaw, pitch, name, System.currentTimeMillis(), Boolean.FALSE);
         }
 
         static BotState from(ServerPlayerEntity bot) {
@@ -297,6 +309,47 @@ public final class BotWorldStateService {
             float clampedPitch = Math.max(-90.0F, Math.min(90.0F, rawPitch));
             return new BotState(bot.getX(), bot.getY(), bot.getZ(), bot.getYaw(), clampedPitch, bot.getName().getString());
         }
+
+        BotState shelvedCopy(boolean value) {
+            return new BotState(x, y, z, yaw, pitch, name, savedAtMs, value);
+        }
+    }
+
+    /** Marks this bot's entry in the current world as put away (despawned for good) or not. */
+    public static synchronized void markShelved(MinecraftServer server, String alias, boolean value) {
+        if (server == null || alias == null || alias.isBlank()) {
+            return;
+        }
+        ensureLoaded();
+        Map<String, BotState> worldMap = STATE.get(normalizeAlias(alias));
+        String key = worldKey(server);
+        BotState st = worldMap == null ? null : worldMap.get(key);
+        if (st == null) {
+            return;
+        }
+        worldMap.put(key, st.shelvedCopy(value));
+        flush();
+    }
+
+    /** The current world's entry for {@code alias} as stored (no legacy fallback), or empty. */
+    public static synchronized Optional<BotState> currentEntry(MinecraftServer server, String alias) {
+        ensureLoaded();
+        Map<String, BotState> worldMap = STATE.get(normalizeAlias(alias));
+        return worldMap == null ? Optional.empty() : Optional.ofNullable(worldMap.get(worldKey(server)));
+    }
+
+    /** The newest {@code savedAtMs} among this world's entries, 0 when none has one. */
+    public static synchronized long newestSavedAtMs(MinecraftServer server) {
+        ensureLoaded();
+        String key = worldKey(server);
+        long newest = 0L;
+        for (Map<String, BotState> worlds : STATE.values()) {
+            BotState st = worlds == null ? null : worlds.get(key);
+            if (st != null && st.savedAtMs() > newest) {
+                newest = st.savedAtMs();
+            }
+        }
+        return newest;
     }
 
     /** The name as spelled that a saved entry for {@code alias} recorded, in any world; empty for older entries. */
