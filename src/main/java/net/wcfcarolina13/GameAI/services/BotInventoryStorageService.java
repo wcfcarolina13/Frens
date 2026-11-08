@@ -407,6 +407,24 @@ public final class BotInventoryStorageService {
         return out;
     }
 
+    /**
+     * The UUIDs in this alias's inventory snapshot names ({@code <alias>_<uuid>.nbt}), newest file
+     * first. The file name keeps the bot's UUID, which the user cache maps back to the name as spelled.
+     */
+    public static List<String> snapshotUuidsForAlias(MinecraftServer server, String aliasRaw) {
+        List<Path> files = new ArrayList<>(collectCandidateSnapshots(server, aliasRaw, null));
+        files.sort(Comparator.comparing(BotInventoryStorageService::safeLastModified).reversed());
+        String prefix = sanitizeAliasForStorage(aliasRaw) + "_";
+        List<String> out = new ArrayList<>();
+        for (Path path : files) {
+            String file = path.getFileName().toString();
+            if (file.length() > prefix.length() + 4 && file.toLowerCase(Locale.ROOT).startsWith(prefix)) {
+                out.add(file.substring(prefix.length(), file.length() - 4));
+            }
+        }
+        return out;
+    }
+
     private static FileTime safeLastModified(Path path) {
         try {
             return Files.getLastModifiedTime(path);

@@ -266,13 +266,13 @@ public final class LeafClearService {
         return candidates;
     }
 
-    public static MovementService.LeafClearResult clearLeafObstructionDetailed(ServerPlayerEntity player, Direction toward) {
+    public static LeafClearResult clearLeafObstructionDetailed(ServerPlayerEntity player, Direction toward) {
         if (player == null || toward == null) {
-            return new MovementService.LeafClearResult(MovementService.LeafClearAction.NO_CLEAR, false, 0, null, "invalid-input");
+            return new LeafClearResult(LeafClearAction.NO_CLEAR, false, 0, null, "invalid-input");
         }
         ServerWorld world = MovementService.getWorld(player);
         if (world == null) {
-            return new MovementService.LeafClearResult(MovementService.LeafClearAction.NO_CLEAR, false, 0, null, "no-world");
+            return new LeafClearResult(LeafClearAction.NO_CLEAR, false, 0, null, "no-world");
         }
 
         UUID id = player.getUuid();
@@ -282,7 +282,7 @@ public final class LeafClearService {
             if (id != null) {
                 LEAF_BYPASS_FAILURE_STREAK.remove(id);
             }
-            return new MovementService.LeafClearResult(MovementService.LeafClearAction.NO_OBSTRUCTION, false, 0, null, "no-leaf-in-path");
+            return new LeafClearResult(LeafClearAction.NO_OBSTRUCTION, false, 0, null, "no-leaf-in-path");
         }
 
         if (id != null) {
@@ -291,7 +291,7 @@ public final class LeafClearService {
             CompletableFuture<String> inflight = LEAF_MINE_INFLIGHT.get(id);
             if (inflight != null && !inflight.isDone()) {
                 BlockPos target = LEAF_MINE_TARGET.get(id);
-                return new MovementService.LeafClearResult(MovementService.LeafClearAction.MINING_IN_PROGRESS, true, bypassFailures, target, "inflight");
+                return new LeafClearResult(LeafClearAction.MINING_IN_PROGRESS, true, bypassFailures, target, "inflight");
             }
         }
 
@@ -302,7 +302,7 @@ public final class LeafClearService {
             if (id != null) {
                 LEAF_BYPASS_FAILURE_STREAK.put(id, nextFailures);
             }
-            return new MovementService.LeafClearResult(MovementService.LeafClearAction.BYPASS_STEP, true, nextFailures, null, "bypass-step");
+            return new LeafClearResult(LeafClearAction.BYPASS_STEP, true, nextFailures, null, "bypass-step");
         }
 
         // If bypass isn't possible, start mining a single natural leaf asynchronously (no blocking waits).
@@ -316,8 +316,8 @@ public final class LeafClearService {
                 if (id != null) {
                     LEAF_BYPASS_FAILURE_STREAK.remove(id);
                 }
-                return new MovementService.LeafClearResult(
-                        mineResult == LeafMineResult.STARTED ? MovementService.LeafClearAction.MINING_STARTED : MovementService.LeafClearAction.MINING_IN_PROGRESS,
+                return new LeafClearResult(
+                        mineResult == LeafMineResult.STARTED ? LeafClearAction.MINING_STARTED : LeafClearAction.MINING_IN_PROGRESS,
                         true,
                         0,
                         leaf.toImmutable(),
@@ -331,15 +331,15 @@ public final class LeafClearService {
             LEAF_BYPASS_FAILURE_STREAK.put(id, Math.min(10, bypassFailures + 1));
         }
         CompanionOverheadDialogueService.tryShowLeafStuck(player, "clearLeafObstruction-noClear");
-        return new MovementService.LeafClearResult(MovementService.LeafClearAction.NO_CLEAR, true, id != null ? LEAF_BYPASS_FAILURE_STREAK.getOrDefault(id, 0) : bypassFailures + 1, null, "no-clear");
+        return new LeafClearResult(LeafClearAction.NO_CLEAR, true, id != null ? LEAF_BYPASS_FAILURE_STREAK.getOrDefault(id, 0) : bypassFailures + 1, null, "no-clear");
     }
 
     public static boolean clearLeafObstruction(ServerPlayerEntity player, Direction toward) {
-        MovementService.LeafClearResult result = clearLeafObstructionDetailed(player, toward);
+        LeafClearResult result = clearLeafObstructionDetailed(player, toward);
         if (result == null) {
             return false;
         }
-        return result.countsAsCleared() || result.action() == MovementService.LeafClearAction.BYPASS_STEP;
+        return result.countsAsCleared() || result.action() == LeafClearAction.BYPASS_STEP;
     }
 
     public static boolean hasLeafObstruction(ServerPlayerEntity player, Direction toward) {

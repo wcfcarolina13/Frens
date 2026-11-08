@@ -285,6 +285,11 @@ public final class DirtShovelSkill implements Skill {
                                 excluded.add(blocker);
                             }
                         } else {
+                            if (targetReached()) {
+                                // The approach to the hidden target already brought in the last block.
+                                LOGGER.info("{}: requested amount reached; not mining past {}", label, detectedPos);
+                                return SkillExecutionResult.success("Requested amount of " + label + " reached.");
+                            }
                             LOGGER.info("{} at {} is hidden by {}; mining that {} block instead", label, detectedPos, blocker, label);
                             String blockerResult = mineWithTimeout(player, blocker);
                             if (blockerResult != null && player.getEntityWorld().getBlockState(blocker).isAir()) {

@@ -4,7 +4,20 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-11-08 (1.1.299) — next session starts here
+## Session Handoff 2026-11-08 (1.1.300) — next session starts here
+
+**State:** 1.1.300 = 1.1.299 plus 16 PRs (#13, #18, #19, #22, #25, #26, #57, #67, #69, #73–#79) and one review fix (a cook stopped before its first load leaves the furnace alone), merged through one release PR on Bradley's "review and merge all open PRs on your own that you can". List in changelog.md, "Release wave … 1.1.300". Tests 4282 (cloud; only the root-container `SoulStoreTest.persistCursorFailure…` fails). Not on Modrinth; 1.1.299 isn't either. Mac steps not done for either release: sandbox smoke of the jar, field-checklist phase in frens-dev, frens-stream `./smoke.sh`. No Nirn deploy without Bradley's yes.
+
+**Open PRs carried** (each needs an update from main before merging):
+- Need a game run: #15 sunset, #29 blind walk (stacked on #13, which is now merged: retarget to main), #40 TEASE, #71 "you and <bot>" (Bradley in game), #62 Guide cards (open them), #32 Quick Store/Fetch GUI, #4 and #10 (regression check only so far).
+- Need a second player: #5, #12, #53.
+- Need a ruling: #8, #14, #41 (draft), #55 (draft CI; #19 is now merged), #1 (outside contribution, conflicts).
+
+**In progress on the Mac (Bradley, 2026-11-08: "also handle the new open items you listed as unfixed"):** six items, each to become its own PR with a sandbox proof: (1) hand-dug hill stair times out after 3 steps at ~20 s a step bare-handed; (2) a bot falls back into the open pit it escaped (no default pit filling of terrain the bot didn't make); (3) after a hunt a bot walked toward a base 1,340 blocks away and gave up silently; (4) a settings reset gives every bot a new ID and auto-spawns every bot ever saved; (5) furnace take-back tells the bot's same-kind fuel (and food) from the owner's only by count; (6) guard/patrol stuck escape on more terrain types.
+
+**Rulings still waiting on Bradley:** as in the 1.1.299 handoff below, minus backlog 1021 (ruled "align the gates", shipped in #73).
+
+## Session Handoff 2026-11-08 (1.1.299) — superseded by 1.1.300 above
 
 **State:** 1.1.299 = main 6a1eb28 plus 37 sandbox-proven PRs, their stack bases #30 and #56, and the #31 handoff, merged through one release PR (list and ruling in changelog.md, "Release wave"). Not yet on Modrinth: Bradley uploads. The Mac release steps still to do: deploy to the sandbox for a smoke run, add the 1.1.299 phase to the field checklist in frens-dev, run frens-stream `./smoke.sh` (log lines may have changed: tick-guard, auto-spawn skip, break-free door).
 
@@ -1128,7 +1141,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [ ] **Come tool crafting (verification)**: Verify torches/shovels/pickaxes are provisioned in-world when recipes/materials permit
 - [ ] **Follow stability (verification)**: Core planner/backoff/waypoint recovery runtime verification across dimensions/terrain
 - [ ] **Deterministic follow/come assertions (verification)**: Run `FOLLOW_COME_ASSERT_RUNBOOK.md` and record pass/fail outcomes
-- [ ] **Follow vertical recovery (verification)**: Bot should attempt a nearby projected anchor reroute first, then prompt regroup if still blocked
+- [x] **Follow vertical recovery (verification)**: Bot should attempt a nearby projected anchor reroute first, then prompt regroup if still blocked. Done 1.1.300 (#73, ruling "align the gates": the planner fallback reroute is the projected anchor; it runs from a 3-block gap before every regroup prompt; sandbox: regroup prompt when the bot can't climb, 8-high staircase climbed).
   - [ ] In-game check: have commander drop into a shaft with a nearby reachable staircase and verify follow reroutes to descend
   - [ ] In-game check: while following, place a 1x1 deep shaft in the movement lane; verify bot sidesteps/stops
 
