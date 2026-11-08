@@ -80,6 +80,14 @@ Fixes the 1.1.296 deferral "Fakeplayer still present after removal attempt on ev
 - **Death with auto-respawn off:** `onBotDeath` deletes the `.dat`, and the following `unregisterBot` now ends in `PlayerManager.remove`, which saves it again (post-drop inventory, death position); a "yes" would then restore the bot at the death spot instead of the fresh-start chain (dev builds already did this). The death handler in `Frens.java` now deletes the `.dat` again after `unregisterBot`, the order `/bot forget` uses (found by the independent review).
 - **Tests** 3857 → 3861 (`BotRemovalPolicyTest`, 4). Known `SoulStoreTest.persistCursorFailure…` failure unchanged.
 - **Sandbox check needed:** `/bot despawn`, sleep logoff and a travel in a release jar: no WARN, the bot leaves the tab list, `/bot spawn` of the same name works, inventory survives.
+## Follow no longer steers a bot while `/bot craft` walks it (unreleased, 2026-11-05)
+
+Found while checking the `/bot place` worker hop: nothing in the follow tick checks for an active task. Only `SkillManager.runSkill` (and `TaskService.runAmbient`) move the bot out of FOLLOW with `suspendFollowMode`. `/bot craft` runs `CraftingHelper` on a worker with a ticket but outside `runSkill`, so while it walked the bot to a table or furnace the follow tick kept writing movement inputs, and could stop it or teleport it back to the owner.
+
+- The craft worker now attaches its thread to the ticket, suspends follow before the work, reads the abort before `complete`, completes the ticket, then resumes follow unless the task was aborted (the same order as `runAmbient`).
+- **Not fixed here (same gap):** chest Quick Store / Quick Fetch (`ChestRegistryNetworkManager`, walks on `CompletableFuture.runAsync` with no ticket) and `SurfaceRecoveryService` (called from flee). The `/bot place` worker gets the same fix on its own branch.
+- **Cost:** a following bot stops following for the length of the craft and picks follow back up after; an aborted craft leaves follow off (as skills do).
+- Tests 3857 → 3858 (`CraftCommandFollowWiringTest`, source-reading). **Sandbox check:** with the bot following, `/bot craft` something that needs a crafting table a few blocks away: the bot walks to it without jittering or snapping back, crafts, then follows again.
 
 ## Repository clean-up: public and private split (2026-11-04)
 
