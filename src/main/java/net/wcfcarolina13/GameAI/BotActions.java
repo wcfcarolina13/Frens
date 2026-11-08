@@ -336,6 +336,15 @@ public final class BotActions {
     }
 
     public static boolean selectBestWeapon(ServerPlayerEntity bot) {
+        // Swaps stacks / changes the selected slot: server thread (inline when already there).
+        // Skills call this from their workers; same pattern as selectHarvestToolOrHands.
+        if (bot == null) {
+            return false;
+        }
+        return callOnServerThread(bot, () -> selectBestWeaponOnServer(bot), 750L, false);
+    }
+
+    private static boolean selectBestWeaponOnServer(ServerPlayerEntity bot) {
         if (bot == null) {
             return false;
         }
@@ -404,6 +413,15 @@ public final class BotActions {
     }
 
     public static boolean selectBestMeleeWeapon(ServerPlayerEntity bot) {
+        // Swaps stacks / changes the selected slot: server thread (inline when already there).
+        // Skills call this from their workers; same pattern as selectHarvestToolOrHands.
+        if (bot == null) {
+            return false;
+        }
+        return callOnServerThread(bot, () -> selectBestMeleeWeaponOnServer(bot), 750L, false);
+    }
+
+    private static boolean selectBestMeleeWeaponOnServer(ServerPlayerEntity bot) {
         if (bot == null) {
             return false;
         }
@@ -471,6 +489,15 @@ public final class BotActions {
     }
 
     public static boolean selectBestTool(ServerPlayerEntity bot, String preferKeyword, String avoidKeyword) {
+        // Swaps stacks / changes the selected slot: server thread (inline when already there).
+        // Skills call this from their workers; same pattern as selectHarvestToolOrHands.
+        if (bot == null) {
+            return false;
+        }
+        return callOnServerThread(bot, () -> selectBestToolOnServer(bot, preferKeyword, avoidKeyword), 750L, false);
+    }
+
+    private static boolean selectBestToolOnServer(ServerPlayerEntity bot, String preferKeyword, String avoidKeyword) {
         if (bot == null) {
             return false;
         }
@@ -805,6 +832,17 @@ public final class BotActions {
     }
 
     public static void selectHotbarSlot(ServerPlayerEntity bot, int index) {
+        // Selected-slot change: server thread (inline when already there), as for the tool selectors.
+        if (bot == null) {
+            return;
+        }
+        callOnServerThread(bot, () -> {
+            selectHotbarSlotOnServer(bot, index);
+            return Boolean.TRUE;
+        }, 750L, Boolean.FALSE);
+    }
+
+    private static void selectHotbarSlotOnServer(ServerPlayerEntity bot, int index) {
         if (bot == null) {
             return;
         }
@@ -820,6 +858,15 @@ public final class BotActions {
     }
 
     public static boolean ensureHotbarItem(ServerPlayerEntity bot, Item desired) {
+        // Swaps stacks / changes the selected slot: server thread (inline when already there).
+        // Skills call this from their workers; same pattern as selectHarvestToolOrHands.
+        if (bot == null) {
+            return false;
+        }
+        return callOnServerThread(bot, () -> ensureHotbarItemOnServer(bot, desired), 750L, false);
+    }
+
+    private static boolean ensureHotbarItemOnServer(ServerPlayerEntity bot, Item desired) {
         if (bot == null || desired == null) {
             return false;
         }

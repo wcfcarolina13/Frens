@@ -1330,6 +1330,12 @@ public final class HuntSkill implements Skill {
     }
 
     private static boolean consumeInventoryFood(ServerPlayerEntity bot, int slot) {
+        // Swap, select and use in one server-thread hop: from the hunt worker, a select that
+        // timed out would have used whatever was in hand instead of the food.
+        return BotActions.callOnServerThread(bot, () -> consumeInventoryFoodOnServer(bot, slot), 1500L, false);
+    }
+
+    private static boolean consumeInventoryFoodOnServer(ServerPlayerEntity bot, int slot) {
         if (bot.isUsingItem()) {
             return false;
         }

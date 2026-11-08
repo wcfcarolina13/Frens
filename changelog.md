@@ -236,6 +236,32 @@ Tests: `OffThreadMutationWiringTest` (6, source wiring, including no sleep insid
 flare`; dirt or strip-mine in the dark (torches go up); farm and harvest (seeds planted,
 replanted); a hovel build with a roof pillar; woodcut needing scaffold planks with a nearly full
 inventory (watch for `Scaffold planks: inventory full, dropped`).
+## Hotbar selectors run on the server thread (2026-11-05, unreleased)
+
+Closes the "off-thread inventory mutation in `BotActions`" deferral (1.1.2xx deferred list). In
+1.1.289, `selectHarvestToolOrHands` started hopping to the server thread. The other public
+selectors now do the same: `selectBestWeapon`, `selectBestMeleeWeapon`, `selectBestTool`,
+`ensureHotbarItem` and `selectHotbarSlot`. They swap stacks and change the selected slot, and
+skills call them from workers. That covers fishing, woodcut and woodcut cleanup axe equipping,
+wool shears, farm mining, hunt melee weapons, and every placement path that selects a hotbar slot
+first. Each now runs inline on the server thread and waits for it (up to 750 ms) from a worker.
+A server task that has not started when the wait ends is cancelled.
+
+Costs and limits:
+- From a worker, each call now waits for the next server tick (about 50 ms at 20 TPS), so a
+  placement that selects and then places waits about two ticks instead of one.
+- If the server stalls for more than 750 ms, the selection is skipped (false, or no change for
+  `selectHotbarSlot`) and the caller carries on with what is in hand, as for harvest tools today.
+- Eating: `HealingService.consumeFood` (auto-eat, also the recorded "desperate eat swaps slots on
+  the worker" deferral) and `HuntSkill.consumeInventoryFood` now swap, select and use in one
+  server-thread hop. Split across threads, a selection that timed out would have left the old
+  item in hand, and `useSelectedItem` would have used it: emptied a bucket, thrown a pearl, drawn
+  a bow. Found in review.
+- `CraftingHelper`'s own inventory swaps, and the local `selectHotbarSlot`/`swapStacks` helpers
+  in `FarmSkill`, `HarvestCropSkill` and `PlantSeedsSkill`, are not changed here.
+
+Tests: `BotActionsSelectorHopWiringTest`. Needs a sandbox smoke test: fish, woodcut, shear sheep,
+hunt, and place blocks (shelter or bridge), watching for wrong-item use or slowed placement.
 
 ## Repository clean-up: public and private split (2026-11-04)
 
