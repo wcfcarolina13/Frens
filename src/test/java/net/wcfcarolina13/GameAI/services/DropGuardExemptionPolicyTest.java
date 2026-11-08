@@ -65,4 +65,30 @@ class DropGuardExemptionPolicyTest {
         assertEquals(3, count, "both melee approach sites and the kiting step forward");
         assertTrue(src.contains("st.mode == Mode.GUARD || st.mode == Mode.PATROL"));
     }
+
+    // The sandbox column (2026-11-08): ground 120, then stair treads 119 and 118, pit floor 117.
+    @Test
+    void theStairIsRefusedFromItsSecondTreadMeasuredFromTheGuardPoint() {
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.refusesStep(119, 120, 120, false));
+        org.junit.jupiter.api.Assertions.assertTrue(DropGuardExemptionPolicy.refusesStep(118, 119, 120, false));
+        org.junit.jupiter.api.Assertions.assertTrue(DropGuardExemptionPolicy.refusesStep(118, 120, 120, false));
+        // The target is down in the pit: allowed.
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.refusesStep(118, 119, 120, true));
+    }
+
+    @Test
+    void aGuardBelowItsPointStillWalksLevelOrClimbs() {
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.refusesStep(117, 117, 120, false));
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.refusesStep(118, 117, 120, false));
+        org.junit.jupiter.api.Assertions.assertEquals(119, DropGuardExemptionPolicy.minBypassStandY(120));
+    }
+
+    @Test
+    void theAirHaltIsGuardOnlyAndAirborneOnly() {
+        org.junit.jupiter.api.Assertions.assertTrue(DropGuardExemptionPolicy.haltInAir(true, false, false, true));
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.haltInAir(false, false, false, true));
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.haltInAir(true, true, false, true));
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.haltInAir(true, false, true, true));
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.haltInAir(true, false, false, false));
+    }
 }

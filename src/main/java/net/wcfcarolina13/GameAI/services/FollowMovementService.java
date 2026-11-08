@@ -482,6 +482,10 @@ public final class FollowMovementService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
+        if (stayOutOfHoles && !bot.isOnGround()) {
+            return tryAirborneHoleGuard(bot, world, targetPos);
+        }
+        AIRBORNE_HALT_LOGGED.remove(bot.getUuid());
         if (!bot.isOnGround() || bot.hasVehicle() || bot.isUsingItem() || bot.isTouchingWater()) {
             return false;
         }
@@ -497,7 +501,13 @@ public final class FollowMovementService {
             Direction fallbackDir = approximateToward(bot.getBlockPos(), BlockPos.ofFloored(targetPos));
             front = bot.getBlockPos().offset(fallbackDir);
         }
-        if (!isDangerousDropCell(world, front, DropGuardExemptionPolicy.minDepth(stayOutOfHoles))) {
+        // Guard and patrol also measure the drop from the ground they guard: a stair of 1-block steps
+        // down into a pit is refused from its second tread (DropGuardExemptionPolicy.refusesStep).
+        Integer referenceY = stayOutOfHoles ? guardReferenceY(bot) : null;
+        boolean belowReference = referenceY != null
+                && DropGuardExemptionPolicy.refusesStep(standLevelAt(world, front, Math.max(bot.getBlockY(), referenceY)),
+                        bot.getBlockY(), referenceY, false);
+        if (!belowReference && !isDangerousDropCell(world, front, DropGuardExemptionPolicy.minDepth(stayOutOfHoles))) {
             return false;
         }
 
@@ -514,7 +524,8 @@ public final class FollowMovementService {
             return false;
         }
 
-        BlockPos safeBypass = selectDropoffBypassCandidate(world, bot.getBlockPos(), front, BlockPos.ofFloored(targetPos));
+        BlockPos safeBypass = selectDropoffBypassCandidate(world, bot.getBlockPos(), front, BlockPos.ofFloored(targetPos),
+                referenceY != null ? DropGuardExemptionPolicy.minBypassStandY(referenceY) : Integer.MIN_VALUE);
         if (safeBypass != null) {
             LookController.faceBlock(bot, safeBypass);
             BotActions.sprint(bot, false);
@@ -539,6 +550,81 @@ public final class FollowMovementService {
         }
         maybeShowDropWarning(bot);
         return true;
+    }
+
+    /**
+     * Guard and patrol, in the air: if the feet are heading (a block ahead along the bot's motion, or
+     * toward the target when it is nearly still) into a cell whose stand level is a refused step below
+     * the guarded ground, drop the forward input and the horizontal momentum so the bot lands where
+     * it is (DropGuardExemptionPolicy.haltInAir). Returns true when it halted the move.
+     */
+    private static boolean tryAirborneHoleGuard(ServerPlayerEntity bot, ServerWorld world, Vec3d targetPos) {
+        if (bot.hasVehicle() || bot.isTouchingWater() || bot.isInLava()) {
+            return false;
+        }
+        Integer referenceY = guardReferenceY(bot);
+        if (referenceY == null) {
+            return false;
+        }
+        Vec3d v = bot.getVelocity();
+        Vec3d dir = new Vec3d(v.x, 0.0D, v.z);
+        if (dir.lengthSquared() < 4.0E-4D) {
+            dir = new Vec3d(targetPos.x - bot.getX(), 0.0D, targetPos.z - bot.getZ());
+        }
+        if (dir.lengthSquared() < 1.0E-6D) {
+            return false;
+        }
+        dir = dir.normalize().multiply(DropGuardExemptionPolicy.AIRBORNE_PROBE_BLOCKS);
+        BlockPos column = BlockPos.ofFloored(bot.getX() + dir.x, bot.getY(), bot.getZ() + dir.z);
+        if (column.getX() == bot.getBlockX() && column.getZ() == bot.getBlockZ()) {
+            return false;
+        }
+        int standAhead = standLevelAt(world, column, Math.max(bot.getBlockY(), referenceY));
+        BlockPos targetBlock = BlockPos.ofFloored(targetPos);
+        boolean targetDownThere = referenceY - targetPos.y >= DropGuardExemptionPolicy.GUARD_MIN_DEPTH
+                && isGroundedTwoHighClearance(world, targetBlock);
+        int currentLevel = standLevelAt(world, bot.getBlockPos(), bot.getBlockY());
+        boolean refused = DropGuardExemptionPolicy.refusesStep(standAhead, currentLevel, referenceY, targetDownThere);
+        if (!DropGuardExemptionPolicy.haltInAir(true, false, false, refused)) {
+            return false;
+        }
+        BotActions.stop(bot);
+        bot.setVelocity(0.0D, v.y, 0.0D);
+        bot.velocityDirty = true;
+        if (AIRBORNE_HALT_LOGGED.add(bot.getUuid())) {
+            LOGGER.info("drop guard: {} in the air heading for a cell {} below the guarded ground at {}; dropping forward momentum",
+                    bot.getName().getString(), referenceY - standAhead, column.toShortString());
+        }
+        return true;
+    }
+
+    /** Bots whose current airborne stretch already logged a halt (cleared once they are on the ground). */
+    private static final java.util.Set<UUID> AIRBORNE_HALT_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** The Y of the ground a guarding or patrolling bot holds: its guard point's block Y. */
+    private static Integer guardReferenceY(ServerPlayerEntity bot) {
+        Vec3d center = GuardPatrolService.getGuardCenter(bot.getUuid());
+        return center == null ? null : BlockPos.ofFloored(center).getY();
+    }
+
+    /**
+     * The level a bot would stand at in {@code column}, scanning down from {@code fromY}: a blocked
+     * cell at {@code fromY} counts as ground at or above it (a step up or a wall, never a drop).
+     */
+    private static int standLevelAt(ServerWorld world, BlockPos column, int fromY) {
+        BlockPos cell = new BlockPos(column.getX(), fromY, column.getZ());
+        if (!world.getBlockState(cell).getCollisionShape(world, cell).isEmpty()) {
+            return fromY + 1;
+        }
+        for (int d = 0; d < DROP_GUARD_MAX_PROBE_DEPTH; d++) {
+            BlockPos below = cell.down();
+            if (!world.getBlockState(below).getCollisionShape(world, below).isEmpty()
+                    || !world.getFluidState(below).isEmpty()) {
+                return cell.getY();
+            }
+            cell = below;
+        }
+        return cell.getY();
     }
 
     private record RepositionCandidate(BlockPos pos, double lanePenalty) {
@@ -653,7 +739,8 @@ public final class FollowMovementService {
         return best;
     }
 
-    private static BlockPos selectDropoffBypassCandidate(ServerWorld world, BlockPos current, BlockPos front, BlockPos goal) {
+    private static BlockPos selectDropoffBypassCandidate(ServerWorld world, BlockPos current, BlockPos front, BlockPos goal,
+                                                         int minStandY) {
         if (world == null || current == null || front == null || goal == null) {
             return null;
         }
@@ -679,7 +766,7 @@ public final class FollowMovementService {
                 if (!isGroundedTwoHighClearance(world, pos)) {
                     continue;
                 }
-                if (isDangerousDropCell(world, pos)) {
+                if (isDangerousDropCell(world, pos) || pos.getY() < minStandY) {
                     continue;
                 }
                 double distScore = horizontalSq(pos, goal);

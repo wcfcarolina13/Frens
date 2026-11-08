@@ -39,4 +39,42 @@ public final class DropGuardExemptionPolicy {
         }
         return stepDown >= GUARD_MIN_DEPTH || (frontX == targetX && frontZ == targetZ);
     }
+
+    /**
+     * Guard and patrol: a cell ahead whose stand level is {@link #GUARD_MIN_DEPTH} or more below the
+     * ground being guarded ({@code referenceY}, the guard point's Y) is a drop the bot does not take
+     * unless its target is down there. Depth is measured from that reference, not from the bot's
+     * current level: the pit a guard climbed out of is reached by its own hand-dug stair, three
+     * 1-block steps (120, 119, 118, 117 in the sandbox scan 2026-11-08), so no single step is ever
+     * 2 deep from where the bot stands. With the reference, the first tread (1 below) is fine and the
+     * second (2 below) is refused, on the ground and in the air alike. {@code currentLevel}: the
+     * level the bot stands at (or would land at) in its own column.
+     */
+    public static boolean refusesStep(int standLevelAhead, int currentLevel, int referenceY, boolean targetDownThere) {
+        // Only a step down is refused: a guard already below the reference (it followed a target
+        // down, or was knocked into a dip) still walks level or climbs back.
+        return !targetDownThere && standLevelAhead < currentLevel
+                && referenceY - standLevelAhead >= GUARD_MIN_DEPTH;
+    }
+
+    /** The lowest stand level a guard's bypass step may land on: one below the reference at most. */
+    public static int minBypassStandY(int referenceY) {
+        return referenceY - GUARD_MIN_DEPTH + 1;
+    }
+
+    /** How far ahead of the feet an airborne guard's heading cell is judged, in blocks. */
+    public static final double AIRBORNE_PROBE_BLOCKS = 1.0D;
+
+    /**
+     * Whether a guarding bot in the air must lose its forward push (Bradley's ruling 2026-11-08,
+     * option (a): "Check holes in the air too"). The ground drop guard only runs on the ground; a
+     * guard jumping off the lip into its stair dip was carried by its combat forward input, still in
+     * the air, on down the stair into the pit (sandbox trace 2026-11-08). {@code refused}: the heading
+     * cell's stand level is a refused step ({@link #refusesStep}). Guard and patrol only: a following
+     * bot jumping a gap is left alone.
+     */
+    public static boolean haltInAir(boolean stayOutOfHoles, boolean onGround, boolean inWaterOrVehicle,
+                                    boolean refused) {
+        return stayOutOfHoles && !onGround && !inWaterOrVehicle && refused;
+    }
 }
