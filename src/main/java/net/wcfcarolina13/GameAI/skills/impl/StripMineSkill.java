@@ -54,6 +54,17 @@ public final class StripMineSkill implements Skill {
 
     @Override
     public SkillExecutionResult execute(SkillContext context) {
+        ServerPlayerEntity bot = context.botSource().getPlayer();
+        try {
+            return runTunnel(context);
+        } finally {
+            if (bot != null) {
+                net.wcfcarolina13.GameAI.services.TunnelKeepClearService.clear(bot.getUuid());
+            }
+        }
+    }
+
+    private SkillExecutionResult runTunnel(SkillContext context) {
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity player = Objects.requireNonNull(source.getPlayer(), "player");
         ServerPlayerEntity commander = context.requestSource() != null ? context.requestSource().getPlayer() : null;
@@ -84,6 +95,9 @@ public final class StripMineSkill implements Skill {
 
         Direction tunnelDirection = determineTunnelDirection(context, player, resumeRequested);
         Direction finalDirection = tunnelDirection;
+        // A crafting table for the pickaxe must not go into the tunnel ahead (stripmine won't break it).
+        net.wcfcarolina13.GameAI.services.TunnelKeepClearService.set(player.getUuid(),
+                tunnelDirection.getOffsetX(), tunnelDirection.getOffsetZ());
         runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(finalDirection)));
 
         BlockPos lastPos = player.getBlockPos();
@@ -143,6 +157,12 @@ public final class StripMineSkill implements Skill {
                     continue;
                 }
                 if (state.isIn(BlockTags.PICKAXE_MINEABLE)) {
+                    if (!holdsPickaxe(player)) {
+                        // The table for a new pickaxe goes beside or behind the bot, never in the tunnel
+                        // ahead (TunnelKeepClearService). Off-centre after a step, its hitbox still
+                        // covers the cell behind, which then can't take the table.
+                        net.wcfcarolina13.GameAI.services.CraftingHelper.recenterOnStand(player, player.getBlockPos());
+                    }
                     ToolProvisionService.ensurePickaxe(player, source, commander);
                 }
                 // Skip torches - extra safety layer
@@ -378,6 +398,16 @@ public final class StripMineSkill implements Skill {
         LOGGER.warn("Stripmine couldn't clear {} after multiple attempts (state={})",
                 blockPos.toShortString(),
                 world.getBlockState(blockPos).getBlock().getName().getString());
+        return false;
+    }
+
+    private static boolean holdsPickaxe(ServerPlayerEntity player) {
+        var inventory = player.getInventory();
+        for (int i = 0; i < inventory.size(); i++) {
+            if (inventory.getStack(i).isIn(net.minecraft.registry.tag.ItemTags.PICKAXES)) {
+                return true;
+            }
+        }
         return false;
     }
 
