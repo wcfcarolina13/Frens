@@ -62,7 +62,7 @@ class DropGuardExemptionPolicyTest {
         for (int i = src.indexOf("moveTowardInCombat(bot, positionOf(closest), "); i >= 0; i = src.indexOf("moveTowardInCombat(bot, positionOf(closest), ", i + 1)) {
             count++;
         }
-        assertEquals(2, count, "both melee approach sites");
+        assertEquals(3, count, "both melee approach sites and the kiting step forward");
         assertTrue(src.contains("st.mode == Mode.GUARD || st.mode == Mode.PATROL"));
     }
 }

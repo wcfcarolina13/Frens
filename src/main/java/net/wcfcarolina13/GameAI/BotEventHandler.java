@@ -4190,7 +4190,7 @@ public class BotEventHandler {
                                 .shouldSuppressPursuit(bot, closest)) {
                             BotActions.raiseShieldFacing(bot, closest);
                         } else {
-                            moveToward(bot, positionOf(closest), 1.5D, false);
+                            moveTowardInCombat(bot, positionOf(closest), 1.5D, false);
                         }
                     }
                 }
@@ -4313,9 +4313,13 @@ public class BotEventHandler {
      * far side and fell in, sandbox 2026-11-08). Other modes keep the plain approach.
      */
     private static void moveTowardInCombat(ServerPlayerEntity bot, Vec3d target, double stopDistance) {
+        moveTowardInCombat(bot, target, stopDistance, true);
+    }
+
+    private static void moveTowardInCombat(ServerPlayerEntity bot, Vec3d target, double stopDistance, boolean sprint) {
         BotCommandStateService.State st = stateFor(bot);
         boolean stayOutOfHoles = st != null && (st.mode == Mode.GUARD || st.mode == Mode.PATROL);
-        FollowMovementService.moveToward(bot, target, stopDistance, true, () -> lowerShieldTracking(bot), stayOutOfHoles);
+        FollowMovementService.moveToward(bot, target, stopDistance, sprint, () -> lowerShieldTracking(bot), stayOutOfHoles);
     }
 
     /** Guard and patrol walking back to their point: a hole in front is stepped around (DropGuardExemptionPolicy). */
