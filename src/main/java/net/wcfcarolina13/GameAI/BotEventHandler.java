@@ -747,6 +747,11 @@ public class BotEventHandler {
     }
 
     public static void unregisterBot(ServerPlayerEntity bot) {
+        unregisterBot(bot, false);
+    }
+
+    /** @param saveFirst save the bot before removing it ({@code /bot despawn}); see DespawnSavePolicy */
+    public static void unregisterBot(ServerPlayerEntity bot, boolean saveFirst) {
         if (bot == null) {
             return;
         }
@@ -757,7 +762,7 @@ public class BotEventHandler {
         net.wcfcarolina13.PlayerUtils.CombatInventoryManager.forgetBot(uuid);
         net.wcfcarolina13.PlayerUtils.ToolSelector.forgetBot(uuid);
         RESPAWN_HANDLING.forget(uuid);
-        BotPersistenceService.removeBot(bot);
+        BotPersistenceService.removeBot(bot, saveFirst);
         clearState(bot);
         LAST_JOIN_ENCLOSURE_CHECK_TICK.remove(uuid);
         LAST_ARMOR_AUDIT_TICK.remove(uuid);
@@ -846,11 +851,13 @@ public class BotEventHandler {
             // Pass nearby hostiles so autoEat knows whether it's safe.
             // Without this, autoEat sees null hostiles and always considers it safe,
             // causing the bot to eat food mid-combat (and "attack" with food).
-            List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(player, 10.0D)
-                    .stream()
-                    .filter(EntityUtil::isHostile)
-                    .toList();
-            HealingService.autoEat(player, nearbyHostiles);
+            net.wcfcarolina13.TickGuard.perBot("BotEventHandler::tickHunger", player, () -> {
+                List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(player, 10.0D)
+                        .stream()
+                        .filter(EntityUtil::isHostile)
+                        .toList();
+                HealingService.autoEat(player, nearbyHostiles);
+            });
         }
     }
 
@@ -1201,6 +1208,12 @@ public class BotEventHandler {
                 currentBot.setHealth(currentBot.getMaxHealth());
             }
             onBotRespawn(currentBot, false); // the fallback only runs after a death
+            // A Frens bot's death never reaches vanilla respawnPlayer (it is revived in place), so
+            // AFTER_RESPAWN never fires for it and this fallback is the death path: note the
+            // respawn in the soul journal as the listener would.
+            if (net.wcfcarolina13.GameAI.services.RespawnResetPolicy.plan(false).noteSoulRespawn()) {
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onBotRespawn(currentBot);
+            }
         }));
     }
 
@@ -5722,10 +5735,15 @@ public class BotEventHandler {
         try {
             CompletableFuture.runAsync(() -> {
                 try {
+                    // The commander is the request source, as for a skill they start themselves:
+                    // tool provisioning reads their crafting history (recorded against the player,
+                    // not the bot), so without it a boxed-in bot dug stone bare-handed with logs
+                    // in its pack.
                     SkillContext ctx = new SkillContext(
                             bot.getCommandSource(),
                             SharedStateService.safeSharedState("come-recovery"),
-                            finalParams
+                            finalParams,
+                            commander != null ? commander.getCommandSource() : null
                     );
                     LOGGER.info("[ComeRecovery] launch-confirmed bot={} goal={} skill={} args={}",
                             bot.getName().getString(),
@@ -7610,6 +7628,8 @@ public class BotEventHandler {
 	            BotLifecycleService.clear();
 	            BotRegistry.clear();
 	            net.wcfcarolina13.PlayerUtils.ToolSelector.resetSession();
+            // Hotbar locks hold "until tick N"; the next world's ticks restart at 0.
+            net.wcfcarolina13.GameAI.services.HotbarLockService.resetSession();
 		            BotCommandStateService.clearAll();
 		            BotRescueService.reset();
 		            BotStuckService.resetAll();

@@ -162,16 +162,20 @@ public final class AiSetupChecklistPolicy {
         steps.add(new Step(StepId.VOICE, voice.enabled() ? State.DONE : State.OPTIONAL, canEdit, !canEdit,
                 voiceDetail));
 
-        NewBotSoul newBotSoul = newBotSoul(canEdit, runtime.newBotSoulDefault(), ollamaState, modelState);
+        NewBotSoul newBotSoul = newBotSoul(canEdit, status.viewer().canSetNewBotSoul(),
+                runtime.newBotSoulDefault(), ollamaState, modelState);
         return new Checklist(steps, rows, testBot, onServerMachine, newBotSoul);
     }
 
     /**
      * Whether and how step 4 shows the new-bot soul question: only to an operator or the host,
      * once Ollama and the model are done, and always after it was answered so it can be changed.
+     * Hidden when the server does not say it handles the answer ({@code serverHandles} false): a
+     * server before 1.1.296 drops the unknown action, so the button would do nothing.
      */
-    public static NewBotSoul newBotSoul(boolean canEdit, Boolean answer, State ollama, State model) {
-        if (!canEdit) {
+    public static NewBotSoul newBotSoul(boolean canEdit, boolean serverHandles, Boolean answer,
+                                        State ollama, State model) {
+        if (!canEdit || !serverHandles) {
             return NewBotSoul.HIDDEN;
         }
         if (answer != null) {

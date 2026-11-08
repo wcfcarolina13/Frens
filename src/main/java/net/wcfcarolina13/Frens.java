@@ -385,7 +385,7 @@ public class Frens implements ModInitializer {
         // Register mod items
         ModItems.registerAll();
 
-        UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
+        UseEntityCallback.EVENT.register(TickGuard.useEntity("use-entity", (player, world, hand, entity, hit) -> {
             if (world.isClient()) return net.minecraft.util.ActionResult.PASS;
             // Only react once (MAIN_HAND). OFF_HAND callback will return PASS to avoid double-fire.
             if (hand != net.minecraft.util.Hand.MAIN_HAND) return net.minecraft.util.ActionResult.PASS;
@@ -441,7 +441,7 @@ public class Frens implements ModInitializer {
                     (net.minecraft.server.network.ServerPlayerEntity) player, bot
             );
             return ok ? net.minecraft.util.ActionResult.SUCCESS : net.minecraft.util.ActionResult.PASS;
-        });
+        }));
 
         // Nether ritual resurrection: sneak-right-click a Respawn Anchor with a Ghast Tear.
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
@@ -531,14 +531,14 @@ public class Frens implements ModInitializer {
             }
         });
 
-        net.fabricmc.fabric.api.event.player.AttackEntityCallback.EVENT.register(
+        net.fabricmc.fabric.api.event.player.AttackEntityCallback.EVENT.register(TickGuard.attackEntity("attack-entity",
                 (player, world, hand, entity, hitResult) -> {
             if (world != null && !world.isClient()
                     && player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer) {
                 net.wcfcarolina13.GameAI.souls.SoulRuntime.notePlayerAttack(serverPlayer, entity);
             }
             return net.minecraft.util.ActionResult.PASS;
-        });
+        }));
 
         LOGGER.info("Hello Fabric world!");
 
@@ -818,6 +818,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotHomeService.restartExecutors();
             net.wcfcarolina13.PathFinding.PathCompareService.restartExecutors();
             net.wcfcarolina13.GameAI.services.BotZzzSleepService.restartExecutor();
+            net.wcfcarolina13.GameAI.services.DurabilityFallbackService.restartExecutors();
             serverInstance = server;
             net.wcfcarolina13.GameAI.souls.SoulRuntime.start(server, CONFIG);
             net.wcfcarolina13.GameAI.souls.SoulEventObserver.initializeProduction();
@@ -978,6 +979,16 @@ public class Frens implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             BotEventHandler.resetAll();
+            // Tick- and day-based per-bot gates: the next world's ticks restart at 0 with the same
+            // bot UUIDs, so stale gates would hold behaviour back for as long as this world ran.
+            net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotEmergencyRescueService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotMutualAidService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotAutoHuntService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotAutoCookingService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotFallSafetyService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotCombatCalloutService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotFleeService.resetSession();
             AutoFaceEntity.onServerStopped(server);
             // Integrated-server world reloads keep mod static state alive. Ensure task locks don't leak across reloads.
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopped, clearing task state.");
@@ -1074,7 +1085,7 @@ public class Frens implements ModInitializer {
         });
 
         // Register damage event to handle suffocation immediately
-        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register(TickGuard.allowDamage("allow-damage", (entity, source, amount) -> {
             if (entity instanceof ServerPlayerEntity realPlayer && !(realPlayer instanceof net.wcfcarolina13.Entity.createFakePlayer)) {
                 LearningModeService.onPlayerDamage(realPlayer, source, amount);
                 // Journal this damage to any owned bot that is local enough to witness it.
@@ -1181,11 +1192,11 @@ public class Frens implements ModInitializer {
                 }
             }
             return true; // Allow the damage
-        });
+        }));
 
         // A bot's hit on a real player (melee or its arrow) that actually landed: the bot apologises.
         // Bot victims are covered by their own friendly-fire-received line in ALLOW_DAMAGE above.
-        ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamageTaken, damageTaken, blocked) -> {
+        ServerLivingEntityEvents.AFTER_DAMAGE.register(TickGuard.afterDamage("after-damage", (entity, source, baseDamageTaken, damageTaken, blocked) -> {
             if (!(entity instanceof ServerPlayerEntity victim) || source == null) {
                 return;
             }
@@ -1198,9 +1209,9 @@ public class Frens implements ModInitializer {
                 net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onBotHitPlayer(
                         (ServerPlayerEntity) attacker, victim, damageTaken);
             }
-        });
+        }));
 
-        ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
+        ServerLivingEntityEvents.AFTER_DEATH.register(TickGuard.afterDeath("after-death", (entity, damageSource) -> {
             if (entity instanceof ServerPlayerEntity serverPlayer) {
                 boolean shouldAutoRespawn = true;
                 if (BotEventHandler.isRegisteredBot(serverPlayer)) {
@@ -1254,6 +1265,12 @@ public class Frens implements ModInitializer {
                                 .promptForRespawn(srv, serverPlayer);
                     }
                     BotEventHandler.unregisterBot(serverPlayer);
+                    // unregisterBot ends in PlayerManager.remove, which saves player data: that
+                    // re-created the .dat onBotDeath just deleted (post-drop inventory, death spot),
+                    // so a "yes" respawned the bot where it died. Delete it again, as /bot forget does.
+                    if (srv != null) {
+                        BotPersistenceService.deletePlayerDataFile(srv, serverPlayer.getUuid());
+                    }
                 }
                 HuntSessionService.clearSession(serverPlayer.getUuid());
             }
@@ -1293,7 +1310,7 @@ public class Frens implements ModInitializer {
                     triggerNearbyBotClappingForKill(killer3, dead);
                 }
             }
-        });
+        }));
 
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
             // Check if the respawned player is the bot
@@ -1311,65 +1328,65 @@ public class Frens implements ModInitializer {
             BotEventHandler.ensureBotPresence(newPlayer.getCommandSource().getServer());
         });
 
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.souls.SoulRuntime::tickScenes);
-        ServerTickEvents.END_SERVER_TICK.register(BotPersistenceService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
-        ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickHunger);
-        ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickDrowningRescue);
-        ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickDurabilityArmorAudit);
-        ServerTickEvents.END_SERVER_TICK.register(Frens::processSpawnEscapeChecks);
-        ServerTickEvents.END_SERVER_TICK.register(server -> flushPreferenceSaves());
-        ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAnimalDefenseService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotHazardService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotPowderSnowRescueService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.navigation.NavHazardCache::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotTorchHoldService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotRandomDanceService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotSnowballFightService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotStandDownService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotZzzSleepService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotPressurePlateDiagnosticService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoHuntService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoCookingService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFoodGivingService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotEmergencyRescueService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.network.HuntablesNetworkManager::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.TravelWaitService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotMutualAidService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(BotInventoryFullDialogueService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(BotMoodManager::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(BotAmbientChatter::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(BotQuestService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.RideSyncService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotCombatCalloutService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.VillageProximityReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.PetProximityReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotDogWalkingHobbyService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.CompanionContextReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.SweetBerryBushReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotWakeUpDialogueService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.EnchantingAmbientDialogueService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.PlayerEatingReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.CookingReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.ElytraFlightService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.GhastFireballDeflectService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(LearningModeService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(NavigationArtifactService::tickPendingTravels);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.SoulOfEnderService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.souls.SoulEventObserver::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.ZoneVisualizerService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("SoulRuntime::tickScenes", net.wcfcarolina13.GameAI.souls.SoulRuntime::tickScenes));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotPersistenceService::onServerTick", BotPersistenceService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("SurvivalRecruitmentService::onServerTick", net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotEventHandler::tickBurialRescue", BotEventHandler::tickBurialRescue));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotEventHandler::tickHunger", BotEventHandler::tickHunger));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotEventHandler::tickDrowningRescue", BotEventHandler::tickDrowningRescue));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotEventHandler::tickDurabilityArmorAudit", BotEventHandler::tickDurabilityArmorAudit));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("Frens::processSpawnEscapeChecks", Frens::processSpawnEscapeChecks));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("flushPreferenceSaves", server -> flushPreferenceSaves()));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotCampfireAvoidanceService::onServerTick", BotCampfireAvoidanceService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotAnimalDefenseService::onServerTick", net.wcfcarolina13.GameAI.services.BotAnimalDefenseService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotHazardService::onServerTick", net.wcfcarolina13.GameAI.services.BotHazardService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotPowderSnowRescueService::onServerTick", net.wcfcarolina13.GameAI.services.BotPowderSnowRescueService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("NavHazardCache::onServerTick", net.wcfcarolina13.GameAI.services.navigation.NavHazardCache::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("PassageAnchorService::onServerTick", net.wcfcarolina13.GameAI.services.navigation.PassageAnchorService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotTorchHoldService::onServerTick", net.wcfcarolina13.GameAI.services.BotTorchHoldService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotRandomDanceService::onServerTick", net.wcfcarolina13.GameAI.services.BotRandomDanceService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotSnowballFightService::onServerTick", net.wcfcarolina13.GameAI.services.BotSnowballFightService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotFallSafetyService::onServerTick", net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotStandDownService::onServerTick", net.wcfcarolina13.GameAI.services.BotStandDownService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotZzzSleepService::onServerTick", net.wcfcarolina13.GameAI.services.BotZzzSleepService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotPressurePlateDiagnosticService::onServerTick", net.wcfcarolina13.GameAI.services.BotPressurePlateDiagnosticService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotAutoHuntService::onServerTick", net.wcfcarolina13.GameAI.services.BotAutoHuntService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotAutoCookingService::onServerTick", net.wcfcarolina13.GameAI.services.BotAutoCookingService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotFoodGivingService::onServerTick", net.wcfcarolina13.GameAI.services.BotFoodGivingService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotAutoReturnSunsetService::onServerTick", BotAutoReturnSunsetService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotEmergencyRescueService::onServerTick", net.wcfcarolina13.GameAI.services.BotEmergencyRescueService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotUndergroundSurvivalService::onServerTick", net.wcfcarolina13.GameAI.services.BotUndergroundSurvivalService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("HuntablesNetworkManager::onServerTick", net.wcfcarolina13.network.HuntablesNetworkManager::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotIdleHobbiesService::onServerTick", BotIdleHobbiesService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("TravelWaitService::onServerTick", net.wcfcarolina13.GameAI.services.TravelWaitService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotMutualAidService::onServerTick", net.wcfcarolina13.GameAI.services.BotMutualAidService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotInventoryFullDialogueService::onServerTick", BotInventoryFullDialogueService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotAmbientSocialChatService::onServerTick", BotAmbientSocialChatService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotMoodManager::onServerTick", BotMoodManager::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotAmbientChatter::onServerTick", BotAmbientChatter::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotQuestService::onServerTick", BotQuestService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("RideSyncService::onServerTick", net.wcfcarolina13.GameAI.services.RideSyncService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotCombatCalloutService::onServerTick", net.wcfcarolina13.GameAI.services.BotCombatCalloutService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("VillageProximityReactionService::onServerTick", net.wcfcarolina13.GameAI.services.VillageProximityReactionService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("PetProximityReactionService::onServerTick", net.wcfcarolina13.GameAI.services.PetProximityReactionService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotDogWalkingHobbyService::onServerTick", net.wcfcarolina13.GameAI.services.BotDogWalkingHobbyService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("CompanionContextReactionService::onServerTick", net.wcfcarolina13.GameAI.services.CompanionContextReactionService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("SweetBerryBushReactionService::onServerTick", net.wcfcarolina13.GameAI.services.SweetBerryBushReactionService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("BotWakeUpDialogueService::onServerTick", net.wcfcarolina13.GameAI.services.BotWakeUpDialogueService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("EnchantingAmbientDialogueService::onServerTick", net.wcfcarolina13.GameAI.services.EnchantingAmbientDialogueService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("PlayerEatingReactionService::onServerTick", net.wcfcarolina13.GameAI.services.PlayerEatingReactionService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("CookingReactionService::onServerTick", net.wcfcarolina13.GameAI.services.CookingReactionService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("ElytraFlightService::onServerTick", net.wcfcarolina13.GameAI.services.ElytraFlightService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("GhastFireballDeflectService::onServerTick", net.wcfcarolina13.GameAI.services.GhastFireballDeflectService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("CompanionOverheadHologramService::onServerTick", net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("LearningModeService::onServerTick", LearningModeService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("NavigationArtifactService::tickPendingTravels", NavigationArtifactService::tickPendingTravels));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("SoulOfEnderService::onServerTick", net.wcfcarolina13.GameAI.services.SoulOfEnderService::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("SoulEventObserver::onServerTick", net.wcfcarolina13.GameAI.souls.SoulEventObserver::onServerTick));
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("ZoneVisualizerService::onServerTick", net.wcfcarolina13.GameAI.services.ZoneVisualizerService::onServerTick));
 
         // Lock mode: crosshair feedback + particle visualization for admin players
-        ServerTickEvents.END_SERVER_TICK.register(server -> {
+        ServerTickEvents.END_SERVER_TICK.register(TickGuard.endTick("lock-mode", server -> {
             int tick = server.getTicks();
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
                 if (player instanceof net.wcfcarolina13.Entity.createFakePlayer) continue;
@@ -1382,7 +1399,7 @@ public class Frens implements ModInitializer {
                     net.wcfcarolina13.GameAI.services.LockableBlockService.tickParticles(player, sw);
                 }
             }
-        });
+        }));
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
