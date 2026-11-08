@@ -9,6 +9,15 @@ A 1.1.296+ client on an older Frens server showed "New bots: Ask" in the AI setu
 - The status `viewer` block gets `canSetNewBotSoul`, sent as true by a current server to an operator or the host. Old servers never send it, so it reads false and `AiSetupChecklistPolicy.newBotSoul` returns HIDDEN. The redacted player view always clears it.
 - **Cost (chosen over a disabled button with an "update the server" tooltip):** on an old server the operator does not learn the setting exists. The alternative needed a new label set and tooltip that I could not check for fit at GUI scale 5 from a cloud session. Old client on a new server: the extra JSON field is ignored, no change.
 - **Limits:** unit tests only (3 new, Tests 3857 → 3860). Not checked in game. Needs a sandbox check: a current client against a pre-1.1.296 server shows no "New bots" button in step 4, and against a current server the button still appears and toggles.
+## A bot's second End exit comes back like the first (unreleased, 2026-11-05)
+
+1.1.295 deferral: since 1.1.295 a bot that walks into the End exit portal answers vanilla's credits path itself, but vanilla then marks it `seenCredits`, so its second exit took the ordinary portal teleport. That reaches `teleportTo`, which reads as an external teleport: follow cleared and the task ended with "External teleport detected."
+
+- Checked against the 1.21.11 yarn jar first: `ServerPlayerEntity.seenCredits` is a public field; `EndPortalBlock.onEntityCollision` detaches only while it is false; `detachForDimensionChange` sets it; `copyFrom` carries it to the respawned entity; the player save keeps it.
+- `createFakePlayer` resets it to false after `detachForDimensionChange` (before the self-respawn, so `copyFrom` carries false) and after `readCustomData` (saves from 1.1.295-1.1.298 can hold true). The decision is `EndCreditsPolicy` (5 tests, Tests 3857 → 3862). Carpet's and real players untouched.
+- **Chosen over** the deferral's suggestion (reset on the cross-dimension `teleportTo` path): resetting there still lets the second exit take the teleport path and only fixes the third, so every other exit would still fail.
+- **Cost:** none in play, since a bot has no client to show credits. The saved `seenCredits` for Frens bots now always reads false.
+- **Limits:** unit tests only, not run in game. Needs a sandbox check: one bot exits the End twice (and once more after a world reload); each exit keeps follow, shows "Task ended: changed dimension." once when a task ran, and never logs "External teleport detected."
 
 ## Repository clean-up: public and private split (2026-11-04)
 
