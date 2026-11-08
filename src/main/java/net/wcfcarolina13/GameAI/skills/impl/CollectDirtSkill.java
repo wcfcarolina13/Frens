@@ -1595,9 +1595,16 @@ public class CollectDirtSkill implements Skill {
             int maxSteps = Math.abs(targetY - player.getBlockY()) * 5; // Generous limit
             int consecutiveNoProgressSteps = 0;
             int[] handDigSteps = {0};
+            // A bot digging its stair by hand (no blocks) takes ~22 s a step in stone, accepted
+            // (#28 ruling 3): its runtime cap is a budget from the climb, not the flat 60 s that
+            // cut a hillside climb off after 3 steps. The no-progress cap still ends a stalled climb.
+            long handDigBudgetMs = HandDigStairPolicy.climbBudgetMillis(
+                    Math.max(0, targetY - player.getBlockY()), MAX_RUNTIME_MILLIS);
 
             while ((player.getBlockY() < targetY || (stopAtSurface && !isOnSurface(player))) &&
-                   System.currentTimeMillis() - startTime < MAX_RUNTIME_MILLIS && 
+                   System.currentTimeMillis() - startTime < HandDigStairPolicy.runtimeCapMillis(
+                           HandDigStairPolicy.handDigging(handDigSteps[0], countScaffoldBlocks(player)),
+                           handDigBudgetMs, MAX_RUNTIME_MILLIS) && 
                    steps < maxSteps) {
                 
                 // Safety checks

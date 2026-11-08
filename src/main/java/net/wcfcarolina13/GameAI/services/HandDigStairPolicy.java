@@ -279,6 +279,34 @@ public final class HandDigStairPolicy {
         return null;
     }
 
+    /** Worst case for one hand-dug step: three cells at the per-cell cap, plus the step-up and its hop. */
+    public static final long STEP_BUDGET_MILLIS = 3L * MAX_CELL_BREAK_TICKS * 50L + 5_000L;
+
+    /**
+     * Runtime budget for an ascent the bot digs by hand: one {@link #STEP_BUDGET_MILLIS} per block to
+     * climb, at most {@link #MAX_STEPS} steps, never below {@code floorMillis} (the flat cap that
+     * held before). A surface-mode climb whose target is far above counts as {@link #MAX_STEPS}.
+     */
+    public static long climbBudgetMillis(int blocksToClimb, long floorMillis) {
+        int steps = Math.min(MAX_STEPS, Math.max(1, blocksToClimb));
+        return Math.max(floorMillis, steps * STEP_BUDGET_MILLIS);
+    }
+
+    /**
+     * Whether this climb is a hand-dig climb, latched: once a step was dug by hand the bot keeps
+     * the hand-dig budget, even after the dug dirt gives it blocks to pillar with. Without the latch
+     * the first picked-up block dropped the cap to the flat 60 s, and the time already spent on
+     * hand-dug steps ended the climb.
+     */
+    public static boolean handDigging(int handDugSteps, int scaffoldBlocks) {
+        return handDugSteps > 0 || scaffoldBlocks <= 0;
+    }
+
+    /** The ascent's runtime cap: the hand-dig budget while the bot has no blocks, else the flat cap. */
+    public static long runtimeCapMillis(boolean handDigging, long handDigBudgetMillis, long flatCapMillis) {
+        return handDigging ? Math.max(flatCapMillis, handDigBudgetMillis) : flatCapMillis;
+    }
+
     public static Decision decide(CellView view, List<Dir> preference, int stepsTaken) {
         Map<Dir, Refusal> per = new EnumMap<>(Dir.class);
         if (stepsTaken >= MAX_STEPS) {
