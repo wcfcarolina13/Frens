@@ -131,6 +131,10 @@ public final class TaskService {
             executingThread.set(thread);
         }
 
+        Thread executingThreadOrNull() {
+            return executingThread.get();
+        }
+
         public boolean isExecutingThreadAlive() {
             Thread t = executingThread.get();
             return t != null && t.isAlive();
@@ -206,6 +210,14 @@ public final class TaskService {
      * own cancelled ticket was no longer visible to its abort checks. Cleared by {@link #complete}.
      */
     private static final ThreadLocal<TaskTicket> WORKER_TICKET = new ThreadLocal<>();
+    /**
+     * Per bot, the worker of a ticket that was aborted while its thread was still alive. abortTicket
+     * frees the slot at once (so /bot stop stays instant), which let a new command's worker start
+     * while the old one was still unwinding: two workers for one bot. The new worker waits for it,
+     * on its own thread, in {@link #attachExecutingThread} (ruling 2026-11-08: up to 2 s).
+     */
+    private static final Map<UUID, Thread> UNWINDING = new ConcurrentHashMap<>();
+    private static volatile long unwindWaitMs = UnwindWaitPolicy.WAIT_MS;
 
     private static UUID key(UUID botUuid) {
         return botUuid != null ? botUuid : GLOBAL_KEY;
@@ -484,7 +496,52 @@ public final class TaskService {
         ticket.attachExecutingThread(thread);
         if (thread == Thread.currentThread()) {
             WORKER_TICKET.set(ticket);
+            awaitPreviousWorker(ticket.botUuid());
         }
+    }
+
+    /** Waits, bounded, for this bot's aborted worker to exit before the new one goes on. */
+    private static void awaitPreviousWorker(UUID botUuid) {
+        UUID slot = key(botUuid);
+        Thread previous = UNWINDING.get(slot);
+        if (previous == null) {
+            return;
+        }
+        Thread current = Thread.currentThread();
+        boolean onServerThread = false;
+        try {
+            var server = net.wcfcarolina13.Frens.serverInstance;
+            onServerThread = server != null && server.isOnThread();
+        } catch (Throwable ignored) {
+        }
+        if (!UnwindWaitPolicy.shouldWait(previous == current, previous.isAlive(), onServerThread)) {
+            if (previous == current || !previous.isAlive()) {
+                UNWINDING.remove(slot, previous);
+            }
+            return;
+        }
+        long started = System.nanoTime();
+        try {
+            previous.join(unwindWaitMs);
+        } catch (InterruptedException e) {
+            // The new task was itself stopped while waiting: keep the flag for its abort checks.
+            current.interrupt();
+            return;
+        }
+        long waitedMs = (System.nanoTime() - started) / 1_000_000L;
+        if (previous.isAlive()) {
+            LOGGER.warn("Bot {}: previous worker '{}' still unwinding after {} ms; starting the new task anyway",
+                    botUuid, previous.getName(), waitedMs);
+        } else if (waitedMs > 0) {
+            LOGGER.info("Bot {}: waited {} ms for the previous worker to exit", botUuid, waitedMs);
+        }
+        // One wait per abort: a worker that outlives the budget must not delay every later start.
+        UNWINDING.remove(slot, previous);
+    }
+
+    /** Test seam: the wait budget, so a test of the cap does not take 2 s. */
+    static void setUnwindWaitMsForTest(long ms) {
+        unwindWaitMs = ms > 0 ? ms : UnwindWaitPolicy.WAIT_MS;
     }
 
     /** The current thread's own ticket for this bot, or null. Matches by slot, not {@code matches()}. */
@@ -557,6 +614,7 @@ public final class TaskService {
         if (WORKER_TICKET.get() == ticket) {
             WORKER_TICKET.remove();
         }
+        UNWINDING.remove(key(ticket.botUuid()), Thread.currentThread());
         State finalState = success ? State.COMPLETED : State.ABORTED;
         if (ticket.isCancelRequested()) {
             finalState = State.ABORTED;
@@ -771,6 +829,10 @@ public final class TaskService {
     /** Returns true when this call cancelled the ticket (the case that announces the reason). */
     private static boolean abortTicket(TaskTicket ticket, String reason, boolean dispatchMessage) {
         ABORT_LATCH.put(key(ticket.botUuid()), reason == null ? "" : reason);
+        Thread worker = ticket.executingThreadOrNull();
+        if (worker != null && worker.isAlive() && worker != Thread.currentThread()) {
+            UNWINDING.put(key(ticket.botUuid()), worker);
+        }
         boolean cancelled = ticket.requestCancel(reason);
         if (cancelled) {
             ticket.setState(State.ABORTED);
@@ -809,6 +871,7 @@ public final class TaskService {
         ACTIVE.clear();
         IN_ASCENT_MODE.clear();
         ABORT_LATCH.clear();
+        UNWINDING.clear();
         WORKER_TICKET.remove();
     }
 
