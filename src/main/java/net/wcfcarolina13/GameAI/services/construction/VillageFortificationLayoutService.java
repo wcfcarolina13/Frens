@@ -12,8 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Plans a defensive wall layout around a detected village using a 2D convex hull
@@ -297,26 +295,25 @@ public class VillageFortificationLayoutService {
         // Scan villagers on the server thread
         final int searchR = sr;
         final BlockPos sc = searchCenter;
-        CompletableFuture<List<BlockPos>> villagerFuture = new CompletableFuture<>();
-        world.getServer().execute(() -> {
-            List<VillagerEntity> villagers = world.getEntitiesByClass(
-                    VillagerEntity.class,
-                    new Box(sc).expand(searchR),
-                    v -> true
-            );
-            List<BlockPos> positions = new ArrayList<>();
-            for (VillagerEntity v : villagers) {
-                positions.add(v.getBlockPos().toImmutable());
-            }
-            villagerFuture.complete(positions);
-        });
-
-        List<BlockPos> villagerPositions;
-        try {
-            villagerPositions = villagerFuture.get(5, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            LOGGER.warn("Failed to query villagers: {}", e.getMessage());
-            villagerPositions = List.of();
+        // Inline on the server thread (the "map village" packet handler runs there): posting to
+        // server.execute and waiting from the server thread could never run, so it always waited
+        // the full 5 s and then built the layout with no villagers. From a worker: hop and wait.
+        net.minecraft.server.MinecraftServer server = world.getServer();
+        List<BlockPos> villagerPositions = server == null ? List.of()
+                : net.wcfcarolina13.GameAI.services.ServerThreadCallPolicy.call(server.isOnThread(), server::execute, () -> {
+                    List<VillagerEntity> villagers = world.getEntitiesByClass(
+                            VillagerEntity.class,
+                            new Box(sc).expand(searchR),
+                            v -> true
+                    );
+                    List<BlockPos> positions = new ArrayList<>();
+                    for (VillagerEntity v : villagers) {
+                        positions.add(v.getBlockPos().toImmutable());
+                    }
+                    return positions;
+                }, 5000L, List.of());
+        if (villagerPositions.isEmpty()) {
+            LOGGER.debug("No villagers found near {} (or the server did not answer in time)", sc.toShortString());
         }
 
         for (BlockPos vp : villagerPositions) {

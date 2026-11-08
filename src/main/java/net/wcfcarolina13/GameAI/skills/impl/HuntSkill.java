@@ -1330,6 +1330,12 @@ public final class HuntSkill implements Skill {
     }
 
     private static boolean consumeInventoryFood(ServerPlayerEntity bot, int slot) {
+        // Swap, select and use in one server-thread hop: from the hunt worker, a select that
+        // timed out would have used whatever was in hand instead of the food.
+        return BotActions.callOnServerThread(bot, () -> consumeInventoryFoodOnServer(bot, slot), 1500L, false);
+    }
+
+    private static boolean consumeInventoryFoodOnServer(ServerPlayerEntity bot, int slot) {
         if (bot.isUsingItem()) {
             return false;
         }
@@ -1446,14 +1452,19 @@ public final class HuntSkill implements Skill {
                 net.minecraft.item.Items.BAMBOO_CHEST_RAFT,
                 net.minecraft.item.Items.CRAFTING_TABLE
         );
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (!stack.isEmpty() && disposable.contains(stack.getItem())) {
-                bot.dropItem(stack, false);
-                bot.getInventory().setStack(i, ItemStack.EMPTY);
-                LOGGER.info("Jettisoned {} to clear inventory space", stack.getItem().getName().getString());
+        // Runs from the hunt worker; dropping spawns an item entity and edits the inventory, so it
+        // happens on the server thread (synchronously: callers check free space right after).
+        BotActions.callOnServerThread(bot, () -> {
+            for (int i = 0; i < bot.getInventory().size(); i++) {
+                ItemStack stack = bot.getInventory().getStack(i);
+                if (!stack.isEmpty() && disposable.contains(stack.getItem())) {
+                    bot.dropItem(stack, false);
+                    bot.getInventory().setStack(i, ItemStack.EMPTY);
+                    LOGGER.info("Jettisoned {} to clear inventory space", stack.getItem().getName().getString());
+                }
             }
-        }
+            return true;
+        }, 1000L, false);
     }
 
     public static boolean hasRawFood(ServerPlayerEntity bot) {

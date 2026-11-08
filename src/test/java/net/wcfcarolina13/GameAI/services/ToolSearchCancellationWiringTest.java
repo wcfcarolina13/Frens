@@ -81,10 +81,19 @@ class ToolSearchCancellationWiringTest {
                 + " ? Step.loud(Result.refused(Refusal.ABORTED)) : step(bot, chestPos, sample, qty, need);"));
         assertTrue(withdraw.contains("outcome = onServer(srv, oneStep)"));
         assertTrue(withdraw.contains("awaitAnswer(srv, bot, abort, oneStep)"));
+        // The single-item wait delegates to the one generic loop (shared with the bundle since the
+        // combined chest ask); the abort check and the ABORTED refusal live in that loop.
         String wait = method("supply/SupplyWithdrawals.java", "awaitAnswer");
-        assertTrue(wait.contains("boolean aborted = (abort != null && abort.getAsBoolean())"));
-        assertTrue(wait.contains("SupplyWithdrawalPolicy.keepWaiting(aborted, pending,"));
-        assertTrue(wait.contains("case ABORTED: return Step.loud(Result.refused(Refusal.ABORTED));"));
+        assertTrue(wait.contains("return awaitAnswer(srv, bot, abort, () -> onServer(srv, oneStep),"
+                + " r -> Step.loud(Result.refused(r)));"));
+        String loop = method("supply/SupplyWithdrawals.java", "<T> T awaitAnswer");
+        assertTrue(loop.contains("boolean aborted = (abort != null && abort.getAsBoolean())"));
+        assertTrue(loop.contains("SupplyWithdrawalPolicy.keepWaiting(aborted, pending,"));
+        assertTrue(loop.contains("case ABORTED: return refused.apply(Refusal.ABORTED);"));
+        String bundle = method("supply/SupplyWithdrawals.java", "withdrawBundle");
+        assertTrue(bundle.contains("Function<BundleResult, BundleResult> oneStep = before -> abort != null && abort.getAsBoolean()"));
+        assertTrue(bundle.contains("awaitAnswer(srv, bot, abort, () -> onServer(srv, () -> oneStep.apply(before), refusedUnsettled),"
+                + " refusedUnsettled)"));
     }
 
     private static String method(String relative, String name) throws IOException {
@@ -92,8 +101,8 @@ class ToolSearchCancellationWiringTest {
                 .replaceAll("(?s)/\\*.*?\\*/", "")
                 .replaceAll("(?m)//.*$", "")
                 .replaceAll("\\s+", " ");
-        var declaration = Pattern.compile("(?:public|private) (?:static )?[\\w.<>]+ "
-                + name + "\\s*\\([^)]*\\)\\s*\\{").matcher(source);
+        var declaration = Pattern.compile("(?:public|private) (?:static )?" + (name.startsWith("<") ? "" : "[\\w.<>]+ ")
+                + Pattern.quote(name) + "\\s*\\([^)]*\\)\\s*\\{").matcher(source);
         while (declaration.find()) {
             if (!name.equals("retrieveToolFromChests")
                     || declaration.group().contains("SupplyWithdrawals.WaitMode mode")) {
