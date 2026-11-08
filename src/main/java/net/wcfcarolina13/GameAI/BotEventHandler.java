@@ -3195,7 +3195,7 @@ public class BotEventHandler {
 
         double distanceFromCenter = positionOf(bot).distanceTo(center);
         if (distanceFromCenter > 1.5D) {
-            moveToward(bot, center, 0.9D, false);
+            moveTowardStayingOutOfHoles(bot, center, 0.9D);
             return true;
         }
 
@@ -3361,7 +3361,7 @@ public class BotEventHandler {
             if (server != null) {
                 GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), server.getTicks() + 20L);
             }
-            moveToward(bot, center, 2.0D, false);
+            moveTowardStayingOutOfHoles(bot, center, 2.0D);
             return true;
         }
 
@@ -3369,7 +3369,7 @@ public class BotEventHandler {
         if (patrolTarget != null) {
             double dist = positionOf(bot).distanceTo(patrolTarget);
             if (dist > 1.35D) {
-                moveToward(bot, patrolTarget, 1.1D, false);
+                moveTowardStayingOutOfHoles(bot, patrolTarget, 1.1D);
                 return true;
             }
             GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
@@ -4305,6 +4305,11 @@ public class BotEventHandler {
 
     private static void moveToward(ServerPlayerEntity bot, Vec3d target, double stopDistance, boolean sprint) {
         FollowMovementService.moveToward(bot, target, stopDistance, sprint, () -> lowerShieldTracking(bot));
+    }
+
+    /** Guard and patrol walking back to their point: a hole in front is stepped around (DropGuardExemptionPolicy). */
+    private static void moveTowardStayingOutOfHoles(ServerPlayerEntity bot, Vec3d target, double stopDistance) {
+        FollowMovementService.moveToward(bot, target, stopDistance, false, () -> lowerShieldTracking(bot), true);
     }
 
     private static void followInputStep(ServerPlayerEntity bot, Vec3d targetPos, double distanceSq, boolean allowCloseStop, double followPersonalSpace) {

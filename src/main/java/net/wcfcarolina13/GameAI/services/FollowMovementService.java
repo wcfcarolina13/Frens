@@ -86,6 +86,22 @@ public final class FollowMovementService {
                                  double stopDistance,
                                  boolean sprint,
                                  Runnable lowerShield) {
+        moveToward(bot, target, stopDistance, sprint, lowerShield, false);
+    }
+
+    /**
+     * {@code stayOutOfHoles}: guard and patrol walking back to their point. Their target is a spot
+     * on the ground near which the bot already stands, so the drop guard's "a grounded target within
+     * 4.5 blocks below is a normal descent" exemption let it walk into the open pit it had just
+     * climbed out of (sandbox 2026-11-08, backlog "Guard/patrol verification"). With it set, a hole
+     * in front is stepped around unless the drop lands on the target's own column.
+     */
+    public static void moveToward(ServerPlayerEntity bot,
+                                 Vec3d target,
+                                 double stopDistance,
+                                 boolean sprint,
+                                 Runnable lowerShield,
+                                 boolean stayOutOfHoles) {
         if (bot == null || target == null) {
             return;
         }
@@ -105,7 +121,7 @@ public final class FollowMovementService {
         bot.setBodyYaw(yaw);
 
         // Guard against blindly stepping off tall ledges during waypoint/goal movement.
-        if (tryDropoffGuard(bot, target)) {
+        if (tryDropoffGuard(bot, target, stayOutOfHoles)) {
             return;
         }
 
@@ -456,6 +472,10 @@ public final class FollowMovementService {
     }
 
     private static boolean tryDropoffGuard(ServerPlayerEntity bot, Vec3d targetPos) {
+        return tryDropoffGuard(bot, targetPos, false);
+    }
+
+    private static boolean tryDropoffGuard(ServerPlayerEntity bot, Vec3d targetPos, boolean stayOutOfHoles) {
         if (bot == null || targetPos == null) {
             return false;
         }
@@ -488,8 +508,9 @@ public final class FollowMovementService {
         // false positive.  Checking the target directly avoids this.
         BlockPos targetBlock = BlockPos.ofFloored(targetPos);
         double stepDown = bot.getY() - targetPos.y;
-        if (stepDown >= -0.5D && stepDown <= 4.5D
-                && isGroundedTwoHighClearance(world, targetBlock)) {
+        if (DropGuardExemptionPolicy.exempt(stayOutOfHoles, stepDown,
+                isGroundedTwoHighClearance(world, targetBlock),
+                front.getX(), front.getZ(), targetBlock.getX(), targetBlock.getZ())) {
             return false;
         }
 
