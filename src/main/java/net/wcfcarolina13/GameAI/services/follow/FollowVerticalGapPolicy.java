@@ -23,4 +23,37 @@ public final class FollowVerticalGapPolicy {
     public static boolean isVerticalSeparation(int botY, int targetY) {
         return Math.abs(botY - targetY) >= MIN_VERTICAL_GAP;
     }
+
+    /** A reroute goal must bring the bot at least this much closer to the commander (blocks, 3D). */
+    public static final double MIN_FALLBACK_GAIN = 2.0D;
+
+    /**
+     * Whether a reroute goal is worth a plan: it is at least {@link #MIN_FALLBACK_GAIN} closer to the
+     * target than the bot is now. Once the bot stands at the foot of the commander's block, the goal
+     * "near the commander at the bot's level" is where it already is: a plan there succeeds, clears
+     * the no-path streak and the stagnation count, and the regroup prompt never comes (sandbox
+     * 2026-11-08, commander on a 4-high block with no way up: planner-fallback every 2.5 s, no prompt
+     * in 75 s, where main prompted at 14 s). Skipping that goal lets the no-path streak build.
+     */
+    public static boolean fallbackGoalGainsOnTarget(double botX, double botY, double botZ,
+                                                    double goalX, double goalY, double goalZ,
+                                                    double targetX, double targetY, double targetZ) {
+        double botToTarget = Math.sqrt(sq(botX - targetX) + sq(botY - targetY) + sq(botZ - targetZ));
+        double goalToTarget = Math.sqrt(sq(goalX - targetX) + sq(goalY - targetY) + sq(goalZ - targetZ));
+        return botToTarget - goalToTarget >= MIN_FALLBACK_GAIN;
+    }
+
+    private static double sq(double v) {
+        return v * v;
+    }
+
+    /**
+     * Whether a follow plan clears the no-path streak that drives the regroup prompt. A plan to the
+     * commander does; a reroute plan does not, because the direct path still failed. Otherwise any
+     * reroute that lands (to a goal at the block's foot, or a partial plan toward a midpoint) reset
+     * the streak every few seconds and the bot waited at the foot with no prompt and no auto-regroup.
+     */
+    public static boolean rerouteClearsNoPathStreak(boolean viaReroute) {
+        return !viaReroute;
+    }
 }
