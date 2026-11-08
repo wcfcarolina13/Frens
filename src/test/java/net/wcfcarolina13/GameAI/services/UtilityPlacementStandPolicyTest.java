@@ -78,7 +78,7 @@ class UtilityPlacementStandPolicyTest {
                 "src/main/java/net/wcfcarolina13/GameAI/services/CraftingHelper.java"), StandardCharsets.UTF_8);
         assertTrue(src.contains("UtilityPlacementStandPolicy.decide("), "retry must use the policy");
         assertTrue(src.contains("\"bot-occupies\""), "planner must skip cells the bot's hitbox reaches into");
-        assertTrue(src.contains("findRepositionStandClearOf(world, bot.getBlockPos(), placeAt, placeAt)"),
+        assertTrue(src.contains("findRepositionStandClearOf(world, bot, placeAt, placeAt)"),
                 "relocation during the retry must exclude the place cell");
     }
 }
