@@ -200,8 +200,9 @@ public final class SmeltingService {
                     int inputCountBefore = inputBefore.isOf(rawItem) ? inputBefore.getCount() : 0;
                     if (liveStacks != null) {
                         for (ItemStack stack : liveStacks) {
-                            if (insertIntoInput(furnace, stack.copy())) {
-                                consumeFromInventory(liveBot, stack);
+                            int loadedNow = insertIntoInput(furnace, stack.copy());
+                            if (loadedNow > 0) {
+                                consumeFromInventory(liveBot, stack.copyWithCount(loadedNow));
                                 inserted++;
                             }
                         }
@@ -739,8 +740,9 @@ public final class SmeltingService {
                 for (Map.Entry<Item, List<ItemStack>> entry : cookables.entrySet()) {
                     String name = entry.getKey().getName().getString();
                     for (ItemStack stack : entry.getValue()) {
-                        if (insertIntoInput(furnace, stack.copy())) {
-                            consumeFromInventory(liveBot, stack);
+                        int moved = insertIntoInput(furnace, stack.copy());
+                        if (moved > 0) {
+                            consumeFromInventory(liveBot, stack.copyWithCount(moved));
                             inserted++;
                             ChatUtils.sendSystemMessage(source, "Added raw stack: " + name);
                         }
@@ -1379,22 +1381,25 @@ public final class SmeltingService {
         return options;
     }
 
-    private static boolean insertIntoInput(net.minecraft.block.entity.AbstractFurnaceBlockEntity furnace, ItemStack stack) {
-        if (stack.isEmpty()) return false;
+    /** Puts {@code stack} into the input slot; returns how many items went in (only those leave the bot). */
+    private static int insertIntoInput(net.minecraft.block.entity.AbstractFurnaceBlockEntity furnace, ItemStack stack) {
+        if (stack.isEmpty()) return 0;
         ItemStack input = furnace.getStack(0);
         if (input.isEmpty()) {
+            int all = stack.getCount();
             furnace.setStack(0, stack);
             furnace.markDirty();
-            return true;
+            return all;
         }
-        if (ItemStack.areItemsEqual(input, stack) && ItemStack.areEqual(input, stack) && input.getCount() < input.getMaxCount()) {
-            int transfer = Math.min(stack.getCount(), input.getMaxCount() - input.getCount());
+        int transfer = FurnaceInputPolicy.transfer(ItemStack.areItemsAndComponentsEqual(input, stack),
+                input.getCount(), input.getMaxCount(), stack.getCount());
+        if (transfer > 0) {
             input.increment(transfer);
             stack.decrement(transfer);
             furnace.markDirty();
-            return transfer > 0;
+            return transfer;
         }
-        return false;
+        return 0;
     }
 
     private static void consumeFromInventory(ServerPlayerEntity bot, ItemStack template) {
