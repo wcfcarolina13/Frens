@@ -292,4 +292,22 @@ public final class CraftingStationPolicy {
         String item = label == null ? "" : label.trim().toLowerCase(java.util.Locale.ROOT);
         return botId + "|" + item;
     }
+
+    /** What a plank craft does once its make-room step returns (see {@link #afterMakeRoom}). */
+    public enum AfterMakeRoom { CRAFT, NESTED_TABLE, SHORT }
+
+    /**
+     * A plank craft counts its planks, makes room, then commits. Making room can place a chest, and
+     * crafting that chest can craft and place a crafting table: those nested crafts spend the planks
+     * counted before. {@code stationTable}: this craft is a table for another craft's station step;
+     * {@code tableNowAvailable}: a table is now held or in reach, so a second one is never made.
+     * Otherwise the craft commits only when the planks it needs are still there.
+     */
+    public static AfterMakeRoom afterMakeRoom(boolean stationTable, boolean tableNowAvailable,
+                                              int planksHeld, int planksNeeded) {
+        if (stationTable && tableNowAvailable) {
+            return AfterMakeRoom.NESTED_TABLE;
+        }
+        return planksHeld >= planksNeeded ? AfterMakeRoom.CRAFT : AfterMakeRoom.SHORT;
+    }
 }
