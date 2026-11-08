@@ -141,6 +141,26 @@ final class SoulMindOps {
         return withStance(mind, new SoulTypes.Stance(s.trust(), s.exasperation(), s.curiosity() + 1));
     }
 
+    /**
+     * Shared hardship (phase-3 spec, the OWNER_DAMAGE peer rule): the owner was hurt in a fight
+     * while this bot and {@code peers} all saw it, so trust toward each peer rises by 1. Uses the
+     * same once-per-Minecraft-day-per-pair trust guard as the "we both spoke" scene rule, so a
+     * fight and a chat on one day still add only +1. Pure; null or self ids are skipped.
+     */
+    static SoulTypes.SoulMind noteSharedHardship(SoulTypes.SoulMind mind, UUID selfId,
+                                                 java.util.Collection<UUID> peers, int day) {
+        if (mind == null || peers == null || peers.isEmpty() || day < 0) {
+            return mind;
+        }
+        SoulTypes.SoulMind next = mind;
+        for (UUID peer : peers) {
+            if (peer != null && !peer.equals(selfId)) {
+                next = bumpPeerStance(next, peer, SoulSideChannelOps.Axis.WARMTH, 1, day);
+            }
+        }
+        return next;
+    }
+
     // === peer stance rules (conversation ontology Phase 3a) ===
 
     /** At most this many peers are remembered; the flattest stance is evicted first. */
