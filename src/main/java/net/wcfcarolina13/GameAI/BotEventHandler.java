@@ -3382,10 +3382,19 @@ public class BotEventHandler {
             long nowTick = server.getTicks();
             long nextPickTick = GuardPatrolService.getNextPatrolPickTick(bot.getUuid());
             if (nowTick >= nextPickTick) {
-                Vec3d next = groundedNear(bot, randomPointWithin(center, radius * 0.85D));
+                Vec3d next = null;
+                for (int attempt = 0; attempt < 6 && next == null; attempt++) {
+                    next = groundedNear(bot, randomPointWithin(center, radius * 0.85D), center);
+                }
+                if (next == null) {
+                    // Every point fell on ground too far below the patrol centre (a pit, a cliff): wait and re-roll.
+                    GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), nowTick + 20L);
+                    BotActions.stop(bot);
+                    return true;
+                }
                 GuardPatrolService.setPatrolTarget(bot.getUuid(), next);
                 GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), nowTick + 40L + RANDOM.nextInt(40));
-                moveToward(bot, next, 1.1D, false);
+                moveTowardStayingOutOfHoles(bot, next, 1.1D);
                 return true;
             }
         }
@@ -7611,20 +7620,28 @@ public class BotEventHandler {
 
     /**
      * A patrol point on the ground: randomPointWithin keeps the centre's Y, so on a slope a point
-     * downhill hung in the air and the guard's drop rules misjudged it. Scans from 4 above to 12 below.
+     * downhill hung in the air and the guard's drop rules misjudged it. Scans from 12 above to 12
+     * below, looking through leaves to the ground under a canopy. Null when the ground there is
+     * {@link net.wcfcarolina13.GameAI.services.DropGuardExemptionPolicy#GUARD_MIN_DEPTH} or more
+     * below the centre: such a point (the floor of the pit the guard climbed out of) would count as
+     * "target down there" and walk the guard back in. The caller re-rolls.
      */
-    private static Vec3d groundedNear(ServerPlayerEntity bot, Vec3d point) {
+    private static Vec3d groundedNear(ServerPlayerEntity bot, Vec3d point, Vec3d center) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world) || point == null) {
             return point;
         }
-        BlockPos top = BlockPos.ofFloored(point.x, point.y + 4, point.z);
-        for (int d = 0; d <= 16; d++) {
+        int lowest = net.wcfcarolina13.GameAI.services.DropGuardExemptionPolicy.minBypassStandY(
+                BlockPos.ofFloored(center).getY());
+        BlockPos top = BlockPos.ofFloored(point.x, point.y + 12, point.z);
+        for (int d = 0; d <= 24; d++) {
             BlockPos feet = top.down(d);
             BlockPos below = feet.down();
+            BlockState belowState = world.getBlockState(below);
             if (world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
                     && world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty()
-                    && !world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
-                return new Vec3d(point.x, feet.getY(), point.z);
+                    && !belowState.getCollisionShape(world, below).isEmpty()
+                    && !belowState.isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
+                return feet.getY() < lowest ? null : new Vec3d(point.x, feet.getY(), point.z);
             }
         }
         return point;
