@@ -994,7 +994,12 @@ public final class CraftingHelper {
             }
         }
         if (!ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)) {
-            if (!quiet) sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft.");
+            if (!quiet) {
+                boolean hasLogs = InventoryIterator.count(bot,
+                        st -> st.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) > 0;
+                sendCraftTableNeededOnce(bot, source, PlanksShortLinePolicy.line(planksPerItem, hasLogs,
+                        bot.getInventory().getEmptySlot() == -1));
+            }
             return 0;
         }
         int plankCount = countPlanks(bot);
@@ -4064,9 +4069,20 @@ public final class CraftingHelper {
         }
         List<BlockPos> chests = findNearbyChests(world, bot.getBlockPos(), CHEST_OFFLOAD_SEARCH_RADIUS, CHEST_OFFLOAD_SEARCH_YSPAN);
         if (chests.isEmpty()) {
-            BlockPos placed = ChestStoreService.placeChestNearBot(source, bot, false);
-            if (placed != null) {
-                chests = List.of(placed.toImmutable());
+            // Placing a chest may craft one, and that craft makes room by offloading again. Only the
+            // outermost offload may place: a nested one uses existing chests or gives up, so a full
+            // pack with no chest and no table ends in a refused craft instead of a StackOverflowError.
+            if (!OffloadChestGuard.tryEnter()) {
+                debugChest("Nested offload while a chest is being placed; not placing another.");
+                return false;
+            }
+            try {
+                BlockPos placed = ChestStoreService.placeChestNearBot(source, bot, false);
+                if (placed != null) {
+                    chests = List.of(placed.toImmutable());
+                }
+            } finally {
+                OffloadChestGuard.exit();
             }
         }
         if (chests.isEmpty()) {

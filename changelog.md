@@ -108,6 +108,29 @@ Backlog P2 (1.1.236 / 1.1.239 handoffs). Surface recovery climbs by pillaring. W
 - **Limits.** It digs only the four cardinal directions. Mob threats are left to the existing `shouldAbortSkill`. It does not place torches or remember the staircase. Only surface recovery and the `collect_dirt` ascent use it. MovementService's terrain-move path (`TerrainMovePolicy`) is unchanged, because MovementService is in open PRs; a no-blocks fallback there would go beside `PLACE` in its terrain-move chooser. The two limits the first review left open (no `MiningHazardDetector.detect` / `FallingBlockStabilizer` on the hand-dig path; no WATER tread test) are fixed in the second pass above.
 - **Tests 3857 → 3904** (+43 `HandDigStairPolicyTest`: 26 from the first pass, 14 for the review fixes, 3 WATER tread tests; +4 `HandDigStairWiringTest`). The run still has the known `SoulStoreTest` failure(s) (persistCursorFailure…).
 - **Sandbox check (not yet run).** Put a bot with an empty inventory and a stone pickaxe in a 3-deep pit in stone, then let surface recovery trigger. It should log "Hand-dig stair step 1/12 … 3/12" and climb out. Then dig a pit with lava one block behind the east wall at head height and face the bot east. It should cut another direction. With lava above its own head cell, it should log "Hand-dig stair refused … LAVA_EXPOSED" and stop. For the review fixes: put the bot at the centre of a 3x3 pocket 3 deep in stone; it should log "no tread on any side … walking one cell EAST" once, then "Hand-dig stair step 1/12". Put a fence against the east wall at floor level; it should cut another direction, not jump at the fence. For the second pass: put a coal ore block in the east wall at head height (a cut cell); the bot should say "I found coal!", log "Hand-dig stair hazard … Mining paused: I found coal!" and stop without mining it, with manual resume flagged. Put gravel two cells above the east cut (dy=4, outside the policy's face check) over a 1-wide gap; after the cut the log should show the stabilizer wait, not a jump into falling gravel.
+## A full pack with no chest or table no longer crashes the craft (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server. A bot with a full pack, no chest and no
+crafting table nearby recursed until `StackOverflowError`. Placing an offload chest can craft one,
+the craft makes room by offloading, and that offload places (and crafts) another chest. A woodcut
+with a full pack crashed at its end ("Skill 'woodcut' crashed: StackOverflowError"), and
+`/bot craft chest` nested 373 table crafts before it aborted. Plain main does the same.
+
+Only the outermost offload on a thread may place a chest now (`OffloadChestGuard`). A nested
+offload uses chests that are already there or gives up. The same woodcut now ends with
+"Cut 4 tree(s)", and the craft nests 3 deep instead of 373.
+
+Costs and limits:
+- In that corner (full pack, no chest, no table) `/bot craft chest` still fails. The bot can place
+  two crafting tables first, one per nesting level. Its line now names the cause ("My pack is
+  full, so I can't turn my logs into planks. Make some room and ask again.", `PlanksShortLinePolicy`)
+  instead of "I need 4 planks per craft.". Dropping a cheap stack to make room,
+  as the server-thread path already does, would fix the outcome but changes what bots throw away
+  mid-task, so it is left as a decision.
+- The guard is per thread, so two bots crafting at once don't block each other.
+
+Tests: `OffloadChestGuardTest` (3), `PlanksShortLinePolicyTest` (2).
+
 ## CraftingHelper commits each craft in one server-thread step (2026-11-05, unreleased)
 
 Stacked on the combined chest ask (PRs #34 and #39). Closes the deferral "off-thread inventory mutation in CraftingHelper": `/bot craft` and the skills run `CraftingHelper` on a worker, and every craft tail there decremented the ingredient stacks and inserted the output on that worker. Now `commitCraft(bot, output, count, consumes)` does the whole inventory step in ONE `SupplyServerHop.call` hop: the lambda's consumes (`consumeItemOnServer`, `consumePlanksOnServer`, `consumeCobbleOnServer`, `consumeSlotOnServer`, which may reach into bundles but never walk) and then `insertStack` of the output. The 21 craft tails (ladders, beds, white wool, `craftWithPlanks` incl. chest and table, sticks, torches with the coal-then-charcoal choice, doors, fences, leads, bundles, leather, saddles, both fishing-rod items, the tool craft, shields, `craftSimple` for buckets and shears, leather armor, `craftCobbleBlock` for furnaces, fishing rods) and the two log-to-plank loops (`craftPlanks`, `ensurePlanksFromLogs`: one commit per slot, the slot checked again on the server thread) go through it; `distributeOutput` is gone. One hop, not two: separate hops could abandon the consume and still run the insert, output with no ingredients. `SupplyServerHop` rather than `BotActions.callOnServerThread` (changed in review): it is abandon-safe by an atomic claim, so a task that had not started when the wait ran out never runs, and a task already running is waited for instead of being reported as failed.
