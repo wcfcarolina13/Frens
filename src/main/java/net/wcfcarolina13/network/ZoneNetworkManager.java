@@ -110,9 +110,7 @@ public final class ZoneNetworkManager {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "\u00A7cZone name cannot be empty.");
                         return;
                     }
-                    if (name.length() > 32) {
-                        name = name.substring(0, 32);
-                    }
+                    name = BaseScreenLimitPolicy.capLabel(name);
 
                     ServerWorld world = player.getCommandSource().getWorld();
                     BlockPos corner1 = new BlockPos(payload.x1(), payload.y1(), payload.z1());
@@ -135,7 +133,8 @@ public final class ZoneNetworkManager {
                     if (player == null) return;
 
                     String oldLabel = payload.label();
-                    String newName = payload.newName();
+                    // Capped like a new zone's name: the zone list goes to every op/host viewer.
+                    String newName = BaseScreenLimitPolicy.capLabel(payload.newName());
                     if (oldLabel == null || newName == null || newName.isBlank()) return;
 
                     ServerWorld world = player.getCommandSource().getWorld();

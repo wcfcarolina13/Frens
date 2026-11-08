@@ -2,6 +2,8 @@ package net.wcfcarolina13.network;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
@@ -22,6 +24,7 @@ import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceSe
 import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -37,6 +40,8 @@ public final class BaseNetworkManager {
     private static final Map<String, Long> DENIED_LOG_TIMES = new ConcurrentHashMap<>();
     private static volatile boolean REGISTERED = false;
     private static final Map<UUID, String> PLAYER_BOT_ALIAS_CONTEXT = new ConcurrentHashMap<>();
+    /** Per-player bucket shared by the save-base and map-village packets. Server thread only. */
+    private static final Map<UUID, BotActionPolicy.Throttle> WRITE_THROTTLES = new HashMap<>();
 
     private BaseNetworkManager() {}
 
@@ -63,16 +68,28 @@ public final class BaseNetworkManager {
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
                     if (player == null) return;
-                    applyBaseSet(player.getCommandSource(), payload.label());
+                    // Each base upserts a protected auto-zone that keeps other players' bots out,
+                    // so the packet gets the map-village gate and the shared write throttle. The
+                    // /bot base set command path (applyBaseSet) keeps its own permission.
+                    // A packet handled after disconnect must not recreate a throttle entry.
+                    if (player.isRemoved() || !acquireWriteSlot(player)) return;
+                    String label = payload != null ? payload.label() : null;
+                    if (!BaseAccessPolicy.canMapVillage(ownsAnyBot(player), Frens.isOperator(player), BotAccessGate.isHost(player))) {
+                        warnDenied(player, "base_set", label, "not_bot_owner");
+                        ChatUtils.sendSystemMessage(player.getCommandSource(),
+                                "Only a bot owner, an operator or the host can save a base.");
+                        return;
+                    }
+                    applyBaseSet(player.getCommandSource(), label);
                 }));
 
         ServerPlayNetworking.registerGlobalReceiver(BaseMapVillagePayload.ID, (payload, context) ->
                 context.server().execute(() -> {
                     ServerPlayerEntity player = context.player();
                     if (player == null) return;
-                    boolean ownsBot = Frens.CONFIG.getBotOwnership().values().stream()
-                            .anyMatch(owner -> owner != null && player.getUuid().equals(tryParseUuid(owner.ownerUuid())));
-                    if (!BaseAccessPolicy.canMapVillage(ownsBot, Frens.isOperator(player), BotAccessGate.isHost(player))) {
+                    // A packet handled after disconnect must not recreate a throttle entry.
+                    if (player.isRemoved() || !acquireWriteSlot(player)) return;
+                    if (!BaseAccessPolicy.canMapVillage(ownsAnyBot(player), Frens.isOperator(player), BotAccessGate.isHost(player))) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(),
                                 "Only a bot owner, an operator or the host can map a village.");
                         return;
@@ -82,7 +99,7 @@ public final class BaseNetworkManager {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Villages are only managed in the Overworld.");
                         return;
                     }
-                    String label = payload != null ? payload.label() : null;
+                    String label = BaseScreenLimitPolicy.capLabel(payload != null ? payload.label() : null);
                     if (label == null || label.isBlank()) {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Enter a village name first.");
                         return;
@@ -527,6 +544,36 @@ public final class BaseNetworkManager {
                     BaseOwnerArg.Owner owner = BaseOwnerArg.normalize(payload.newOwnerUuid(), payload.newOwnerName());
                     applyBaseOwner(player.getCommandSource(), payload.label(), owner.uuid(), owner.name());
                 }));
+
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            UUID id = handler.player.getUuid();
+            server.execute(() -> WRITE_THROTTLES.remove(id));
+        });
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> WRITE_THROTTLES.clear());
+    }
+
+    /** Whether any configured bot names {@code player} as its owner. */
+    private static boolean ownsAnyBot(ServerPlayerEntity player) {
+        if (player == null || Frens.CONFIG == null || Frens.CONFIG.getBotOwnership() == null) return false;
+        return Frens.CONFIG.getBotOwnership().values().stream()
+                .anyMatch(owner -> owner != null && player.getUuid().equals(tryParseUuid(owner.ownerUuid())));
+    }
+
+    /**
+     * Takes one token from {@code player}'s write bucket ({@link BaseScreenLimitPolicy#newWriteThrottle}).
+     * A dropped packet tells the player at most once every {@link BotActionPolicy#THROTTLE_NOTICE_MS}
+     * ms, as the bot-action receiver does. Server thread only.
+     */
+    private static boolean acquireWriteSlot(ServerPlayerEntity player) {
+        long now = System.currentTimeMillis();
+        BotActionPolicy.Throttle throttle = WRITE_THROTTLES.computeIfAbsent(player.getUuid(),
+                id -> BaseScreenLimitPolicy.newWriteThrottle());
+        if (throttle.tryAcquire(now)) return true;
+        LOGGER.debug("[bot-access] throttled base write from {}", player.getName().getString());
+        if (throttle.shouldNotify(now)) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "Slow down, that click was ignored.");
+        }
+        return false;
     }
 
     /**
@@ -586,6 +633,7 @@ public final class BaseNetworkManager {
             reply(source, "Bases can only be saved in the Overworld.");
             return 0;
         }
+        label = BaseScreenLimitPolicy.capLabel(label);
         if (label == null || label.isBlank()) {
             reply(source, "Enter a base name first.");
             return 0;
@@ -669,6 +717,7 @@ public final class BaseNetworkManager {
             reply(source, "Bases are only managed in the Overworld.");
             return 0;
         }
+        newLabel = BaseScreenLimitPolicy.capLabel(newLabel);
         if (oldLabel == null || oldLabel.isBlank() || newLabel == null || newLabel.isBlank()) {
             reply(source, "Select a base and enter a new name.");
             return 0;
@@ -724,7 +773,9 @@ public final class BaseNetworkManager {
         }
 
         String homeLabel = null;
-        ServerPlayerEntity selectedBot = resolveControlledBot(player.getCommandSource().getServer(), botAliasContext, null, null);
+        // Gated like every other bot-targeting packet: a bot the viewer may not act on adds no
+        // home mark and no lodestone destinations to the list (its coordinates stay private).
+        ServerPlayerEntity selectedBot = resolveControlledBot(player.getCommandSource().getServer(), botAliasContext, player, "bases_list");
         if (selectedBot != null) {
             homeLabel = BotHomeService.getPreferredHomeBaseLabel(selectedBot).orElse(null);
         }
@@ -791,8 +842,34 @@ public final class BaseNetworkManager {
             }
         }
 
-        String json = GSON.toJson(out);
-        ServerPlayNetworking.send(player, new BasesListPayload(json));
+        ServerPlayNetworking.send(player, new BasesListPayload(encodeBasesList(out)));
+    }
+
+    /**
+     * {@code out} as the JSON array GSON would write ({@code [a,b,c]}, no whitespace), dropping
+     * entries from the end when the whole array would not fit the {@code BasesListPayload} codec
+     * ({@link BaseScreenLimitPolicy#MAX_LIST_JSON_CHARS}). An oversized array made netty throw
+     * while encoding and disconnected the viewer; a shorter list is the lesser harm.
+     */
+    static String encodeBasesList(List<BaseDto> out) {
+        List<String> encoded = new ArrayList<>(out.size());
+        List<Integer> lengths = new ArrayList<>(out.size());
+        for (BaseDto dto : out) {
+            String one = GSON.toJson(dto);
+            encoded.add(one);
+            lengths.add(one.length());
+        }
+        int keep = BaseScreenLimitPolicy.entriesThatFit(lengths, BaseScreenLimitPolicy.MAX_LIST_JSON_CHARS);
+        if (keep < encoded.size()) {
+            LOGGER.warn("[bases-list] dropped {} of {} entries so the list fits the packet limit",
+                    encoded.size() - keep, encoded.size());
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < keep; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(encoded.get(i));
+        }
+        return sb.append(']').toString();
     }
 
     /**
