@@ -2,6 +2,14 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## "New bots" button hidden on a server that can't take the answer (unreleased, 2026-11-05)
+
+A 1.1.296+ client on an older Frens server showed "New bots: Ask" in the AI setup checklist, and a click did nothing: the old server drops the unknown `SET_NEW_BOT_SOUL` action without a reply (1.1.296 deferral). The client could not tell "old server" from "not answered yet", since both send no `newBotSoul` field.
+
+- The status `viewer` block gets `canSetNewBotSoul`, sent as true by a current server to an operator or the host. Old servers never send it, so it reads false and `AiSetupChecklistPolicy.newBotSoul` returns HIDDEN. The redacted player view always clears it.
+- **Cost (chosen over a disabled button with an "update the server" tooltip):** on an old server the operator does not learn the setting exists. The alternative needed a new label set and tooltip that I could not check for fit at GUI scale 5 from a cloud session. Old client on a new server: the extra JSON field is ignored, no change.
+- **Limits:** unit tests only (3 new, Tests 3857 → 3860). Not checked in game. Needs a sandbox check: a current client against a pre-1.1.296 server shows no "New bots" button in step 4, and against a current server the button still appears and toggles.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.
