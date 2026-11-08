@@ -1134,6 +1134,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [ ] Quick-action buttons (Sort, Equip Best, Take All, Give All)
 - [ ] Bundle packing verification: drop_sweep crafts/uses bundles when inventory is truly full
 - [ ] Chest management overhaul: locking/access policy, categorization rules, organization modes
+- [ ] **P2 (L)** Container fetch and organize (Bradley 2026-11-05: "the bot being in your base near your storage room and telling it 'go look for 30 oak wood' or sorting, giving it stuff and saying 'go organize that'"; he expects trade-offs either way and floated item frames on containers or a UI overlay inside the container). Options, vanilla facts and a staged plan with 10 open rulings: `docs/superpowers/specs/2026-11-05-container-fetch-and-organize-options.md`. Recommended order: (1) multi-chest fetch across the base, report shortfalls; (2) organize what the bot carries, learned from chest contents with item-frame overrides; (3) re-sorting and the UI overlay only if asked. Needs Bradley's rulings before build. Overlaps "Chest management overhaul" above and "Supplies Phase 4".
 
 ### Follow / Come
 
