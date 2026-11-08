@@ -94,6 +94,51 @@ class TaskServiceUnwindWaitTest {
         assertTrue(waitedMs.get() >= 100 && waitedMs.get() < 1200, "waited " + waitedMs.get() + " ms");
     }
 
+    /**
+     * Skill workers are pooled: the old worker's thread stays alive after its task completes. The
+     * new task must go on once the old ticket completes, not sit out the whole budget (sandbox
+     * failure on f457350e: "still unwinding after 2000 ms" every time).
+     */
+    @Test
+    void pooledWorkerThatStaysAliveDoesNotCostTheWholeBudget() throws Exception {
+        UUID bot = UUID.randomUUID();
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            CountDownLatch attached = new CountDownLatch(1);
+            AtomicBoolean oldDone = new AtomicBoolean(false);
+            pool.submit(() -> {
+                TaskService.TaskTicket ticket = TaskService.beginSkill("old", null, bot).orElseThrow();
+                TaskService.attachExecutingThread(ticket, Thread.currentThread());
+                attached.countDown();
+                long end = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(200);
+                while (System.nanoTime() < end) {
+                    Thread.onSpinWait();
+                }
+                oldDone.set(true);
+                TaskService.complete(ticket, false);
+            });
+            assertTrue(attached.await(2, TimeUnit.SECONDS));
+            TaskService.forceAbort(bot, "stop", false);
+
+            AtomicLong waitedMs = new AtomicLong(-1);
+            AtomicBoolean oldDoneWhenNewWentOn = new AtomicBoolean(false);
+            Thread fresh = new Thread(() -> {
+                TaskService.TaskTicket ticket = TaskService.beginSkill("new", null, bot).orElseThrow();
+                long t0 = System.nanoTime();
+                TaskService.attachExecutingThread(ticket, Thread.currentThread());
+                waitedMs.set((System.nanoTime() - t0) / 1_000_000L);
+                oldDoneWhenNewWentOn.set(oldDone.get());
+                TaskService.complete(ticket, true);
+            }, "new-worker");
+            fresh.start();
+            fresh.join(5000);
+            assertTrue(oldDoneWhenNewWentOn.get(), "the new worker went on before the old ticket completed");
+            assertTrue(waitedMs.get() < 1500, "waited " + waitedMs.get() + " ms for a finished pooled worker");
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     @Test
     void noWaitWhenNothingWasStopped() throws Exception {
         UUID bot = UUID.randomUUID();
