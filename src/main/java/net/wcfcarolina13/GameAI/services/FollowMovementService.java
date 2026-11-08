@@ -508,9 +508,15 @@ public final class FollowMovementService {
                 && DropGuardExemptionPolicy.refusesStep(standLevelAt(world, bot.getBlockPos(), bot.getBlockY()),
                         bot.getBlockY(), referenceY, false)) {
             // Feet already over the hole, held up only by the edge of the tread beside it: any
-            // forward push tips the bot in. Stand still; the next target move comes from solid ground.
-            BotActions.stop(bot);
-            return true;
+            // forward push tips the bot in. Step back onto the block holding it up instead (standing
+            // still here froze the bot for good once its target wandered off).
+            BlockPos support = supportingNeighbour(world, bot);
+            if (support != null) {
+                LookController.faceBlock(bot, support);
+                BotActions.sprint(bot, false);
+                BotActions.applyMovementInput(bot, Vec3d.ofCenter(support), 0.18D);
+                return true;
+            }
         }
         boolean belowReference = referenceY != null
                 && DropGuardExemptionPolicy.refusesStep(standLevelAt(world, front, Math.max(bot.getBlockY(), referenceY)),
@@ -535,7 +541,8 @@ public final class FollowMovementService {
         BlockPos safeBypass = selectDropoffBypassCandidate(world, bot.getBlockPos(), front, BlockPos.ofFloored(targetPos),
                 referenceY != null
                         ? Math.max(DropGuardExemptionPolicy.minBypassStandY(referenceY), bot.getBlockY())
-                        : Integer.MIN_VALUE);
+                        : Integer.MIN_VALUE,
+                referenceY == null);
         if (safeBypass != null) {
             LookController.faceBlock(bot, safeBypass);
             BotActions.sprint(bot, false);
@@ -609,6 +616,27 @@ public final class FollowMovementService {
                     bot.getName().getString(), referenceY - standAhead, column.toShortString());
         }
         return true;
+    }
+
+    /** The neighbouring cell at the bot's own level, with ground under it, nearest the bot's centre. */
+    private static BlockPos supportingNeighbour(ServerWorld world, ServerPlayerEntity bot) {
+        BlockPos feet = bot.getBlockPos();
+        BlockPos best = null;
+        double bestSq = Double.MAX_VALUE;
+        for (Direction d : Direction.Type.HORIZONTAL) {
+            BlockPos n = feet.offset(d);
+            if (!isGroundedTwoHighClearance(world, n)) {
+                continue;
+            }
+            double cx = n.getX() + 0.5D - bot.getX();
+            double cz = n.getZ() + 0.5D - bot.getZ();
+            double sq = cx * cx + cz * cz;
+            if (sq < bestSq) {
+                bestSq = sq;
+                best = n;
+            }
+        }
+        return best;
     }
 
     /** Bots whose current airborne stretch already logged a halt (cleared once they are on the ground). */
@@ -759,7 +787,7 @@ public final class FollowMovementService {
     }
 
     private static BlockPos selectDropoffBypassCandidate(ServerWorld world, BlockPos current, BlockPos front, BlockPos goal,
-                                                         int minStandY) {
+                                                         int minStandY, boolean allowStepUp) {
         if (world == null || current == null || front == null || goal == null) {
             return null;
         }
@@ -781,6 +809,11 @@ public final class FollowMovementService {
                 continue;
             }
             for (int dY : REPOSITION_Y_OFFSETS) {
+                // Guard and patrol sidestep without a hop, so a step-up candidate would only press
+                // the bot into the wall.
+                if (dY > 0 && !allowStepUp) {
+                    continue;
+                }
                 BlockPos pos = cand.pos().add(0, dY, 0);
                 if (!isGroundedTwoHighClearance(world, pos)) {
                     continue;

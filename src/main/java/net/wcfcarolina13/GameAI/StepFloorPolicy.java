@@ -8,7 +8,11 @@ package net.wcfcarolina13.GameAI;
  */
 public final class StepFloorPolicy {
 
-    /** A stair edge (1) or a short drop (2) is fine; a 3-deep pit is not. */
+    /**
+     * floorDepth 1 = level ground, 2 = a 1-block step down; 3 or more (two open cells under the
+     * landing) is refused, the same depth the guard walk path refuses (GUARD_MIN_DEPTH open cells).
+     * Applies to guard and patrol only.
+     */
     public static final int MAX_STEP_DOWN = 2;
 
     private StepFloorPolicy() {

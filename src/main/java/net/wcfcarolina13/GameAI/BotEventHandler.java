@@ -3382,7 +3382,7 @@ public class BotEventHandler {
             long nowTick = server.getTicks();
             long nextPickTick = GuardPatrolService.getNextPatrolPickTick(bot.getUuid());
             if (nowTick >= nextPickTick) {
-                Vec3d next = randomPointWithin(center, radius * 0.85D);
+                Vec3d next = groundedNear(bot, randomPointWithin(center, radius * 0.85D));
                 GuardPatrolService.setPatrolTarget(bot.getUuid(), next);
                 GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), nowTick + 40L + RANDOM.nextInt(40));
                 moveToward(bot, next, 1.1D, false);
@@ -7607,6 +7607,27 @@ public class BotEventHandler {
 
     private static List<Entity> findHostilesAround(ServerPlayerEntity player, double radius) {
         return BotThreatService.findHostilesAround(player, radius);
+    }
+
+    /**
+     * A patrol point on the ground: randomPointWithin keeps the centre's Y, so on a slope a point
+     * downhill hung in the air and the guard's drop rules misjudged it. Scans from 4 above to 12 below.
+     */
+    private static Vec3d groundedNear(ServerPlayerEntity bot, Vec3d point) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world) || point == null) {
+            return point;
+        }
+        BlockPos top = BlockPos.ofFloored(point.x, point.y + 4, point.z);
+        for (int d = 0; d <= 16; d++) {
+            BlockPos feet = top.down(d);
+            BlockPos below = feet.down();
+            if (world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
+                    && world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty()
+                    && !world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
+                return new Vec3d(point.x, feet.getY(), point.z);
+            }
+        }
+        return point;
     }
 
     private static Vec3d randomPointWithin(Vec3d center, double radius) {
