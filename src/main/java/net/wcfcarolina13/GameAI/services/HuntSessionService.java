@@ -143,6 +143,17 @@ public final class HuntSessionService {
         }
     }
 
+    /** The running save's key; null (any world) before a server is up. */
+    private static String currentWorldKey() {
+        net.minecraft.server.MinecraftServer server = net.wcfcarolina13.Frens.serverInstance;
+        return server == null ? null : BotWorldStateService.currentWorldKey(server);
+    }
+
+    /** Callers hold {@link #LOCK}: this world's entry for the bot, else its legacy bare-id entry. */
+    private static String sessionKey(UUID botId) {
+        return SessionWorldKeyPolicy.find(DATA.keySet(), currentWorldKey(), botId.toString());
+    }
+
     // ── Public API ──────────────────────────────────────────────────────
 
     public static void saveSession(ServerPlayerEntity bot, BlockPos huntOrigin, BlockPos chestPos,
@@ -154,7 +165,8 @@ public final class HuntSessionService {
                 killsCompleted, killsTarget, zoneName, depopulationEnabled, rawArgs);
         ensureLoaded();
         synchronized (LOCK) {
-            DATA.put(bot.getUuid().toString(), SessionData.from(session));
+            DATA.remove(bot.getUuid().toString()); // a legacy bare-id entry is replaced by this world's
+            DATA.put(SessionWorldKeyPolicy.key(currentWorldKey(), bot.getUuid().toString()), SessionData.from(session));
         }
         flush();
         LOGGER.info("Hunt session saved for {}: kills={}/{} origin={}",
@@ -165,10 +177,10 @@ public final class HuntSessionService {
         if (botId == null) return null;
         ensureLoaded();
         synchronized (LOCK) {
-            SessionData d = DATA.get(botId.toString());
+            SessionData d = DATA.get(sessionKey(botId));
             if (d == null) return null;
             if (System.currentTimeMillis() - d.savedAtMs > EXPIRY_MS) {
-                DATA.remove(botId.toString());
+                DATA.remove(sessionKey(botId));
                 flush();
                 return null;
             }
@@ -180,7 +192,7 @@ public final class HuntSessionService {
         if (botId == null) return null;
         ensureLoaded();
         synchronized (LOCK) {
-            SessionData d = DATA.remove(botId.toString());
+            SessionData d = DATA.remove(sessionKey(botId));
             if (d == null) return null;
             flush();
             if (System.currentTimeMillis() - d.savedAtMs > EXPIRY_MS) return null;
@@ -192,10 +204,10 @@ public final class HuntSessionService {
         if (botId == null) return false;
         ensureLoaded();
         synchronized (LOCK) {
-            SessionData d = DATA.get(botId.toString());
+            SessionData d = DATA.get(sessionKey(botId));
             if (d == null) return false;
             if (System.currentTimeMillis() - d.savedAtMs > EXPIRY_MS) {
-                DATA.remove(botId.toString());
+                DATA.remove(sessionKey(botId));
                 flush();
                 return false;
             }
@@ -207,7 +219,7 @@ public final class HuntSessionService {
         if (botId == null) return;
         ensureLoaded();
         synchronized (LOCK) {
-            if (DATA.remove(botId.toString()) != null) {
+            if (DATA.remove(sessionKey(botId)) != null) {
                 flush();
                 LOGGER.info("Hunt session cleared for {}", botId);
             }
