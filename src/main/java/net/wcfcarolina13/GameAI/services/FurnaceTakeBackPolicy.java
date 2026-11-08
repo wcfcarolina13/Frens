@@ -69,4 +69,13 @@ public final class FurnaceTakeBackPolicy {
     public static int outputAllowance(int inputAddedByBot, int outputTakenSinceLoad) {
         return Math.max(0, inputAddedByBot - Math.max(0, outputTakenSinceLoad));
     }
+
+    /**
+     * Whether the output slot would stop the new food cooking (another item, or a full stack). The
+     * bot never clears it before a load: what is there is not the bot's, so it skips that food at
+     * this furnace instead and the owner's cooked food is never swept into the bot's pack.
+     */
+    public static boolean outputBlocksLoad(boolean outputEmpty, boolean sameAsCookResult, int outputCount, int maxCount) {
+        return !outputEmpty && (!sameAsCookResult || outputCount >= maxCount);
+    }
 }

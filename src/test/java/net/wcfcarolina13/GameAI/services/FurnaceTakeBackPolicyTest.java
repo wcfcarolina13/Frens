@@ -96,4 +96,14 @@ class FurnaceTakeBackPolicyTest {
         assertEquals(0, FurnaceTakeBackPolicy.outputAllowance(8, 8));
         assertEquals(0, FurnaceTakeBackPolicy.outputAllowance(0, 0));
     }
+
+    @Test
+    void theOutputBlocksALoadOnlyWhenItWouldStopCooking() {
+        assertFalse(FurnaceTakeBackPolicy.outputBlocksLoad(true, false, 0, 64));
+        // The owner's 5 steaks, and the bot is cooking beef again: they stay.
+        assertFalse(FurnaceTakeBackPolicy.outputBlocksLoad(false, true, 5, 64));
+        // Steaks in the slot, and the bot is cooking chicken: the furnace can't cook until they move.
+        assertTrue(FurnaceTakeBackPolicy.outputBlocksLoad(false, false, 5, 64));
+        assertTrue(FurnaceTakeBackPolicy.outputBlocksLoad(false, true, 64, 64));
+    }
 }

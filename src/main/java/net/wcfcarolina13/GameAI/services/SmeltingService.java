@@ -168,26 +168,26 @@ public final class SmeltingService {
                         return;
                     }
 
-                    // Evacuate output
+                    // What is in the furnace now is not the bot's: it takes its own share at the end
+                    // of each batch. If the output (another item, or a full stack) or a different raw
+                    // food in the input would stop this food cooking, skip this food here rather than
+                    // sweep someone else's food into the bot's pack.
                     ItemStack output = furnace.getStack(2);
-                    if (!output.isEmpty()) {
-                        ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
-                        if (remaining != null && remaining.isEmpty()) {
-                            furnace.setStack(2, ItemStack.EMPTY);
-                        } else if (remaining != null && remaining.getCount() < output.getCount()) {
-                            furnace.setStack(2, remaining);
-                        }
-                    }
-
-                    // Evacuate input if different item type
+                    var cookType = recipeTypeFor(liveWorld.getBlockState(furnacePos));
+                    var cookRecipe = cookType == null ? null
+                            : findMatchingCookingRecipe(new ItemStack(rawItem), liveWorld, cookType);
+                    ItemStack cookResult = cookRecipe == null ? ItemStack.EMPTY
+                            : cookRecipe.value().craft(new SingleStackRecipeInput(new ItemStack(rawItem)), liveWorld.getRegistryManager());
                     ItemStack existingInput = furnace.getStack(0);
-                    if (!existingInput.isEmpty() && !existingInput.isOf(rawItem)) {
-                        ItemStack remaining = evacuateInput(liveBot, source, existingInput.copy(), STATION_REACH_SQ);
-                        if (remaining != null && remaining.isEmpty()) {
-                            furnace.setStack(0, ItemStack.EMPTY);
-                        } else if (remaining != null && remaining.getCount() < existingInput.getCount()) {
-                            furnace.setStack(0, remaining);
-                        }
+                    if (FurnaceTakeBackPolicy.outputBlocksLoad(output.isEmpty(),
+                            !cookResult.isEmpty() && ItemStack.areItemsAndComponentsEqual(output, cookResult),
+                            output.getCount(), output.getMaxCount())
+                            || (!existingInput.isEmpty() && !existingInput.isOf(rawItem))) {
+                        LOGGER.info("cookAllFoodSync: {} leaves {} uncooked here: the furnace holds someone else's {}",
+                                liveBot.getName().getString(), rawItem.getName().getString(),
+                                (output.isEmpty() ? existingInput : output).getName().getString());
+                        loadResult.complete(false);
+                        return;
                     }
 
                     // Load all stacks of this raw food type
