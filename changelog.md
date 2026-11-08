@@ -15,6 +15,12 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 ## Test: the soul store close check waits for the worker to exit (unreleased, 2026-11-05)
 
 `SoulStoreTest.closeShutsDownInjectedExecutorLeavingNoThreadAlive` checked for a live executor thread right after `close()`, but `close()` only calls `shutdown()`, and the worker exits a moment later. Under load (parallel builds in a cloud container) it failed on unrelated branches. The test now joins the thread for up to 5 s before checking. A thread that `close()` never stops still fails. No main code changed. Tests 3857, unchanged count.
+## Tests for 2 untested policies (unreleased, 2026-11-05)
+
+- Audit: 185 `*Policy.java` (plus `*Ops.java` in `GameAI/souls`) classes; 4 had no real test. `DirtNavigationPolicy` and `ExplorationMovePolicy` take `BlockPos` in every method, so they stay untested under the no-`net.minecraft` test rule.
+- New `ExecutionPolicyTest` (8 tests): defaults, smallest and largest accepted values, each guard field rejecting zero and negative values, and which field is reported first.
+- New `BotSleepProximityPolicyTest` (6 tests): the 16-block co-sleep radius is inclusive at 256 squared, is measured on squared distance, and treats NaN and infinity as out of range. It was only checked as a source string in `WakeUpDelayWiringTest` before.
+- Tests: 3857 before, 3871 after. No suspected bugs. Every `ExecutionPolicy` call site passes a positive time budget (the FortifyVillageSkill segment budget is checked for `<= 0` first).
 
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
