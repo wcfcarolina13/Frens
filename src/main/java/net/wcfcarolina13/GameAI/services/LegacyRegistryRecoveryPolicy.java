@@ -194,7 +194,9 @@ public final class LegacyRegistryRecoveryPolicy {
     /**
      * The closing line of {@code /bot legacy-state registry preview}. An import is suggested only
      * when there is something to import: no adoption here, no registry of this save's own, and at
-     * least one legacy record.
+     * least one legacy record. It says to import before any bot activity: a refused adoption leaves no
+     * registry, but the first runtime record creates one and the import then refuses (ruling
+     * 2026-11-08: reword the preview rather than merge or replace).
      *
      * @param quotedFingerprint this save's fingerprint, already quoted for the command line
      */
@@ -204,7 +206,9 @@ public final class LegacyRegistryRecoveryPolicy {
         if (targetExists) return "This save already has this registry. It will not be overwritten. Legacy original retained.";
         if (records <= 0) return "No legacy records for this store in this dimension. Nothing to import.";
         return "If these records belong to this save and dimension, copy them with /bot legacy-state registry import "
-                + store + " " + quotedFingerprint + ". Originals remain unchanged.";
+                + store + " " + quotedFingerprint + ". Do it before any bot activity in this save: the first"
+                + " record a bot makes starts this save's own registry, and the import then refuses."
+                + " Originals remain unchanged.";
     }
 
     private static boolean invalidTarget(String sourceKey, String targetKey, String fingerprint) {
