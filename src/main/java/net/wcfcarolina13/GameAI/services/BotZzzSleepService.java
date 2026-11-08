@@ -109,6 +109,10 @@ public final class BotZzzSleepService {
          *  only. Entries written before 1.1.298 lack the key and read as false, which keeps
          *  the older wake rule for them. */
         public boolean dawnOnly;
+        /** The save the bot logged off in ({@link BotWorldStateService#currentWorldKey}). The
+         *  sidecar is one file for every world, so another world's entries are left alone.
+         *  Entries written before this field read as null and count for any world, as before. */
+        public String worldKey;
 
         public LoggedOff() {}
 
@@ -165,8 +169,34 @@ public final class BotZzzSleepService {
         return botId != null && ACTIVE.containsKey(botId);
     }
 
+    /** Whether the bot is logged off for the night. Player names are case-insensitive in
+     *  Minecraft, and the auto-spawn alias may differ in case from the name the entry was saved
+     *  under, so the match ignores case. */
     public static boolean isLoggedOff(String botName) {
-        return botName != null && LOGGED_OFF.containsKey(botName);
+        return BotSleepLogoffPolicy.containsNameIgnoreCase(LOGGED_OFF.keySet(), botName);
+    }
+
+    /** Like {@link #isLoggedOff(String)}, but only counts an entry from this save (or a legacy
+     *  entry with no save recorded). Auto-spawn uses it so a bot logged off in another world
+     *  still auto-spawns here. */
+    public static boolean isLoggedOffIn(MinecraftServer server, String botName) {
+        if (botName == null) return false;
+        String current = BotWorldStateService.currentWorldKey(server);
+        for (LoggedOff lo : LOGGED_OFF.values()) {
+            if (lo != null && botName.equalsIgnoreCase(lo.botName)
+                    && BotSleepLogoffPolicy.belongsToWorld(lo.worldKey, current)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Loads the logoff sidecar once per server session. The tick loop calls this, and so does
+     *  auto-spawn, which on a dedicated server runs at startup before the first tick. */
+    public static synchronized void ensureLoaded() {
+        if (diskLoaded) return;
+        loadFromDisk();
+        diskLoaded = true;
     }
 
     /** The admin setting "Bots log off when they can't sleep", read on the server. Null-safe:
@@ -338,8 +368,7 @@ public final class BotZzzSleepService {
     public static void onServerTick(MinecraftServer server) {
         if (server == null) return;
         if (!diskLoaded) {
-            loadFromDisk();
-            diskLoaded = true;
+            ensureLoaded();
         }
         long tick = server.getTicks();
         if (tick % TICK_INTERVAL != 0) return;
@@ -443,6 +472,7 @@ public final class BotZzzSleepService {
 
         LoggedOff entry = new LoggedOff(name, pos, yaw, pitch, dim, mode, server.getOverworld().getTime(),
                 dawnOnly);
+        entry.worldKey = BotWorldStateService.currentWorldKey(server);
         LOGGED_OFF.put(name, entry);
         saveToDisk();
 
@@ -455,8 +485,11 @@ public final class BotZzzSleepService {
 
     private static void tickWakeMonitor(MinecraftServer server) {
         if (LOGGED_OFF.isEmpty()) return;
+        String currentWorldKey = BotWorldStateService.currentWorldKey(server);
         for (Map.Entry<String, LoggedOff> e : new ArrayList<>(LOGGED_OFF.entrySet())) {
             LoggedOff lo = e.getValue();
+            // Another save's entry: leave it for when that world is open again.
+            if (lo == null || !BotSleepLogoffPolicy.belongsToWorld(lo.worldKey, currentWorldKey)) continue;
             ServerWorld targetWorld = resolveWorld(server, lo.dimensionId);
             if (targetWorld == null) continue;
             if (!shouldWakeUp(targetWorld, server, lo.dawnOnly)) continue;
