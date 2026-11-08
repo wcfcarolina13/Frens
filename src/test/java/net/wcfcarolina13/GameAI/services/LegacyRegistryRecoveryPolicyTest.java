@@ -234,8 +234,9 @@ class LegacyRegistryRecoveryPolicyTest {
         assertEquals("No legacy records for this store in this dimension. Nothing to import.",
                 LegacyRegistryRecoveryPolicy.previewClosingLine(false, false, 0, "furnaces", quoted));
         assertEquals("If these records belong to this save and dimension, copy them with /bot legacy-state registry import "
-                        + "furnaces \"fp\". Do it before any bot activity in this save: the first record a bot"
-                        + " makes starts this save's own registry, and the import then refuses. Originals remain unchanged.",
+                        + "furnaces \"fp\". Do it before playing on in this save: the first new record (a bot's, or yours,"
+                        + " such as a hunt kill) starts this save's own registry, and the import then refuses."
+                        + " Originals remain unchanged.",
                 LegacyRegistryRecoveryPolicy.previewClosingLine(false, false, 3, "furnaces", quoted));
         assertTrue(LegacyRegistryRecoveryPolicy.previewClosingLine(true, false, 0, "hunt", quoted)
                 .startsWith("This save adopted these records"));
