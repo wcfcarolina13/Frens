@@ -11,6 +11,7 @@ import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.TransferSta
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.Kind;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawals.WaitMode;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -616,5 +617,84 @@ public final class SupplyWithdrawalPolicy {
             return WaitDecision.TIMED_OUT;
         }
         return WaitDecision.KEEP_WAITING;
+    }
+
+    // ── Bundles (one combined ask) ───────────────────────────────────────────────────────────
+
+    /**
+     * Why a bundled withdrawal ({@code SupplyWithdrawals.withdrawBundle}) ended without the items,
+     * as far as the caller's next move cares: the owner decided against it, nobody answered, or
+     * something else (busy, no owner, not running). A craft stops with one line for the first two
+     * and keeps today's per-item path for the rest. Declared weakest first: {@link #strongerWhy}
+     * keeps the later constant.
+     */
+    public enum BundleWhy {
+        /** Nothing refused (moved, ready or waiting). */
+        NONE,
+        /** Any other refusal: busy, no owner, chest unreadable, policy, not running. */
+        OTHER,
+        /** Nobody answered: the prompt lapsed, or the worker's wait ran out before it settled. */
+        NO_ANSWER,
+        /** The owner said No, here or recently enough that the ledger still remembers it. */
+        OWNER_DECLINED
+    }
+
+    /** What a request's refusal means for a bundle: a recent No is the owner's decision. */
+    public static BundleWhy bundleWhyOfRequest(RequestStatus status) {
+        return status == RequestStatus.REJECT_COOLDOWN ? BundleWhy.OWNER_DECLINED : BundleWhy.OTHER;
+    }
+
+    /**
+     * What a ticket step means for a bundle. A dropped ticket ({@link TicketStep#DROP_NOT_PERMITTED})
+     * was either answered No or left to lapse, and only the first is the owner's decision: the ledger
+     * puts a line on its reject cooldown for an explicit No alone, so {@code rejectCooling} tells
+     * them apart. The other steps refuse nothing the owner decided.
+     *
+     * @param rejectCooling the ledger's reject cooldown for this bot, chest and item id is active
+     */
+    public static BundleWhy bundleWhyOfTicket(TicketStep step, boolean rejectCooling) {
+        if (step != TicketStep.DROP_NOT_PERMITTED) {
+            return BundleWhy.OTHER;
+        }
+        return rejectCooling ? BundleWhy.OWNER_DECLINED : BundleWhy.NO_ANSWER;
+    }
+
+    /**
+     * Whether a line's result from the step before the wait is final, so the step that settles the
+     * bundle keeps it instead of running the line again: a line already moved must not be asked
+     * for again (the bot holds the items; a new ask would open a new prompt), and a refused line
+     * was decided for this call. Waiting and ready lines are the ones the settle step is for.
+     */
+    public static boolean bundleLineSettled(Kind kind) {
+        return kind == Kind.MOVED || kind == Kind.REFUSED;
+    }
+
+    /** The one reason a bundle reports: the owner's decision outranks no answer, which outranks the rest. */
+    public static BundleWhy strongerWhy(BundleWhy a, BundleWhy b) {
+        BundleWhy x = a == null ? BundleWhy.NONE : a;
+        BundleWhy y = b == null ? BundleWhy.NONE : b;
+        return x.ordinal() >= y.ordinal() ? x : y;
+    }
+
+    /**
+     * One kind for a bundle from its lines: a line still waiting makes the bundle wait (the owner's
+     * one answer covers the rest too); else anything moved is a move (the caller recounts what it
+     * has); else a permitted line out of reach is ready (walk, ask again); else refused. An empty
+     * bundle is refused.
+     */
+    public static Kind aggregateKinds(List<Kind> kinds) {
+        if (kinds == null || kinds.isEmpty()) {
+            return Kind.REFUSED;
+        }
+        boolean moved = false;
+        boolean ready = false;
+        for (Kind kind : kinds) {
+            if (kind == Kind.WAITING) {
+                return Kind.WAITING;
+            }
+            moved |= kind == Kind.MOVED;
+            ready |= kind == Kind.READY;
+        }
+        return moved ? Kind.MOVED : ready ? Kind.READY : Kind.REFUSED;
     }
 }
