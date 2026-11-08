@@ -29,22 +29,23 @@ public final class FurnaceTakeBackPolicy {
 
     /**
      * Raw food to take back from the input slot: only the food type this cycle was cooking, and never
-     * more than the bot loaded of it (owner's same-kind food already in the slot stays). Edge case:
-     * when both were in the slot and part has cooked, which part cooked cannot be told apart; the
-     * bot's share is taken first.
+     * more than the bot loaded of it less what has cooked since ({@code cookedSinceLoad}), so the
+     * owner's same-kind raw food already in the slot stays. When both were in the slot the furnace
+     * cooks them as one stack; counting every cooked item against the bot's share keeps the owner's
+     * raw food whole, at the cost of the bot sometimes leaving some of its own raw food behind.
      */
-    public static int inputToTakeBack(boolean sameItemAsLoaded, int countNow, int addedByBot) {
+    public static int inputToTakeBack(boolean sameItemAsLoaded, int countNow, int addedByBot, int cookedSinceLoad) {
         if (!sameItemAsLoaded || countNow <= 0 || addedByBot <= 0) {
             return 0;
         }
-        return Math.min(countNow, addedByBot);
+        return Math.min(countNow, Math.max(0, addedByBot - Math.max(0, cookedSinceLoad)));
     }
 
     /**
      * Fuel to take back after a stop: never more than the bot put in this cycle ({@code addedByBot},
      * counted at each of its refuels), and never more than the slot holds above what it held before
-     * the cycle first fuelled it. With nobody else touching the slot, that is exactly the bot's fuel
-     * left over (what it added, less what burned for its own cook). Edge case: a player who adds the
+     * the cycle first fuelled it. With nobody else touching the slot, that is the bot's fuel left
+     * over (what it added, less what burned for its own cook). Edge case: a player who adds the
      * same fuel item to the slot during the cycle can lose up to what the bot added, since the two
      * stacks merge and burned fuel cannot be told apart. A different fuel item before: none.
      */

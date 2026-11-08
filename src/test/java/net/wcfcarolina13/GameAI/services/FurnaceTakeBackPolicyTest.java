@@ -8,6 +8,7 @@ import java.nio.file.Paths;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class FurnaceTakeBackPolicyTest {
 
@@ -22,10 +23,10 @@ class FurnaceTakeBackPolicyTest {
 
     @Test
     void onlyTheFoodTheBotLoadedComesBack() {
-        assertTrue(FurnaceTakeBackPolicy.inputToTakeBack(true, 8, 8) == 8);
-        assertTrue(FurnaceTakeBackPolicy.inputToTakeBack(true, 12, 5) == 5);   // 7 of the owner's raw beef stay
-        assertTrue(FurnaceTakeBackPolicy.inputToTakeBack(true, 3, 5) == 3);    // part cooked
-        assertTrue(FurnaceTakeBackPolicy.inputToTakeBack(false, 6, 5) == 0);   // a food type the bot did not load
+        assertTrue(FurnaceTakeBackPolicy.inputToTakeBack(true, 8, 8, 0) == 8);
+        assertTrue(FurnaceTakeBackPolicy.inputToTakeBack(true, 12, 5, 0) == 5);   // 7 of the owner's raw beef stay
+        assertTrue(FurnaceTakeBackPolicy.inputToTakeBack(true, 3, 5, 2) == 3);    // part cooked
+        assertTrue(FurnaceTakeBackPolicy.inputToTakeBack(false, 6, 5, 0) == 0);   // a food type the bot did not load
     }
 
     @Test
@@ -40,7 +41,7 @@ class FurnaceTakeBackPolicyTest {
     void theCookCycleTakesBackBeforeItReturns() throws Exception {
         String src = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/SmeltingService.java"));
         int start = src.indexOf("public static boolean cookAllFoodSync(");
-        int takeBack = src.indexOf("takeBackAfterStop(bot, source, server, worldKey, botId, furnacePos, fuelBaseline.get(), fuelAddedByBot.get(),", start);
+        int takeBack = src.indexOf("takeBackAfterStop(bot, source, server, worldKey, botId, furnacePos, fuelBaseline.get(), fuelAddedByBot,", start);
         int ret = src.indexOf("return anyCooked;", start);
         assertTrue(start > 0 && takeBack > start && takeBack < ret);
     }
@@ -76,5 +77,14 @@ class FurnaceTakeBackPolicyTest {
         assertTrue(FurnaceTakeBackPolicy.refuelAdded(true, 12, 15) == 3);
         assertTrue(FurnaceTakeBackPolicy.refuelAdded(true, 15, 15) == 0);
         assertTrue(FurnaceTakeBackPolicy.refuelAdded(false, 2, 8) == 0);
+    }
+
+    @Test
+    void cookedFoodCountsAgainstTheBotsRawShare() {
+        // Owner had 4 raw beef in the slot, the bot loaded 8, 6 have cooked: 6 raw left.
+        // The bot takes back at most 8 - 6 = 2; the owner's 4 stay.
+        assertEquals(2, FurnaceTakeBackPolicy.inputToTakeBack(true, 6, 8, 6));
+        assertEquals(0, FurnaceTakeBackPolicy.inputToTakeBack(true, 4, 8, 9));
+        assertEquals(8, FurnaceTakeBackPolicy.inputToTakeBack(true, 12, 8, 0));
     }
 }
