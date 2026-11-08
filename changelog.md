@@ -8,6 +8,7 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 - New `ExecutionPolicyTest` (8 tests): defaults, smallest and largest accepted values, each guard field rejecting zero and negative values, and which field is reported first.
 - New `BotSleepProximityPolicyTest` (6 tests): the 16-block co-sleep radius is inclusive at 256 squared, is measured on squared distance, and treats NaN and infinity as out of range. It was only checked as a source string in `WakeUpDelayWiringTest` before.
 - Tests: 3857 before, 3871 after. No suspected bugs. Every `ExecutionPolicy` call site passes a positive time budget (the FortifyVillageSkill segment budget is checked for `<= 0` first).
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
