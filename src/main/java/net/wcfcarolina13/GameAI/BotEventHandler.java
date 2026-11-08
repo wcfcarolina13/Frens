@@ -7620,8 +7620,8 @@ public class BotEventHandler {
 
     /**
      * A patrol point on the ground: randomPointWithin keeps the centre's Y, so on a slope a point
-     * downhill hung in the air and the guard's drop rules misjudged it. Scans from 12 above to 12
-     * below, looking through leaves to the ground under a canopy. Null when the ground there is
+     * downhill hung in the air and the guard's drop rules misjudged it. Takes the standable level
+     * nearest the centre's height (within 12, below before above at equal distance), looking through leaves. Null when the ground there is
      * {@link net.wcfcarolina13.GameAI.services.DropGuardExemptionPolicy#GUARD_MIN_DEPTH} or more
      * below the centre: such a point (the floor of the pit the guard climbed out of) would count as
      * "target down there" and walk the guard back in. The caller re-rolls.
@@ -7632,9 +7632,12 @@ public class BotEventHandler {
         }
         int lowest = net.wcfcarolina13.GameAI.services.DropGuardExemptionPolicy.minBypassStandY(
                 BlockPos.ofFloored(center).getY());
-        BlockPos top = BlockPos.ofFloored(point.x, point.y + 12, point.z);
-        for (int d = 0; d <= 24; d++) {
-            BlockPos feet = top.down(d);
+        // The standable level nearest the centre's height, below before above. Scanning
+        // down from high above put points under a roof on the roof and points by a trunk on the log.
+        BlockPos base = BlockPos.ofFloored(point.x, center.y, point.z);
+        for (int k = 0; k <= 24; k++) {
+            int dy = (k % 2 == 1) ? -((k + 1) / 2) : k / 2;   // 0, -1, +1, -2, +2 ...
+            BlockPos feet = base.up(dy);
             BlockPos below = feet.down();
             BlockState belowState = world.getBlockState(below);
             if (world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
