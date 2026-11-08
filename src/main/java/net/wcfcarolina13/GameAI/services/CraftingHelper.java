@@ -2529,9 +2529,18 @@ public final class CraftingHelper {
                 return bot.getBlockPos().getSquaredDistance(placeAtDirect) <= STATION_REACH_SQ;
             }
         }
-        // Don't spam-craft tables — if we crafted one recently, give up.
+        // Don't spam-craft tables: a table crafted in the last minute that is still in range but could
+        // not be used is not followed by another. With no table in range at all (the bot moved on, or
+        // the table is gone), the cooldown has nothing to protect and the bot crafts one.
         Long lastCraft = CRAFT_TABLE_CRAFT_COOLDOWN.get(bot.getUuid());
-        if (lastCraft != null && (System.currentTimeMillis() - lastCraft) < CRAFT_TABLE_CRAFT_COOLDOWN_MS) {
+        boolean cooldownActive = lastCraft != null && (System.currentTimeMillis() - lastCraft) < CRAFT_TABLE_CRAFT_COOLDOWN_MS;
+        boolean tableInRange = cooldownActive && !findBlocksInBox(world, botPos.add(-radius, -ySpan, -radius),
+                botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Crafting table cooldown", true).isEmpty();
+        if (cooldownActive && !tableInRange) {
+            logStationStep(onServerThread, "Table craft cooldown ignored: no crafting table within {} blocks of {}",
+                    radius, botPos.toShortString());
+        }
+        if (CraftingStationPolicy.tableCraftCooldownBlocks(cooldownActive, tableInRange)) {
             logStationStep(onServerThread, "Skipping crafting table craft (cooldown active, last craft {}ms ago)",
                     System.currentTimeMillis() - lastCraft);
             declineIfTickSide(bot, onServerThread, skippedTableOutOfReach ? "far-table" : "no-table");

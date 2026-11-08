@@ -66,7 +66,7 @@ class CraftingStationPolicyTest {
         assertTrue(helper.contains("new ChunkBlockReader(world)") && helper.contains("section.hasAny(match)"),
                 "the box scan reads through one reader and skips sections without a match");
         assertTrue(helper.contains("CraftingStationPolicy.compareScanOrder("), "hits keep the whole-box order");
-        assertEquals(3, count(source, "CraftingHelper::isCraftingTable,"), "the table scan, its re-scan and the pre-check");
+        assertEquals(4, count(source, "CraftingHelper::isCraftingTable,"), "the table scan, its re-scan, the pre-check and the cooldown range check");
         assertEquals(2, count(source, "CraftingHelper::isChest,"), "both findNearbyChests overloads");
     }
 
@@ -730,5 +730,13 @@ class CraftingStationPolicyTest {
                 "the make-room drop ignores the batch reserve");
         assertTrue(bodyOf(helper, "private static boolean hasRoomForItem(").contains("PlayerInventory.MAIN_SIZE"),
                 "hasRoomForItem counts armor/offhand slots as room");
+    }
+
+    @Test
+    void tableCraftCooldownHoldsOnlyWhileATableIsInRange() {
+        assertTrue(CraftingStationPolicy.tableCraftCooldownBlocks(true, true));
+        assertFalse(CraftingStationPolicy.tableCraftCooldownBlocks(true, false));
+        assertFalse(CraftingStationPolicy.tableCraftCooldownBlocks(false, true));
+        assertFalse(CraftingStationPolicy.tableCraftCooldownBlocks(false, false));
     }
 }
