@@ -461,6 +461,38 @@ Review fixes:
 - The Dreamsleeve warm-up ack now waits up to 120 s, not 2 s. If the server acks only after loading its model and rendering, a short wait would have sent the first real line into the load, timed it out, killed the server and looped. The wait runs on the engine thread. The old read had no bound.
 - A base URL pasted with a trailing `/api` is accepted, as the old `resolve()` call allowed.
 - The UNIX-socket test skips cleanly where there is no `/tmp`.
+## One failing handler no longer crashes the server (2026-11-05, unreleased)
+
+Fabric does not catch exceptions in event handlers. One escaping an END_SERVER_TICK handler, or
+the damage or death callbacks, ends `MinecraftServer.tick` and crashes the server (a "Ticking
+entity" crash for damage). An audit found about 60 such handlers registered by the mod and only
+about 9 that caught anything. No live crash was found, but any latent null or removed-entity bug
+in, say, hazard rescue, hunger, mutual aid or idle hobbies would have taken the whole server
+down.
+
+All of them now go through `TickGuard`. A RuntimeException is logged, with its stack trace the
+first time and then at most once a minute per handler with a count (`TickGuardLogPolicy`), and the
+server keeps ticking. This covers:
+- the 57 END_SERVER_TICK handlers in Frens.java, plus the group chat hint and supply request
+  ticks (59 in all);
+- ALLOW_DAMAGE (falls back to vanilla: the damage goes ahead);
+- AFTER_DAMAGE (the bot's apology for hitting a player);
+- AFTER_DEATH;
+- UseEntityCallback and AttackEntityCallback (both fall back to PASS, so the use or attack goes
+  ahead as vanilla would).
+
+A test fails if a new END_SERVER_TICK registration skips the guard, or if any of the five
+damage, death and entity callbacks in Frens.java loses it.
+
+Costs and limits:
+- A failing handler skips the rest of its own work for that tick: every bot after the failing
+  one in that handler's loop. That is not one bot only. Per-bot isolation inside the larger loops
+  (hazards, hunger, persistence autosave) is a follow-up.
+- A handler that keeps failing logs one ERROR a minute rather than crashing, so watch for
+  `frens-tick-guard` lines.
+- Errors such as OutOfMemoryError still propagate.
+
+Tests: `TickGuardTest` (3).
 
 ## Repository clean-up: public and private split (2026-11-04)
 
