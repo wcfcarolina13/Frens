@@ -69,9 +69,15 @@ public final class AnimalFeedingService {
         if (foods.isEmpty()) {
             return false;
         }
+        int maxAttempts = requireLowHealth ? 6 : 2;
+        net.minecraft.server.MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server != null && server.isOnThread()) {
+            // Ride sync calls this from the server tick: one feed now, the rest paced through
+            // scheduled ticks instead of Thread.sleep (up to ~1 s of server freeze before).
+            return feedOnServerTick(server, bot, animal, foods, requireLowHealth, maxAttempts);
+        }
         int attempts = 0;
         boolean fed = false;
-        int maxAttempts = requireLowHealth ? 6 : 2;
         while (attempts < maxAttempts) {
             if (requireLowHealth && !isLowHealth(animal)) {
                 break;
@@ -99,6 +105,26 @@ public final class AnimalFeedingService {
             }
         }
         return fed;
+    }
+
+    /** Server-thread feeding: one item now; while still needed, the next one about three ticks later. */
+    private static boolean feedOnServerTick(net.minecraft.server.MinecraftServer server, ServerPlayerEntity bot,
+                                            LivingEntity animal, List<Item> foods, boolean requireLowHealth,
+                                            int attemptsLeft) {
+        if (attemptsLeft <= 0 || animal.isRemoved() || bot.isRemoved()
+                || (requireLowHealth && !isLowHealth(animal))) {
+            return false;
+        }
+        Item food = findFoodItem(bot, foods);
+        if (food == null || !BotActions.ensureHotbarItem(bot, food)
+                || !BotActions.interactEntity(bot, animal, Hand.MAIN_HAND)) {
+            return false;
+        }
+        if (requireLowHealth && attemptsLeft > 1) {
+            TaskService.runOnServerAfterTicks(server, 3L,
+                    () -> feedOnServerTick(server, bot, animal, foods, true, attemptsLeft - 1));
+        }
+        return true;
     }
 
     public static List<LivingEntity> findLowHealthAnimals(ServerWorld world, BlockPos origin, double radius) {

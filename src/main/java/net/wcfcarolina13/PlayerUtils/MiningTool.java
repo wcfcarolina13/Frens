@@ -181,7 +181,11 @@ public class MiningTool {
         // Initialize targeting and tool selection directly (avoid server-thread join deadlock)
         try {
             BlockState initialState = bot.getEntityWorld().getBlockState(targetBlockPos);
-            if (ProtectedStructureBlockHelper.isNeverBreakAt(bot.getEntityWorld(), targetBlockPos)
+            // This runs on the caller's thread, often a skill worker: the painting scan is an entity
+            // query and is skipped there. The server-thread tick repeats the full check before every
+            // tryBreakBlock, so a block holding a painting is still refused before it breaks.
+            boolean onServerThread = server != null && server.isOnThread();
+            if (ProtectedStructureBlockHelper.isNeverBreakAt(bot.getEntityWorld(), targetBlockPos, onServerThread)
                     || isNeverMineBlock(initialState)) {
                 miningResult.complete("⚠️ Refusing to mine a protected block.");
                 return miningResult;

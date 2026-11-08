@@ -654,7 +654,9 @@ public final class FollowPathService {
                 int nx = cx + dir.getOffsetX();
                 int nz = cz + dir.getOffsetZ();
 
-                // Prefer same-level movement, then step up, then step down.
+                // Every height is a neighbour: costs already prefer level. Stopping at the first one
+                // hid the step up onto a stair whose own cell is also walkable, so stairs over air
+                // had no route.
                 int[] dyOrder = snapshot.isSwimmable(curPos) ? new int[] { 1, 0, -1 } : new int[] { 0, 1, -1 };
                 for (int dY : dyOrder) {
                     int ny = cy + dY;
@@ -679,7 +681,6 @@ public final class FollowPathService {
                             open.add(new Node(nIdx, f));
                         }
                     }
-                    break;
                 }
             }
         }

@@ -69,9 +69,9 @@ public class WoolSkill implements Skill {
             Items.OAK_PLANKS, Items.SPRUCE_PLANKS, Items.BIRCH_PLANKS, Items.JUNGLE_PLANKS, Items.ACACIA_PLANKS,
             Items.DARK_OAK_PLANKS, Items.MANGROVE_PLANKS, Items.CHERRY_PLANKS, Items.CRIMSON_PLANKS, Items.WARPED_PLANKS
     );
-    private static final Map<UUID, BlockPos> LAST_SEEN_SHEEP = new HashMap<>();
+    private static final Map<UUID, BlockPos> LAST_SEEN_SHEEP = new java.util.concurrent.ConcurrentHashMap<>();
     /** Per-bot zone visit timestamps for smarter exploration. Key = packed (cellX, cellZ), value = visit epoch ms. */
-    private static final Map<UUID, Map<Long, Long>> EXPLORED_ZONES = new HashMap<>();
+    private static final Map<UUID, Map<Long, Long>> EXPLORED_ZONES = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long ZONE_COOLDOWN_MS = 3 * 60_000L; // 3 minutes before revisiting a zone
 
     @Override
@@ -514,7 +514,8 @@ public class WoolSkill implements Skill {
         BlockPos last = LAST_SEEN_SHEEP.get(bot.getUuid());
         BlockPos anchor = last != null ? last : bot.getBlockPos();
 
-        Map<Long, Long> zones = EXPLORED_ZONES.computeIfAbsent(bot.getUuid(), k -> new HashMap<>());
+        // Concurrent: an aborted wool worker can still be recording a zone while the next run reads it.
+        Map<Long, Long> zones = EXPLORED_ZONES.computeIfAbsent(bot.getUuid(), k -> new java.util.concurrent.ConcurrentHashMap<>());
         long now = System.currentTimeMillis();
 
         // Generate candidates: 8 directions at increasing radii, skip recently visited zones
