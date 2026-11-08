@@ -53,6 +53,13 @@ public final class TorchPlacer {
      * @return true if torch was successfully replaced
      */
     public static boolean replaceTorchAt(ServerPlayerEntity bot, BlockPos pos) {
+        // Callers are skill workers (dirt, strip-mine, shovel); the block set and torch decrement
+        // must run on the server thread. Inline when already there.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThread(bot,
+                () -> replaceTorchAtOnServer(bot, pos), 1000L, false);
+    }
+
+    private static boolean replaceTorchAtOnServer(ServerPlayerEntity bot, BlockPos pos) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
@@ -101,6 +108,12 @@ public final class TorchPlacer {
      * @return PlacementResult indicating success, no torches, or failure
      */
     public static PlacementResult placeTorch(ServerPlayerEntity bot, Direction preferredDirection) {
+        // Same as replaceTorchAt: hotbar swap, block set and decrement on the server thread.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThread(bot,
+                () -> placeTorchOnServer(bot, preferredDirection), 1000L, PlacementResult.FAILED);
+    }
+
+    private static PlacementResult placeTorchOnServer(ServerPlayerEntity bot, Direction preferredDirection) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return PlacementResult.FAILED;
         }

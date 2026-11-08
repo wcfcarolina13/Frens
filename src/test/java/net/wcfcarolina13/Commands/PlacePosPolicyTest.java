@@ -2,12 +2,14 @@ package net.wcfcarolina13.Commands;
 
 import net.wcfcarolina13.Commands.PlacePosPolicy.Cell;
 import net.wcfcarolina13.Commands.PlacePosPolicy.Face;
+import net.wcfcarolina13.Commands.PlacePosPolicy.Stop;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -125,26 +127,76 @@ class PlacePosPolicyTest {
     }
 
     @Test
-    void placeCommandCatchesUnexpectedErrors() throws IOException {
-        String body = method("private static int executePlaceGeneric(");
+    void placeLoopCatchesUnexpectedErrors() throws IOException {
+        String body = method("private static PlaceRun runPlaceLoop(");
         assertTrue(body.contains("catch (RuntimeException e)"));
         assertTrue(body.contains("LOGGER.error(\"Unexpected error in /bot place {}\", item, e)"));
         int catchAt = body.indexOf("catch (RuntimeException e)");
-        int summaryInCatch = body.indexOf("placedLine(placed, item)", catchAt);
-        int catchReturn = body.indexOf("return placed > 0 ? 1 : 0;", catchAt);
-        assertTrue(summaryInCatch > catchAt && summaryInCatch < catchReturn,
-                "an error after some placements still reports what was placed");
+        assertTrue(body.indexOf("PlacePosPolicy.Stop.ERROR", catchAt) > catchAt,
+                "an error ends the run with the count so far, so the report still says what was placed");
+    }
+
+    // --- 1.1.296: out of reach, a worker walks over and places ---
+
+    @Test
+    void onlyAServerThreadReachFailureHandsOff() {
+        assertTrue(PlacePosPolicy.handOffToWorker(true, Stop.OUT_OF_REACH));
+        for (Stop stop : Stop.values()) {
+            assertFalse(PlacePosPolicy.handOffToWorker(false, stop), "a worker pass never hands off again: " + stop);
+            if (stop != Stop.OUT_OF_REACH) {
+                assertFalse(PlacePosPolicy.handOffToWorker(true, stop), stop.name());
+            }
+        }
     }
 
     @Test
-    void reachFailureIsNotFollowedByTheNoItemLine() throws IOException {
+    void reportLinesPerStop() {
+        assertEquals(List.of("Placed 1 chest."), PlacePosPolicy.reportLines(1, Stop.DONE, "chest"));
+        assertEquals(List.of("Placed 3 chests."), PlacePosPolicy.reportLines(3, Stop.DONE, "chest"));
+        assertEquals(List.of("I don't have any furnace to place."), PlacePosPolicy.reportLines(0, Stop.NO_ITEMS, "furnace"));
+        assertEquals(List.of("Placed 2 chests."), PlacePosPolicy.reportLines(2, Stop.NO_ITEMS, "chest"));
+        // a reach failure is not "no items"
+        assertEquals(List.of("I can't reach that spot."), PlacePosPolicy.reportLines(0, Stop.OUT_OF_REACH, "chest"));
+        assertEquals(List.of("I can't reach that spot.", "Placed 1 chest."),
+                PlacePosPolicy.reportLines(1, Stop.OUT_OF_REACH, "chest"));
+        // /bot stop already says it stopped; only what was placed is added
+        assertEquals(List.of(), PlacePosPolicy.reportLines(0, Stop.ABORTED, "chest"));
+        assertEquals(List.of("Placed 1 chest."), PlacePosPolicy.reportLines(1, Stop.ABORTED, "chest"));
+        assertEquals(List.of("Something went wrong placing the chest, so I stopped.", "Placed 2 chests."),
+                PlacePosPolicy.reportLines(2, Stop.ERROR, "chest"));
+        assertEquals(List.of("Something went wrong placing the chest, so I stopped."),
+                PlacePosPolicy.reportLines(0, Stop.ERROR, "chest"));
+    }
+
+    @Test
+    void placeCommandHandsTheWalkToAWorkerWithATicket() throws IOException {
         String body = method("private static int executePlaceGeneric(");
-        int reach = body.indexOf("\"I can't reach that spot.\"");
-        assertTrue(reach >= 0);
-        assertTrue(body.indexOf("reachFailed = true;", reach) > reach);
-        int noItem = body.indexOf("\"I don't have any \"");
-        assertTrue(noItem > 0);
-        assertTrue(body.lastIndexOf("!reachFailed", noItem) > reach,
-                "the no-item line must be gated on the reach failure");
+        int firstPass = body.indexOf("runPlaceLoop(bot, target, item, placeItem, count, 0, null)");
+        int gate = body.indexOf("PlacePosPolicy.handOffToWorker(true, first.stop())");
+        int ticket = body.indexOf("TaskService.beginSkill(\"place\", source, botUuid)");
+        int submit = body.indexOf("skillExecutor.submit(");
+        int rest = body.indexOf("runPlaceLoop(bot, target, item, placeItem, count, first.placed(), first.lastPlaced())");
+        int report = body.indexOf("server.execute(() -> reportPlacement(source, rest, item))");
+        int complete = body.indexOf("TaskService.complete(ticket, success)");
+        assertTrue(firstPass >= 0 && gate > firstPass, "in-reach pass first, then the hand-off gate");
+        assertTrue(ticket > gate && submit > ticket, "a /bot stop-able ticket before the worker hop");
+        assertTrue(rest > submit, "the walking pass runs on the worker");
+        assertTrue(report > rest, "the result goes back to the server thread");
+        assertTrue(complete > report && body.lastIndexOf("finally", complete) > rest, "the ticket always completes");
+        assertTrue(body.indexOf("return 1;", submit) > submit, "the command returns at once after the hop");
+    }
+
+    @Test
+    void walkingPlacementKeepsMutationsOnTheServerThread() throws IOException {
+        String body = method("private static BlockPos attemptPlacement(");
+        int yaw = body.indexOf("bot.setYaw(target.yaw)");
+        assertTrue(body.lastIndexOf("BotActions.callOnServerThread(", yaw) >= 0, "rotation runs on the server thread");
+        int breakAt = body.indexOf("breakBlock(placePos, false)");
+        int hop = body.lastIndexOf("BotActions.callOnServerThread(", breakAt);
+        assertTrue(hop > yaw, "the snow clear runs inside its own server-thread call");
+        assertTrue(body.contains("TaskService.isAbortRequested(bot.getUuid())"), "/bot stop ends the walk loop");
+        String loop = method("private static PlaceRun runPlaceLoop(");
+        assertTrue(loop.contains("BotActions.callOnServerThread(bot, () -> findItem(bot, placeItem)"));
+        assertTrue(loop.contains("PlacePosPolicy.Stop.ABORTED"));
     }
 }

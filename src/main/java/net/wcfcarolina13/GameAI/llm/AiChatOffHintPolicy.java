@@ -9,7 +9,7 @@ package net.wcfcarolina13.GameAI.llm;
 public final class AiChatOffHintPolicy {
 
     public static final String NOTICE =
-            "AI chat is off. To let companions talk back, open the Guide (]) → AI setup.";
+            "Bots run on commands: try /bot or open the Guide (]). To let them talk back, use AI setup in the Guide.";
 
     private AiChatOffHintPolicy() {
     }

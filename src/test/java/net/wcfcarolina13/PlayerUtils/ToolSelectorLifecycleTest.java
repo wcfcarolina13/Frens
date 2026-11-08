@@ -27,10 +27,10 @@ class ToolSelectorLifecycleTest {
 
     @Test
     void unregisterForgetsTheToolCooldownAlongsideCombatCleanup() throws IOException {
-        String body = method(events(), "public static void unregisterBot(");
+        String body = method(events(), "public static void unregisterBot(ServerPlayerEntity bot, boolean saveFirst)");
         assertTrue(body.contains("ToolSelector.forgetBot(uuid)"));
         assertTrue(body.contains("CombatInventoryManager.forgetBot(uuid)"));
-        assertTrue(body.indexOf("ToolSelector.forgetBot(uuid)") < body.indexOf("BotPersistenceService.removeBot(bot)"));
+        assertTrue(body.indexOf("ToolSelector.forgetBot(uuid)") < body.indexOf("BotPersistenceService.removeBot(bot, saveFirst)"));
     }
 
     @Test
