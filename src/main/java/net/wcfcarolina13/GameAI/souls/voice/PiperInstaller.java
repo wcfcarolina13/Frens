@@ -512,9 +512,13 @@ public final class PiperInstaller {
                 }
             }
         } else {
-            // .tar.gz — macOS and Linux always ship a system tar.
+            // .tar.gz — macOS and Linux always ship a system tar. Nobody reads tar's output and
+            // the failure message is fixed text, so discard both streams at the OS level: an
+            // unread pipe with more than 64 KB of output would block tar until the 120 s timeout.
             Process tar = new ProcessBuilder("tar", "-xzf", archive.toString(), "-C", destDir.toString())
-                    .redirectErrorStream(true).start();
+                    .redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .start();
             if (!tar.waitFor(120, TimeUnit.SECONDS) || tar.exitValue() != 0) {
                 tar.destroyForcibly();
                 throw new IOException("tar extraction failed");

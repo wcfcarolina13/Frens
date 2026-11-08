@@ -294,8 +294,10 @@ public final class SoulEventObserver {
             return;
         }
         SoulTypes.EventType outcome = taskOutcome(finalState, ticket.isCancelRequested());
+        String failure = outcome == SoulTypes.EventType.TASK_FAILED
+                ? SoulTaskFailurePolicy.factValue(ticket.failureMessage()) : "";
         observer.noteTaskFinished(ticket.botUuid(), ticket.name(), category(ticket.name()), outcome,
-                sanitizeReasonCategory(ticket.cancelReason()), worldTickOf(ticket));
+                sanitizeReasonCategory(ticket.cancelReason()), failure, worldTickOf(ticket));
     }
 
     /** The {@code TaskService} ticket name a running hunt registers under (see {@code SkillManager.runSkill} -&gt; {@code TaskService.beginSkill("hunt", ...)}, which prefixes {@code "skill:"}). */
@@ -626,11 +628,21 @@ public final class SoulEventObserver {
 
     void noteTaskFinished(UUID botId, String taskName, String category, SoulTypes.EventType outcome,
                           String reasonCategory, long worldTick) {
+        noteTaskFinished(botId, taskName, category, outcome, reasonCategory, "", worldTick);
+    }
+
+    /** {@code failureKind}: {@link SoulTaskFailurePolicy#factValue}, journaled only when non-empty. */
+    void noteTaskFinished(UUID botId, String taskName, String category, SoulTypes.EventType outcome,
+                          String reasonCategory, String failureKind, long worldTick) {
         if (botId == null || !sink.accepts(botId) || isSleepTask(taskName)) {
             return;
         }
         Map<String, String> facts = factMap("task", nullToEmpty(taskName), "category", nullToEmpty(category),
                 "state", outcome.name(), "reason", nullToEmpty(reasonCategory));
+        if (failureKind != null && !failureKind.isEmpty()) {
+            facts = new java.util.LinkedHashMap<>(facts);
+            facts.put(SoulTaskFailurePolicy.FACT_KEY, failureKind);
+        }
         emit(botId, outcome, "", "", facts, SoulTypes.Witness.SELF, worldTick, SoulTypes.Salience.NORMAL,
                 List.of());
         activeTaskByBot.remove(botId);

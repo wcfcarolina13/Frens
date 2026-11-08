@@ -113,6 +113,10 @@ public final class DropSweeper {
         while (attempts < maxTargets && System.currentTimeMillis() <= deadline) {
             if (isInventoryFull(player)) {
                 if (ensureSpaceForDropSweep(source, player, commander)) {
+                    // Making room can walk the bot to a crafting table for a bundle. Drops are
+                    // searched around the bot, so come back first or the ones that started this
+                    // sweep end up outside the radius and are left behind.
+                    returnToSweepOrigin(source, player, origin, horizontalRadius);
                     continue;
                 }
                 LOGGER.info("Drop sweep ending: inventory full and no storage/drop options available.");
@@ -299,6 +303,29 @@ public final class DropSweeper {
 
     private static Vec3d currentPosition(ServerPlayerEntity player) {
         return new Vec3d(player.getX(), player.getY(), player.getZ());
+    }
+
+    private static void returnToSweepOrigin(ServerCommandSource source, ServerPlayerEntity player,
+                                            Vec3d origin, double horizontalRadius) {
+        if (player == null || origin == null) {
+            return;
+        }
+        double distSq = currentPosition(player).squaredDistanceTo(origin);
+        if (!SweepReturnPolicy.shouldReturnToOrigin(distSq, horizontalRadius)) {
+            return;
+        }
+        BlockPos originBlock = BlockPos.ofFloored(origin);
+        Optional<MovementService.MovementPlan> planOpt = MovementService.planLootApproach(
+                player, originBlock, MovementService.MovementOptions.lootCollection());
+        if (planOpt.isEmpty()) {
+            LOGGER.info("Drop sweep: no path back to the sweep start at {} after making room", originBlock.toShortString());
+            return;
+        }
+        MovementService.clearRecentWalkAttempt(player.getUuid());
+        MovementService.MovementResult movement = MovementService.execute(source, player, planOpt.get(), false, true, true, false);
+        BotActions.stop(player);
+        LOGGER.info("Drop sweep: walked back to the sweep start at {} after making room ({})",
+                originBlock.toShortString(), movement.success() ? "arrived" : movement.detail());
     }
 
     private static boolean isInventoryFull(ServerPlayerEntity player) {

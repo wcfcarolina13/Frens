@@ -29,7 +29,7 @@ class AiSetupChecklistPolicyTest {
                 new AiSetupStatus.Runtime(true, soulsOn, ready, model, model.isBlank()
                         ? "Configure a local soul model first." : "", true),
                 bots, new AiSetupStatus.Voice(voiceOn, true, "piper", true, voiceOn),
-                new AiSetupStatus.Viewer(true, true));
+                new AiSetupStatus.Viewer(true, true, true));
     }
 
     private static AiSetupStatus.Ollama ollama(boolean reachable, String... tags) {
@@ -122,7 +122,7 @@ class AiSetupChecklistPolicyTest {
                 new AiSetupStatus.Runtime(true, false, false, "llama3.2:3b", "", true),
                 List.of(bot("Bob", BOB_ID, false, true, true, false), bot("Amy", AMY_ID, true, false, true, false)),
                 new AiSetupStatus.Voice(false, true, "pocket", false, false),
-                new AiSetupStatus.Viewer(false, false));
+                new AiSetupStatus.Viewer(false, false, false));
         // The server sends the redacted view to a non-operator; round-trip it like the wire does.
         AiSetupStatus seen = AiSetupStatus.fromJson(full.redactedForPlayer().toJson());
         Checklist c = AiSetupChecklistPolicy.evaluate(seen);
@@ -148,7 +148,7 @@ class AiSetupChecklistPolicyTest {
                 new AiSetupStatus.Runtime(true, true, true, "llama3.2:3b", "", true),
                 List.of(bot("Amy", AMY_ID, true, false, true, false), bot("Bob", BOB_ID, true, true, false, false)),
                 new AiSetupStatus.Voice(false, true, "piper", true, false),
-                new AiSetupStatus.Viewer(true, false));
+                new AiSetupStatus.Viewer(true, false, true));
         Checklist c = AiSetupChecklistPolicy.evaluate(s);
         assertEquals(2, c.bots().size());
         assertEquals("Bob", c.testBotName(), "own bot preferred over another owner's, even out of reach");
@@ -274,7 +274,7 @@ class AiSetupChecklistPolicyTest {
                 new AiSetupStatus.Runtime(true, true, true, model, "", true, answer),
                 List.of(bot("Bob", BOB_ID, false, true, true, false)),
                 new AiSetupStatus.Voice(false, true, "piper", true, false),
-                new AiSetupStatus.Viewer(canEdit, canEdit));
+                new AiSetupStatus.Viewer(canEdit, canEdit, canEdit));
     }
 
     @Test
@@ -299,6 +299,40 @@ class AiSetupChecklistPolicyTest {
         String json = full.redactedForPlayer().toJson();
         assertFalse(json.contains("newBotSoul"), json);
         assertEquals(null, AiSetupStatus.fromJson(json).runtime().newBotSoulDefault());
+    }
+
+    @Test
+    void oldServerStatusHidesTheNewBotButton() {
+        // A server before 1.1.296 sends no canSetNewBotSoul and no answer: the question is hidden
+        // instead of offering a click the server drops.
+        String oldServerJson = "{\"v\":1,\"full\":true,"
+                + "\"ollama\":{\"reachable\":true,\"version\":\"0.5\",\"installedTags\":[\"llama3.2:3b\"],\"hostRamGb\":16},"
+                + "\"runtime\":{\"running\":true,\"soulsEnabled\":true,\"ready\":true,\"model\":\"llama3.2:3b\",\"validationError\":\"\",\"providerHealthy\":true},"
+                + "\"bots\":[],\"voice\":{\"enabled\":false},"
+                + "\"viewer\":{\"canEditServer\":true,\"isIntegratedHost\":true}}";
+        AiSetupStatus old = AiSetupStatus.fromJson(oldServerJson);
+        assertFalse(old.viewer().canSetNewBotSoul());
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.HIDDEN, AiSetupChecklistPolicy.evaluate(old).newBotSoul());
+        // The same status from a current server asks.
+        AiSetupStatus current = withNewBotAnswer(ollama(true, "llama3.2:3b"), "llama3.2:3b", null, true);
+        assertEquals(AiSetupChecklistPolicy.NewBotSoul.ASK,
+                AiSetupChecklistPolicy.evaluate(AiSetupStatus.fromJson(current.toJson())).newBotSoul());
+    }
+
+    @Test
+    void serverThatDoesNotHandleTheAnswerHidesEveryState() {
+        for (Boolean answer : new Boolean[] {null, true, false}) {
+            assertEquals(AiSetupChecklistPolicy.NewBotSoul.HIDDEN, AiSetupChecklistPolicy.newBotSoul(true, false,
+                    answer, AiSetupChecklistPolicy.State.DONE, AiSetupChecklistPolicy.State.DONE));
+        }
+    }
+
+    @Test
+    void redactedViewNeverOffersTheNewBotAnswer() {
+        AiSetupStatus full = withNewBotAnswer(ollama(true, "llama3.2:3b"), "llama3.2:3b", null, true);
+        AiSetupStatus redacted = full.redactedForPlayer();
+        assertFalse(redacted.viewer().canSetNewBotSoul());
+        assertFalse(redacted.toJson().contains("canSetNewBotSoul"));
     }
 
     @Test

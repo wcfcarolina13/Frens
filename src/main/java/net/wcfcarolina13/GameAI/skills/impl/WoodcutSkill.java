@@ -2479,8 +2479,12 @@ public final class WoodcutSkill implements Skill {
                     // If still not on the right block, force-position onto the column center.
                     // This is safe: the bot is on its own scaffold, we just need it centered
                     // so the gravity drop goes straight down.
-                    if (!bot.getBlockPos().equals(aboveColumn)) {
-                        Vec3d center = Vec3d.ofBottomCenter(aboveColumn);
+                    Vec3d center = Vec3d.ofBottomCenter(aboveColumn);
+                    if (!bot.getBlockPos().equals(aboveColumn)
+                            && ScaffoldRecenterPolicy.mayForcePosition(
+                                    bot.getEntityPos().squaredDistanceTo(center),
+                                    world.getBlockState(aboveColumn).getCollisionShape(world, aboveColumn).isEmpty(),
+                                    world.getBlockState(aboveColumn.up()).getCollisionShape(world, aboveColumn.up()).isEmpty())) {
                         world.getServer().execute(() -> {
                             bot.setPosition(center.x, center.y, center.z);
                             bot.setVelocity(Vec3d.ZERO);
@@ -5923,27 +5927,41 @@ public final class WoodcutSkill implements Skill {
         if (bot == null || logsToConvert <= 0) {
             return 0;
         }
-        int crafted = 0;
-        for (int i = 0; i < bot.getInventory().size() && logsToConvert > 0; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty() || !stack.isIn(ItemTags.LOGS)) {
-                continue;
+        // Inventory edits on the server thread: this runs on the woodcut worker while the server
+        // tick can also be picking items up into the same inventory.
+        final int toConvert = logsToConvert;
+        return BotActions.callOnServerThread(bot, () -> {
+            int crafted = 0;
+            int remaining = toConvert;
+            for (int i = 0; i < bot.getInventory().size() && remaining > 0; i++) {
+                ItemStack stack = bot.getInventory().getStack(i);
+                if (stack.isEmpty() || !stack.isIn(ItemTags.LOGS)) {
+                    continue;
+                }
+                int use = Math.min(stack.getCount(), remaining);
+                Item plankItem = mapLogToPlank(stack.getItem());
+                if (plankItem == null || plankItem == Items.AIR) {
+                    continue;
+                }
+                int produce = use * 4;
+                stack.decrement(use);
+                if (stack.isEmpty()) {
+                    bot.getInventory().setStack(i, ItemStack.EMPTY);
+                }
+                ItemStack planks = new ItemStack(plankItem, produce);
+                bot.getInventory().insertStack(planks);
+                if (!planks.isEmpty()) {
+                    // A full inventory used to swallow these: drop them at the bot's feet instead.
+                    LOGGER.warn("Scaffold planks: inventory full, dropped {} {}", planks.getCount(),
+                            plankItem.getName().getString());
+                    produce -= planks.getCount();
+                    bot.dropItem(planks, false);
+                }
+                crafted += produce;
+                remaining -= use;
             }
-            int use = Math.min(stack.getCount(), logsToConvert);
-            Item plankItem = mapLogToPlank(stack.getItem());
-            if (plankItem == null || plankItem == Items.AIR) {
-                continue;
-            }
-            int produce = use * 4;
-            stack.decrement(use);
-            if (stack.isEmpty()) {
-                bot.getInventory().setStack(i, ItemStack.EMPTY);
-            }
-            bot.getInventory().insertStack(new ItemStack(plankItem, produce));
-            crafted += produce;
-            logsToConvert -= use;
-        }
-        return crafted;
+            return crafted;
+        }, 1000L, 0);
     }
 
     private static Item mapLogToPlank(Item logItem) {

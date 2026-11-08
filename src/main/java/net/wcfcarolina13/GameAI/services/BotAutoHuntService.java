@@ -39,6 +39,17 @@ public final class BotAutoHuntService {
     private static final long TELEPORT_ABORT_SNOOZE_TICKS = 20L * 10L;
     private static final Map<UUID, Long> NEXT_DECISION_TICK = new ConcurrentHashMap<>();
 
+    /**
+     * Auto-hunt decision gate.
+     * Called at SERVER_STOPPED: a singleplayer quit keeps static state, the next world's server
+     * restarts its tick counter at 0 and the same bots keep their UUIDs, so tick-based gates from
+     * the old world would hold back behaviour for as long as that world had run.
+     */
+    public static void resetSession() {
+        NEXT_DECISION_TICK.clear();
+    }
+
+
     private static final AtomicInteger THREAD_ID = new AtomicInteger(0);
     private static volatile ExecutorService EXECUTOR = createExecutor();
 
