@@ -12,7 +12,7 @@ Minecraft Fabric mod ("Frens") that adds intelligent NPC bot companions with aut
 JAVA_HOME=<your JDK 21> ./gradlew build   # JDK 21 required (JDK 25 breaks Gradle 8.14.2)
 ```
 
-JUnit suite under `src/test/java` (3857 tests as of 2026-11-04, pure-logic policy/director/pathfinding tests; run with `./gradlew test`, or `./gradlew build` which includes it). CI still runs `./gradlew build -x test`. Gameplay behaviour is verified manually in-game.
+JUnit suite under `src/test/java` (3857 tests as of 2026-11-04, pure-logic policy/director/pathfinding tests; run with `./gradlew test`, or `./gradlew build` which includes it). CI runs `./gradlew build -x test` and then `./gradlew test` as a separate step (test reports are uploaded when it fails). Gameplay behaviour is verified manually in-game.
 
 **Test policy (hard rules, learned 2026-09-04):** no `net.minecraft.*` types in test code — extract the decision as a static pure helper over ints/strings/records and test that (`*Policy.java` convention: `TravelWaitPolicy`, `BundleReachPolicy`, `ScaffoldSlotPolicy`, `FuelOffloadPolicy`). `ManualConfig` is built in tests via its private constructor with reflection (see `SoulFoundationTest.newRealConfig()`); never call `save()`/`load()`. Classes whose static init touches `Blocks`/`SoundEvents` (e.g. `BotFleeService`) throw `ExceptionInInitializerError` under JUnit — put the pure helper in a separate class (`PlayerUtils/TickFreshness` is the precedent). If `./gradlew test` reports UP-TO-DATE, use `./gradlew cleanTest test`; stale incremental classes after `build -x test` are fixed by `./gradlew clean build`.
 
