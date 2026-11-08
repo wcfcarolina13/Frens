@@ -101,6 +101,12 @@ public final class SmeltingService {
         // What the fuel slot held before this cycle first fuelled it: a stop gives back only the
         // fuel the bot itself put in (FurnaceTakeBackPolicy.fuelToTakeBack).
         java.util.concurrent.atomic.AtomicReference<ItemStack> fuelBaseline = new java.util.concurrent.atomic.AtomicReference<>();
+        // Exactly what the bot's own refuels put in the fuel slot this cycle (same item as the slot).
+        java.util.concurrent.atomic.AtomicInteger fuelAddedByBot = new java.util.concurrent.atomic.AtomicInteger();
+        // The food type in the input slot and how many of it the bot itself loaded (owner's same-kind
+        // food already in the slot is not counted).
+        java.util.concurrent.atomic.AtomicReference<Item> inputItemLoaded = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicInteger inputAddedByBot = new java.util.concurrent.atomic.AtomicInteger();
         // Walk-backs after losing furnace reach mid-cycle (FurnaceReachRecoveryPolicy budget).
         int walkBacksUsed = 0;
 
@@ -184,6 +190,8 @@ public final class SmeltingService {
                     Map<Item, List<ItemStack>> liveCookables = findCookables(liveBot, liveWorld, liveFurnaceState, "", true);
                     List<ItemStack> liveStacks = liveCookables.get(rawItem);
                     int inserted = 0;
+                    ItemStack inputBefore = furnace.getStack(FurnaceTakeBackPolicy.INPUT_SLOT);
+                    int inputCountBefore = inputBefore.isOf(rawItem) ? inputBefore.getCount() : 0;
                     if (liveStacks != null) {
                         for (ItemStack stack : liveStacks) {
                             if (insertIntoInput(furnace, stack.copy())) {
@@ -192,6 +200,10 @@ public final class SmeltingService {
                             }
                         }
                     }
+                    ItemStack inputAfter = furnace.getStack(FurnaceTakeBackPolicy.INPUT_SLOT);
+                    inputItemLoaded.set(rawItem);
+                    inputAddedByBot.set(FurnaceTakeBackPolicy.refuelAdded(inputAfter.isOf(rawItem),
+                            inputCountBefore, inputAfter.getCount()));
                     if (inserted == 0) {
                         loadResult.complete(false);
                         return;
@@ -199,7 +211,7 @@ public final class SmeltingService {
 
                     // Ensure fuel
                     fuelBaseline.compareAndSet(null, furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT).copy());
-                    ensureFuel(liveBot, source, furnace, liveWorld, "auto");
+                    refuelCounting(liveBot, source, furnace, liveWorld, fuelAddedByBot);
                     loadResult.complete(true);
                 } catch (Throwable t) {
                     LOGGER.warn("cookAllFoodSync: load failed: {}", t.getMessage());
@@ -283,7 +295,7 @@ public final class SmeltingService {
                         // Refuel if needed and input still has items
                         ItemStack input = furnace.getStack(0);
                         if (!input.isEmpty() && needsFuel(furnace)) {
-                            ensureFuel(liveBot, source, furnace, liveWorld, "auto");
+                            refuelCounting(liveBot, source, furnace, liveWorld, fuelAddedByBot);
                         }
 
                         // Check if batch is done (input slot empty)
@@ -382,9 +394,9 @@ public final class SmeltingService {
         }
 
         boolean stoppedEarly = Thread.currentThread().isInterrupted() || TaskService.isAbortRequested(botId);
-        if (FurnaceTakeBackPolicy.shouldTakeBack(stoppedEarly, TaskService.isServerStopping(),
-                fuelBaseline.get() != null)) {
-            takeBackAfterStop(bot, source, server, worldKey, botId, furnacePos, fuelBaseline.get());
+        if (FurnaceTakeBackPolicy.shouldTakeBack(stoppedEarly, TaskService.isServerStopping(), fuelBaseline.get() != null)) {
+            takeBackAfterStop(bot, source, server, worldKey, botId, furnacePos, fuelBaseline.get(), fuelAddedByBot.get(),
+                    inputItemLoaded.get(), inputAddedByBot.get());
         }
 
         if (anyCooked) {
@@ -392,6 +404,16 @@ public final class SmeltingService {
                     bot.getName().getString(), System.currentTimeMillis() - totalStartMs);
         }
         return anyCooked;
+    }
+
+    /** Server thread: {@link #ensureFuel} for the cook cycle, adding to {@code added} what it put in the fuel slot. */
+    private static void refuelCounting(ServerPlayerEntity bot, ServerCommandSource source, AbstractFurnaceBlockEntity furnace,
+                                       ServerWorld world, java.util.concurrent.atomic.AtomicInteger added) {
+        ItemStack before = furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT).copy();
+        ensureFuel(bot, source, furnace, world, "auto");
+        ItemStack after = furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT);
+        boolean sameItem = before.isEmpty() || ItemStack.areItemsAndComponentsEqual(before, after);
+        added.addAndGet(FurnaceTakeBackPolicy.refuelAdded(sameItem, before.getCount(), after.getCount()));
     }
 
     /**
@@ -403,7 +425,8 @@ public final class SmeltingService {
     private static void takeBackAfterStop(ServerPlayerEntity bot, ServerCommandSource source,
                                           net.minecraft.server.MinecraftServer server,
                                           net.minecraft.registry.RegistryKey<net.minecraft.world.World> worldKey,
-                                          UUID botId, BlockPos furnacePos, ItemStack fuelBefore) {
+                                          UUID botId, BlockPos furnacePos, ItemStack fuelBefore, int fuelAdded,
+                                          Item inputItem, int inputAdded) {
         boolean interrupted = Thread.interrupted();
         try {
             CompletableFuture<String> done = new CompletableFuture<>();
@@ -430,18 +453,28 @@ public final class SmeltingService {
                         if (stack.isEmpty()) {
                             continue;
                         }
+                        // Input: only the bot's own loading of the food it was cooking comes back.
+                        int want = slot == FurnaceTakeBackPolicy.OUTPUT_SLOT ? stack.getCount()
+                                : FurnaceTakeBackPolicy.inputToTakeBack(inputItem != null && stack.isOf(inputItem),
+                                        stack.getCount(), inputAdded);
+                        if (want <= 0) {
+                            continue;
+                        }
+                        ItemStack part = stack.copyWithCount(want);
                         ItemStack remaining = slot == FurnaceTakeBackPolicy.OUTPUT_SLOT
-                                ? evacuateOutput(liveBot, source, stack.copy(), STATION_REACH_SQ)
-                                : evacuateInput(liveBot, source, stack.copy(), STATION_REACH_SQ);
-                        int left = remaining == null ? stack.getCount() : remaining.getCount();
-                        taken += stack.getCount() - left;
-                        furnace.setStack(slot, left <= 0 ? ItemStack.EMPTY : remaining);
+                                ? evacuateOutput(liveBot, source, part, STATION_REACH_SQ)
+                                : evacuateInput(liveBot, source, part, STATION_REACH_SQ);
+                        int notMoved = remaining == null ? want : remaining.getCount();
+                        int moved = want - notMoved;
+                        taken += moved;
+                        int left = stack.getCount() - moved;
+                        furnace.setStack(slot, left <= 0 ? ItemStack.EMPTY : stack.copyWithCount(left));
                     }
                     if (fuelBefore != null) {
                         ItemStack fuel = furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT);
                         int give = FurnaceTakeBackPolicy.fuelToTakeBack(fuelBefore.isEmpty(),
                                 fuelBefore.isEmpty() || ItemStack.areItemsAndComponentsEqual(fuelBefore, fuel),
-                                fuelBefore.getCount(), fuel.getCount());
+                                fuelBefore.getCount(), fuel.getCount(), fuelAdded);
                         if (give > 0) {
                             ItemStack back = fuel.copyWithCount(give);
                             liveBot.getInventory().insertStack(back);
