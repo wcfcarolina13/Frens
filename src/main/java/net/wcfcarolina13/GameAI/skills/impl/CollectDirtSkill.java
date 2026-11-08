@@ -1637,6 +1637,9 @@ public class CollectDirtSkill implements Skill {
                 consecutiveNoProgressSteps = 0;
             }
             if (stopAtSurface && isOnSurface(player)) {
+                if (handDigSteps[0] > 0) {
+                    stepOntoGroundAfterHandDig(player, direction);
+                }
                 LOGGER.info("Ascent surface mode complete after {} steps at Y={}", steps, player.getBlockY());
                 return SkillExecutionResult.success("Reached surface with open sky after " + steps + " steps.");
             }
@@ -1665,6 +1668,9 @@ public class CollectDirtSkill implements Skill {
         }
         
         if (stopAtSurface && isOnSurface(player)) {
+            if (handDigSteps[0] > 0) {
+                stepOntoGroundAfterHandDig(player, direction);
+            }
             LOGGER.info("Ascent surface mode complete after {} steps, final Y={}", steps, player.getBlockY());
             return SkillExecutionResult.success("Reached surface with open sky after " + steps + " steps.");
         }
@@ -1817,6 +1823,57 @@ public class CollectDirtSkill implements Skill {
      * it, arrival is standing on the ground within the cell (the wide-floor walk). Returns
      * {@code true} on arrival, {@code false} on timeout, {@code null} when interrupted or aborted.
      */
+    /**
+     * A hand-dug stair that reached open sky one block below the ground beside it takes that last
+     * 1-high step, so the bot ends level with the ground ({@link HandDigStairPolicy#stepOntoGround}).
+     * Nothing is mined. Worker thread only (it waits).
+     */
+    private void stepOntoGroundAfterHandDig(ServerPlayerEntity player, Direction direction) {
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        BlockPos feet = player.getBlockPos();
+        Map<HandDigStairPolicy.Offset, HandDigStairPolicy.Cell> snapshot = new ConcurrentHashMap<>();
+        Map<HandDigStairPolicy.Dir, Boolean> sky = new ConcurrentHashMap<>();
+        runOnServerThread(player, () -> {
+            for (HandDigStairPolicy.Dir d : HandDigStairPolicy.Dir.values()) {
+                for (int dy = 0; dy <= 3; dy++) {
+                    snapshot.put(new HandDigStairPolicy.Offset(d.dx, dy, d.dz),
+                            classifyHandDigCell(player, world, feet.add(d.dx, dy, d.dz)));
+                }
+                sky.put(d, world.isSkyVisible(feet.add(d.dx, 1, d.dz)));
+            }
+        });
+        HandDigStairPolicy.Dir preferred = toPolicyDir(direction);
+        HandDigStairPolicy.Dir step = HandDigStairPolicy.stepOntoGround(
+                (dx, dy, dz) -> {
+                    HandDigStairPolicy.Dir d = dirOf(dx, dz);
+                    if (dy >= 1 && d != null && !Boolean.TRUE.equals(sky.get(d))) {
+                        return HandDigStairPolicy.Cell.unbreakable();
+                    }
+                    return snapshot.getOrDefault(new HandDigStairPolicy.Offset(dx, dy, dz),
+                            HandDigStairPolicy.Cell.unbreakable());
+                },
+                preferred == null ? List.of() : List.of(preferred));
+        if (step == null) {
+            return;
+        }
+        BlockPos onto = feet.add(step.dx, 1, step.dz);
+        Boolean arrived = moveTowardCellBounded(player, onto, true, feet.getY());
+        LOGGER.info("Hand-dig stair: {} took the last step {} onto open ground at {}: {}",
+                player.getName().getString(), step, onto.toShortString(),
+                arrived == null ? "interrupted" : arrived ? "level with the ground" : "did not get up");
+    }
+
+    private static HandDigStairPolicy.Dir dirOf(int dx, int dz) {
+        for (HandDigStairPolicy.Dir d : HandDigStairPolicy.Dir.values()) {
+            if (d.dx == dx && d.dz == dz) {
+                return d;
+            }
+        }
+        return null;
+    }
+
     private Boolean moveTowardCellBounded(ServerPlayerEntity player, BlockPos cell, boolean climb, int beforeY) {
         Vec3d target = new Vec3d(cell.getX() + 0.5D, cell.getY(), cell.getZ() + 0.5D);
         long deadline = System.currentTimeMillis() + HAND_DIG_STEP_UP_MILLIS;

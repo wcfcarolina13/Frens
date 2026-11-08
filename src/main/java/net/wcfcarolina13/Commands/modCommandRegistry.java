@@ -4761,6 +4761,11 @@ public class modCommandRegistry {
         }
         BlockPos goal = safeGoal != null ? safeGoal : rawGoal;
 
+        // As the walk branch does: stop any running skill, then clear the abort latch, which an
+        // earlier /bot stop leaves set. The teleport below checks it first and would answer
+        // "could not reach you: direct: aborted" without moving.
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come.");
+        TaskService.clearAbortLatch(bot.getUuid());
         BotIdleHobbiesService.snoozeFor(bot, 3_600L);
 
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -8040,10 +8045,20 @@ public class modCommandRegistry {
             return 0;
         }
         SkillPreferences.setTeleportDuringSkills(bot.getUuid(), enabled);
+        // Kept in the bot's saved controls too: every mode command (follow, stop, come, guard)
+        // re-applies those, which reset an in-memory-only setting to the saved one.
+        savedBotControl(context, bot).setTeleportDuringSkills(enabled);
         String state = enabled ? "enabled" : "disabled";
         ChatUtils.sendSystemMessage(context.getSource(),
                 "Teleport during skill tasks " + state + " for " + bot.getName().getString() + ".");
         return 1;
+    }
+
+    /** This bot's saved per-world controls, the ones {@link net.wcfcarolina13.GameAI.services.BotControlApplier#applyToBot} re-applies. */
+    private static ManualConfig.BotControlSettings savedBotControl(CommandContext<ServerCommandSource> context,
+                                                                   ServerPlayerEntity bot) {
+        String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(context.getSource().getServer());
+        return Frens.CONFIG.getOrCreateBotControl(bot.getName().getString(), worldKey);
     }
 
     private static int executeTeleportConfigTargets(CommandContext<ServerCommandSource> context,
@@ -8055,10 +8070,13 @@ public class modCommandRegistry {
         for (ServerPlayerEntity bot : bots) {
             successes += executeTeleportConfig(context, bot, enabled);
         }
+        if (successes > 0) {
+            Frens.CONFIG.save();
+        }
         if (!bots.isEmpty()) {
             String summary = formatBotList(bots, isAll);
             ChatUtils.sendSystemMessage(context.getSource(),
-                    summary + " now " + (enabled ? "teleport" : "walk") + " during skill tasks.");
+                    summary + " will now " + (enabled ? "teleport" : "walk") + " during skill tasks.");
         }
         return successes;
     }
@@ -8071,6 +8089,7 @@ public class modCommandRegistry {
             return 0;
         }
         SkillPreferences.setPauseOnFullInventory(bot.getUuid(), enabled);
+        savedBotControl(context, bot).setPauseOnFullInventory(enabled);
         String state = enabled ? "enabled" : "disabled";
         ChatUtils.sendSystemMessage(context.getSource(),
                 "Inventory-full pause " + state + " for " + bot.getName().getString() + ".");
@@ -8085,6 +8104,9 @@ public class modCommandRegistry {
         int successes = 0;
         for (ServerPlayerEntity bot : bots) {
             successes += executeInventoryFullConfig(context, bot, enabled);
+        }
+        if (successes > 0) {
+            Frens.CONFIG.save();
         }
         if (!bots.isEmpty()) {
             String summary = formatBotList(bots, isAll);

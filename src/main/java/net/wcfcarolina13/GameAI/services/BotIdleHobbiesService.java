@@ -1085,10 +1085,21 @@ public final class BotIdleHobbiesService {
         }
 
 
-        // Cook hobby: runs SmeltingService.cookAllFoodSync directly (no registered Skill needed)
+        // Cook hobby: runs SmeltingService.cookAllFoodSync directly (no registered Skill needed).
+        // It holds a task slot like the other hobbies: the scheduler's minimal backoff relies on the
+        // running task to block the next hobby, and without one a wander or woodcut started a few
+        // seconds into the cook and walked the bot away from the furnace.
         if ("cook".equalsIgnoreCase(runSkillName)) {
+            var cookTicketOpt = TaskService.beginAmbientSkill(CookHobbyTaskPolicy.TASK_NAME, botSource, botUuid);
+            if (cookTicketOpt.isEmpty()) {
+                LOGGER.info("Cook hobby: {} already has a task, skipping", bot.getName().getString());
+                return;
+            }
+            TaskService.TaskTicket cookTicket = cookTicketOpt.get();
             try {
             AMBIENT_EXECUTOR.submit(() -> {
+                boolean cookSuccess = false;
+                TaskService.attachExecutingThread(cookTicket, Thread.currentThread());
                 try {
                     if (TaskService.isServerStopping()) return;
                     ServerWorld sw = bot.getEntityWorld() instanceof ServerWorld s ? s : null;
@@ -1100,6 +1111,7 @@ public final class BotIdleHobbiesService {
                     }
                     LOGGER.info("Cook hobby starting for {}", bot.getName().getString());
                     boolean result = SmeltingService.cookAllFoodSync(bot, botSource, sw);
+                    cookSuccess = result;
                     LOGGER.info("Cook hobby finished for {}: success={}", bot.getName().getString(), result);
                     LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
                     net.wcfcarolina13.GameAI.souls.SoulEventObserver.onHobbySession(botUuid, "cook");
@@ -1112,10 +1124,13 @@ public final class BotIdleHobbiesService {
                 } catch (Throwable t) {
                     LOGGER.warn("Cook hobby crashed for {}: {}", bot.getName().getString(), t.getMessage());
                     LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                } finally {
+                    TaskService.complete(cookTicket, cookSuccess);
                 }
             });
             } catch (java.util.concurrent.RejectedExecutionException ignored) {
                 // Executor shut down during server stop — safe to ignore.
+                TaskService.complete(cookTicket, false);
             }
             return;
         }

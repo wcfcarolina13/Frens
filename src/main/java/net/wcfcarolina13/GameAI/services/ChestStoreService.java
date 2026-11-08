@@ -1191,7 +1191,7 @@ public final class ChestStoreService {
 
         // Retry once after clearing leaf obstructions mid-path
         if (towardStand.getAxis().isHorizontal() && !MovementService.abortRequested(bot)) {
-            MovementService.LeafClearResult leafClear = MovementService.clearLeafObstructionDetailed(bot, towardStand);
+            LeafClearResult leafClear = MovementService.clearLeafObstructionDetailed(bot, towardStand);
             if (leafClear.countsAsCleared()) {
                 MovementService.clearRecentWalkAttempt(bot.getUuid());
                 move = MovementService.execute(bot.getCommandSource(), bot, plan,

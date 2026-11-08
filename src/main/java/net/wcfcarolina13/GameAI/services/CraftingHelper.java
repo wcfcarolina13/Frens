@@ -135,6 +135,8 @@ public final class CraftingHelper {
      * its crafts run synchronously on one thread, so a ThreadLocal reaches every nested line.
      */
     private static final ThreadLocal<Boolean> QUIET = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    // Set while ensureCraftingStation re-enters itself to use a table a nested craft placed (one re-entry).
+    private static final ThreadLocal<Boolean> NESTED_TABLE_RECHECK = ThreadLocal.withInitial(() -> Boolean.FALSE);
     /** What the rest of the idle upgrade batch still needs; the make-room drop keeps it (finding 57). */
     private static final ThreadLocal<StoneUpgradePolicy.BatchReserve> BATCH_RESERVE =
             ThreadLocal.withInitial(() -> StoneUpgradePolicy.BatchReserve.NONE);
@@ -1012,6 +1014,31 @@ public final class CraftingHelper {
         if (!ensureInventorySpaceForSubCraft(bot, source, output, crafts, crafts * planksPerItem, 0, Map.of(), quiet)) {
             return 0;
         }
+        // Making room can craft (a chest, whose own station step may craft and place a table), and
+        // those nested crafts spend the planks counted above. Count again before the commit.
+        boolean stationTable = output.equals(Items.CRAFTING_TABLE) && !askChest;
+        boolean tableNowAvailable = stationTable && tableAvailableWithoutCrafting(bot, source);
+        int planksNow = countPlanks(bot);
+        if (!tableNowAvailable && planksNow < crafts * planksPerItem) {
+            ensurePlanksAvailable(bot, source, crafts * planksPerItem);
+            planksNow = countPlanks(bot);
+        }
+        switch (CraftingStationPolicy.afterMakeRoom(stationTable, tableNowAvailable, planksNow, crafts * planksPerItem)) {
+            case NESTED_TABLE -> {
+                LOGGER.info("Making room for a crafting table placed one already; {} is not crafting another",
+                        bot.getName().getString());
+                return 0;
+            }
+            case SHORT -> {
+                LOGGER.info("Making room for {} spent its planks ({} of {} left); not crafting it",
+                        output.getName().getString(), planksNow, crafts * planksPerItem);
+                if (!quiet) sendCraftTableNeededOnce(bot, source, "I need " + planksPerItem + " planks per craft. Missing "
+                        + (crafts * planksPerItem - planksNow) + ".");
+                return 0;
+            }
+            case CRAFT -> {
+            }
+        }
         CraftCommitPolicy.Outcome committed = commitCraft(bot, output, crafts,
                 () -> consumePlanksOnServer(bot, crafts * planksPerItem));
         if (committed == CraftCommitPolicy.Outcome.ABORTED) {
@@ -1688,7 +1715,9 @@ public final class CraftingHelper {
     private static String toolShortfallLine(ServerPlayerEntity bot, ToolKind kind, ToolMaterial mat,
                                             int amount, int headCount, int stickCount) {
         boolean headIsPlanks = mat.headItem().equals(Items.OAK_PLANKS);
-        int planks = countPlanks(bot);
+        // Held logs count as the planks they make: the craft converts them before giving up, so a
+        // bot holding logs is never told it has none of that.
+        int planks = plankEquivalentHeld(bot);
         int heads = headIsPlanks ? planks : countItem(bot, mat.headItem());
         List<CraftingRequirementsPolicy.Missing> reqs = ToolCraftShortfallPolicy.requirements(
                 headIsPlanks ? "planks" : itemLabel(mat.headItem()),
@@ -2529,9 +2558,18 @@ public final class CraftingHelper {
                 return bot.getBlockPos().getSquaredDistance(placeAtDirect) <= STATION_REACH_SQ;
             }
         }
-        // Don't spam-craft tables — if we crafted one recently, give up.
+        // Don't spam-craft tables: a table crafted in the last minute that is still in range but could
+        // not be used is not followed by another. With no table in range at all (the bot moved on, or
+        // the table is gone), the cooldown has nothing to protect and the bot crafts one.
         Long lastCraft = CRAFT_TABLE_CRAFT_COOLDOWN.get(bot.getUuid());
-        if (lastCraft != null && (System.currentTimeMillis() - lastCraft) < CRAFT_TABLE_CRAFT_COOLDOWN_MS) {
+        boolean cooldownActive = lastCraft != null && (System.currentTimeMillis() - lastCraft) < CRAFT_TABLE_CRAFT_COOLDOWN_MS;
+        boolean tableInRange = cooldownActive && !findBlocksInBox(world, botPos.add(-radius, -ySpan, -radius),
+                botPos.add(radius, ySpan, radius), CraftingHelper::isCraftingTable, "Crafting table cooldown", true).isEmpty();
+        if (cooldownActive && !tableInRange) {
+            logStationStep(onServerThread, "Table craft cooldown ignored: no crafting table within {} blocks of {}",
+                    radius, botPos.toShortString());
+        }
+        if (CraftingStationPolicy.tableCraftCooldownBlocks(cooldownActive, tableInRange)) {
             logStationStep(onServerThread, "Skipping crafting table craft (cooldown active, last craft {}ms ago)",
                     System.currentTimeMillis() - lastCraft);
             declineIfTickSide(bot, onServerThread, skippedTableOutOfReach ? "far-table" : "no-table");
@@ -2605,6 +2643,17 @@ public final class CraftingHelper {
             return close;
         }
 
+        if (!crafted && !NESTED_TABLE_RECHECK.get() && tableAvailableWithoutCrafting(bot, source)) {
+            // The table craft made room by placing a chest, and that chest's own craft placed a table:
+            // use it (scanned once more, never a third table: the craft cooldown is armed).
+            LOGGER.info("A nested craft placed a crafting table for {}; using it", bot.getName().getString());
+            NESTED_TABLE_RECHECK.set(Boolean.TRUE);
+            try {
+                return ensureCraftingStation(bot, source, quiet);
+            } finally {
+                NESTED_TABLE_RECHECK.set(Boolean.FALSE);
+            }
+        }
         logStationStep(onServerThread, "No crafting table within {} blocks of {}", radius, botPos.toShortString());
         if (!quiet) sendCraftTableNeededOnce(bot, source, "I need a crafting table nearby to craft that.");
         declineIfTickSide(bot, onServerThread, skippedTableOutOfReach ? "far-table" : "no-table");
@@ -4219,7 +4268,10 @@ public final class CraftingHelper {
         if (reservePlanksNeeded && stack.isIn(net.minecraft.registry.tag.ItemTags.PLANKS)) {
             return true;
         }
-        if (reserveLogsNeeded && stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) {
+        // Logs are where planks come from: a craft that keeps its planks keeps its logs too, or a
+        // make-room offload puts away the log the rest of the craft (its sticks, its head) needs.
+        if (MakeRoomDropPolicy.offloadKeepsLogs(reservePlanksNeeded, reserveLogsNeeded)
+                && stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) {
             return true;
         }
         return false;
