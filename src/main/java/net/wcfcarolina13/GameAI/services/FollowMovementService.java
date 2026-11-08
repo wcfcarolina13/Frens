@@ -497,7 +497,7 @@ public final class FollowMovementService {
             Direction fallbackDir = approximateToward(bot.getBlockPos(), BlockPos.ofFloored(targetPos));
             front = bot.getBlockPos().offset(fallbackDir);
         }
-        if (!isDangerousDropCell(world, front)) {
+        if (!isDangerousDropCell(world, front, DropGuardExemptionPolicy.minDepth(stayOutOfHoles))) {
             return false;
         }
 
@@ -708,6 +708,11 @@ public final class FollowMovementService {
     }
 
     public static boolean isDangerousDropCell(ServerWorld world, BlockPos pos) {
+        return isDangerousDropCell(world, pos, DROP_GUARD_MIN_DEPTH);
+    }
+
+    /** {@code minDepth}: how many open cells below the front cell make it a drop (DropGuardExemptionPolicy). */
+    public static boolean isDangerousDropCell(ServerWorld world, BlockPos pos, int minDepth) {
         if (world == null || pos == null) {
             return false;
         }
@@ -727,7 +732,7 @@ public final class FollowMovementService {
             }
             fallDepth++;
         }
-        return fallDepth >= DROP_GUARD_MIN_DEPTH;
+        return fallDepth >= minDepth;
     }
 
     private static double horizontalSq(BlockPos a, BlockPos b) {

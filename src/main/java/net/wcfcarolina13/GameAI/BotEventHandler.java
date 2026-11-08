@@ -4079,7 +4079,7 @@ public class BotEventHandler {
                 BotActions.raiseShieldFacing(bot, closest);
             } else {
                 lowerShieldTracking(bot);
-                moveToward(bot, positionOf(closest), preferredStopDistance, true);
+                moveTowardInCombat(bot, positionOf(closest), preferredStopDistance);
             }
         } else if (shouldBlock) {
             // In melee range with a sword: stop sprinting when 2+ mobs are close so
@@ -4171,7 +4171,7 @@ public class BotEventHandler {
                         BotActions.raiseShieldFacing(bot, closest);
                     } else {
                         BotActions.sprint(bot, true);
-                        moveToward(bot, positionOf(closest), BotActions.getPreferredMeleeStopDistance(bot.getMainHandStack()), true);
+                        moveTowardInCombat(bot, positionOf(closest), BotActions.getPreferredMeleeStopDistance(bot.getMainHandStack()));
                     }
                 }
                 // Hit-and-retreat kiting: after swinging, backpedal during cooldown reset
@@ -4305,6 +4305,17 @@ public class BotEventHandler {
 
     private static void moveToward(ServerPlayerEntity bot, Vec3d target, double stopDistance, boolean sprint) {
         FollowMovementService.moveToward(bot, target, stopDistance, sprint, () -> lowerShieldTracking(bot));
+    }
+
+    /**
+     * The melee approach: a guarding or patrolling bot steps around a hole on its way to the mob, as
+     * on its way back to its point (it crossed the open pit beside its point to reach a zombie on the
+     * far side and fell in, sandbox 2026-11-08). Other modes keep the plain approach.
+     */
+    private static void moveTowardInCombat(ServerPlayerEntity bot, Vec3d target, double stopDistance) {
+        BotCommandStateService.State st = stateFor(bot);
+        boolean stayOutOfHoles = st != null && (st.mode == Mode.GUARD || st.mode == Mode.PATROL);
+        FollowMovementService.moveToward(bot, target, stopDistance, true, () -> lowerShieldTracking(bot), stayOutOfHoles);
     }
 
     /** Guard and patrol walking back to their point: a hole in front is stepped around (DropGuardExemptionPolicy). */
