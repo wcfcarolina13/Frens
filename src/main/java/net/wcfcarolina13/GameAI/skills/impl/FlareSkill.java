@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.skills.impl;
 
+import net.wcfcarolina13.GameAI.BotActions;
 import net.minecraft.entity.projectile.FireworkRocketEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -96,23 +97,34 @@ public final class FlareSkill implements Skill {
         ChatUtils.sendChatMessages(source, "Sending a flare!");
         LOGGER.info("Flare skill: firing firework at {}", bot.getBlockPos().toShortString());
 
-        // Consume one firework
-        ItemStack fireworkStack = bot.getInventory().getStack(fireworkSlot);
-        ItemStack toUse = fireworkStack.split(1);
-        if (fireworkStack.isEmpty()) {
-            bot.getInventory().setStack(fireworkSlot, ItemStack.EMPTY);
+        // Consume one firework and launch it on the server thread: an entity spawned from this
+        // skill worker races the chunk's entity tick (the C2ME ConcurrentModificationException
+        // class). The slot is re-checked there because the walk to open sky took time.
+        final int foundSlot = fireworkSlot;
+        boolean launched = BotActions.callOnServerThread(bot, () -> {
+            int slot = isFirework(bot.getInventory().getStack(foundSlot)) ? foundSlot : findFireworkSlot(bot);
+            if (slot < 0) {
+                return false;
+            }
+            ItemStack fireworkStack = bot.getInventory().getStack(slot);
+            ItemStack toUse = fireworkStack.split(1);
+            if (fireworkStack.isEmpty()) {
+                bot.getInventory().setStack(slot, ItemStack.EMPTY);
+            }
+            Vec3d launchPos = Vec3d.ofCenter(bot.getBlockPos()).add(0, 1.5, 0);
+            FireworkRocketEntity firework = new FireworkRocketEntity(
+                    world,
+                    launchPos.x, launchPos.y, launchPos.z,
+                    toUse
+            );
+            firework.setVelocity(0, 0.5, 0);
+            world.spawnEntity(firework);
+            return true;
+        }, 1500L, false);
+        if (!launched) {
+            LOGGER.warn("Flare skill: launch did not run (no firework left, or the server thread was busy)");
+            return SkillExecutionResult.failure("Couldn't launch the flare.");
         }
-
-        // Spawn and launch the firework straight up
-        Vec3d launchPos = Vec3d.ofCenter(bot.getBlockPos()).add(0, 1.5, 0);
-        FireworkRocketEntity firework = new FireworkRocketEntity(
-                world,
-                launchPos.x, launchPos.y, launchPos.z,
-                toUse
-        );
-        // Set upward velocity
-        firework.setVelocity(0, 0.5, 0);
-        world.spawnEntity(firework);
 
         LOGGER.info("Flare skill: firework launched successfully");
         return SkillExecutionResult.success("Flare sent!");

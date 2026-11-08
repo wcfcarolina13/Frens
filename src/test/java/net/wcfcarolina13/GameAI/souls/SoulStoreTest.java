@@ -2,7 +2,9 @@ package net.wcfcarolina13.GameAI.souls;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import net.wcfcarolina13.GameAI.services.StoreFileModePolicy;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -106,6 +108,24 @@ class SoulStoreTest {
                 .resolve(player.toString()).resolve("archive")));
 
         store.close();
+    }
+
+    /** 0600 store file mode: soul.json and a new transcript are owner read/write only on POSIX. */
+    @Test
+    void soulFilesAreOwnerOnlyOnPosix() throws Exception {
+        Assumptions.assumeTrue(StoreFileModePolicy.defaultFileSystemIsPosix(), "POSIX file system only");
+        UUID bot = UUID.randomUUID();
+        UUID player = UUID.randomUUID();
+        SoulTypes.ConversationKey key = new SoulTypes.ConversationKey(
+                bot, player, SoulTypes.Channel.DIRECT);
+
+        store.bindProfile(bot, "frens:jake").get(2, SECONDS);
+        store.beginHeardTurn(key, UUID.randomUUID(), "hello", Instant.EPOCH).get(2, SECONDS);
+
+        assertEquals(StoreFileModePolicy.ownerOnlyPermissions(),
+                Files.getPosixFilePermissions(botDir(bot).resolve("soul.json")));
+        assertEquals(StoreFileModePolicy.ownerOnlyPermissions(),
+                Files.getPosixFilePermissions(activeFile(bot, player)));
     }
 
     /**

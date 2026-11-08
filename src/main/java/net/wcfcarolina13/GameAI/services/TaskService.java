@@ -73,6 +73,8 @@ public final class TaskService {
         private final AtomicReference<Thread> executingThread;
         private final AtomicReference<Origin> origin;
         private final AtomicBoolean openEnded;
+        /** The skill's own failure text, set by the skill runner before complete; empty otherwise. */
+        private final AtomicReference<String> failureMessage = new AtomicReference<>("");
 
         TaskTicket(String name, ServerCommandSource source, UUID botUuid) {
             this.name = name;
@@ -166,6 +168,14 @@ public final class TaskService {
 
         public String cancelReason() {
             return cancelReason.get();
+        }
+
+        public String failureMessage() {
+            return failureMessage.get();
+        }
+
+        public void noteFailureMessage(String message) {
+            failureMessage.set(message == null ? "" : message);
         }
 
         public void clear() {
