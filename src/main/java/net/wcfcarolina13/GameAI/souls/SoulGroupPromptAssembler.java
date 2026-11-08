@@ -52,6 +52,8 @@ public final class SoulGroupPromptAssembler {
 
     /** Live read of {@code soulStructuredOutputEnabled}; default off keeps the prompt unchanged. */
     private final java.util.function.BooleanSupplier structuredEnabled;
+    /** Scene smoothing step 2 ({@link SceneBoundaryPolicy}); off unless a caller turns it on. */
+    private final java.util.function.BooleanSupplier sceneBoundaries;
 
     public SoulGroupPromptAssembler() {
         // No mind: assembly is a pure function of its arguments.
@@ -83,9 +85,18 @@ public final class SoulGroupPromptAssembler {
     public SoulGroupPromptAssembler(Function<UUID, Optional<SoulTypes.SoulMind>> mindLookup,
                                     java.util.function.BooleanSupplier relationsEnabled,
                                     java.util.function.BooleanSupplier structuredEnabled) {
+        this(mindLookup, relationsEnabled, structuredEnabled, () -> false);
+    }
+
+    /** @param sceneBoundaries live read: mark scene boundaries in the replayed history (step 2) */
+    public SoulGroupPromptAssembler(Function<UUID, Optional<SoulTypes.SoulMind>> mindLookup,
+                                    java.util.function.BooleanSupplier relationsEnabled,
+                                    java.util.function.BooleanSupplier structuredEnabled,
+                                    java.util.function.BooleanSupplier sceneBoundaries) {
         this.mindLookup = mindLookup == null ? id -> Optional.empty() : mindLookup;
         this.relationsEnabled = relationsEnabled == null ? () -> false : relationsEnabled;
         this.structuredEnabled = structuredEnabled == null ? () -> false : structuredEnabled;
+        this.sceneBoundaries = sceneBoundaries == null ? () -> false : sceneBoundaries;
     }
 
     /**
@@ -121,6 +132,10 @@ public final class SoulGroupPromptAssembler {
         beliefsBlock(turn).ifPresent(messages::add);
         HistoryBlock history = boundedHistory(partyHistory, turn.audience());
         messages.addAll(history.messages());
+        if (sceneBoundaries.getAsBoolean()
+                && SceneBoundaryPolicy.breakBeforeCue(turn.kind(), history.messages().isEmpty())) {
+            messages.add(new SoulTypes.Message(SoulTypes.Role.SYSTEM, SceneBoundaryPolicy.MARKER));
+        }
         // A PLAYER scene with several companions: without this every model answered with one
         // line from one bot (field finding 2). A separate SYSTEM message, so the owner's user
         // turn stays byte-identical to what history later replays.
@@ -609,6 +624,8 @@ public final class SoulGroupPromptAssembler {
         Deque<SoulTypes.Message> ordered = new ArrayDeque<>();
         int totalChars = 0;
         UUID privateOwner = null;
+        boolean marks = sceneBoundaries.getAsBoolean();
+        UUID laterScene = null; // walking newest to oldest: the scene of the record just added
         for (int i = capped.size() - 1; i >= 0; i--) {
             SoulTypes.ConversationRecord record = capped.get(i);
             int length = record.content().length();
@@ -622,7 +639,11 @@ public final class SoulGroupPromptAssembler {
             SoulTypes.Role role = record.kind() == SoulTypes.TurnKind.HEARD
                     ? SoulTypes.Role.USER
                     : SoulTypes.Role.ASSISTANT;
+            if (marks && SceneBoundaryPolicy.breakBetween(record.correlationId(), laterScene)) {
+                ordered.addFirst(new SoulTypes.Message(SoulTypes.Role.SYSTEM, SceneBoundaryPolicy.MARKER));
+            }
             ordered.addFirst(new SoulTypes.Message(role, record.content()));
+            laterScene = record.correlationId();
         }
         return new HistoryBlock(new ArrayList<>(ordered), privateOwner);
     }
