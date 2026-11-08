@@ -12,6 +12,9 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 - `FortifyVillageSkill`: inlined the single-caller wrappers `isCarveEligibleForBreakAttempt` and `attemptFinalizeCarveTransaction` (call sites now call `carveHelper.*` directly) and deleted the 3-arg `tryBreakThroughObstacle` overload, which had no callers (1.1.210 review Minor 3).
 - Kept the 4-arg `tryBreakThroughObstacle(bot, world, target, causeContext)`: it has four callers (patch-start preflight, breakthrough fallback, two in the stuck-recovery loop), so the backlog's "single-caller" note did not hold for it. None of the four are `FortifySkillOps` interface methods.
 - Pure refactor, no behaviour change. Tests 3857 before and after (only the known root-container `SoulStoreTest.persistCursorFailure…` failure; `closeShutsDown…` flaked once under memory pressure and passed on rerun).
+## Test: the soul store close check waits for the worker to exit (unreleased, 2026-11-05)
+
+`SoulStoreTest.closeShutsDownInjectedExecutorLeavingNoThreadAlive` checked for a live executor thread right after `close()`, but `close()` only calls `shutdown()`, and the worker exits a moment later. Under load (parallel builds in a cloud container) it failed on unrelated branches. The test now joins the thread for up to 5 s before checking. A thread that `close()` never stops still fails. No main code changed. Tests 3857, unchanged count.
 
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
