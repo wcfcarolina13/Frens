@@ -18,9 +18,13 @@ public final class FurnaceTakeBackPolicy {
     private FurnaceTakeBackPolicy() {
     }
 
-    /** Only a stop takes the food back; a shutting-down server leaves the furnace as it is. */
-    public static boolean shouldTakeBack(boolean stoppedEarly, boolean serverStopping) {
-        return stoppedEarly && !serverStopping;
+    /**
+     * Only a stop takes the food back, and only from a cycle that put food in: a stop before the first
+     * load would otherwise empty a shared furnace of what someone else is cooking. A shutting-down
+     * server leaves the furnace as it is.
+     */
+    public static boolean shouldTakeBack(boolean stoppedEarly, boolean serverStopping, boolean loadedThisCycle) {
+        return stoppedEarly && !serverStopping && loadedThisCycle;
     }
 
     /**

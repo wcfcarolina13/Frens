@@ -13,9 +13,11 @@ class FurnaceTakeBackPolicyTest {
 
     @Test
     void aStopTakesTheFoodBack() {
-        assertTrue(FurnaceTakeBackPolicy.shouldTakeBack(true, false));
-        assertFalse(FurnaceTakeBackPolicy.shouldTakeBack(false, false));
-        assertFalse(FurnaceTakeBackPolicy.shouldTakeBack(true, true));
+        assertTrue(FurnaceTakeBackPolicy.shouldTakeBack(true, false, true));
+        assertFalse(FurnaceTakeBackPolicy.shouldTakeBack(false, false, true));
+        assertFalse(FurnaceTakeBackPolicy.shouldTakeBack(true, true, true));
+        // A stop before the cycle loaded anything leaves the furnace alone (it may be someone else's cook).
+        assertFalse(FurnaceTakeBackPolicy.shouldTakeBack(true, false, false));
     }
 
     @Test

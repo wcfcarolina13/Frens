@@ -382,7 +382,8 @@ public final class SmeltingService {
         }
 
         boolean stoppedEarly = Thread.currentThread().isInterrupted() || TaskService.isAbortRequested(botId);
-        if (FurnaceTakeBackPolicy.shouldTakeBack(stoppedEarly, TaskService.isServerStopping())) {
+        if (FurnaceTakeBackPolicy.shouldTakeBack(stoppedEarly, TaskService.isServerStopping(),
+                fuelBaseline.get() != null)) {
             takeBackAfterStop(bot, source, server, worldKey, botId, furnacePos, fuelBaseline.get());
         }
 
