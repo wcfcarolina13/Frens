@@ -34,6 +34,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
+import net.wcfcarolina13.GameAI.services.StoreFileModePolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -853,11 +854,15 @@ public final class SoulStore {
 
     private void appendLine(Path file, String json) throws IOException {
         Files.createDirectories(file.getParent());
+        boolean created = !Files.exists(file);
         try (BufferedWriter writer = Files.newBufferedWriter(
                 file, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
             writer.write(json);
             writer.write(System.lineSeparator());
             writer.flush();
+        }
+        if (created) {
+            StoreFileModePolicy.restrictToOwner(file);
         }
     }
 
@@ -916,6 +921,7 @@ public final class SoulStore {
         Path corruptFile = file.resolveSibling(file.getFileName() + ".corrupt-tail-" + timestamp);
         Files.writeString(corruptFile, corruptLine + System.lineSeparator(), StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        StoreFileModePolicy.restrictToOwner(corruptFile);
 
         StringBuilder rebuilt = new StringBuilder();
         for (int i = 0; i < corruptIndex; i++) {
@@ -939,6 +945,9 @@ public final class SoulStore {
     }
 
     private void atomicReplace(Path tmp, Path target) throws IOException {
+        // Owner-only before the move: the temp file was created by name at the umask default,
+        // and the rename carries its mode onto the target (best effort, never fails a save).
+        StoreFileModePolicy.restrictToOwner(tmp);
         try {
             Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (AtomicMoveNotSupportedException e) {

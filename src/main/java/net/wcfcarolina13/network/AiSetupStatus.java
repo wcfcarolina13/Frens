@@ -89,15 +89,19 @@ public record AiSetupStatus(boolean full,
         }
     }
 
-    /** What the viewer may do, as the server decided it. */
-    public record Viewer(boolean canEditServer, boolean isIntegratedHost) {
+    /**
+     * What the viewer may do, as the server decided it. {@code canSetNewBotSoul}: the server
+     * handles the new-bot soul answer for this viewer. Servers before 1.1.296 never send it, so it
+     * reads false there and the checklist does not offer a button the server would ignore.
+     */
+    public record Viewer(boolean canEditServer, boolean isIntegratedHost, boolean canSetNewBotSoul) {
     }
 
     public AiSetupStatus {
         bots = bots == null ? List.of() : List.copyOf(bots);
         runtime = runtime == null ? new Runtime(false, false, false, "", "", null) : runtime;
         voice = voice == null ? new Voice(false, false, "", false, false) : voice;
-        viewer = viewer == null ? new Viewer(false, false) : viewer;
+        viewer = viewer == null ? new Viewer(false, false, false) : viewer;
     }
 
     /**
@@ -115,7 +119,7 @@ public record AiSetupStatus(boolean full,
                 new Runtime(runtime.running(), runtime.soulsEnabled(), runtime.ready(), "", "", null),
                 own,
                 new Voice(voice.enabled(), false, "", false, false),
-                viewer);
+                new Viewer(viewer.canEditServer(), viewer.isIntegratedHost(), false));
     }
 
     // ── JSON ────────────────────────────────────────────────────────────────
@@ -173,6 +177,9 @@ public record AiSetupStatus(boolean full,
         ObjectNode w = root.putObject("viewer");
         w.put("canEditServer", viewer.canEditServer());
         w.put("isIntegratedHost", viewer.isIntegratedHost());
+        if (viewer.canSetNewBotSoul()) {
+            w.put("canSetNewBotSoul", true);
+        }
         return root.toString();
     }
 
@@ -220,7 +227,8 @@ public record AiSetupStatus(boolean full,
                     v.path("valid").asBoolean(false), v.path("engineAlive").asBoolean(false));
             JsonNode w = root.path("viewer");
             Viewer viewer = new Viewer(w.path("canEditServer").asBoolean(false),
-                    w.path("isIntegratedHost").asBoolean(false));
+                    w.path("isIntegratedHost").asBoolean(false),
+                    w.path("canSetNewBotSoul").asBoolean(false));
             return new AiSetupStatus(full, ollama, runtime, bots, voice, viewer);
         } catch (Exception malformed) {
             return null;

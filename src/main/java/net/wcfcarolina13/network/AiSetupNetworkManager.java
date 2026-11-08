@@ -336,7 +336,7 @@ public final class AiSetupNetworkManager {
             voice = new AiSetupStatus.Voice(on, config != null,
                     config != null ? config.getSoulVoiceEngine() : "", false, false);
         }
-        AiSetupStatus.Viewer viewerState = new AiSetupStatus.Viewer(canEdit, isIntegratedHost(server, viewer));
+        AiSetupStatus.Viewer viewerState = new AiSetupStatus.Viewer(canEdit, isIntegratedHost(server, viewer), canEdit);
         return new AiSetupStatus(canEdit, null, runtimeState, bots, voice, viewerState);
     }
 

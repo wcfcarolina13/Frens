@@ -47,12 +47,23 @@ public final class DurabilityFallbackService {
     // Dedicated executor
     // ------------------------------------------------------------------
 
-    private static final ExecutorService fallbackExecutor =
-            Executors.newSingleThreadExecutor(r -> {
-                Thread t = new Thread(r, "frens-durability-fallback");
-                t.setDaemon(true);
-                return t;
-            });
+    private static volatile ExecutorService fallbackExecutor = newFallbackExecutor();
+
+    private static ExecutorService newFallbackExecutor() {
+        return Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "frens-durability-fallback");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    /** SERVER_STARTED: SERVER_STOPPING shut the executor; without this, a singleplayer world
+     *  reload left the durability fallback rejecting every task for the rest of the game. */
+    public static synchronized void restartExecutors() {
+        if (fallbackExecutor.isShutdown()) {
+            fallbackExecutor = newFallbackExecutor();
+        }
+    }
 
     public static void shutdownExecutors() {
         try {
