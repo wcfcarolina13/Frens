@@ -537,6 +537,25 @@ Costs and limits:
 - Errors such as OutOfMemoryError still propagate.
 
 Tests: `TickGuardTest` (3).
+## A drop sweep comes back for the drops after making room (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server. With a full pack, a drop sweep makes room
+by crafting a bundle, which can walk the bot to a crafting table. The sweep then looks for drops
+around the bot, not where it started. In the headless run the table was about 27 blocks from the
+drop, outside the 20-block radius, so the sweep ended (a DEBUG "no drops within radius" line) and
+the drop that started it stayed on the ground.
+
+After making room, a sweep that is more than half its radius from where it started now walks back
+there before it looks again (`SweepReturnPolicy`). Headless, the same setup logged "walked back to
+the sweep start … (arrived)" and picked up the 16 cobblestone.
+
+Costs and limits:
+- One extra walk when making room moved the bot more than half the radius; none when the bundle
+  was packed in place.
+- If there is no path back, it logs one line and the sweep continues from where the bot is.
+- The walk counts toward the sweep's time budget.
+
+Tests: `SweepReturnPolicyTest` (2).
 
 ## Repository clean-up: public and private split (2026-11-04)
 
