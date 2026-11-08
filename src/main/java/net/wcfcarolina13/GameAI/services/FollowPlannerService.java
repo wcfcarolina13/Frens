@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.wcfcarolina13.GameAI.services.follow.FollowVerticalGapPolicy;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.MinecraftServer;
@@ -516,7 +517,7 @@ public final class FollowPlannerService {
             return List.of();
         }
         int absDeltaY = Math.abs(pos.botPos().getY() - pos.targetPos().getY());
-        if (absDeltaY < 6) {
+        if (!FollowVerticalGapPolicy.isVerticalSeparation(pos.botPos().getY(), pos.targetPos().getY())) {
             return List.of();
         }
         for (BlockPos fallbackGoal : buildVerticalFallbackGoals(pos.botPos(), pos.targetPos())) {
@@ -679,7 +680,7 @@ public final class FollowPlannerService {
             FOLLOW_LAST_NO_PATH_TICK.put(botId, nowTick);
             FOLLOW_NO_PATH_STREAK.put(botId, streak);
 
-            boolean verticalGap = Math.abs(liveBot.getBlockY() - liveTarget.getBlockY()) >= 3;
+            boolean verticalGap = FollowVerticalGapPolicy.isVerticalSeparation(liveBot.getBlockY(), liveTarget.getBlockY());
             if (!verticalGap) {
                 clearFollowNoPathState(botId);
                 return;
