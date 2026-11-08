@@ -1204,6 +1204,12 @@ public class BotEventHandler {
                 currentBot.setHealth(currentBot.getMaxHealth());
             }
             onBotRespawn(currentBot, false); // the fallback only runs after a death
+            // A Frens bot's death never reaches vanilla respawnPlayer (it is revived in place), so
+            // AFTER_RESPAWN never fires for it and this fallback is the death path: note the
+            // respawn in the soul journal as the listener would.
+            if (net.wcfcarolina13.GameAI.services.RespawnResetPolicy.plan(false).noteSoulRespawn()) {
+                net.wcfcarolina13.GameAI.souls.SoulEventObserver.onBotRespawn(currentBot);
+            }
         }));
     }
 

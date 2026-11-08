@@ -53,6 +53,13 @@ Follow-up to the soul store 0600 change: `SupplyRequestService` (the supply "Alw
 - **Limits:** an existing transcript keeps its mode until it is rewritten (append does not touch an existing file; archives are renames). Soul directories keep the umask default, so bot UUIDs stay visible as folder names. Windows is unchanged. Not touched: `SupplyRequestService` and `GroupChatHint` (by-name temp files, not part of the 1.1.291 store set) and config files edited by hand.
 - **Tests:** 3857 → 3863 (`StoreFileModePolicyTest` 5, `SoulStoreTest` +1; POSIX cases skip elsewhere).
 - **Sandbox check needed:** on the Mac, start a save with a soul bot, talk to it, then `ls -l` its `frens/souls/v1/<bot>/soul.json` and `conversations/<player>/active.jsonl` in the world folder: both `-rw-------`. The game must still save and reload the soul normally.
+## A bot's death is noted in its soul journal as a respawn (unreleased, 2026-11-05)
+
+From the 1.1.295 deferral "`AFTER_RESPAWN` does not fire for real deaths or `/kill` (worth knowing why)". Why, from the code and the Fabric jar: Fabric fires `AFTER_RESPAWN` only at the end of `PlayerManager.respawnPlayer`, and a dead Frens bot never goes there. `createFakePlayer.onDeath` revives the same entity (health 20, then `kill` schedules a disconnect that `FakeClientConnection` ignores), and `BotEventHandler.ensureRespawnHandled` runs the reset 5 ticks later and logs "AFTER_RESPAWN did not fire". So the WARN is the normal death path, not a fault. Only the End exit reaches `respawnPlayer` (through the self-sent PERFORM_RESPAWN).
+
+- The fallback skipped the soul respawn note the listener makes (`RespawnResetPolicy.plan(false).noteSoulRespawn()` is true for a death). It now makes it, after the reset, behind the same flag.
+- **Left alone, needs a ruling:** the fallback also skips `AutoFaceEntity.handleBotRespawn` (task abort, auto-face restart: deaths already stop the task since 1.1.295, and the same entity keeps its loop), `BotPersistenceService.onBotRespawn` (on a death it calls `onBotJoin`, which restores saved state: running it after a real death could restore items the bot just dropped), and `botSpawnCount++`. The WARN text stays because `RespawnHandlingWiringTest` (also edited by open PR #4) matches it.
+- Tests 3857 → 3859 (`DeathSoulRespawnWiringTest`, source-reading). **Sandbox check:** with souls on, kill a bot; its journal (`events.jsonl`) gets a RESPAWN event after the DEATH one.
 
 ## Repository clean-up: public and private split (2026-11-04)
 
