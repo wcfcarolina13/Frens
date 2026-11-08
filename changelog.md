@@ -461,6 +461,27 @@ Review fixes:
 - The Dreamsleeve warm-up ack now waits up to 120 s, not 2 s. If the server acks only after loading its model and rendering, a short wait would have sent the first real line into the load, timed it out, killed the server and looped. The wait runs on the engine thread. The old read had no bound.
 - A base URL pasted with a trailing `/api` is accepted, as the old `resolve()` call allowed.
 - The UNIX-socket test skips cleanly where there is no `/tmp`.
+## One bot's error no longer skips the others in the survival loops (2026-11-07, unreleased)
+
+Follow-up to the tick-handler guard (#56, which this branch is stacked on). That guard stops a
+failing handler crashing the server, but a failure still skips the rest of that handler's loop:
+every bot after the failing one. Three loops now guard each bot separately (`TickGuard.perBot`):
+- hazard escape (`BotHazardService`: standing in fire, on magma, near pufferfish);
+- eating (`BotEventHandler.tickHunger`);
+- autosave (`BotPersistenceService`). Here a failure for one bot used to skip the autosave of
+  every bot after it, the `LAST_SAVE_TICK` prune and the mount autosave, and a bot that failed
+  every tick would keep the later bots from being autosaved.
+
+Costs and limits:
+- The other ~55 tick loops still skip the remaining bots on a failure. These three were picked
+  because a skipped tick there costs health or saved data; the rest are dialogue, hobbies and
+  reactions, where a skipped tick is cosmetic. Wrapping them means editing each service, and many
+  of those files are in other open PRs.
+- The once-a-minute log limit is per loop, not per bot: if two bots fail in the same loop within a
+  minute, only the first is named and the second shows in the held-back count.
+
+Tests: `TickGuardTest` (4).
+
 ## One failing handler no longer crashes the server (2026-11-05, unreleased)
 
 Fabric does not catch exceptions in event handlers. One escaping an END_SERVER_TICK handler, or

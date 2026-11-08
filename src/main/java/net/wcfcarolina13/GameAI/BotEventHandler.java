@@ -849,11 +849,13 @@ public class BotEventHandler {
             // Pass nearby hostiles so autoEat knows whether it's safe.
             // Without this, autoEat sees null hostiles and always considers it safe,
             // causing the bot to eat food mid-combat (and "attack" with food).
-            List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(player, 10.0D)
-                    .stream()
-                    .filter(EntityUtil::isHostile)
-                    .toList();
-            HealingService.autoEat(player, nearbyHostiles);
+            net.wcfcarolina13.TickGuard.perBot("BotEventHandler::tickHunger", player, () -> {
+                List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(player, 10.0D)
+                        .stream()
+                        .filter(EntityUtil::isHostile)
+                        .toList();
+                HealingService.autoEat(player, nearbyHostiles);
+            });
         }
     }
 
