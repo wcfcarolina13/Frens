@@ -162,4 +162,9 @@ public final class CreeperEvasionPolicy {
     public static boolean swingReady(float attackCooldownProgress) {
         return attackCooldownProgress >= 0.9F;
     }
+
+    /** The swing lands only in 3D reach (attackTarget's 3-block reach), not just horizontal reach. */
+    public static boolean inSwingReach(double distance3d) {
+        return distance3d <= KNOCKBACK_REACH;
+    }
 }

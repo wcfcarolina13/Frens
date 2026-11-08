@@ -44,4 +44,20 @@ class CreeperKnockbackPolicyTest {
         assertFalse(CreeperEvasionPolicy.backoffSwing(false, false, 2.8, 30));  // nothing to swing
         assertFalse(CreeperEvasionPolicy.backoffSwing(true, false, 3.5, 30));   // out of reach
     }
+
+    @Test
+    void swingReadyWantsAFullCharge() {
+        assertTrue(CreeperEvasionPolicy.swingReady(1.0F));
+        assertTrue(CreeperEvasionPolicy.swingReady(0.9F));
+        assertFalse(CreeperEvasionPolicy.swingReady(0.89F));
+    }
+
+    @Test
+    void reachIsInclusiveAtThreeAndANullDecisionNeverSwings() {
+        assertTrue(CreeperEvasionPolicy.swingFirst(Decision.STAY, true, false, false, 3.0, false));
+        assertTrue(CreeperEvasionPolicy.backoffSwing(true, false, 3.0, 10));
+        assertTrue(CreeperEvasionPolicy.inSwingReach(3.0));
+        assertFalse(CreeperEvasionPolicy.inSwingReach(3.01));
+        assertFalse(CreeperEvasionPolicy.swingFirst(null, true, false, false, 2.0, true));
+    }
 }
