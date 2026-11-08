@@ -41,6 +41,7 @@ class AiChatOffHintPolicyTest {
         assertFalse(n.contains("–"));
         assertFalse(n.contains(";"));
         assertTrue(n.contains("Guide"));
+        assertTrue(n.indexOf("/bot") < n.indexOf("AI setup"), "commands first, AI setup second");
         assertTrue(n.contains("AI setup"));
     }
 }

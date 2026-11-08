@@ -39,7 +39,7 @@ public final class SupplyServerHop {
     }
 
     /** How one hop ended. Only {@link #DONE} carries the task's value. */
-    enum Status {
+    public enum Status {
         /** The task ran to completion (inline, or on the server thread in time). */
         DONE,
         /** No server, the executor refused the task, or it ran off the server thread (a stopped server). */
@@ -55,7 +55,7 @@ public final class SupplyServerHop {
     }
 
     /** A hop's end and, for {@link Status#DONE}, the task's value (which may itself be {@code null}). */
-    record Hop<T>(Status status, T value) {
+    public record Hop<T>(Status status, T value) {
         static <T> Hop<T> of(Status status) {
             return new Hop<>(status, null);
         }
@@ -78,7 +78,7 @@ public final class SupplyServerHop {
     }
 
     /** {@link #call} with the way it ended, for callers that report why. */
-    static <T> Hop<T> hop(MinecraftServer server, Supplier<T> task, long timeoutMs) {
+    public static <T> Hop<T> hop(MinecraftServer server, Supplier<T> task, long timeoutMs) {
         if (server == null) {
             return Hop.of(Status.NOT_RUNNING);
         }

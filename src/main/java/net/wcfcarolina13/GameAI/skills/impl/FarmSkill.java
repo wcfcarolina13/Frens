@@ -2245,16 +2245,9 @@ public class FarmSkill implements Skill {
                 continue;
                 }
 
-            ActionResult result = bot.interactionManager.interactBlock(
-                    bot,
-                    world,
-                    bot.getMainHandStack(),
-                    Hand.MAIN_HAND,
-                    hit
-            );
+            ActionResult result = BotActions.interactBlockAndSwing(bot, world, hit);
 
             if (result.isAccepted()) {
-                bot.swingHand(Hand.MAIN_HAND, true);
                 planted++;
                 sleep(120);
             }
@@ -3931,9 +3924,8 @@ public class FarmSkill implements Skill {
                 if (!isMutationAuthorized(bot, world, plot.up())) {
                     continue;
                 }
-                ActionResult result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
+                ActionResult result = BotActions.interactBlockAndSwing(bot, world, hit);
                 if (result.isAccepted()) {
-                    bot.swingHand(Hand.MAIN_HAND, true);
                     replanted++;
                     sleep(60);
                 }
@@ -4242,20 +4234,24 @@ public class FarmSkill implements Skill {
         }
         selectHotbarSlot(bot, bucketSlot);
         BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(pos), Direction.UP, pos, false);
-        ActionResult result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
-        LOGGER.info("pickupWater at {} result={} hand={}", pos, result, bot.getMainHandStack().getItem());
-        if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            return true;
-        }
-        result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
-        LOGGER.info("pickupWater interactItem at {} result={} hand={}", pos, result, bot.getMainHandStack().getItem());
-        if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            return true;
-        }
-        return false;
+        // Scooping replaces the bucket stack and drains the block: server thread, not this worker.
+        return BotActions.callOnServerThread(bot, () -> {
+            ActionResult result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
+            LOGGER.info("pickupWater at {} result={} hand={}", pos, result, bot.getMainHandStack().getItem());
+            if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+                return true;
+            }
+            result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
+            LOGGER.info("pickupWater interactItem at {} result={} hand={}", pos, result, bot.getMainHandStack().getItem());
+            if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+                return true;
+            }
+            return false;
+        }, 1000L, false);
     }
+
 
     private static boolean hasHoe(PlayerInventory inventory) {
         for (int i = 0; i < inventory.size(); i++) {
@@ -4335,6 +4331,15 @@ public class FarmSkill implements Skill {
      * callers must treat that as "item unavailable" rather than clamping to slot 0.
      */
     private static int ensureHotbarAccess(ServerPlayerEntity bot, int slot) {
+        if (slot >= 0 && slot < 9) {
+            return slot; // already in the hotbar: resolveHotbarTarget returns it whatever the lock
+        }
+        // Moves a stack into the hotbar: server thread (inline when already there), not the worker.
+        // Retried once on a timeout: callers end their planting pass on -1.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThreadRetrying(bot, () -> ensureHotbarAccessOnServer(bot, slot), 750L, -1);
+    }
+
+    private static int ensureHotbarAccessOnServer(ServerPlayerEntity bot, int slot) {
         PlayerInventory inventory = bot.getInventory();
         boolean locked = net.wcfcarolina13.GameAI.services.HotbarLockService.isLocked(bot);
         int target = net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy.resolveHotbarTarget(
@@ -4390,6 +4395,14 @@ public class FarmSkill implements Skill {
     }
 
     private static void selectHotbarSlot(ServerPlayerEntity bot, int slot) {
+        // Selected slot, hand stack and screen sync: server thread (inline when already there).
+        net.wcfcarolina13.GameAI.BotActions.callOnServerThread(bot, () -> {
+            selectHotbarSlotOnServer(bot, slot);
+            return Boolean.TRUE;
+        }, 750L, Boolean.FALSE);
+    }
+
+    private static void selectHotbarSlotOnServer(ServerPlayerEntity bot, int slot) {
         if (slot < 0 || slot >= 9) {
             return;
         }

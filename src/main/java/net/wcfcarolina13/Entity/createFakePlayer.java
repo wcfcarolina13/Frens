@@ -22,6 +22,7 @@ import net.minecraft.server.GameProfileResolver;
 import net.minecraft.server.network.ConnectedClientData;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.storage.ReadView;
 import net.minecraft.text.Text;
 import net.minecraft.text.TranslatableTextContent;
 import net.minecraft.util.math.BlockPos;
@@ -31,6 +32,7 @@ import net.minecraft.world.TeleportTarget;
 import net.minecraft.world.World;
 import net.wcfcarolina13.network.FakeClientConnection;
 import net.wcfcarolina13.GameAI.services.BotAutoHuntService;
+import net.wcfcarolina13.GameAI.services.EndCreditsPolicy;
 import net.wcfcarolina13.GameAI.services.TaskService;
 
 import java.io.InputStreamReader;
@@ -370,9 +372,19 @@ public class createFakePlayer extends ServerPlayerEntity {
     @Override
     public void detachForDimensionChange() {
         super.detachForDimensionChange();
+        // Vanilla just set seenCredits; keep it false so the next exit detaches again instead of
+        // taking the portal teleport (read as an external teleport). copyFrom carries it over.
+        this.seenCredits = EndCreditsPolicy.seenCreditsToKeep(true, this.seenCredits);
         if (notInAnyWorld) {
             requestRespawnFromLimbo();
         }
+    }
+
+    /** A save from an earlier exit can hold seenCredits=true: reset it (EndCreditsPolicy). */
+    @Override
+    protected void readCustomData(ReadView view) {
+        super.readCustomData(view);
+        this.seenCredits = EndCreditsPolicy.seenCreditsToKeep(true, this.seenCredits);
     }
 
     /** Stands in for the client's PERFORM_RESPAWN after the credits screen. Server thread only. */

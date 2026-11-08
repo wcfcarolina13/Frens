@@ -150,10 +150,11 @@ public final class BotHazardService {
         for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(server)) {
             if (bot == null || bot.isRemoved() || !bot.isAlive()) continue;
             if (!(bot.getEntityWorld() instanceof ServerWorld world)) continue;
-            if (tryEscapeHazardBlockAtFeet(bot, world)) {
-                continue;
-            }
-            tryFleePufferfish(bot, world);
+            net.wcfcarolina13.TickGuard.perBot("BotHazardService::onServerTick", bot, () -> {
+                if (!tryEscapeHazardBlockAtFeet(bot, world)) {
+                    tryFleePufferfish(bot, world);
+                }
+            });
         }
     }
 
