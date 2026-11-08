@@ -11,6 +11,9 @@ package net.wcfcarolina13.Commands;
  *       move it is the one running the command), so only one in-reach attempt is made there.</li>
  *   <li>Which way to sidestep after a walk: a horizontal turn of the clicked face, or of the
  *       bot's facing when the face is UP or DOWN (rotating a vertical face throws).</li>
+ *   <li>When to hand the rest of the run to a worker (1.1.296): the server-thread pass stopped
+ *       only because the spot was out of reach, so a worker, which may walk, takes over.</li>
+ *   <li>Which lines end the run.</li>
  * </ul>
  */
 public final class PlacePosPolicy {
@@ -28,6 +31,9 @@ public final class PlacePosPolicy {
     }
 
     public enum Cell { HIT, BESIDE_FACE }
+
+    /** Why a placement run ended. */
+    public enum Stop { DONE, NO_ITEMS, OUT_OF_REACH, ABORTED, ERROR }
 
     private PlacePosPolicy() {}
 
@@ -72,5 +78,38 @@ public final class PlacePosPolicy {
     public static Face sidestep(Face face, float botYaw) {
         Face base = (face == null || face.vertical()) ? facingFromYaw(botYaw) : face;
         return rotateClockwise(base);
+    }
+
+    /**
+     * Hand the rest of the run to a worker: only a server-thread pass that stopped out of reach
+     * (a worker pass has already walked, and the other stops do not improve with walking).
+     */
+    public static boolean handOffToWorker(boolean onServerThread, Stop stop) {
+        return onServerThread && stop == Stop.OUT_OF_REACH;
+    }
+
+    /**
+     * Lines that end a run of {@code placed} items. An out-of-reach stop says so; "I don't have
+     * any" only when nothing was placed because the items ran out (a reach failure or a
+     * {@code /bot stop} is not "no items"); a stop or an error after some placements still
+     * reports them.
+     */
+    public static java.util.List<String> reportLines(int placed, Stop stop, String item) {
+        java.util.List<String> lines = new java.util.ArrayList<>(2);
+        if (stop == Stop.OUT_OF_REACH) {
+            lines.add("I can't reach that spot.");
+        } else if (stop == Stop.ERROR) {
+            lines.add("Something went wrong placing the " + item + ", so I stopped.");
+        }
+        if (placed > 0) {
+            lines.add(placedLine(placed, item));
+        } else if (stop == Stop.NO_ITEMS) {
+            lines.add("I don't have any " + item + " to place.");
+        }
+        return lines;
+    }
+
+    public static String placedLine(int placed, String item) {
+        return "Placed " + placed + " " + item + (placed == 1 ? "" : "s") + ".";
     }
 }

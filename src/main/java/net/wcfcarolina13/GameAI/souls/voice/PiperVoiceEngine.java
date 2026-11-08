@@ -4,15 +4,14 @@ import net.wcfcarolina13.GameAI.souls.SoulTypes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -57,21 +56,27 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
                 return t;
             });
 
-    /** Engine-thread only: one warm Piper per (model path, speaker). */
-    private final Map<String, PiperProcess> processes = new LinkedHashMap<>();
+    /**
+     * One warm Piper per (model path, speaker). Mutated only on the engine thread; a concurrent
+     * map so the closer thread can walk a consistent snapshot for the direct kill in
+     * {@link #close()} without racing an in-flight insert.
+     */
+    private final Map<String, PiperProcess> processes = new ConcurrentHashMap<>();
     private final Set<String> warnedMissingVoices = ConcurrentHashMap.newKeySet();
     private volatile boolean closed;
 
-    /** One Piper subprocess and its stdio; owned and touched only by the engine thread. */
+    /** One Piper subprocess and its stdio; stdio touched only by the engine thread. */
     private static final class PiperProcess {
         final String model;
         final int speaker;
         final Path outDir;
         /** Set once, just before the first spawn attempt; never cleared by {@link #killProcess}. */
         boolean startAttempted;
-        Process process;
+        /** Volatile so the closer thread's direct kill sees the live handle. */
+        volatile Process process;
         Writer stdin;
-        BufferedReader stdout;
+        /** Raw pipe, read byte by byte under a deadline (a BufferedReader could block on a partial line). */
+        InputStream stdout;
 
         PiperProcess(String model, int speaker, Path outDir) {
             this.model = model;
@@ -262,23 +267,22 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         return proc;
     }
 
-    /** Blocking stdout read bounded by the synth deadline, running ON the engine thread. */
+    /**
+     * Stdout read bounded by the synth deadline, running ON the engine thread. Byte by byte
+     * through {@code available()} (see {@link DeadlineReads#readLine}): the old
+     * {@code ready()} then {@code readLine()} pair could block past the timeout on a partial
+     * line, and pipe reads ignore interrupts, so {@code shutdownNow} could not free the thread.
+     */
     private String readLineWithDeadline(PiperProcess proc) throws Exception {
-        long deadline = System.currentTimeMillis() + synthTimeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            if (proc.stdout.ready()) {
-                String line = proc.stdout.readLine();
-                if (line == null) {
-                    throw new IOException("piper stdout closed");
-                }
-                if (!line.isBlank()) {
-                    return line;
-                }
-            } else {
-                Thread.sleep(20);
-            }
+        Process child = proc.process;
+        try {
+            return DeadlineReads.readLine(proc.stdout, synthTimeoutMs,
+                    () -> child != null && child.isAlive());
+        } catch (TimeoutException ex) {
+            throw new TimeoutException("piper synthesis exceeded " + synthTimeoutMs + "ms");
+        } catch (IOException ex) {
+            throw new IOException("piper stdout closed: " + ex.getMessage(), ex);
         }
-        throw new TimeoutException("piper synthesis exceeded " + synthTimeoutMs + "ms");
     }
 
     private void ensureProcess(PiperProcess proc) throws IOException {
@@ -294,7 +298,7 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         proc.startAttempted = true;
         proc.process = builder.start();
         proc.stdin = new java.io.OutputStreamWriter(proc.process.getOutputStream(), StandardCharsets.UTF_8);
-        proc.stdout = new BufferedReader(new InputStreamReader(proc.process.getInputStream(), StandardCharsets.UTF_8));
+        proc.stdout = proc.process.getInputStream();
         startStderrDrain(proc.process);
         LOGGER.info("[souls] tts engine started pid={} model={}{}", proc.process.pid(),
                 Path.of(proc.model).getFileName(), proc.speaker >= 0 ? " speaker=" + proc.speaker : "");
@@ -326,16 +330,18 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
         drain.start();
     }
 
+    /** Safe from any thread: {@code destroyForcibly} is thread-safe and idempotent. */
     private static void killProcess(PiperProcess proc) {
-        if (proc.process != null) {
-            proc.process.destroyForcibly();
+        Process current = proc.process;
+        if (current != null) {
+            current.destroyForcibly();
             proc.process = null;
         }
     }
 
-    /** Engine thread: tear down every warm process. */
+    /** Tears down every warm process. Runs on the engine thread and, from {@link #close()}, on the closer. */
     private void killAll() {
-        for (PiperProcess proc : processes.values()) {
+        for (PiperProcess proc : List.copyOf(processes.values())) {
             killProcess(proc);
         }
     }
@@ -364,6 +370,10 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
      * {@code SoulRuntime}'s {@code lifecycleLock} on the server thread (both from
      * {@code SERVER_STOPPING} via {@code SoulRuntime.stop()} and from {@code /bot soul} commands
      * via {@code reloadSettings}) — a blocking wait there would stall the server thread.
+     *
+     * <p>The closer also runs {@link #killAll()} itself: when a synth is in flight the queued
+     * kill never executes ({@code shutdownNow} drops queued tasks), which used to leave the warm
+     * Piper processes alive past a world reload and even past JVM exit.
      */
     @Override
     public void close() {
@@ -386,6 +396,7 @@ public final class PiperVoiceEngine implements SoulVoiceEngine {
                 Thread.currentThread().interrupt();
                 engineThread.shutdownNow();
             }
+            killAll();
             deleteOutputDirQuietly();
         }, "frens-soul-voice-closer");
         closer.setDaemon(true);
