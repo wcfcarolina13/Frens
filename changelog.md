@@ -33,6 +33,15 @@ A 1.1.296+ client on an older Frens server showed "New bots: Ask" in the AI setu
 
 - The target now clicks the anchor on its side facing the step and places into the neighbour. The cell math is `AdjacentChestPolicy` (2 tests, Tests 3857 → 3859).
 - **Limits:** not run in game. Whether two adjacent chests merge into a double chest is left to vanilla's placement (bot yaw and the clicked face), unchanged. Needs a sandbox check: `/bot place chest 2` and `/bot place chest 3` while looking at the ground place 2 and 3 chests side by side with no "I can't reach that spot."
+## Cook cycle walks back to the furnace after losing reach (unreleased, 2026-11-05)
+
+- **Problem:** deferred minor from the 1.1.291 review. `SmeltingService.cookAllFoodSync` (the cook hobby and HuntSkill's post-hunt cook) checks furnace reach on every 2 s poll and before taking the final output. A bot pushed, knocked back or wandered out of reach mid-cook logged "can no longer interact with furnace" and quit the batch; the final-output step then skipped silently, so the cooked food stayed in the furnace.
+- **Change:** on lost reach (poll or final output) the worker asks the new pure `FurnaceReachRecoveryPolicy`: in the furnace's world and fewer than 2 walk-backs used this cycle → walk back to the approach cell (same `MovementService.execute` + nudge as the first approach, now shared in `walkToFurnaceApproach`) and retry; otherwise stop with the old log line. Another dimension, an interrupted worker or a stopping server never walks.
+- **Threading:** the walk runs on the cook worker (`AMBIENT_EXECUTOR` / the hunt skill thread), never the server thread; furnace and inventory work stays in the existing `server.execute` blocks.
+- **Cost:** at most 2 extra walks per cook cycle; walk time counts toward the batch/total timeouts.
+- **Limits:** `/bot cook` (`startBatchCookInternal`) and `startCollectFinishedFood` do not wait for the cook, so they have no mid-cook phase and are unchanged. The per-item load step still skips an item type on lost reach rather than walking. A bot pulled away repeatedly (follow command, mob shoves) gets its 2 walk-backs and then stops.
+- **Tests:** 3857 (1 expected SoulStoreTest failure) → 3864 (same 1 expected failure) (`FurnaceReachRecoveryPolicyTest`, 7).
+- **Sandbox check:** start a cook hobby or post-hunt cook, `/tp` the bot ~8 blocks from the furnace mid-batch; it should log "lost reach of furnace … walking back (1/2)", return, and collect the output. Teleport it to the Nether mid-cook: it should stop without walking.
 
 ## Repository clean-up: public and private split (2026-11-04)
 
