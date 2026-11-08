@@ -133,4 +133,45 @@ public final class RosterScreenCopy {
     public static String createNameInOtherWorldHint() {
         return "That name belongs to a companion in another world. Bring them in from Other worlds.";
     }
+
+    // ── Remote server roster (server-owned list, 2026-11-08 ruling) ──
+
+    /** Title for a player who may see their companions on this server but not restore or create. */
+    public static String viewOnlyTitle() {
+        return "Your companions on this server";
+    }
+
+    /** Subtitle for that player, and the line shown where Create would be. */
+    public static String viewOnlyNotice() {
+        return "Only an operator can restore or create companions on this server.";
+    }
+
+    /** Empty-list line for that player. */
+    public static String viewOnlyEmptyLine(State state) {
+        return state == State.ALL_PRESENT
+                ? "(Your companions are all here.)"
+                : "(No companion on this server is yours yet.)";
+    }
+
+    /** Title while the server's roster is on its way. */
+    public static String loadingTitle() {
+        return "Companions";
+    }
+
+    /** Subtitle while the server's roster is on its way, or once it is overdue. */
+    public static String loadingSubtitle(boolean overdue) {
+        return overdue
+                ? "The server did not answer. Close this and try again."
+                : "Asking the server for your companions...";
+    }
+
+    /** Title on a server whose Frens is too old to send its roster. */
+    public static String unsupportedTitle() {
+        return "Companions";
+    }
+
+    /** Subtitle on such a server: the list is unknown, Create still sends /bot spawn. */
+    public static String unsupportedSubtitle() {
+        return "This server runs an older Frens and can't list its companions. Type a name below to spawn one.";
+    }
 }

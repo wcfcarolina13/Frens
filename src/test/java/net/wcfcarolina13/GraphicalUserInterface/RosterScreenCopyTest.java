@@ -162,4 +162,24 @@ class RosterScreenCopyTest {
                 RosterScreenCopy.state(restorable.size(), false, 0,
                         RosterScreenCopy.savedCount(thisWorld, java.util.Set.of())));
     }
+
+    @Test
+    void remoteRosterCopyNeverOffersRestoreToViewers() {
+        assertTrue(RosterScreenCopy.viewOnlyNotice().contains("operator"));
+        assertFalse(RosterScreenCopy.viewOnlyTitle().contains("Restore"));
+        for (RosterScreenCopy.State state : RosterScreenCopy.State.values()) {
+            String line = RosterScreenCopy.viewOnlyEmptyLine(state);
+            assertFalse(line.contains("below"), state + ": " + line);
+            assertFalse(line.isBlank(), state.name());
+        }
+        assertNotEquals(RosterScreenCopy.viewOnlyEmptyLine(RosterScreenCopy.State.ALL_PRESENT),
+                RosterScreenCopy.viewOnlyEmptyLine(RosterScreenCopy.State.NONE_SAVED));
+    }
+
+    @Test
+    void loadingCopySaysWhenTheServerIsOverdue() {
+        assertNotEquals(RosterScreenCopy.loadingSubtitle(false), RosterScreenCopy.loadingSubtitle(true));
+        assertTrue(RosterScreenCopy.loadingSubtitle(true).contains("did not answer"));
+        assertTrue(RosterScreenCopy.unsupportedSubtitle().contains("older Frens"));
+    }
 }
