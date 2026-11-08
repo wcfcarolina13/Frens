@@ -98,6 +98,9 @@ public final class SmeltingService {
         LOGGER.info("cookAllFoodSync: {} starting cook cycle at furnace {}", bot.getName().getString(), furnacePos.toShortString());
         long totalStartMs = System.currentTimeMillis();
         boolean anyCooked = false;
+        // What the fuel slot held before this cycle first fuelled it: a stop gives back only the
+        // fuel the bot itself put in (FurnaceTakeBackPolicy.fuelToTakeBack).
+        java.util.concurrent.atomic.AtomicReference<ItemStack> fuelBaseline = new java.util.concurrent.atomic.AtomicReference<>();
         // Walk-backs after losing furnace reach mid-cycle (FurnaceReachRecoveryPolicy budget).
         int walkBacksUsed = 0;
 
@@ -111,7 +114,10 @@ public final class SmeltingService {
 
         List<Item> itemTypes = new ArrayList<>(allCookables.keySet());
         for (Item rawItem : itemTypes) {
-            if (Thread.currentThread().isInterrupted() || TaskService.isServerStopping()) {
+            // A /bot stop raises the abort latch without always interrupting this thread: checked
+            // here too, or the cycle loaded the next food type after the stop and left it behind.
+            if (Thread.currentThread().isInterrupted() || TaskService.isServerStopping()
+                    || TaskService.isAbortRequested(botId)) {
                 break;
             }
             if (System.currentTimeMillis() - totalStartMs > COOK_TOTAL_TIMEOUT_MS) {
@@ -192,6 +198,7 @@ public final class SmeltingService {
                     }
 
                     // Ensure fuel
+                    fuelBaseline.compareAndSet(null, furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT).copy());
                     ensureFuel(liveBot, source, furnace, liveWorld, "auto");
                     loadResult.complete(true);
                 } catch (Throwable t) {
@@ -374,11 +381,93 @@ public final class SmeltingService {
             }
         }
 
+        boolean stoppedEarly = Thread.currentThread().isInterrupted() || TaskService.isAbortRequested(botId);
+        if (FurnaceTakeBackPolicy.shouldTakeBack(stoppedEarly, TaskService.isServerStopping())) {
+            takeBackAfterStop(bot, source, server, worldKey, botId, furnacePos, fuelBaseline.get());
+        }
+
         if (anyCooked) {
             LOGGER.info("cookAllFoodSync: {} finished cooking cycle ({}ms)",
                     bot.getName().getString(), System.currentTimeMillis() - totalStartMs);
         }
         return anyCooked;
+    }
+
+    /**
+     * A cook cycle stopped part way (a /bot stop interrupts its thread): take the food back out of
+     * the furnace, the raw input and whatever has cooked, so the bot does not walk off and leave it
+     * there, and the fuel it put in itself this cycle (fuel that was there before stays). In reach only; the
+     * thread's interrupt is set aside for this one short server hop and put back afterwards.
+     */
+    private static void takeBackAfterStop(ServerPlayerEntity bot, ServerCommandSource source,
+                                          net.minecraft.server.MinecraftServer server,
+                                          net.minecraft.registry.RegistryKey<net.minecraft.world.World> worldKey,
+                                          UUID botId, BlockPos furnacePos, ItemStack fuelBefore) {
+        boolean interrupted = Thread.interrupted();
+        try {
+            CompletableFuture<String> done = new CompletableFuture<>();
+            server.execute(() -> {
+                try {
+                    ServerWorld liveWorld = server.getWorld(worldKey);
+                    ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                    if (liveWorld == null || liveBot == null || liveBot.isRemoved()
+                            || liveBot.getEntityWorld() != liveWorld) {
+                        done.complete("bot gone");
+                        return;
+                    }
+                    if (!(liveWorld.getBlockEntity(furnacePos) instanceof AbstractFurnaceBlockEntity furnace)) {
+                        done.complete("furnace gone");
+                        return;
+                    }
+                    if (!ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
+                        done.complete("out of reach");
+                        return;
+                    }
+                    int taken = 0;
+                    for (int slot : FurnaceTakeBackPolicy.SLOTS) {
+                        ItemStack stack = furnace.getStack(slot);
+                        if (stack.isEmpty()) {
+                            continue;
+                        }
+                        ItemStack remaining = slot == FurnaceTakeBackPolicy.OUTPUT_SLOT
+                                ? evacuateOutput(liveBot, source, stack.copy(), STATION_REACH_SQ)
+                                : evacuateInput(liveBot, source, stack.copy(), STATION_REACH_SQ);
+                        int left = remaining == null ? stack.getCount() : remaining.getCount();
+                        taken += stack.getCount() - left;
+                        furnace.setStack(slot, left <= 0 ? ItemStack.EMPTY : remaining);
+                    }
+                    if (fuelBefore != null) {
+                        ItemStack fuel = furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT);
+                        int give = FurnaceTakeBackPolicy.fuelToTakeBack(fuelBefore.isEmpty(),
+                                fuelBefore.isEmpty() || ItemStack.areItemsAndComponentsEqual(fuelBefore, fuel),
+                                fuelBefore.getCount(), fuel.getCount());
+                        if (give > 0) {
+                            ItemStack back = fuel.copyWithCount(give);
+                            liveBot.getInventory().insertStack(back);
+                            int moved = give - back.getCount();
+                            if (moved > 0) {
+                                fuel.decrement(moved);
+                                furnace.setStack(FurnaceTakeBackPolicy.FUEL_SLOT, fuel.isEmpty() ? ItemStack.EMPTY : fuel);
+                                taken += moved;
+                            }
+                        }
+                    }
+                    furnace.markDirty();
+                    done.complete("took back " + taken + " item(s)");
+                } catch (Throwable t) {
+                    done.complete("failed: " + t.getMessage());
+                }
+            });
+            String outcome = done.get(3, TimeUnit.SECONDS);
+            LOGGER.info("cookAllFoodSync: {} stopped mid-cook at {}: {}", bot.getName().getString(),
+                    furnacePos.toShortString(), outcome);
+        } catch (Exception e) {
+            LOGGER.warn("cookAllFoodSync: take-back after stop failed for {}: {}", bot.getName().getString(), e.toString());
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     /**
