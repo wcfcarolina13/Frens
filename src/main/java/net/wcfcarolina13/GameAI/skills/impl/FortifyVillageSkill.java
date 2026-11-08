@@ -210,7 +210,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                             scope.carveSession.target != null ? scope.carveSession.target.toShortString() : "n/a",
                             cleanupHelper.queue.size());
                 } else {
-                    attemptFinalizeCarveTransaction(bot, world, scope);
+                    carveHelper.attemptFinalizeCarveTransaction(bot, world, scope);
                 }
             }
             if (scope != null) {
@@ -3909,10 +3909,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     }
 
     /** Delegates to {@link FortifyCarveHelper#tryBreakThroughObstacle}; the break-through rules live there. */
-    private boolean tryBreakThroughObstacle(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
-        return tryBreakThroughObstacle(bot, world, target, null);
-    }
-
     private boolean tryBreakThroughObstacle(ServerPlayerEntity bot, ServerWorld world, BlockPos target, String causeContext) {
         return carveHelper.tryBreakThroughObstacle(bot, world, target, causeContext);
     }
@@ -3924,11 +3920,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         if (scope.towerPatchContext || scope.gateContext) return true;
         String ctx = scope.context == null ? "" : scope.context;
         return ctx.startsWith("fortify-edge:");
-    }
-
-
-    private boolean isCarveEligibleForBreakAttempt(FortifyNavRuntimeScope scope, ServerWorld world, BlockPos botPos, BlockPos target) {
-        return carveHelper.isCarveEligibleForBreakAttempt(scope, world, botPos, target);
     }
 
     @Override
@@ -4026,10 +4017,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return isTrapLikeCell(world, botPos) && exitsAfter == 0;
     }
 
-
-    private void attemptFinalizeCarveTransaction(ServerPlayerEntity bot, ServerWorld world, FortifyNavRuntimeScope scope) {
-        carveHelper.attemptFinalizeCarveTransaction(bot, world, scope);
-    }
     @Override
     public void processDeferredFortifyCleanupQueue(ServerPlayerEntity bot, ServerWorld world, String context) {
         cleanupProcessor.processDeferredFortifyCleanupQueue(bot, world, context);
@@ -5872,7 +5859,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                         }
                         if (!recovered && activeFortifyNavScope != null
                                 && activeFortifyNavScope.navMode == FortifyNavMode.CARVE_CORRIDOR
-                                && isCarveEligibleForBreakAttempt(activeFortifyNavScope, w, bot.getBlockPos(), target)
+                                && carveHelper.isCarveEligibleForBreakAttempt(activeFortifyNavScope, w, bot.getBlockPos(), target)
                                 && activeFortifyNavScope.carveSession != null
                                 && activeFortifyNavScope.carveSession.canMineMore()) {
                             if (tryBreakThroughObstacle(bot, w, target, navContext + ":carve")) {

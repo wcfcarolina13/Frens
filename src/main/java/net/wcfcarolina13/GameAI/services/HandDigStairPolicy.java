@@ -237,6 +237,48 @@ public final class HandDigStairPolicy {
      *                   listed are tried after, in {@link Dir} order
      * @param stepsTaken hand-dig steps already taken in this ascent
      */
+    /**
+     * After a hand-dig ascent reached open sky: the side to take one more step on, or null. Bradley's
+     * ruling (2026-11-08): when the next cell is a 1-high step onto open ground, the bot takes it and
+     * ends level with the ground, so it does not stop in a notch one block below grade beside its
+     * pit; it never digs into a hillside. So a side counts only when the block at the bot's feet
+     * level there is a usable tread and the three cells above it (feet, head, one more) are already
+     * air: no block is mined. The caller also requires open sky over the feet cell. The preferred
+     * direction (the stair's) is tried first, then the rest in a fixed order.
+     */
+    public static Dir stepOntoGround(CellView view, List<Dir> preference) {
+        if (view == null) {
+            return null;
+        }
+        java.util.List<Dir> order = new java.util.ArrayList<>();
+        if (preference != null) {
+            for (Dir d : preference) {
+                if (d != null && !order.contains(d)) order.add(d);
+            }
+        }
+        for (Dir d : Dir.values()) {
+            if (!order.contains(d)) order.add(d);
+        }
+        for (Dir d : order) {
+            Cell tread = view.at(d.dx, 0, d.dz);
+            if (tread == null || !tread.usableTread()) {
+                continue;
+            }
+            boolean clear = true;
+            for (int dy = 1; dy <= 3; dy++) {
+                Cell c = view.at(d.dx, dy, d.dz);
+                if (c == null || c.kind() != Kind.AIR) {
+                    clear = false;
+                    break;
+                }
+            }
+            if (clear) {
+                return d;
+            }
+        }
+        return null;
+    }
+
     public static Decision decide(CellView view, List<Dir> preference, int stepsTaken) {
         Map<Dir, Refusal> per = new EnumMap<>(Dir.class);
         if (stepsTaken >= MAX_STEPS) {

@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.wcfcarolina13.GameAI.services.follow.FollowVerticalGapPolicy;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.MinecraftServer;
@@ -208,6 +209,7 @@ public final class FollowPlannerService {
                         swimTransitionRejects += FollowPathService.consumeLastSwimTransitionRejectCount();
                     }
                 }
+                boolean viaReroute = false;
                 if (waypoints.isEmpty()) {
                     int[] fallbackTransitionRejects = new int[] { 0 };
                     int[] fallbackSwimTransitionRejects = new int[] { 0 };
@@ -224,6 +226,7 @@ public final class FollowPlannerService {
                     );
                     transitionRejects += fallbackTransitionRejects[0];
                     swimTransitionRejects += fallbackSwimTransitionRejects[0];
+                    viaReroute = !waypoints.isEmpty();
                 }
 
                 maybeLogTransitionRejects(logger, botId, transitionRejects, swimTransitionRejects, reason);
@@ -244,6 +247,7 @@ public final class FollowPlannerService {
                 }
 
                 final List<BlockPos> plannedWaypoints = List.copyOf(waypoints);
+                final boolean rerouted = viaReroute;
                 server.execute(() -> {
                     ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
                     ServerPlayerEntity liveTarget = server.getPlayerManager().getPlayer(targetId);
@@ -258,7 +262,13 @@ public final class FollowPlannerService {
                     FOLLOW_DOOR_PLAN.remove(botId);
                     FOLLOW_LAST_DISTANCE_SQ.remove(botId);
                     FOLLOW_STAGNANT_TICKS.remove(botId);
-                    clearFollowNoPathState(botId);
+                    if (FollowVerticalGapPolicy.rerouteClearsNoPathStreak(rerouted)) {
+                        clearFollowNoPathState(botId);
+                    } else {
+                        // The direct path to the commander still failed: a reroute plan is tried, but
+                        // it counts as a no-path, so the regroup prompt keeps its timing.
+                        noteFollowNoPathAndMaybePrompt(logger, server, worldKey, botId, targetId, reason);
+                    }
                     updateRepeatedPlanState(logger, botId, liveBot.getBlockPos(), plannedWaypoints);
                     if (logger != null && plannedWaypoints.size() > 0) {
                         logger.info("Follow planned {} waypoint(s): bot={} target={} first={}",
@@ -516,10 +526,18 @@ public final class FollowPlannerService {
             return List.of();
         }
         int absDeltaY = Math.abs(pos.botPos().getY() - pos.targetPos().getY());
-        if (absDeltaY < 6) {
+        if (!FollowVerticalGapPolicy.isVerticalSeparation(pos.botPos().getY(), pos.targetPos().getY())) {
             return List.of();
         }
         for (BlockPos fallbackGoal : buildVerticalFallbackGoals(pos.botPos(), pos.targetPos())) {
+            // A goal where the bot already stands is no reroute: its plan would clear the no-path
+            // streak and the regroup prompt would never come.
+            if (!FollowVerticalGapPolicy.fallbackGoalGainsOnTarget(
+                    pos.botPos().getX() + 0.5, pos.botPos().getY(), pos.botPos().getZ() + 0.5,
+                    fallbackGoal.getX() + 0.5, fallbackGoal.getY(), fallbackGoal.getZ() + 0.5,
+                    pos.targetPos().getX() + 0.5, pos.targetPos().getY(), pos.targetPos().getZ() + 0.5)) {
+                continue;
+            }
             FollowPathService.FollowSnapshot snapshot = captureSnapshotForGoal(server, worldKey, botId, fallbackGoal, false);
             if (snapshot == null) {
                 continue;
@@ -679,7 +697,7 @@ public final class FollowPlannerService {
             FOLLOW_LAST_NO_PATH_TICK.put(botId, nowTick);
             FOLLOW_NO_PATH_STREAK.put(botId, streak);
 
-            boolean verticalGap = Math.abs(liveBot.getBlockY() - liveTarget.getBlockY()) >= 3;
+            boolean verticalGap = FollowVerticalGapPolicy.isVerticalSeparation(liveBot.getBlockY(), liveTarget.getBlockY());
             if (!verticalGap) {
                 clearFollowNoPathState(botId);
                 return;
