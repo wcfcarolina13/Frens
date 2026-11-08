@@ -52,7 +52,7 @@ class DropGuardExemptionPolicyTest {
         for (int i = src.indexOf("moveTowardStayingOutOfHoles(bot, "); i >= 0; i = src.indexOf("moveTowardStayingOutOfHoles(bot, ", i + 1)) {
             count++;
         }
-        assertEquals(3, count, "guard return, patrol return and patrol target");
+        assertEquals(4, count, "guard return, patrol return, patrol target and the first move after a patrol pick");
     }
 
     @Test
