@@ -69,8 +69,17 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
                 return t;
             });
 
-    private Process process;
+    /** Written on the engine thread, read by the closer thread for the direct kill in {@link #close()}. */
+    private volatile Process process;
     private volatile boolean closed;
+
+    /**
+     * The warm-up ack wait. Long on purpose: if the server acks only after it has loaded its model
+     * and rendered, a short wait would send the first real line into the load, time it out, kill the
+     * server and loop. This runs on the engine thread, never the server thread; the old read had no
+     * bound at all. Failure is still ignored.
+     */
+    static final long WARMUP_ACK_TIMEOUT_MS = 120_000L;
 
     public DreamsleeveVoiceEngine(String dreamsleeveDir, String refAudio, String refText,
                                    long synthTimeoutMs) throws IOException {
@@ -156,9 +165,12 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
                     net.wcfcarolina13.GameAI.souls.SoulTypes.VoiceSpec spec = resolveQuietly(voiceKey);
                     String ref = spec.refAudio().isEmpty() ? refAudio : spec.refAudio();
                     String txt = spec.refAudio().isEmpty() ? refText : spec.refText();
+                    // One deadline covers the ack and the render, so a line still costs at most
+                    // synthTimeoutMs even when the server accepts and then never answers.
+                    long deadline = System.currentTimeMillis() + synthTimeoutMs;
                     sendRequest(speakRequestJson(text.replace('\n', ' '), ref, txt,
-                            outFile.toString()));
-                    byte[] bytes = awaitRenderedFile(outFile);
+                            outFile.toString()), deadline);
+                    byte[] bytes = awaitRenderedFile(outFile, deadline);
                     result.complete(bytes);
                 } catch (Exception ex) {
                     killProcess();
@@ -178,22 +190,42 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
     }
 
     /** Sends one newline-terminated JSON request and reads the one-line ack. Engine thread only. */
-    private void sendRequest(String requestLine) throws IOException {
+    private void sendRequest(String requestLine, long deadlineMs)
+            throws IOException, InterruptedException, TimeoutException {
+        sendRequestLine(sockPath, requestLine, deadlineMs);
+    }
+
+    /**
+     * Connects, writes the request and waits for the server's one-line ack ({@code {"ok":true}},
+     * read but never parsed) on a non-blocking channel, every step bounded by {@code deadlineMs}.
+     * The ack is still awaited rather than skipped: the server writes it after taking the request,
+     * and closing before it lands would hand the Python side a broken pipe on every line. A server
+     * that accepts and never acks used to park the engine thread in a blocking read for good
+     * (voice went silently dead); now it is a {@link TimeoutException} and the caller kills it.
+     */
+    static void sendRequestLine(Path sockPath, String requestLine, long deadlineMs)
+            throws IOException, InterruptedException, TimeoutException {
         try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
-            channel.connect(UnixDomainSocketAddress.of(sockPath));
-            channel.write(ByteBuffer.wrap(requestLine.getBytes(StandardCharsets.UTF_8)));
-            // One short ack line ({"ok":true}); read whatever arrives, don't parse strictly.
+            channel.configureBlocking(false);
+            if (!channel.connect(UnixDomainSocketAddress.of(sockPath))) {
+                DeadlineReads.awaitProgress(() -> channel.finishConnect() ? 1 : 0, deadlineMs);
+            }
+            ByteBuffer out = ByteBuffer.wrap(requestLine.getBytes(StandardCharsets.UTF_8));
+            DeadlineReads.awaitProgress(() -> {
+                channel.write(out);
+                return out.hasRemaining() ? 0 : 1;
+            }, deadlineMs);
             ByteBuffer ack = ByteBuffer.allocate(256);
-            channel.read(ack);
+            // Any non-zero result ends the wait: bytes of ack, or EOF because the server closed.
+            DeadlineReads.awaitProgress(() -> channel.read(ack), deadlineMs);
         }
     }
 
     /**
      * Waits for the server's atomic rename of {@code outFile} (a visible file is complete by
-     * construction) up to the synth deadline. Engine thread only.
+     * construction) up to the shared synth deadline. Engine thread only.
      */
-    private byte[] awaitRenderedFile(Path outFile) throws Exception {
-        long deadline = System.currentTimeMillis() + synthTimeoutMs;
+    private byte[] awaitRenderedFile(Path outFile, long deadline) throws Exception {
         while (System.currentTimeMillis() < deadline) {
             if (Files.exists(outFile)) {
                 return Files.readAllBytes(outFile);
@@ -233,8 +265,9 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
         // Fire-and-forget warm-up so the model load starts before the first real line.
         try {
             sendRequest(speakRequestJson("Ready.", refAudio, refText,
-                    workDir.resolve("warmup.wav").toString()));
-        } catch (IOException ignored) {
+                    workDir.resolve("warmup.wav").toString()),
+                    System.currentTimeMillis() + WARMUP_ACK_TIMEOUT_MS);
+        } catch (IOException | TimeoutException ignored) {
             // warm-up is opportunistic; the first real line will trigger the load regardless
         }
     }
@@ -260,9 +293,11 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
         drain.start();
     }
 
+    /** Safe from any thread: {@code destroyForcibly} is thread-safe and idempotent. */
     private void killProcess() {
-        if (process != null) {
-            process.destroyForcibly();
+        Process current = process;
+        if (current != null) {
+            current.destroyForcibly();
             process = null;
         }
     }
@@ -276,7 +311,10 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
     /**
      * Idempotent, non-blocking teardown — identical discipline to
      * {@link PiperVoiceEngine#close()}: flip the flag, enqueue the kill, stop the executor,
-     * and let a daemon closer thread do the blocking wait and temp-dir cleanup.
+     * and let a daemon closer thread do the blocking wait and temp-dir cleanup. The closer also
+     * kills the server directly: with a synth in flight the queued kill never runs
+     * ({@code shutdownNow} drops it), which used to leave {@code tts_server.py} alive past a
+     * world reload and even past JVM exit.
      */
     @Override
     public void close() {
@@ -299,6 +337,7 @@ public final class DreamsleeveVoiceEngine implements SoulVoiceEngine {
                 Thread.currentThread().interrupt();
                 engineThread.shutdownNow();
             }
+            killProcess();
             deleteWorkDirQuietly();
         }, "frens-soul-voice-closer");
         closer.setDaemon(true);

@@ -85,4 +85,19 @@ final class BotSleepLogoffPolicy {
     static boolean isDaytime(long timeOfDay) {
         return Math.floorMod(timeOfDay, 24_000L) < 12_000L;
     }
+
+    /** Case-insensitive name lookup, so "jake" matches an entry saved as "Jake". */
+    static boolean containsNameIgnoreCase(java.util.Collection<String> names, String name) {
+        if (name == null || names == null) return false;
+        for (String candidate : names) {
+            if (candidate != null && candidate.equalsIgnoreCase(name)) return true;
+        }
+        return false;
+    }
+
+    /** Whether a logoff entry belongs to the open save. A null key is an entry from before the
+     *  key was recorded: it counts for any world, which was the old behaviour. */
+    static boolean belongsToWorld(String entryWorldKey, String currentWorldKey) {
+        return entryWorldKey == null || entryWorldKey.equals(currentWorldKey);
+    }
 }

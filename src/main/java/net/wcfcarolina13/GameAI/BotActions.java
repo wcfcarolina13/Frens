@@ -155,6 +155,24 @@ public final class BotActions {
                 server.isOnThread(), server::execute, action, Math.max(250L, timeoutMs), fallback);
     }
 
+    /**
+     * Uses the main-hand item on {@code hit} (plant, replant, till-style interactions) and swings
+     * when accepted, always on the server thread: interactBlock sets blocks and shrinks the held
+     * stack, and skills call this from their workers. Inline when already on the server thread;
+     * {@link net.minecraft.util.ActionResult#FAIL} if the server thread does not answer in time.
+     */
+    public static net.minecraft.util.ActionResult interactBlockAndSwing(ServerPlayerEntity bot,
+            net.minecraft.server.world.ServerWorld world, net.minecraft.util.hit.BlockHitResult hit) {
+        return callOnServerThread(bot, () -> {
+            net.minecraft.util.ActionResult result = bot.interactionManager.interactBlock(
+                    bot, world, bot.getMainHandStack(), net.minecraft.util.Hand.MAIN_HAND, hit);
+            if (result.isAccepted()) {
+                bot.swingHand(net.minecraft.util.Hand.MAIN_HAND, true);
+            }
+            return result;
+        }, 1000L, net.minecraft.util.ActionResult.FAIL);
+    }
+
     public static void moveForward(ServerPlayerEntity bot) {
         runOnServerThread(bot, () -> moveRelative(bot, STEP_DISTANCE, false, 0, 0), 750L);
     }
@@ -318,6 +336,15 @@ public final class BotActions {
     }
 
     public static boolean selectBestWeapon(ServerPlayerEntity bot) {
+        // Swaps stacks / changes the selected slot: server thread (inline when already there).
+        // Skills call this from their workers; same pattern as selectHarvestToolOrHands.
+        if (bot == null) {
+            return false;
+        }
+        return callOnServerThread(bot, () -> selectBestWeaponOnServer(bot), 750L, false);
+    }
+
+    private static boolean selectBestWeaponOnServer(ServerPlayerEntity bot) {
         if (bot == null) {
             return false;
         }
@@ -386,6 +413,15 @@ public final class BotActions {
     }
 
     public static boolean selectBestMeleeWeapon(ServerPlayerEntity bot) {
+        // Swaps stacks / changes the selected slot: server thread (inline when already there).
+        // Skills call this from their workers; same pattern as selectHarvestToolOrHands.
+        if (bot == null) {
+            return false;
+        }
+        return callOnServerThread(bot, () -> selectBestMeleeWeaponOnServer(bot), 750L, false);
+    }
+
+    private static boolean selectBestMeleeWeaponOnServer(ServerPlayerEntity bot) {
         if (bot == null) {
             return false;
         }
@@ -453,6 +489,15 @@ public final class BotActions {
     }
 
     public static boolean selectBestTool(ServerPlayerEntity bot, String preferKeyword, String avoidKeyword) {
+        // Swaps stacks / changes the selected slot: server thread (inline when already there).
+        // Skills call this from their workers; same pattern as selectHarvestToolOrHands.
+        if (bot == null) {
+            return false;
+        }
+        return callOnServerThread(bot, () -> selectBestToolOnServer(bot, preferKeyword, avoidKeyword), 750L, false);
+    }
+
+    private static boolean selectBestToolOnServer(ServerPlayerEntity bot, String preferKeyword, String avoidKeyword) {
         if (bot == null) {
             return false;
         }
@@ -520,6 +565,23 @@ public final class BotActions {
         }
 
         return false;
+    }
+
+    /**
+     * {@link #callOnServerThread} that retries once when the server thread does not answer in
+     * time, for lookups whose fallback a caller would act on as a real answer (e.g. "no seed
+     * slot" ending a planting pass).
+     */
+    public static <T> T callOnServerThreadRetrying(ServerPlayerEntity bot, Supplier<T> action, long timeoutMs, T fallback) {
+        if (bot == null || action == null) {
+            return fallback;
+        }
+        var server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return fallback;
+        }
+        return net.wcfcarolina13.GameAI.services.ServerThreadCallPolicy.callRetrying(
+                server.isOnThread(), server::execute, action, Math.max(250L, timeoutMs), 2, fallback);
     }
 
     public static boolean selectHarvestToolOrHands(ServerPlayerEntity bot, String preferKeyword) {
@@ -787,6 +849,17 @@ public final class BotActions {
     }
 
     public static void selectHotbarSlot(ServerPlayerEntity bot, int index) {
+        // Selected-slot change: server thread (inline when already there), as for the tool selectors.
+        if (bot == null) {
+            return;
+        }
+        callOnServerThread(bot, () -> {
+            selectHotbarSlotOnServer(bot, index);
+            return Boolean.TRUE;
+        }, 750L, Boolean.FALSE);
+    }
+
+    private static void selectHotbarSlotOnServer(ServerPlayerEntity bot, int index) {
         if (bot == null) {
             return;
         }
@@ -802,6 +875,15 @@ public final class BotActions {
     }
 
     public static boolean ensureHotbarItem(ServerPlayerEntity bot, Item desired) {
+        // Swaps stacks / changes the selected slot: server thread (inline when already there).
+        // Skills call this from their workers; same pattern as selectHarvestToolOrHands.
+        if (bot == null) {
+            return false;
+        }
+        return callOnServerThread(bot, () -> ensureHotbarItemOnServer(bot, desired), 750L, false);
+    }
+
+    private static boolean ensureHotbarItemOnServer(ServerPlayerEntity bot, Item desired) {
         if (bot == null || desired == null) {
             return false;
         }
@@ -2111,18 +2193,16 @@ public final class BotActions {
         if (frontState.getBlock() instanceof DoorBlock) {
             return; // doors handled elsewhere; don't bunny-hop at them
         }
-        if (frontState.getCollisionShape(world, front).isEmpty()) {
+        var frontShape = frontState.getCollisionShape(world, front);
+        if (frontShape.isEmpty()) {
             return;
         }
-        // Don't attempt to jump over tall collision shapes (fences/walls); that's a real obstacle.
-        double maxY = frontState.getCollisionShape(world, front).getMax(Direction.Axis.Y);
-        if (maxY > 1.01D) {
-            return;
-        }
-
         boolean headSpace = world.getBlockState(frontAbove).getCollisionShape(world, frontAbove).isEmpty()
                 && world.getBlockState(frontAbove.up()).getCollisionShape(world, frontAbove.up()).isEmpty();
-        if (headSpace) {
+        // The jump also needs room over the bot itself: under a two-high ceiling it only hits it.
+        BlockPos ownCeiling = BlockPos.ofFloored(bot.getX(), bot.getY() + 2.0D, bot.getZ());
+        boolean ownHeadroom = world.getBlockState(ownCeiling).getCollisionShape(world, ownCeiling).isEmpty();
+        if (AutoJumpPolicy.shouldJump(true, frontShape.getMax(Direction.Axis.Y), headSpace, ownHeadroom)) {
             jump(bot);
         }
     }
