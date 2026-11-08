@@ -5,6 +5,7 @@ Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what
 ## Test: the soul store close check waits for the worker to exit (unreleased, 2026-11-05)
 
 `SoulStoreTest.closeShutsDownInjectedExecutorLeavingNoThreadAlive` checked for a live executor thread right after `close()`, but `close()` only calls `shutdown()`, and the worker exits a moment later. Under load (parallel builds in a cloud container) it failed on unrelated branches. The test now joins the thread for up to 5 s before checking. A thread that `close()` never stops still fails. No main code changed. Tests 3857, unchanged count.
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
