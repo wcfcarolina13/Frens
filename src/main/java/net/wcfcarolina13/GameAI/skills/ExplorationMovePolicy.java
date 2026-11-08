@@ -15,12 +15,13 @@ public final class ExplorationMovePolicy {
         int successes;
         int failures;
 
-        double score() {
+        // synchronized: worker threads record outcomes concurrently; a bare ++ could lose counts.
+        synchronized double score() {
             // Laplace smoothing keeps the prior at 0.5 until we have real data.
             return (successes + 1.0) / (successes + failures + 2.0);
         }
 
-        void record(boolean success) {
+        synchronized void record(boolean success) {
             if (success) {
                 successes++;
             } else {
@@ -35,13 +36,35 @@ public final class ExplorationMovePolicy {
     }
 
     public static double score(BlockPos origin, BlockPos destination) {
-        Stats stats = MOVE_STATS.get(new Key(origin, destination));
+        return score(new Key(origin, destination));
+    }
+
+    /** Score for a raw offset (dx, dy, dz); 0.5 when nothing was recorded. */
+    static double scoreOffset(int dx, int dy, int dz) {
+        return score(new Key(dx, dy, dz));
+    }
+
+    private static double score(Key key) {
+        Stats stats = MOVE_STATS.get(key);
         return stats == null ? 0.5 : stats.score();
     }
 
     public static void record(BlockPos origin, BlockPos destination, boolean success) {
-        MOVE_STATS.computeIfAbsent(new Key(origin, destination), key -> new Stats())
-                .record(success);
+        record(new Key(origin, destination), success);
+    }
+
+    /** Records an outcome for a raw offset (dx, dy, dz). */
+    static void recordOffset(int dx, int dy, int dz, boolean success) {
+        record(new Key(dx, dy, dz), success);
+    }
+
+    private static void record(Key key, boolean success) {
+        MOVE_STATS.computeIfAbsent(key, k -> new Stats()).record(success);
+    }
+
+    /** Test seam: forget every recorded outcome. */
+    static void clearForTests() {
+        MOVE_STATS.clear();
     }
 
     private record Key(int dx, int dy, int dz) {

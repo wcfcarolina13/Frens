@@ -358,7 +358,9 @@ public final class BotWaterEscapeService {
         if (state.getHardness(world, pos) < 0.0F
                 || state.getBlock() instanceof FallingBlock
                 || !isNaturalLedgeRock(state)
-                || ProtectedStructureBlockHelper.isNeverBreakAt(world, pos)
+                // Entity scan on the server thread only: off it the world's entity lookup is not
+                // safe, and MiningTool still runs the full painting check before the swing.
+                || ProtectedStructureBlockHelper.isNeverBreakAt(world, pos, world.getServer().isOnThread())
                 || ProtectedZoneService.isProtectedForBot(bot.getUuid(), pos, world, null)
                 || MappedVillageService.isInsideMappedVillage(world, pos)) {
             return ShoreStepPolicy.Cell.BLOCKED;

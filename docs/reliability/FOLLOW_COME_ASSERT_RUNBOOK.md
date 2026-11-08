@@ -26,19 +26,22 @@ Run before entering world:
 /bot follow_check <bot> follow+has_target+planner_idle
 ```
 
-2. Start come:
+2. Start come from more than 8 blocks away, and assert within a second or two:
 
 ```mcfunction
 /bot come <bot>
 /bot follow_check <bot> come+fixed_goal+force_walk
 ```
 
-3. Start safe come:
+`come` drops its fixed goal and becomes a normal follow once the commander is within 8 blocks
+horizontally and reachable, so from closer (or once the bot arrives) this assert fails by design.
 
-```mcfunction
-/bot come_safe <bot>
-/bot follow_check <bot> come+recovery_off
-```
+3. ~~Start safe come~~ (retired): `/bot come_safe` no longer exists, and `/bot come` always allows
+recovery skills, so `come+recovery_off` has nothing to check. The `follow_check` token is still
+accepted.
+
+Checked headless on 1.1.298 (2026-11-07): step 1 and step 2 (from ~70 blocks) pass,
+`planner_idle` passes 20 s into the come.
 
 ## Reroute/Planner Checks
 Use awkward geometry (corners, doorways, cave lips) and issue repeated come commands.

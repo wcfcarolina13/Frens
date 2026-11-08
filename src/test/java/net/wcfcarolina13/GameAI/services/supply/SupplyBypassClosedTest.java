@@ -99,8 +99,9 @@ class SupplyBypassClosedTest {
                 "storage-screen Collect after fast travel: owner-initiated, exempt per DESIGN; since 1.1.220 "
                         + "owner-gated, and the arrival take checks ChestBlockEntity then binds it (two sites, one take)");
         allow(SERVICES + "BotChestRegistryService.java", 1, "read-only contents snapshot (refreshAllSnapshots)");
-        allow(SERVICES + "SmeltingService.java", 10,
-                "furnace input/output (not a chest; out of scope per DESIGN) + deposits of furnace output into chests");
+        allow(SERVICES + "SmeltingService.java", 11,
+                "furnace input/output (not a chest; out of scope per DESIGN) + deposits of furnace output into chests"
+                        + " + the take-back of a stopped cook's own food and fuel (furnace, not a chest)");
         allow(SERVICES + "FurnaceOffloadService.java", 2, "furnace fuel slot: read + deposit only (not a chest)");
         allow(SERVICES + "CookingReactionService.java", 1, "read-only furnace probe for cooking dialogue (not a chest)");
         allow(SERVICES + "TravelMountHandler.java", 1,

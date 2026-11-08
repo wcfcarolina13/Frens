@@ -103,6 +103,11 @@ made wrong were corrected in place (line-of-sight, inventory snapshot).
 
 <!-- Add new signs below as you learn from failures -->
 
+### Sign: Parallel Gradle Builds Run Out of Memory
+- **Trigger**: Running more than one `./gradlew build` or `./gradlew test` at a time, in one checkout or across git worktrees (parallel agents, a cloud session that fans out work)
+- **Instruction**: Each concurrent build starts its own Gradle daemon plus forked test JVMs, and the suite is ~3,870 tests. On the 16 GB cloud container, five to seven builds at once got processes killed by the kernel for lack of memory, and the surviving runs showed failures that were load, not code (`SoulStoreTest.closeShutsDownInjectedExecutorLeavingNoThreadAlive` timing out). So: (1) give every agent `--max-workers=1` and tell it to run the full suite once, at the end, using `--tests '<class>'` while iterating; (2) keep at most two or three full builds in flight at once; read-only agents (reviews, scoping, research) should not run Gradle at all; (3) if a run reports "killed for lack of memory" or a test that passes alone fails in the full run, rerun that class alone before calling it a regression; (4) delete `build/` and `.gradle/` in finished worktrees (about 250 MB each) once their branch is pushed. Separate worktrees remove the `build/` file races (see CLAUDE.md "Parallel agents") but not the memory limit.
+- **Added after**: 2026-11-05 — the cloud deferral batch ran eight worktree agents in parallel; the kernel killed builds and a timing test failed on unrelated branches until runs were serialized.
+
 
 
 ---

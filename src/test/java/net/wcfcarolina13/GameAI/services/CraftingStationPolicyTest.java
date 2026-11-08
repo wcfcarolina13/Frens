@@ -66,7 +66,7 @@ class CraftingStationPolicyTest {
         assertTrue(helper.contains("new ChunkBlockReader(world)") && helper.contains("section.hasAny(match)"),
                 "the box scan reads through one reader and skips sections without a match");
         assertTrue(helper.contains("CraftingStationPolicy.compareScanOrder("), "hits keep the whole-box order");
-        assertEquals(3, count(source, "CraftingHelper::isCraftingTable,"), "the table scan, its re-scan and the pre-check");
+        assertEquals(4, count(source, "CraftingHelper::isCraftingTable,"), "the table scan, its re-scan, the pre-check and the cooldown range check");
         assertEquals(2, count(source, "CraftingHelper::isChest,"), "both findNearbyChests overloads");
     }
 
@@ -730,5 +730,42 @@ class CraftingStationPolicyTest {
                 "the make-room drop ignores the batch reserve");
         assertTrue(bodyOf(helper, "private static boolean hasRoomForItem(").contains("PlayerInventory.MAIN_SIZE"),
                 "hasRoomForItem counts armor/offhand slots as room");
+    }
+
+    @Test
+    void stationTableIsNotCraftedTwiceWhenMakingRoomPlacedOne() {
+        // 1.1.299: the table's make-room placed a chest, the chest's craft placed a table and spent the
+        // planks; the first table craft then committed on its stale count and failed.
+        assertEquals(CraftingStationPolicy.AfterMakeRoom.NESTED_TABLE,
+                CraftingStationPolicy.afterMakeRoom(true, true, 0, 4));
+        assertEquals(CraftingStationPolicy.AfterMakeRoom.NESTED_TABLE,
+                CraftingStationPolicy.afterMakeRoom(true, true, 20, 4));
+    }
+
+    @Test
+    void plankCraftCommitsOnlyOnTheCountAfterMakingRoom() {
+        assertEquals(CraftingStationPolicy.AfterMakeRoom.SHORT, CraftingStationPolicy.afterMakeRoom(true, false, 0, 4));
+        assertEquals(CraftingStationPolicy.AfterMakeRoom.SHORT, CraftingStationPolicy.afterMakeRoom(false, false, 7, 8));
+        assertEquals(CraftingStationPolicy.AfterMakeRoom.CRAFT, CraftingStationPolicy.afterMakeRoom(true, false, 4, 4));
+        // A chest or an explicit table craft is never skipped for a table in reach.
+        assertEquals(CraftingStationPolicy.AfterMakeRoom.CRAFT, CraftingStationPolicy.afterMakeRoom(false, true, 8, 8));
+    }
+
+    @Test
+    void stationRechecksForANestedTableBeforeDeclining() throws IOException {
+        String helper = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/CraftingHelper.java"),
+                StandardCharsets.UTF_8);
+        String body = bodyOf(helper, "private static boolean ensureCraftingStation(ServerPlayerEntity bot, ServerCommandSource source, boolean quiet)");
+        int recheck = body.indexOf("NESTED_TABLE_RECHECK.get()");
+        int decline = body.indexOf("No crafting table within {} blocks");
+        assertTrue(recheck > 0 && recheck < decline, "the nested-table recheck runs before the no-table decline");
+    }
+
+    @Test
+    void tableCraftCooldownHoldsOnlyWhileATableIsInRange() {
+        assertTrue(CraftingStationPolicy.tableCraftCooldownBlocks(true, true));
+        assertFalse(CraftingStationPolicy.tableCraftCooldownBlocks(true, false));
+        assertFalse(CraftingStationPolicy.tableCraftCooldownBlocks(false, true));
+        assertFalse(CraftingStationPolicy.tableCraftCooldownBlocks(false, false));
     }
 }
