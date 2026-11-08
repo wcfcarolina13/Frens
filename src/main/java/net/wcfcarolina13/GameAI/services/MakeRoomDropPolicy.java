@@ -63,4 +63,13 @@ public final class MakeRoomDropPolicy {
     private static boolean neverDropped(SlotView slot) {
         return slot.food() || slot.tool() || slot.damageable() || slot.protectedItem() || slot.reserved();
     }
+
+    /**
+     * Whether a make-room offload to a chest keeps logs: when the craft reserves logs, and also when it
+     * reserves planks, because the rest of a wood craft turns logs into planks (1.1.299: a wooden
+     * pickaxe's table step offloaded the last log, then had no planks for the sticks).
+     */
+    public static boolean offloadKeepsLogs(boolean reservesPlanks, boolean reservesLogs) {
+        return reservesPlanks || reservesLogs;
+    }
 }

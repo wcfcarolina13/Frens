@@ -200,7 +200,8 @@ public final class BotWorldStateService {
         ensureLoaded();
         String key = worldKey(server);
         Map<String, BotState> worldMap = STATE.computeIfAbsent(normalizeAlias(alias), k -> new HashMap<>());
-        worldMap.put(key, new BotState(x, y, z, yaw, Math.max(-90.0F, Math.min(90.0F, pitch))));
+        String name = savedDisplayName(alias).orElse(alias.trim());
+        worldMap.put(key, new BotState(x, y, z, yaw, Math.max(-90.0F, Math.min(90.0F, pitch)), name));
         flush();
     }
 
@@ -281,11 +282,33 @@ public final class BotWorldStateService {
         return out;
     }
 
-    public static record BotState(double x, double y, double z, float yaw, float pitch) {
+    /**
+     * {@code name}: the bot's name as spelled (the alias key is lower-cased), null in entries written
+     * before this field existed. Auto-spawn spawns under it when the settings file had to be reset, so a bot does
+     * not come back as a lower-case, different player.
+     */
+    public static record BotState(double x, double y, double z, float yaw, float pitch, String name) {
+        public BotState(double x, double y, double z, float yaw, float pitch) {
+            this(x, y, z, yaw, pitch, null);
+        }
+
         static BotState from(ServerPlayerEntity bot) {
             float rawPitch = bot.getPitch();
             float clampedPitch = Math.max(-90.0F, Math.min(90.0F, rawPitch));
-            return new BotState(bot.getX(), bot.getY(), bot.getZ(), bot.getYaw(), clampedPitch);
+            return new BotState(bot.getX(), bot.getY(), bot.getZ(), bot.getYaw(), clampedPitch, bot.getName().getString());
         }
+    }
+
+    /** The name as spelled that a saved entry for {@code alias} recorded, in any world; empty for older entries. */
+    public static synchronized Optional<String> savedDisplayName(String alias) {
+        ensureLoaded();
+        Map<String, BotState> worlds = STATE.get(normalizeAlias(alias));
+        if (worlds == null) {
+            return Optional.empty();
+        }
+        return worlds.values().stream()
+                .map(st -> st == null ? null : st.name())
+                .filter(n -> n != null && n.equalsIgnoreCase(alias.trim()))
+                .findFirst();
     }
 }
