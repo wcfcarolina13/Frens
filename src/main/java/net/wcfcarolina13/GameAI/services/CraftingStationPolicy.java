@@ -310,4 +310,15 @@ public final class CraftingStationPolicy {
         }
         return planksHeld >= planksNeeded ? AfterMakeRoom.CRAFT : AfterMakeRoom.SHORT;
     }
+
+    /**
+     * Whether the one-minute table-craft cooldown refuses a new table. It exists so a bot that just
+     * placed a table it cannot reach does not craft table after table beside it; so it holds only
+     * while some table is in the scan range. With none in range (the bot moved on, or the table is
+     * gone) a second craft within the minute is allowed (sandbox 2026-11-08: a second
+     * /bot craft 40 blocks away answered "I need a crafting table nearby" while holding 8 logs).
+     */
+    public static boolean tableCraftCooldownBlocks(boolean cooldownActive, boolean tableInRange) {
+        return cooldownActive && tableInRange;
+    }
 }
