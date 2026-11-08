@@ -2,6 +2,21 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## CI runs the test suite (2026-11-05, unreleased)
+
+CI ran `./gradlew build -x test`, so the JUnit suite (about 3900 tests: pure policy, wiring and
+file-system tests that need no game) never ran on a pull request. Every "tests pass" claim rested
+on a local run. `ci-build.yml` now runs `./gradlew test` as its own step after the build and
+uploads the HTML test report when that step fails. The release workflow is unchanged.
+
+Costs and limits:
+- A few more CI minutes per push.
+- A red test now blocks a PR's check.
+- The SoulStore close test (`closeShutsDownInjectedExecutorLeavingNoThreadAlive`) is
+  timing-sensitive under load. The open SoulStore close-test PR (#19) makes it wait for the
+  worker, so merge that first, or expect a rare re-run.
+- The root-only `persistCursorFailure` test fails only when run as root; the GitHub runner is not
+  root.
 ## Release wave: 16 PRs merged by Bradley's "review and merge all open PRs you can"; 1.1.300 (2026-11-08)
 
 Bradley asked on 2026-11-08 to review and merge every open PR that needs nothing from him. Merged as one release PR (merge commits, so GitHub marks each as merged). Full suite 4282 tests in the cloud, only the root-container `SoulStoreTest.persistCursorFailure…` failing; one Fable review of the combined diff (one should-fix, fixed below).
