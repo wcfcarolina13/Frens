@@ -17,6 +17,7 @@ Costs and limits:
   call. Human nicknames are in a separate PR.
 
 Tests: `ChatAddressingTest` (2 new).
+
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 
 Bradley chose "merge and prepare 1.1.299" on 2026-11-08 for the PRs proven in the mcp-sandbox (2026-11-06 pass, the 2026-11-07/08 runs of #65, #66, #68 and the #70 fix). Merged as one release PR so the per-PR changelog entries below (marked "unreleased") ship together; GitHub closes each included PR as merged.
