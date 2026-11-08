@@ -18,7 +18,8 @@ import org.slf4j.LoggerFactory;
  * {@code Files.createTempFile}, which the JDK creates {@code rw-------}, and the atomic move keeps
  * that mode. The soul store writes its temp files by name, so they would land at the umask
  * default (usually 0644); it calls {@link #restrictToOwner} before each move and when it creates
- * a transcript.
+ * a transcript. The supply "Always" grants ({@code SupplyRequestService}) and the group-chat
+ * hint receipts ({@code GroupChatHint}) name their temp files the same way and do the same.
  *
  * <p>Never fails a save: on a non-POSIX file system (Windows) nothing is done, and any error is
  * logged at DEBUG and ignored. Hand-edited config files are out of scope.
