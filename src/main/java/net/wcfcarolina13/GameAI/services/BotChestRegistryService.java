@@ -18,7 +18,6 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 
 import java.io.IOException;
 import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -47,6 +46,8 @@ public final class BotChestRegistryService {
 
     private static RootData DATA = new RootData();
     private static boolean loaded = false;
+    /** Set when the file could neither be read nor moved aside; saves are then refused so it is never overwritten. */
+    private static boolean loadFailed = false;
 
     private BotChestRegistryService() {}
 
@@ -142,9 +143,13 @@ public final class BotChestRegistryService {
                 try (Reader reader = Files.newBufferedReader(file)) {
                     RootData parsed = GSON.fromJson(reader, RootData.class);
                     if (parsed != null) DATA = parsed;
-                } catch (Exception e) {
+                } catch (IOException | RuntimeException e) {
                     LOGGER.warn("Failed to load chest registry: {}", e.getMessage());
                     DATA = new RootData();
+                    // Corrupt: moved to .bad-<stamp>, store starts empty. Unreadable: left in
+                    // place and saves refused, so the next flush cannot wipe it.
+                    Path backup = UnreadableStoreFile.quarantineIfCorrupt(file, e, java.time.LocalDateTime.now(), LOGGER, "chest registry");
+                    loadFailed = backup == null;
                 }
             }
             loaded = true;
@@ -153,12 +158,12 @@ public final class BotChestRegistryService {
 
     private static void flush() {
         synchronized (LOCK) {
+            if (loadFailed) {
+                LOGGER.warn("Chest registry was not saved because its original file could not be read.");
+                return;
+            }
             try {
-                Path file = stateFile();
-                Files.createDirectories(file.getParent());
-                try (Writer writer = Files.newBufferedWriter(file)) {
-                    GSON.toJson(DATA, writer);
-                }
+                AtomicStoreWriter.writeString(stateFile(), GSON.toJson(DATA));
             } catch (IOException e) {
                 LOGGER.warn("Failed to save chest registry: {}", e.getMessage());
             }

@@ -427,10 +427,8 @@ public class HarvestCropSkill implements Skill {
                     farmlandPos,
                     false
             );
-            ActionResult result = bot.interactionManager.interactBlock(
-                    bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
+            ActionResult result = net.wcfcarolina13.GameAI.BotActions.interactBlockAndSwing(bot, world, hit);
             if (result.isAccepted()) {
-                bot.swingHand(Hand.MAIN_HAND, true);
                 replanted++;
                 sleep(120);
             } else {
@@ -488,10 +486,8 @@ public class HarvestCropSkill implements Skill {
                     plot,
                     false
             );
-            ActionResult result = bot.interactionManager.interactBlock(
-                    bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
+            ActionResult result = net.wcfcarolina13.GameAI.BotActions.interactBlockAndSwing(bot, world, hit);
             if (result.isAccepted()) {
-                bot.swingHand(Hand.MAIN_HAND, true);
                 planted++;
                 sleep(120);
             }
@@ -670,6 +666,12 @@ public class HarvestCropSkill implements Skill {
     }
 
     private static int ensureSeedHotbar(ServerPlayerEntity bot, Item targetSeed) {
+        // Moves a stack into the hotbar: server thread (inline when already there), not the worker.
+        // Retried once on a timeout: callers end their planting pass on -1.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThreadRetrying(bot, () -> ensureSeedHotbarOnServer(bot, targetSeed), 750L, -1);
+    }
+
+    private static int ensureSeedHotbarOnServer(ServerPlayerEntity bot, Item targetSeed) {
         if (bot == null || targetSeed == null) {
             return -1;
         }
@@ -706,6 +708,12 @@ public class HarvestCropSkill implements Skill {
     }
 
     private static int findAnySeedHotbarSlot(ServerPlayerEntity bot) {
+        // Moves a stack into the hotbar: server thread (inline when already there), not the worker.
+        // Retried once on a timeout: callers end their planting pass on -1.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThreadRetrying(bot, () -> findAnySeedHotbarSlotOnServer(bot), 750L, -1);
+    }
+
+    private static int findAnySeedHotbarSlotOnServer(ServerPlayerEntity bot) {
         if (bot == null) {
             return -1;
         }
@@ -824,6 +832,14 @@ public class HarvestCropSkill implements Skill {
     }
 
     private static void selectHotbarSlot(ServerPlayerEntity bot, int slot) {
+        // Selected slot, hand stack and screen sync: server thread (inline when already there).
+        net.wcfcarolina13.GameAI.BotActions.callOnServerThread(bot, () -> {
+            selectHotbarSlotOnServer(bot, slot);
+            return Boolean.TRUE;
+        }, 750L, Boolean.FALSE);
+    }
+
+    private static void selectHotbarSlotOnServer(ServerPlayerEntity bot, int slot) {
         if (bot == null || slot < 0 || slot >= 9) return;
         PlayerInventory inventory = bot.getInventory();
         inventory.setSelectedSlot(slot);
