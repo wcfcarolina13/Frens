@@ -5733,10 +5733,15 @@ public class BotEventHandler {
         try {
             CompletableFuture.runAsync(() -> {
                 try {
+                    // The commander is the request source, as for a skill they start themselves:
+                    // tool provisioning reads their crafting history (recorded against the player,
+                    // not the bot), so without it a boxed-in bot dug stone bare-handed with logs
+                    // in its pack.
                     SkillContext ctx = new SkillContext(
                             bot.getCommandSource(),
                             SharedStateService.safeSharedState("come-recovery"),
-                            finalParams
+                            finalParams,
+                            commander != null ? commander.getCommandSource() : null
                     );
                     LOGGER.info("[ComeRecovery] launch-confirmed bot={} goal={} skill={} args={}",
                             bot.getName().getString(),

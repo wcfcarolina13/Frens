@@ -2898,7 +2898,7 @@ public final class CraftingHelper {
         switch (action) {
             case PLACE_NOW -> { }
             case STEP_TO_STAND -> stand = planned;
-            case RELOCATE -> stand = findRepositionStandClearOf(world, bot.getBlockPos(), placeAt, placeAt);
+            case RELOCATE -> stand = findRepositionStandClearOf(world, bot, placeAt, placeAt);
         }
         if (action != UtilityPlacementStandPolicy.Action.PLACE_NOW && stand == null) {
             LOGGER.info("Crafting table local reposition [{}]: no stand clear of place={} bot={}",
@@ -2952,7 +2952,7 @@ public final class CraftingHelper {
      * once centred, worker thread only:
      * callers are behind {@link CraftingStationPolicy#mayWalk}) so its hitbox stays inside the stand.
      */
-    private static void recenterOnStand(ServerPlayerEntity bot, BlockPos stand) {
+    public static void recenterOnStand(ServerPlayerEntity bot, BlockPos stand) {
         if (bot == null || stand == null) {
             return;
         }
@@ -3001,7 +3001,7 @@ public final class CraftingHelper {
         }
 
         BlockPos relocation = CraftingStationPolicy.mayWalk(onServerThread)
-                ? findPlacementRelocationStand(world, bot.getBlockPos(), origin)
+                ? findPlacementRelocationStand(world, bot, origin)
                 : null;
         if (relocation != null && !relocation.equals(bot.getBlockPos())) {
             attemptLog.noteRelocation(relocation);
@@ -3043,9 +3043,17 @@ public final class CraftingHelper {
             if (!world.isChunkLoaded(pos) || !world.isChunkLoaded(pos.down())) {
                 continue;
             }
+            if (inTunnelAhead(bot, pos)) {
+                logPlacementRejection(attemptLog, pos, "tunnel-keep-clear");
+                continue;
+            }
             BlockPos stand = findAdjacentStandCandidate(world, pos, reference, true);
             if (stand == null) {
                 logPlacementRejection(attemptLog, pos, "no-stand-to-carve");
+                continue;
+            }
+            if (inTunnelAhead(bot, stand)) {
+                logPlacementRejection(attemptLog, pos, "tunnel-keep-clear-stand");
                 continue;
             }
             if (!hasSolidSupport(world, pos.down())) {
@@ -3092,9 +3100,17 @@ public final class CraftingHelper {
                 logPlacementRejection(attemptLog, pos, "bot-occupies");
                 continue;
             }
+            if (inTunnelAhead(bot, pos)) {
+                logPlacementRejection(attemptLog, pos, "tunnel-keep-clear");
+                continue;
+            }
             BlockPos stand = findAdjacentStandCandidate(world, pos, reference, false);
             if (stand == null) {
                 logPlacementRejection(attemptLog, pos, "no-adjacent-stand");
+                continue;
+            }
+            if (inTunnelAhead(bot, stand)) {
+                logPlacementRejection(attemptLog, pos, "tunnel-keep-clear-stand");
                 continue;
             }
             return new PreparedPlacement(pos.toImmutable(), stand.toImmutable(), carved, relocated,
@@ -3123,13 +3139,15 @@ public final class CraftingHelper {
         return new ArrayList<>(ordered);
     }
 
-    private static BlockPos findPlacementRelocationStand(ServerWorld world, BlockPos botPos, BlockPos origin) {
+    private static BlockPos findPlacementRelocationStand(ServerWorld world, ServerPlayerEntity bot, BlockPos origin) {
         if (world == null || origin == null) {
             return null;
         }
+        BlockPos botPos = bot == null ? null : bot.getBlockPos();
         for (int radius = 1; radius <= LOCAL_PLACEMENT_RELOCATION_RADIUS; radius++) {
             BlockPos safe = SafePositionService.findSafeNear(world, origin, radius);
-            if (safe != null && isStandCellReady(world, safe) && (botPos == null || !safe.equals(botPos))) {
+            if (safe != null && isStandCellReady(world, safe) && (botPos == null || !safe.equals(botPos))
+                    && !inTunnelAhead(bot, safe)) {
                 return safe.toImmutable();
             }
         }
@@ -3146,10 +3164,11 @@ public final class CraftingHelper {
      * every radius. Searching around the place cell handed back the place cell (open air on grass),
      * which is how the reposition walked the bot onto its own table cell.
      */
-    private static BlockPos findRepositionStandClearOf(ServerWorld world, BlockPos botPos, BlockPos origin, BlockPos avoidPlace) {
+    private static BlockPos findRepositionStandClearOf(ServerWorld world, ServerPlayerEntity bot, BlockPos origin, BlockPos avoidPlace) {
         if (world == null || origin == null) {
             return null;
         }
+        BlockPos botPos = bot == null ? null : bot.getBlockPos();
         for (int r = 0; r <= LOCAL_PLACEMENT_RELOCATION_RADIUS; r++) {
             for (int dx = -r; dx <= r; dx++) {
                 for (int dz = -r; dz <= r; dz++) {
@@ -3161,6 +3180,9 @@ public final class CraftingHelper {
                         continue;
                     }
                     if (botPos != null && safe.equals(botPos)) {
+                        continue;
+                    }
+                    if (inTunnelAhead(bot, safe)) {
                         continue;
                     }
                     if (avoidPlace != null && UtilityPlacementStandPolicy.standOverlapsPlace(
@@ -3300,6 +3322,16 @@ public final class CraftingHelper {
         }
         BlockState state = world.getBlockState(pos);
         return state.isAir() || state.isReplaceable() || state.isOf(Blocks.SNOW);
+    }
+
+    /** A cell in the tunnel the bot is digging ({@link TunnelKeepClearService}): never a place or stand cell. */
+    private static boolean inTunnelAhead(ServerPlayerEntity bot, BlockPos cell) {
+        if (bot == null || cell == null) {
+            return false;
+        }
+        BlockPos at = bot.getBlockPos();
+        return TunnelKeepClearService.blocks(bot.getUuid(), at.getX(), at.getY(), at.getZ(),
+                cell.getX(), cell.getY(), cell.getZ());
     }
 
     private static BlockPos findAdjacentStandCandidate(ServerWorld world,

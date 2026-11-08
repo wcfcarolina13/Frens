@@ -556,6 +556,28 @@ Costs and limits:
 - The walk counts toward the sweep's time budget.
 
 Tests: `SweepReturnPolicyTest` (2).
+## A boxed-in bot answering /bot come crafts a pickaxe instead of digging bare-handed (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server (backlog: "Come tool crafting
+(verification)"). A bot sealed in stone with 4 oak logs, told to `/bot come`, launched the
+recovery stripmine and dug every block with bare hands (7.5 s a block, no cobblestone).
+
+Tool provisioning (`ToolProvisionService.ensurePickaxe`) only crafts a tool whose recipe is in
+the requester's crafting history, and that history is recorded against the player who gave the
+order, not the bot. The come-recovery skill ran with no request source, so it read the bot's
+own history, which held nothing useful. It now carries the commander as the request source, like
+a skill the player starts directly. Headless, the same setup crafted a table, sticks and a wooden
+pickaxe, then mined at 1.15 s a block and reached the commander.
+
+Costs and limits:
+- The two recovery skills (`stripmine`, `collect_dirt`) use the request source only for tool and
+  torch provisioning (`ensurePickaxe`, `ensureToolForKeyword`, `ensureTorches`), so the change
+  is limited to those crafts now being allowed by the commander's history, as for the same skill
+  typed by the player.
+- With no commander (none online) it falls back to the old behaviour.
+- A bot still won't craft a tool its commander has never crafted. That gate is unchanged.
+
+Tests: `ComeRecoveryRequestSourceWiringTest` (1).
 
 ## Repository clean-up: public and private split (2026-11-04)
 

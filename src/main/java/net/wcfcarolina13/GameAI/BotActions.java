@@ -2193,18 +2193,16 @@ public final class BotActions {
         if (frontState.getBlock() instanceof DoorBlock) {
             return; // doors handled elsewhere; don't bunny-hop at them
         }
-        if (frontState.getCollisionShape(world, front).isEmpty()) {
+        var frontShape = frontState.getCollisionShape(world, front);
+        if (frontShape.isEmpty()) {
             return;
         }
-        // Don't attempt to jump over tall collision shapes (fences/walls); that's a real obstacle.
-        double maxY = frontState.getCollisionShape(world, front).getMax(Direction.Axis.Y);
-        if (maxY > 1.01D) {
-            return;
-        }
-
         boolean headSpace = world.getBlockState(frontAbove).getCollisionShape(world, frontAbove).isEmpty()
                 && world.getBlockState(frontAbove.up()).getCollisionShape(world, frontAbove.up()).isEmpty();
-        if (headSpace) {
+        // The jump also needs room over the bot itself: under a two-high ceiling it only hits it.
+        BlockPos ownCeiling = BlockPos.ofFloored(bot.getX(), bot.getY() + 2.0D, bot.getZ());
+        boolean ownHeadroom = world.getBlockState(ownCeiling).getCollisionShape(world, ownCeiling).isEmpty();
+        if (AutoJumpPolicy.shouldJump(true, frontShape.getMax(Direction.Axis.Y), headSpace, ownHeadroom)) {
             jump(bot);
         }
     }
