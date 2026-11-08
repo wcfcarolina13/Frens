@@ -818,6 +818,7 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotHomeService.restartExecutors();
             net.wcfcarolina13.PathFinding.PathCompareService.restartExecutors();
             net.wcfcarolina13.GameAI.services.BotZzzSleepService.restartExecutor();
+            net.wcfcarolina13.GameAI.services.DurabilityFallbackService.restartExecutors();
             serverInstance = server;
             net.wcfcarolina13.GameAI.souls.SoulRuntime.start(server, CONFIG);
             net.wcfcarolina13.GameAI.souls.SoulEventObserver.initializeProduction();
@@ -978,6 +979,16 @@ public class Frens implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             BotEventHandler.resetAll();
+            // Tick- and day-based per-bot gates: the next world's ticks restart at 0 with the same
+            // bot UUIDs, so stale gates would hold behaviour back for as long as this world ran.
+            net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotEmergencyRescueService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotMutualAidService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotAutoHuntService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotAutoCookingService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotFallSafetyService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotCombatCalloutService.resetSession();
+            net.wcfcarolina13.GameAI.services.BotFleeService.resetSession();
             AutoFaceEntity.onServerStopped(server);
             // Integrated-server world reloads keep mod static state alive. Ensure task locks don't leak across reloads.
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopped, clearing task state.");
