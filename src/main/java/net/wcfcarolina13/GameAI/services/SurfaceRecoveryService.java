@@ -46,6 +46,11 @@ public final class SurfaceRecoveryService {
         EXIT_LOG_TIME.clear();
     }
 
+    private static boolean followNoTeleport(ServerPlayerEntity bot) {
+        BotCommandStateService.State st = BotCommandStateService.stateFor(bot);
+        return st != null && st.followNoTeleport;
+    }
+
     public static SkillExecutionResult runSurfaceRecovery(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null) {
             return SkillExecutionResult.failure("No bot available for surface recovery.");
@@ -77,7 +82,14 @@ public final class SurfaceRecoveryService {
         // follow tick from steering the bot (back toward its commander) while the ascent walks it.
         net.wcfcarolina13.GameAI.skills.SkillManager.FollowResumeState followResume = null;
         try {
-            followResume = net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
+            // Only a plain player follow. FollowResumeState does not carry return-to-base's
+            // baseTarget or force-walk's followNoTeleport, so suspending those would hand back a
+            // come-walk or a teleporting follow. They keep the old behaviour (review of #41).
+            if (SurfaceRecoveryFollowPolicy.suspendFollow(
+                    net.wcfcarolina13.GameAI.BotEventHandler.isReturningToBase(bot),
+                    followNoTeleport(bot))) {
+                followResume = net.wcfcarolina13.GameAI.skills.SkillManager.suspendFollowMode(bot);
+            }
             LOGGER.info("Surface recovery starting for bot {} on thread {}", bot.getName().getString(), Thread.currentThread().getName());
             Map<String, Object> params = new HashMap<>();
             params.put("_origin", "system");
