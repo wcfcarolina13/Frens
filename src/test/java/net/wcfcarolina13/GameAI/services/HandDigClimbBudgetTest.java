@@ -7,6 +7,7 @@ import java.nio.file.Paths;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class HandDigClimbBudgetTest {
 
@@ -33,5 +34,16 @@ class HandDigClimbBudgetTest {
     void theAscentLoopReadsTheCap() throws Exception {
         String src = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/skills/impl/CollectDirtSkill.java"));
         assertTrue(src.contains("HandDigStairPolicy.runtimeCapMillis("));
+    }
+
+    @Test
+    void handDigBudgetStaysOnceAStepWasDugByHand() {
+        assertTrue(HandDigStairPolicy.handDigging(0, 0));
+        assertFalse(HandDigStairPolicy.handDigging(0, 5));
+        // The dug dirt gave it blocks: still a hand-dig climb, the budget does not drop to 60 s.
+        assertTrue(HandDigStairPolicy.handDigging(2, 3));
+        long budget = HandDigStairPolicy.climbBudgetMillis(6, 60_000L);
+        assertEquals(budget, HandDigStairPolicy.runtimeCapMillis(
+                HandDigStairPolicy.handDigging(2, 3), budget, 60_000L));
     }
 }

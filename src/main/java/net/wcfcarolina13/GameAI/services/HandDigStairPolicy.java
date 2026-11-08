@@ -292,6 +292,16 @@ public final class HandDigStairPolicy {
         return Math.max(floorMillis, steps * STEP_BUDGET_MILLIS);
     }
 
+    /**
+     * Whether this climb is a hand-dig climb, latched: once a step was dug by hand the bot keeps
+     * the hand-dig budget, even after the dug dirt gives it blocks to pillar with. Without the latch
+     * the first picked-up block dropped the cap to the flat 60 s, and the time already spent on
+     * hand-dug steps ended the climb.
+     */
+    public static boolean handDigging(int handDugSteps, int scaffoldBlocks) {
+        return handDugSteps > 0 || scaffoldBlocks <= 0;
+    }
+
     /** The ascent's runtime cap: the hand-dig budget while the bot has no blocks, else the flat cap. */
     public static long runtimeCapMillis(boolean handDigging, long handDigBudgetMillis, long flatCapMillis) {
         return handDigging ? Math.max(flatCapMillis, handDigBudgetMillis) : flatCapMillis;

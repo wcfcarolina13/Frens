@@ -1603,7 +1603,8 @@ public class CollectDirtSkill implements Skill {
 
             while ((player.getBlockY() < targetY || (stopAtSurface && !isOnSurface(player))) &&
                    System.currentTimeMillis() - startTime < HandDigStairPolicy.runtimeCapMillis(
-                           countScaffoldBlocks(player) <= 0, handDigBudgetMs, MAX_RUNTIME_MILLIS) && 
+                           HandDigStairPolicy.handDigging(handDigSteps[0], countScaffoldBlocks(player)),
+                           handDigBudgetMs, MAX_RUNTIME_MILLIS) && 
                    steps < maxSteps) {
                 
                 // Safety checks
