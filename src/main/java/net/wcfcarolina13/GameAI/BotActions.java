@@ -567,6 +567,23 @@ public final class BotActions {
         return false;
     }
 
+    /**
+     * {@link #callOnServerThread} that retries once when the server thread does not answer in
+     * time, for lookups whose fallback a caller would act on as a real answer (e.g. "no seed
+     * slot" ending a planting pass).
+     */
+    public static <T> T callOnServerThreadRetrying(ServerPlayerEntity bot, Supplier<T> action, long timeoutMs, T fallback) {
+        if (bot == null || action == null) {
+            return fallback;
+        }
+        var server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return fallback;
+        }
+        return net.wcfcarolina13.GameAI.services.ServerThreadCallPolicy.callRetrying(
+                server.isOnThread(), server::execute, action, Math.max(250L, timeoutMs), 2, fallback);
+    }
+
     public static boolean selectHarvestToolOrHands(ServerPlayerEntity bot, String preferKeyword) {
         if (bot == null) {
             return false;

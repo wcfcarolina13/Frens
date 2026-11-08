@@ -4331,6 +4331,15 @@ public class FarmSkill implements Skill {
      * callers must treat that as "item unavailable" rather than clamping to slot 0.
      */
     private static int ensureHotbarAccess(ServerPlayerEntity bot, int slot) {
+        if (slot >= 0 && slot < 9) {
+            return slot; // already in the hotbar: resolveHotbarTarget returns it whatever the lock
+        }
+        // Moves a stack into the hotbar: server thread (inline when already there), not the worker.
+        // Retried once on a timeout: callers end their planting pass on -1.
+        return net.wcfcarolina13.GameAI.BotActions.callOnServerThreadRetrying(bot, () -> ensureHotbarAccessOnServer(bot, slot), 750L, -1);
+    }
+
+    private static int ensureHotbarAccessOnServer(ServerPlayerEntity bot, int slot) {
         PlayerInventory inventory = bot.getInventory();
         boolean locked = net.wcfcarolina13.GameAI.services.HotbarLockService.isLocked(bot);
         int target = net.wcfcarolina13.PlayerUtils.ScaffoldSlotPolicy.resolveHotbarTarget(
@@ -4386,6 +4395,14 @@ public class FarmSkill implements Skill {
     }
 
     private static void selectHotbarSlot(ServerPlayerEntity bot, int slot) {
+        // Selected slot, hand stack and screen sync: server thread (inline when already there).
+        net.wcfcarolina13.GameAI.BotActions.callOnServerThread(bot, () -> {
+            selectHotbarSlotOnServer(bot, slot);
+            return Boolean.TRUE;
+        }, 750L, Boolean.FALSE);
+    }
+
+    private static void selectHotbarSlotOnServer(ServerPlayerEntity bot, int slot) {
         if (slot < 0 || slot >= 9) {
             return;
         }
