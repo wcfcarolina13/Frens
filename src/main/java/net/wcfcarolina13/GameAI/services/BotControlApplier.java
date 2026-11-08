@@ -157,6 +157,20 @@ public final class BotControlApplier {
             if (rawAlias == null || rawAlias.equalsIgnoreCase("default")) {
                 continue;
             }
+            if (Frens.CONFIG.getBotSpawn(rawAlias, currentWorldKey) == null
+                    && Frens.CONFIG.getEffectiveBotControl(rawAlias, currentWorldKey) == null) {
+                // Known only from the world-state store (the settings file was reset or never had
+                // it): bring back only a bot active in this world's last session, never one put away.
+                var entry = BotWorldStateService.currentEntry(server, rawAlias).orElse(null);
+                if (entry != null && !AutoSpawnActivityPolicy.bringBack(entry.shelved(), entry.savedAtMs(), newestSaved)) {
+                    if (Boolean.TRUE.equals(entry.shelved())) {
+                        Frens.LOGGER.info("Auto-spawn skipped for {}: put away with /bot despawn in this world", rawAlias);
+                    } else {
+                        quietSkips++;
+                    }
+                    continue;
+                }
+            }
             // Only a lower-case key (from the world-state store) needs its spelling looked up.
             String alias = rawAlias.equals(rawAlias.toLowerCase(Locale.ROOT)) ? spelledName(server, rawAlias) : rawAlias;
             if (!alias.equals(rawAlias)) {
@@ -169,19 +183,6 @@ public final class BotControlApplier {
                 // Check BotWorldStateService for position in this world
                 hasWorldState = BotWorldStateService.loadState(server, alias).isPresent();
                 if (!hasWorldState) continue;
-            }
-            if (spawn == null && Frens.CONFIG.getEffectiveBotControl(alias, currentWorldKey) == null) {
-                // Known only from the world-state store (the settings file was reset or never had
-                // it): bring back only a bot active in this world's last session, never one put away.
-                var entry = BotWorldStateService.currentEntry(server, alias).orElse(null);
-                if (entry != null && !AutoSpawnActivityPolicy.bringBack(entry.shelved(), entry.savedAtMs(), newestSaved)) {
-                    if (Boolean.TRUE.equals(entry.shelved())) {
-                        Frens.LOGGER.info("Auto-spawn skipped for {}: put away with /bot despawn in this world", alias);
-                    } else {
-                        quietSkips++;
-                    }
-                    continue;
-                }
             }
             ServerPlayerEntity existing = server.getPlayerManager().getPlayer(alias);
             String normalizedAlias = alias.toLowerCase(Locale.ROOT);
