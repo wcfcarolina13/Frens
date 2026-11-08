@@ -287,10 +287,12 @@ public final class SmeltingService {
 
                         // Eat from output if hungry
                         ItemStack output = furnace.getStack(2);
-                        if (!output.isEmpty() && liveBot.getHungerManager().getFoodLevel() < 18) {
-                            ItemStack taken = output.copy();
+                        int eatAllowance = FurnaceTakeBackPolicy.outputAllowance(inputAddedByBot.get(), outputRemovedSinceLoad.get());
+                        if (!output.isEmpty() && eatAllowance > 0 && liveBot.getHungerManager().getFoodLevel() < 18) {
+                            ItemStack taken = output.copyWithCount(Math.min(output.getCount(), eatAllowance));
+                            int offered = taken.getCount();
                             liveBot.getInventory().insertStack(taken);
-                            int consumed = output.getCount() - taken.getCount();
+                            int consumed = offered - taken.getCount();
                             if (consumed > 0) {
                                 outputRemovedSinceLoad.addAndGet(consumed);
                                 output.decrement(consumed);
@@ -365,14 +367,17 @@ public final class SmeltingService {
                         var be = liveWorld.getBlockEntity(furnacePos);
                         if (be instanceof AbstractFurnaceBlockEntity furnace) {
                             ItemStack output = furnace.getStack(2);
-                            if (!output.isEmpty()) {
-                                ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
-                                if (remaining != null && remaining.isEmpty()) {
-                                    outputRemovedSinceLoad.addAndGet(output.getCount());
-                                    furnace.setStack(2, ItemStack.EMPTY);
-                                } else if (remaining != null && remaining.getCount() < output.getCount()) {
-                                    outputRemovedSinceLoad.addAndGet(output.getCount() - remaining.getCount());
-                                    furnace.setStack(2, remaining);
+                            // Only as much cooked food as the bot loaded raw: the rest cooked from the
+                            // owner's food in the slot and stays in the furnace for the owner.
+                            int want = Math.min(output.getCount(),
+                                    FurnaceTakeBackPolicy.outputAllowance(inputAddedByBot.get(), outputRemovedSinceLoad.get()));
+                            if (want > 0) {
+                                ItemStack remaining = evacuateOutput(liveBot, source, output.copyWithCount(want), STATION_REACH_SQ);
+                                int evacuated = remaining == null ? 0 : want - remaining.getCount();
+                                if (evacuated > 0) {
+                                    outputRemovedSinceLoad.addAndGet(evacuated);
+                                    int left = output.getCount() - evacuated;
+                                    furnace.setStack(2, left <= 0 ? ItemStack.EMPTY : output.copyWithCount(left));
                                 }
                             }
                             // Eat cooked food if hungry
@@ -475,7 +480,8 @@ public final class SmeltingService {
                             continue;
                         }
                         // Input: only the bot's own loading of the food it was cooking comes back.
-                        int want = slot == FurnaceTakeBackPolicy.OUTPUT_SLOT ? stack.getCount()
+                        int want = slot == FurnaceTakeBackPolicy.OUTPUT_SLOT
+                                ? Math.min(stack.getCount(), FurnaceTakeBackPolicy.outputAllowance(inputAdded, outputRemovedCounter.get()))
                                 : FurnaceTakeBackPolicy.inputToTakeBack(inputItem != null && stack.isOf(inputItem),
                                         stack.getCount(), inputAdded, cookedSinceLoad);
                         if (want <= 0) {
@@ -1406,7 +1412,7 @@ public final class SmeltingService {
         int remaining = template.getCount();
         for (int i = 0; i < bot.getInventory().size() && remaining > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
-            if (!ItemStack.areItemsEqual(stack, template)) {
+            if (!ItemStack.areItemsAndComponentsEqual(stack, template)) {
                 continue;
             }
             int take = Math.min(stack.getCount(), remaining);

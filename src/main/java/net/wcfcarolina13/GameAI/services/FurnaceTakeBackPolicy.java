@@ -61,4 +61,12 @@ public final class FurnaceTakeBackPolicy {
     public static int refuelAdded(boolean sameItem, int countBefore, int countAfter) {
         return sameItem ? Math.max(0, countAfter - countBefore) : 0;
     }
+
+    /**
+     * Cooked food the bot may still take from the output slot this load: what it loaded raw, less
+     * what it already took. The rest cooked from the owner's same-kind food and stays for the owner.
+     */
+    public static int outputAllowance(int inputAddedByBot, int outputTakenSinceLoad) {
+        return Math.max(0, inputAddedByBot - Math.max(0, outputTakenSinceLoad));
+    }
 }
