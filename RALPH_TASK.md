@@ -4,7 +4,24 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-11-05 (cloud batch, unreleased) — next session starts here
+## Session Handoff 2026-11-08 (1.1.299) — next session starts here
+
+**State:** 1.1.299 = main 6a1eb28 plus 37 sandbox-proven PRs, their stack bases #30 and #56, and the #31 handoff, merged through one release PR (list and ruling in changelog.md, "Release wave"). Not yet on Modrinth: Bradley uploads. The Mac release steps still to do: deploy to the sandbox for a smoke run, add the 1.1.299 phase to the field checklist in frens-dev, run frens-stream `./smoke.sh` (log lines may have changed: tick-guard, auto-spawn skip, break-free door).
+
+**Open PRs carried to the next wave** (each now conflicts with main on changelog.md only; update from main before merging):
+- Need a game run: #15 sunset, #29 blind walk (stacked on #13), #40 TEASE, #67 cook hobby (force the cook hobby; random pick never reached it), #71 "you and <bot>" (Bradley in game), #62 Guide cards (open them), #32 Quick Store/Fetch GUI, #4 and #10 (regression check only so far).
+- Need a second player: #5, #12, #53.
+- Need a ruling: #8, #14, #41 (draft), #55 (draft CI), #1 (outside contribution, conflicts).
+- Partial: #57 (painting scan fixed; mining overshoot 1-3 blocks remains).
+- No behaviour change, ready once rebased: #13, #18, #19, #22, #25, #26, #69.
+
+**Rulings waiting on Bradley** (detail in the superseded 2026-11-05 handoff below): the 12 numbered rulings there; changelog collection step for frens-release-loop (PR-body label or `merge=union`); backlog 1021 criterion ("projected anchor reroute" does not exist in code); 986 cornered sword-only bot vs creeper (hit it or carry a shield); 876 mid-sentence third-person mentions; `TaskService.abortTicket` wait-for-worker; scene smoothing step 2 (A/B on llama3.1:8b: scene-opening filler 1/40 current vs 0/40 step 2, any-line filler 18% vs 12%, p≈0.14, +85 prompt tokens; recommendation: close the backlog line as superseded by step 1, keep branch `claude/scene-smoothing-step2`); fall damage, mob filter self-defence, LAN guest toggle, bot speed setting, sandbox mods.
+
+**Leads (not claimed as bugs):** per-bot `/bot config teleportDuringSkills on <bot>` did not take effect until `globalTeleport on` (headless run); bots respawned with lowercase names after a settings.json5 reset; 1017 a guarding bot sat in a pit for 90 s in one sandbox run (setup may be off); stripmine pauses "out of torches" every 6 blocks in dark tunnels without coal (come recovery restarts it).
+
+**Unfinished game checks:** backlog 825 (hunt aborted to flee), 1017 stuck escape and drop-sweep interaction, `/bot stop` mid-cook (#67).
+
+## Session Handoff 2026-11-05 (cloud batch) — superseded, shipped in 1.1.299 except the PRs listed above
 
 **State:** main at 6a1eb28 (1.1.298 plus mining and despawn fixes #35–#38, #45, #48 from other sessions). PRs #57–#64 are another session's. #59 shares `modCommandRegistry.java` with #11, #24, #27, #33 and #49, and #63 shares `WoodcutSkill.java` with #43; each pair test-merges cleanly (2026-11-07). A cloud session opened PRs #6–#34, #39, #40, #42–#44, #46, #47, #49–#54, #56 and drafts #41, #55 (wcfcarolina13/Frens; #45 and #48 are another session's), all unreleased, no `mod_version` bump, each with its own changelog entry right after the header (the entries conflict only textually: keep all). Each PR body names the sandbox check it needs. Full suite on each branch: only `SoulStoreTest.persistCursorFailure…` fails in the cloud (root container). PRs #2–#5 from the earlier session are untouched; a read-only review of them is summarised below.
 
