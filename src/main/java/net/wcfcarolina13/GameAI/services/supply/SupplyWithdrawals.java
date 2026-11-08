@@ -13,28 +13,39 @@ import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.GameAI.services.supply.SupplyBundlePromptPolicy.Shown;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.LineOutcome;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.LineStatus;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestLedger.Timings;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ChestKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.ItemKey;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.RequestFingerprint;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestPolicy.Verdict;
+import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.BundleRequestOutcome;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.RequestOutcome;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.RequestStatus;
 import net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.TransferOutcome;
 import net.wcfcarolina13.GameAI.services.supply.SupplyServerHop.Hop;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.BundleWhy;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.OwnerAwayMemo;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Refusal;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Scope;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.Ticket;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.TicketBook;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.TicketKey;
+import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.TicketStep;
 import net.wcfcarolina13.GameAI.services.supply.SupplyWithdrawalPolicy.TransferAction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -69,6 +80,15 @@ import java.util.function.Supplier;
  * ledger. After a request finds the owner away from the bot, the bot asks about no chest a
  * standing permission does not cover for {@link SupplyWithdrawalPolicy#OWNER_AWAY_MEMO_MS}, or
  * until the owner is back in prompt range, whichever comes first. Neither logs at INFO.
+ *
+ * <p><b>One combined ask</b> ({@link #withdrawBundle}, Bradley's ruling of 2026-10-23). A craft that
+ * lacks several things asks one chest for all of them in one prompt
+ * ({@link SupplyRequestService#requestBundle}); the owner's one answer grants or refuses the set.
+ * Each line then has its own ticket and is taken through the same {@link #redeem} as a single
+ * withdrawal, so a line already covered by a live grant is taken without a prompt and a line the
+ * owner refused recently is left out. The result carries one kind for the set
+ * ({@link SupplyWithdrawalPolicy#aggregateKinds}), a {@link BundleWhy} for the caller's next move,
+ * and every line's own result.
  *
  * <p>{@link #grantableEstimate} lets a caller count, before asking, how much of a chest's stock
  * the policy could ever grant (allowlist and reserve only; advisory). {@link #grantablePreview}
@@ -141,6 +161,101 @@ public final class SupplyWithdrawals {
         }
     }
 
+    /**
+     * One line of a bundled ask: a stack of the exact item wanted (only read), how many the bot
+     * asks for and how many it needs.
+     */
+    public record BundleAsk(ItemStack sample, int qty, int need) {
+    }
+
+    /**
+     * What {@link #withdrawBundle} achieved for the set.
+     *
+     * @param kind     one kind for the set ({@link SupplyWithdrawalPolicy#aggregateKinds})
+     * @param moved    items moved into the bot's inventory over every line
+     * @param reason   the reason of the first line that decided {@code kind}
+     * @param scope    that line's scope ({@link Scope#NONE} unless refused)
+     * @param why      for a refusal, whether the owner declined, nobody answered, or something else
+     * @param lines    every line's own result, in input order
+     * @param lineWhys every line's own why ({@link BundleWhy#NONE} unless that line was refused), in input order
+     */
+    public record BundleResult(Kind kind, int moved, String reason, Scope scope, BundleWhy why, List<Result> lines,
+                               List<BundleWhy> lineWhys) {
+        public BundleResult {
+            scope = SupplyWithdrawalPolicy.resultScope(kind, scope);
+            why = why == null ? BundleWhy.NONE : why;
+            lines = lines == null ? List.of() : List.copyOf(lines);
+            lineWhys = lineWhys == null ? List.of() : List.copyOf(lineWhys);
+        }
+
+        /** Every line refused the same way (an empty set carries the refusal itself). */
+        static BundleResult refusedAll(Result refusal, BundleWhy why, int count) {
+            if (count <= 0) {
+                return new BundleResult(refusal.kind(), 0, refusal.reason(), refusal.scope(), why, List.of(), List.of());
+            }
+            Result[] lines = new Result[count];
+            BundleWhy[] whys = new BundleWhy[count];
+            for (int i = 0; i < count; i++) {
+                lines[i] = refusal;
+                whys[i] = why;
+            }
+            return of(lines, whys);
+        }
+
+        /**
+         * {@code before} with every line the wait did not settle (waiting or ready) refused as
+         * {@code refusal}; the lines settled before the wait keep their result.
+         */
+        static BundleResult unsettledRefused(BundleResult before, Result refusal, BundleWhy why) {
+            int count = before.lines().size();
+            Result[] lines = new Result[count];
+            BundleWhy[] whys = new BundleWhy[count];
+            for (int i = 0; i < count; i++) {
+                boolean settled = SupplyWithdrawalPolicy.bundleLineSettled(before.lines().get(i).kind());
+                lines[i] = settled ? before.lines().get(i) : refusal;
+                whys[i] = settled ? before.lineWhys().get(i) : why;
+            }
+            return of(lines, whys);
+        }
+
+        /**
+         * The set's result from its lines: one kind ({@link SupplyWithdrawalPolicy#aggregateKinds}),
+         * the reason and scope of the first line of that kind, the moved total, and for a refused
+         * set the strongest why among its refused lines ({@link SupplyWithdrawalPolicy#strongerWhy}).
+         * A {@code null} line counts as {@link Refusal#INVALID}.
+         */
+        static BundleResult of(Result[] results, BundleWhy[] whys) {
+            int count = results.length;
+            List<Kind> kinds = new ArrayList<>(count);
+            List<Result> all = new ArrayList<>(count);
+            List<BundleWhy> lineWhys = new ArrayList<>(count);
+            int moved = 0;
+            BundleWhy why = BundleWhy.NONE;
+            for (int i = 0; i < count; i++) {
+                Result r = results[i] == null ? Result.refused(Refusal.INVALID) : results[i];
+                BundleWhy lineWhy = r.kind() != Kind.REFUSED ? BundleWhy.NONE
+                        : whys[i] == null || whys[i] == BundleWhy.NONE ? BundleWhy.OTHER : whys[i];
+                all.add(r);
+                kinds.add(r.kind());
+                lineWhys.add(lineWhy);
+                moved += r.moved();
+                if (r.kind() == Kind.REFUSED) {
+                    why = SupplyWithdrawalPolicy.strongerWhy(why, lineWhy);
+                }
+            }
+            Kind kind = SupplyWithdrawalPolicy.aggregateKinds(kinds);
+            Result first = all.isEmpty() ? Result.refused(Refusal.INVALID) : all.get(0);
+            for (Result r : all) {
+                if (r.kind() == kind) {
+                    first = r;
+                    break;
+                }
+            }
+            return new BundleResult(kind, moved, first.reason(), first.scope(),
+                    kind == Kind.REFUSED ? why : BundleWhy.NONE, all, lineWhys);
+        }
+    }
+
     /** One step's result, and whether it is worth an INFO line (a repeat or a quiet refusal is not). */
     private record Step(Result result, boolean quiet) {
         static Step loud(Result result) {
@@ -201,6 +316,75 @@ public final class SupplyWithdrawals {
         }
         log(outcome, bot, chestPos, sample, qty, need, purpose, effective);
         return outcome.result();
+    }
+
+    /**
+     * Takes every line of {@code lines} from the chest at {@code chestPos} into {@code bot}'s
+     * inventory after ONE prompt to the owner (see the class comment). Lines a live grant already
+     * covers are taken without asking; a line the policy refuses, or the owner refused here
+     * recently, is left out and reported in its own {@link Result}. Threading, waiting and the
+     * abort check are exactly as for {@link #withdraw}: with {@link WaitMode#UNTIL_ANSWERED} off
+     * the server thread the worker polls the ledger until the one prompt settles, then takes every
+     * granted line in one more server step. That step runs only the lines the first step left
+     * waiting or ready ({@link SupplyWithdrawalPolicy#bundleLineSettled}): a line already moved is
+     * never asked for again, and a refused line keeps its refusal. A wait that ends without the
+     * prompt settling (timeout, abort) refuses those same lines and keeps the rest.
+     *
+     * @param purpose      what the bot is making, for the prompt ("a wooden pickaxe") and the logs
+     * @param stillMissing what this chest cannot cover, named in the same prompt; may be empty
+     */
+    public static BundleResult withdrawBundle(ServerPlayerEntity bot, BlockPos chestPos, List<BundleAsk> lines,
+                                              String purpose, List<Shown> stillMissing, WaitMode mode,
+                                              BooleanSupplier abort) {
+        int count = lines == null ? 0 : lines.size();
+        MinecraftServer srv = SupplyRequestService.server();
+        boolean onServerThread = srv != null && srv.isOnThread();
+        if (mode == WaitMode.UNTIL_ANSWERED && onServerThread
+                && WARNED_WAIT_ON_SERVER_THREAD.compareAndSet(false, true)) {
+            LOGGER.warn("[supply] withdraw asked to wait for an answer on the server thread (purpose={});"
+                    + " not waiting there, this call and any like it run without waiting", purposeText(purpose));
+        }
+        WaitMode effective = SupplyWithdrawalPolicy.effectiveMode(mode, onServerThread);
+        // One step, given the step before it (null for the first): settled lines are carried, not re-run.
+        Function<BundleResult, BundleResult> oneStep = before -> abort != null && abort.getAsBoolean()
+                ? refusedAfter(before, Refusal.ABORTED, count)
+                : bundleStep(bot, chestPos, lines, purpose, stillMissing, before);
+        BundleResult outcome;
+        if (srv == null || count == 0) {
+            outcome = BundleResult.refusedAll(Result.refused(count == 0 ? Refusal.INVALID : Refusal.NOT_RUNNING),
+                    BundleWhy.OTHER, count);
+        } else {
+            Function<Refusal, BundleResult> refused = r -> refusedAfter(null, r, count);
+            outcome = onServer(srv, () -> oneStep.apply(null), refused);
+            if (effective == WaitMode.UNTIL_ANSWERED && outcome.kind() == Kind.WAITING) {
+                BundleResult before = outcome;
+                Function<Refusal, BundleResult> refusedUnsettled = r -> refusedAfter(before, r, count);
+                outcome = awaitAnswer(srv, bot, abort, () -> onServer(srv, () -> oneStep.apply(before), refusedUnsettled),
+                        refusedUnsettled);
+            }
+        }
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info("[supply] withdraw-bundle bot={} chest={} lines={} purpose={} mode={} result={} moved={}"
+                            + " reason={} scope={} why={}",
+                    bot == null ? "-" : bot.getName().getString(),
+                    chestPos == null ? "-" : chestPos.getX() + "," + chestPos.getY() + "," + chestPos.getZ(),
+                    bundleText(lines), purposeText(purpose), effective, outcome.kind(), outcome.moved(),
+                    outcome.reason(), outcome.scope(), outcome.why());
+        }
+        return outcome;
+    }
+
+    /**
+     * A bundle refused as {@code refusal} by the facade itself (hop failed, timeout, abort): every
+     * line when there was no step before, else only the lines that step left unsettled. A timeout
+     * is nobody's answer; the rest is {@link BundleWhy#OTHER}.
+     */
+    private static BundleResult refusedAfter(BundleResult before, Refusal refusal, int count) {
+        BundleWhy why = refusal == Refusal.TIMEOUT ? BundleWhy.NO_ANSWER : BundleWhy.OTHER;
+        Result refused = Result.refused(refusal);
+        return before == null || before.lines().size() != count
+                ? BundleResult.refusedAll(refused, why, count)
+                : BundleResult.unsettledRefused(before, refused, why);
     }
 
     /**
@@ -393,6 +577,167 @@ public final class SupplyWithdrawals {
     }
 
     /**
+     * One server-thread step of a bundle: per line, the same ticket logic as {@link #step}
+     * (redeem a covered ticket, wait on a pending one, drop a lapsed one); then ONE
+     * {@link SupplyRequestService#requestBundle} for every line still without a ticket, whose
+     * per-line outcomes become tickets (asked: wait; covered: take now) or refusals.
+     *
+     * @param before the step before the wait, or {@code null} for the first step: a line it settled
+     *               ({@link SupplyWithdrawalPolicy#bundleLineSettled}) keeps that result here and
+     *               is neither redeemed nor asked for again
+     */
+    private static BundleResult bundleStep(ServerPlayerEntity bot, BlockPos chestPos, List<BundleAsk> lines,
+                                           String purpose, List<Shown> stillMissing, BundleResult before) {
+        int count = lines.size();
+        List<Result> carried = before != null && before.lines().size() == count ? before.lines() : null;
+        SupplyRequestPolicy.Config config = SupplyRequestService.config();
+        if (TaskService.isServerStopping() || !SupplyRequestService.isRunning() || config == null) {
+            return refusedAfter(before, Refusal.NOT_RUNNING, count);
+        }
+        if (bot == null || bot.isRemoved()) {
+            return refusedAfter(before, Refusal.BOT_GONE, count);
+        }
+        if (chestPos == null) {
+            return refusedAfter(before, Refusal.INVALID, count);
+        }
+        UUID owner = CompanionCommunicationPolicy.resolveOwnerUuid(bot);
+        if (owner == null) {
+            return refusedAfter(before, Refusal.NO_OWNER, count);
+        }
+        ServerWorld world = bot.getEntityWorld();
+        ChestKey chestKey = SupplyRequestService.chestKeyAt(world, chestPos);
+        if (chestKey == null) {
+            return refusedAfter(before, Refusal.CHEST_UNREADABLE, count);
+        }
+        UUID botId = bot.getUuid();
+        long now = System.currentTimeMillis();
+        boolean pending = SupplyRequestService.isPending(botId);
+        Result[] results = new Result[count];
+        BundleWhy[] whys = new BundleWhy[count];
+        List<BundleAsk> toRequest = new ArrayList<>();
+        List<Integer> toRequestAt = new ArrayList<>();
+        List<ItemKey> toRequestItems = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            BundleAsk ask = lines.get(i);
+            whys[i] = BundleWhy.OTHER;
+            if (carried != null && SupplyWithdrawalPolicy.bundleLineSettled(carried.get(i).kind())) {
+                // Moved before the wait (the bot holds it: asking again would open a new prompt) or
+                // refused before it: this step is for the lines the one answer was about.
+                results[i] = carried.get(i);
+                whys[i] = before.lineWhys().get(i);
+                continue;
+            }
+            if (ask == null || ask.sample() == null || ask.sample().isEmpty() || ask.qty() <= 0 || ask.need() <= 0) {
+                results[i] = Result.refused(Refusal.INVALID);
+                continue;
+            }
+            ItemKey item = SupplyRequestService.itemKeyOf(world, ask.sample());
+            Verdict verdict = SupplyRequestPolicy.classify(item, config);
+            Scope preFilter = SupplyWithdrawalPolicy.preFilterScope(verdict);
+            if (preFilter != Scope.NONE) {
+                results[i] = Result.refused("INELIGIBLE(" + verdict + ")", preFilter);
+                continue;
+            }
+            Ticket ticket = TICKETS.find(botId, TicketKey.of(chestKey, item), now, SupplyRequestService.timings());
+            boolean permitted = ticket != null && SupplyRequestService.isPermitted(ticket.fp());
+            TicketStep ticketStep = SupplyWithdrawalPolicy.ticketStep(ticket != null, pending, permitted);
+            switch (ticketStep) {
+                case REDEEM -> results[i] = redeem(bot, world, chestPos, ticket, ask.need()).result();
+                case WAIT -> results[i] = new Result(Kind.WAITING, 0, "PENDING", Scope.NONE);
+                case DROP_NOT_PERMITTED -> {
+                    TICKETS.drop(ticket);
+                    results[i] = Result.refused(Refusal.NOT_PERMITTED);
+                    // An explicit No left this line on the ledger's reject cooldown; a lapsed prompt did not.
+                    whys[i] = SupplyWithdrawalPolicy.bundleWhyOfTicket(ticketStep,
+                            SupplyRequestService.isRejectCoolingDown(botId, chestKey, item.itemId()));
+                }
+                case OTHER_PENDING -> results[i] = Result.refused(Refusal.OTHER_REQUEST_PENDING);
+                case REQUEST -> {
+                    toRequest.add(ask);
+                    toRequestAt.add(i);
+                    toRequestItems.add(item);
+                }
+                default -> results[i] = Result.refused(Refusal.INVALID);
+            }
+        }
+        if (!toRequest.isEmpty()) {
+            boolean notedAway = OWNER_AWAY.isAway(botId, now);
+            boolean covered = false;
+            if (notedAway) {
+                covered = SupplyRequestService.hasAlways(owner, chestKey);
+                for (ItemKey item : toRequestItems) {
+                    covered |= SupplyRequestService.isPermitted(new RequestFingerprint(owner, botId, chestKey, item, 1));
+                }
+            }
+            switch (SupplyWithdrawalPolicy.ownerAwayStep(notedAway, covered,
+                    notedAway && SupplyRequestService.isOwnerInPromptRange(bot, owner))) {
+                case REFUSE_QUIETLY -> {
+                    for (int at : toRequestAt) {
+                        results[at] = Result.refused(Refusal.OWNER_NOT_NEARBY);
+                    }
+                    toRequest.clear();
+                }
+                case FORGET_AND_ASK -> OWNER_AWAY.forget(botId);
+                case ASK -> {
+                }
+            }
+        }
+        if (!toRequest.isEmpty()) {
+            BundleRequestOutcome asked = SupplyRequestService.requestBundle(bot, chestPos, toRequest, purpose,
+                    stillMissing);
+            // The service merges lines naming the same exact item, so its outcomes are found by item, not index.
+            Map<ItemKey, LineOutcome> outcomes = new HashMap<>();
+            for (LineOutcome line : asked.lines()) {
+                if (line != null && line.requested() != null) {
+                    outcomes.putIfAbsent(line.requested().item(), line);
+                }
+            }
+            switch (SupplyWithdrawalPolicy.onRequest(asked.status())) {
+                case TAKE, WAIT -> {
+                    for (int n = 0; n < toRequestAt.size(); n++) {
+                        int at = toRequestAt.get(n);
+                        LineOutcome line = outcomes.get(toRequestItems.get(n));
+                        if (line == null) {
+                            results[at] = Result.refused(asked.status().name(), Scope.BUSY);
+                            continue;
+                        }
+                        switch (line.status()) {
+                            case ASKED -> {
+                                Ticket ticket = TICKETS.record(line.approved(), now);
+                                results[at] = asked.status() == RequestStatus.OPENED
+                                        ? new Result(Kind.WAITING, 0, "ASKED", Scope.NONE)
+                                        : redeem(bot, world, chestPos, ticket, toRequest.get(n).need()).result();
+                            }
+                            case COVERED_BY_GRANT -> results[at] = redeem(bot, world, chestPos,
+                                    TICKETS.record(line.approved(), now), toRequest.get(n).need()).result();
+                            case REJECT_COOLDOWN -> {
+                                results[at] = Result.refused(LineStatus.REJECT_COOLDOWN.name(),
+                                        SupplyWithdrawalPolicy.requestScope(RequestStatus.REJECT_COOLDOWN, null, null));
+                                whys[at] = BundleWhy.OWNER_DECLINED;
+                            }
+                            case INELIGIBLE -> results[at] = Result.refused("INELIGIBLE(" + line.verdict() + ")",
+                                    SupplyWithdrawalPolicy.verdictScope(line.verdict()));
+                        }
+                    }
+                }
+                case REFUSE -> {
+                    if (asked.status() == RequestStatus.OWNER_NOT_NEARBY) {
+                        OWNER_AWAY.noteAway(botId, now);
+                    }
+                    Result refusal = Result.refused(asked.logText(),
+                            SupplyWithdrawalPolicy.requestScope(asked.status(), asked.access(), null));
+                    BundleWhy why = SupplyWithdrawalPolicy.bundleWhyOfRequest(asked.status());
+                    for (int at : toRequestAt) {
+                        results[at] = refusal;
+                        whys[at] = why;
+                    }
+                }
+            }
+        }
+        return BundleResult.of(results, whys);
+    }
+
+    /**
      * After items left a chest one of this bot's owner's bots placed, refresh its registry
      * snapshot, as {@code ChestStoreService}'s transfer did after every withdrawal. Only for a
      * recorded chest: {@code updateContentsSnapshot} rewrites the registry file even when no
@@ -427,13 +772,18 @@ public final class SupplyWithdrawals {
      * that started is waited for, since its items may already have moved).
      */
     private static Step onServer(MinecraftServer srv, Supplier<Step> body) {
-        Hop<Step> hop = SupplyServerHop.hop(srv, body, HOP_TIMEOUT_MS);
+        return onServer(srv, body, r -> Step.loud(Result.refused(r)));
+    }
+
+    /** {@link #onServer(MinecraftServer, Supplier)} for any step shape; {@code refused} builds a hop's refusal. */
+    private static <T> T onServer(MinecraftServer srv, Supplier<T> body, Function<Refusal, T> refused) {
+        Hop<T> hop = SupplyServerHop.hop(srv, body, HOP_TIMEOUT_MS);
         return switch (hop.status()) {
             case DONE -> hop.value();
-            case NOT_RUNNING -> Step.loud(Result.refused(Refusal.NOT_RUNNING));
-            case TIMED_OUT, UNFINISHED -> Step.loud(Result.refused(Refusal.SERVER_BUSY));
-            case INTERRUPTED -> Step.loud(Result.refused(Refusal.ABORTED));
-            case FAILED -> Step.loud(Result.refused(Refusal.ERROR));
+            case NOT_RUNNING -> refused.apply(Refusal.NOT_RUNNING);
+            case TIMED_OUT, UNFINISHED -> refused.apply(Refusal.SERVER_BUSY);
+            case INTERRUPTED -> refused.apply(Refusal.ABORTED);
+            case FAILED -> refused.apply(Refusal.ERROR);
         };
     }
 
@@ -444,6 +794,15 @@ public final class SupplyWithdrawals {
      */
     private static Step awaitAnswer(MinecraftServer srv, ServerPlayerEntity bot, BooleanSupplier abort,
                                     Supplier<Step> oneStep) {
+        return awaitAnswer(srv, bot, abort, () -> onServer(srv, oneStep), r -> Step.loud(Result.refused(r)));
+    }
+
+    /**
+     * The wait itself, for any step shape: {@code settle} runs the one more step once the prompt is
+     * no longer pending, {@code refused} builds the timeout or abort result. Worker thread only.
+     */
+    private static <T> T awaitAnswer(MinecraftServer srv, ServerPlayerEntity bot, BooleanSupplier abort,
+                                     Supplier<T> settle, Function<Refusal, T> refused) {
         Timings timings = SupplyRequestService.timings();
         UUID botId = bot.getUuid();
         long startedAt = System.currentTimeMillis();
@@ -457,11 +816,11 @@ public final class SupplyWithdrawals {
             switch (SupplyWithdrawalPolicy.keepWaiting(aborted, pending, startedAt, System.currentTimeMillis(),
                     timings)) {
                 case SETTLED:
-                    return onServer(srv, oneStep);
+                    return settle.get();
                 case TIMED_OUT:
-                    return Step.loud(Result.refused(Refusal.TIMEOUT));
+                    return refused.apply(Refusal.TIMEOUT);
                 case ABORTED:
-                    return Step.loud(Result.refused(Refusal.ABORTED));
+                    return refused.apply(Refusal.ABORTED);
                 case KEEP_WAITING:
                 default:
                     break;
@@ -470,7 +829,7 @@ public final class SupplyWithdrawals {
                 Thread.sleep(POLL_INTERVAL_MS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return Step.loud(Result.refused(Refusal.ABORTED));
+                return refused.apply(Refusal.ABORTED);
             }
         }
     }
@@ -516,5 +875,24 @@ public final class SupplyWithdrawals {
 
     private static String purposeText(String purpose) {
         return purpose == null || purpose.isBlank() ? "-" : purpose;
+    }
+
+    /** {@code minecraft:oak_log x2,minecraft:stick x2}, for the one log line per bundle call. */
+    private static String bundleText(List<BundleAsk> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return "-";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (BundleAsk ask : lines) {
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            if (ask == null || ask.sample() == null || ask.sample().isEmpty()) {
+                sb.append('-');
+            } else {
+                sb.append(Registries.ITEM.getId(ask.sample().getItem())).append('x').append(ask.qty());
+            }
+        }
+        return sb.toString();
     }
 }

@@ -1210,6 +1210,7 @@ public final class BotGuideScreen extends Screen {
                         "Mines a straight tunnel for ores and stone resources.",
                         List.of(
                                 "Use +/- to set desired tunnel length.",
+                                "Then face the way to dig and press the Go To key (- by default) to start.",
                                 "The bot should refuse impossible or unsafe tool scenarios."
                         ),
                         "bot skill stripmine <length> " + target,
@@ -1223,6 +1224,7 @@ public final class BotGuideScreen extends Screen {
                         "Climbs upward by a block count or until surface sky.",
                         List.of(
                                 "Use +/- for block count.",
+                                "Then press the Go To key (- by default) to start.",
                         "Use the ☀ toggle in Actions to turn Surface mode on/off."
                         ),
                         "bot skill mining ascent <blocks|surface> " + target,
@@ -1236,6 +1238,7 @@ public final class BotGuideScreen extends Screen {
                         "Digs downward by a selected block count.",
                         List.of(
                                 "Use +/- to set depth target.",
+                                "Then face the way to dig and press the Go To key (- by default) to start.",
                                 "Good for controlled shaft digging with oversight."
                         ),
                         "bot skill mining descent <blocks> " + target,

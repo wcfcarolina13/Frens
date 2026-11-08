@@ -83,6 +83,8 @@ public final class GroupChatHint {
                             Files.createDirectories(destination.getParent());
                             Path temporary = destination.resolveSibling(destination.getFileName() + ".tmp");
                             Files.write(temporary, snapshot);
+                            // Player UUIDs: owner-only where the file system allows (never fails the save).
+                            net.wcfcarolina13.GameAI.services.StoreFileModePolicy.restrictToOwner(temporary);
                             Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                                     java.nio.file.StandardCopyOption.ATOMIC_MOVE);
                         } catch (java.io.IOException ex) {
@@ -90,7 +92,7 @@ public final class GroupChatHint {
                         }
                     });
                 }));
-        ServerTickEvents.END_SERVER_TICK.register(GroupChatHint::tick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.TickGuard.endTick("GroupChatHint::tick", GroupChatHint::tick));
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             // DISCONNECT can fire on a Netty IO thread while tick() iterates these plain
             // collections on the server thread — hop over so only the server thread touches them.

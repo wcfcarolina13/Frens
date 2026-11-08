@@ -54,7 +54,6 @@ public final class BotPersistenceService {
     private static final Method LOAD_PLAYER_DATA = resolveManagerHook("loadPlayerData", "loadPlayerData", "method_14600");
     private static final Method SAVE_PLAYER_DATA = resolveManagerHook("savePlayerData", "savePlayerData", "method_14577");
     private static final Constructor<?> PLAYER_CONFIG_ENTRY_CONSTRUCTOR = resolvePlayerConfigEntryConstructor();
-    private static final Method REMOVE_PLAYER = resolveManagerHook("remove", "removePlayer", "method_2984", "method_14576"); // Common obfuscated name for PlayerManager#remove
 
     private static final ConcurrentMap<UUID, Integer> LAST_SAVE_TICK = new ConcurrentHashMap<>();
     private static final ConcurrentMap<UUID, Long> RESTORE_SEQUENCE = new ConcurrentHashMap<>();
@@ -375,15 +374,19 @@ public final class BotPersistenceService {
                 continue;
             }
             active.add(player.getUuid());
-            BotWorldStateService.saveState(player); // keep last-known position fresh
-            int last = LAST_SAVE_TICK.getOrDefault(player.getUuid(), Integer.MIN_VALUE);
-            if (currentTick - last >= AUTOSAVE_INTERVAL_TICKS) {
-                if (persistViaPlayerManager(server, player, "autosave")) {
-                    BotInventoryStorageService.save(player);
-                    BotWorldStateService.saveState(player);
-                    LAST_SAVE_TICK.put(player.getUuid(), currentTick);
+            // One bot's failure must not skip the autosave of the bots after it, the
+            // LAST_SAVE_TICK prune or the mount autosave below.
+            net.wcfcarolina13.TickGuard.perBot("BotPersistenceService::onServerTick", player, () -> {
+                BotWorldStateService.saveState(player); // keep last-known position fresh
+                int last = LAST_SAVE_TICK.getOrDefault(player.getUuid(), Integer.MIN_VALUE);
+                if (currentTick - last >= AUTOSAVE_INTERVAL_TICKS) {
+                    if (persistViaPlayerManager(server, player, "autosave")) {
+                        BotInventoryStorageService.save(player);
+                        BotWorldStateService.saveState(player);
+                        LAST_SAVE_TICK.put(player.getUuid(), currentTick);
+                    }
                 }
-            }
+            });
         }
 
         LAST_SAVE_TICK.keySet().retainAll(active);
@@ -725,53 +728,26 @@ public final class BotPersistenceService {
         if (server == null || bot == null) {
             return false;
         }
-        if (REMOVE_PLAYER != null) {
+        // Direct call (Loom remaps it). The old reflective lookup matched the yarn name "remove"
+        // in dev only; in a release jar it fell through to "method_14576", which is
+        // PlayerManager#sendCommandTree (remove is method_14611), so the bot was never taken
+        // out of playerMap. FakeClientConnection.handleDisconnection is a no-op, so kill()'s
+        // scheduled disconnect never reaches PlayerManager#remove either: this is the only removal.
+        net.minecraft.server.PlayerManager manager = server.getPlayerManager();
+        if (BotRemovalPolicy.shouldCallVanillaRemove(manager.getPlayer(bot.getUuid()) == bot,
+                manager.getPlayerList().contains(bot))) {
             try {
-                REMOVE_PLAYER.invoke(server.getPlayerManager(), bot);
+                manager.remove(bot);
             } catch (Exception e) {
                 LOGGER.warn("Failed to remove fakeplayer '{}' from PlayerManager: {}", bot.getName().getString(), e.getMessage());
             }
-        } else {
-            LOGGER.warn("Unable to remove fakeplayer '{}': PlayerManager#remove method not resolved.", bot.getName().getString());
         }
 
-        boolean removed = server.getPlayerManager().getPlayer(bot.getUuid()) == null
-                && !server.getPlayerManager().getPlayerList().contains(bot);
-        if (removed) {
+        boolean present = BotRemovalPolicy.isStillRegistered(manager.getPlayer(bot.getUuid()) == bot,
+                manager.getPlayerList().contains(bot));
+        if (!present) {
             LOGGER.info("Removed fakeplayer '{}' from PlayerManager.", bot.getName().getString());
             return true;
-        }
-
-        try {
-            boolean listRemoved = server.getPlayerManager().getPlayerList().remove(bot);
-            if (listRemoved && server.getPlayerManager().getPlayer(bot.getUuid()) == null) {
-                LOGGER.info("Removed fakeplayer '{}' from PlayerManager player list.", bot.getName().getString());
-                return true;
-            }
-        } catch (Exception ignored) {
-        }
-
-        // Fallback attempt: find any method that looks like a removal hook for this runtime.
-        for (Method method : server.getPlayerManager().getClass().getMethods()) {
-            if (method.getParameterCount() != 1) {
-                continue;
-            }
-            if (!method.getName().toLowerCase().contains("remove")) {
-                continue;
-            }
-            if (!method.getParameterTypes()[0].isAssignableFrom(bot.getClass())
-                    && !method.getParameterTypes()[0].isAssignableFrom(ServerPlayerEntity.class)) {
-                continue;
-            }
-            try {
-                method.invoke(server.getPlayerManager(), bot);
-                if (server.getPlayerManager().getPlayer(bot.getUuid()) == null
-                        && !server.getPlayerManager().getPlayerList().contains(bot)) {
-                    LOGGER.info("Removed fakeplayer '{}' from PlayerManager using fallback method {}.", bot.getName().getString(), method.getName());
-                    return true;
-                }
-            } catch (Exception ignored) {
-            }
         }
 
         LOGGER.warn("Fakeplayer '{}' still present after removal attempt.", bot.getName().getString());

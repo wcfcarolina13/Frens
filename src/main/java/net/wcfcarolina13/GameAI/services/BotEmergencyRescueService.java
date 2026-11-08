@@ -119,6 +119,22 @@ public final class BotEmergencyRescueService {
     private static final Map<String, PendingArrival> PENDING_ARRIVALS = new ConcurrentHashMap<>();
     private static final Map<UUID, EscortHudNotice> PENDING_ESCORT_HUD = new ConcurrentHashMap<>();
 
+    /**
+     * Rescue cooldowns and pending arrivals.
+     * Called at SERVER_STOPPED: a singleplayer quit keeps static state, the next world's server
+     * restarts its tick counter at 0 and the same bots keep their UUIDs, so tick-based gates from
+     * the old world would hold back behaviour for as long as that world had run.
+     */
+    public static void resetSession() {
+        DIRE_UNTIL_TICK.clear();
+        NEXT_RESCUE_ATTEMPT_TICK.clear();
+        RESCUE_COOLDOWN_UNTIL_TICK.clear();
+        TELEPORT_RESCUE_COOLDOWN_UNTIL_TICK.clear();
+        PENDING_ARRIVALS.clear();
+        PENDING_ESCORT_HUD.clear();
+    }
+
+
     private BotEmergencyRescueService() {
     }
 

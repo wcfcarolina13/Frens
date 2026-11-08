@@ -131,26 +131,36 @@ public final class OllamaModelInstaller {
     private static String baseUrl() {
         ManualConfig cfg = Frens.CONFIG;
         String url = cfg != null ? cfg.getOllamaBaseUrl() : null;
-        return (url == null || url.isBlank()) ? "http://127.0.0.1:11434" : url.trim();
+        return (url == null || url.isBlank()) ? OllamaEndpointPolicy.DEFAULT_BASE_URL : url.trim();
     }
 
     // ── Detection ────────────────────────────────────────────────────────────
 
+    /**
+     * Never throws for a bad base URL: the manager screen's detect thread stores the result and
+     * flips its phase, so an escaping exception (a {@code file:} URL used to raise a
+     * {@code ClassCastException} out of {@code openConnection()}) left it spinning in DETECTING
+     * for good. A rejected scheme or any runtime failure now reads as unreachable.
+     */
     public static Status detect() {
         String base = baseUrl();
         boolean reachable = false;
         String version = "";
         List<InstalledModel> installed = new ArrayList<>();
-        try {
-            JsonNode v = getJson(base + "/api/version", 4_000);
-            version = v.path("version").asText("");
-            reachable = true;
-            JsonNode tags = getJson(base + "/api/tags", 6_000);
-            for (JsonNode m : tags.path("models")) {
-                installed.add(new InstalledModel(m.path("name").asText(""), m.path("size").asLong(0)));
+        if (!OllamaEndpointPolicy.isHttpUrl(base)) {
+            LOGGER.warn("[souls] ollama base url rejected ({}): {}", OllamaEndpointPolicy.SCHEME_ERROR, base);
+        } else {
+            try {
+                JsonNode v = getJson(OllamaEndpointPolicy.endpoint(base, "/api/version"), 4_000);
+                version = v.path("version").asText("");
+                reachable = true;
+                JsonNode tags = getJson(OllamaEndpointPolicy.endpoint(base, "/api/tags"), 6_000);
+                for (JsonNode m : tags.path("models")) {
+                    installed.add(new InstalledModel(m.path("name").asText(""), m.path("size").asLong(0)));
+                }
+            } catch (IOException | RuntimeException e) {
+                LOGGER.info("[souls] ollama not reachable at {}: {}", base, e.toString());
             }
-        } catch (IOException e) {
-            LOGGER.info("[souls] ollama not reachable at {}: {}", base, e.toString());
         }
 
         long totalRam = -1L;
@@ -181,8 +191,10 @@ public final class OllamaModelInstaller {
      * is safely retryable. Throws with a user-showable message on failure.
      */
     public static void pull(String tag, Progress progress) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) URI.create(baseUrl() + "/api/pull")
-                .toURL().openConnection();
+        // endpoint() rejects a non-HTTP base with a user-showable IllegalArgumentException, which
+        // pullAsync reports as the job's failure text.
+        HttpURLConnection conn = (HttpURLConnection) URI.create(
+                OllamaEndpointPolicy.endpoint(baseUrl(), "/api/pull")).toURL().openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
         conn.setRequestProperty("Content-Type", "application/json");

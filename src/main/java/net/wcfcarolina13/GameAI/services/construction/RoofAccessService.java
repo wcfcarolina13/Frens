@@ -43,13 +43,15 @@ public final class RoofAccessService {
     /**
      * Per-bot tracking of roof access pillars.
      */
-    private static final Map<UUID, List<RoofAccessPillar>> roofPillars = new HashMap<>();
+    private static final Map<UUID, List<RoofAccessPillar>> roofPillars = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * Get roof pillar tracking for a bot.
      */
     public static List<RoofAccessPillar> getRoofPillars(ServerPlayerEntity bot) {
-        return roofPillars.computeIfAbsent(bot.getUuid(), k -> new ArrayList<>());
+        // Copy-on-write: an aborted build worker can still be tearing a pillar down while the next
+        // build for the same bot starts on a new worker.
+        return roofPillars.computeIfAbsent(bot.getUuid(), k -> new java.util.concurrent.CopyOnWriteArrayList<>());
     }
 
     /**
@@ -135,7 +137,8 @@ public final class RoofAccessService {
             return false;
         }
 
-        List<RoofAccessPillar> pillars = getRoofPillars(bot);
+        // A snapshot: another worker for this bot may remove a pillar between a size check and a read.
+        List<RoofAccessPillar> pillars = new ArrayList<>(getRoofPillars(bot));
         
         // If we have a tracked pillar, use it to descend
         if (!pillars.isEmpty()) {

@@ -56,37 +56,44 @@ class SupplyEntryPointTest {
     /** The only files that may name request/transferNow. */
     private static final Set<String> ENTRY_POINT_FILES = Set.of(SUPPLY_DIR + SERVICE, SUPPLY_DIR + FACADE);
     /** The facade's whole public static surface. */
-    private static final Set<String> FACADE_PUBLIC_STATICS = Set.of("withdraw", "grantableEstimate", "grantablePreview");
+    private static final Set<String> FACADE_PUBLIC_STATICS = Set.of("withdraw", "withdrawBundle", "grantableEstimate",
+            "grantablePreview");
     private static final String ROUTED =
             "supplies Phase 3 routes automatic withdrawals through SupplyWithdrawals: ";
 
     /** A call or method reference to request/transferNow qualified by the service's name. */
     private static final Pattern QUALIFIED_USE =
-            Pattern.compile("SupplyRequestService\\s*(?:\\.|::)\\s*(?:request|transferNow)\\b");
+            Pattern.compile("SupplyRequestService\\s*(?:\\.|::)\\s*(?:request|requestBundle|transferNow)\\b");
     private static final Pattern QUALIFIED_REQUEST_CALL = Pattern.compile("SupplyRequestService\\s*\\.\\s*request\\s*\\(");
     private static final Pattern QUALIFIED_TRANSFER_CALL =
             Pattern.compile("SupplyRequestService\\s*\\.\\s*transferNow\\s*\\(");
+    private static final Pattern QUALIFIED_BUNDLE_CALL =
+            Pattern.compile("SupplyRequestService\\s*\\.\\s*requestBundle\\s*\\(");
     /** A static import that would let either be called unqualified. */
     private static final Pattern STATIC_IMPORT =
-            Pattern.compile("import\\s+static\\s+[\\w.]*SupplyRequestService\\s*\\.\\s*(?:\\*|request\\b|transferNow\\b)");
+            Pattern.compile("import\\s+static\\s+[\\w.]*SupplyRequestService\\s*\\.\\s*(?:\\*|request\\b|requestBundle\\b|transferNow\\b)");
     /** transferNow is unique to the service; any mention elsewhere is a use. */
     private static final Pattern TRANSFER_NOW = Pattern.compile("\\btransferNow\\b");
     private static final Pattern BARE_REQUEST_CALL = Pattern.compile("(?<![\\w.])request\\s*\\(");
+    private static final Pattern BARE_BUNDLE_CALL = Pattern.compile("(?<![\\w.])requestBundle\\s*\\(");
     private static final Pattern TRANSFER_NOW_CALL = Pattern.compile("\\btransferNow\\s*\\(");
-    private static final Pattern SELF_REFERENCE = Pattern.compile("::\\s*(?:request|transferNow)\\b");
+    private static final Pattern SELF_REFERENCE = Pattern.compile("::\\s*(?:request|requestBundle|transferNow)\\b");
 
     /** Any mention of the private bodies: a call, a method reference or a name in a string. */
     private static final Pattern EVALUATE_REQUEST = Pattern.compile("\\bevaluateRequest\\b");
     private static final Pattern EVALUATE_TRANSFER = Pattern.compile("\\bevaluateTransfer\\b");
-    private static final Pattern EVALUATE_ANY = Pattern.compile("\\bevaluate(?:Request|Transfer)\\b");
+    private static final Pattern EVALUATE_BUNDLE = Pattern.compile("\\bevaluateBundleRequest\\b");
+    private static final Pattern EVALUATE_ANY = Pattern.compile("\\bevaluate(?:Request|BundleRequest|Transfer)\\b");
     /** The one permitted call of each body: the first statement of its public entry point. */
     private static final Pattern REQUEST_PINNED_CALL = Pattern.compile(
             "public static RequestOutcome request\\([^)]*\\)\\s*\\{\\s*RequestOutcome\\s+outcome\\s*=\\s*evaluateRequest\\s*\\(");
     private static final Pattern TRANSFER_PINNED_CALL = Pattern.compile(
             "public static TransferOutcome transferNow\\([^)]*\\)\\s*\\{\\s*TransferResult\\s+result\\s*=\\s*evaluateTransfer\\s*\\(");
+    private static final Pattern BUNDLE_PINNED_CALL = Pattern.compile(
+            "public static BundleRequestOutcome requestBundle\\([^)]*\\)\\s*\\{\\s*BundleRequestOutcome\\s+outcome\\s*=\\s*evaluateBundleRequest\\s*\\(");
     /** A string literal that is exactly one of the four method names, as reflection would pass it. */
     private static final Pattern REFLECTIVE_NAME =
-            Pattern.compile("\"\\s*(?:request|transferNow|evaluateRequest|evaluateTransfer)\\s*\"");
+            Pattern.compile("\"\\s*(?:request|requestBundle|transferNow|evaluateRequest|evaluateBundleRequest|evaluateTransfer)\\s*\"");
     private static final Pattern NAMES_THE_SERVICE = Pattern.compile("\\bSupplyRequestService\\b");
 
     /**
@@ -153,6 +160,8 @@ class SupplyEntryPointTest {
         assertTrue(service.contains("public static RequestOutcome request("), "request( declaration moved or renamed");
         assertTrue(service.contains("public static TransferOutcome transferNow("),
                 "transferNow( declaration moved or renamed");
+        assertTrue(service.contains("public static BundleRequestOutcome requestBundle("),
+                "requestBundle( declaration moved or renamed");
     }
 
     @Test
@@ -179,6 +188,7 @@ class SupplyEntryPointTest {
         assertTrue(QUALIFIED_REQUEST_CALL.matcher(facade).find(), "the scan must see the facade's real request( call");
         assertTrue(QUALIFIED_TRANSFER_CALL.matcher(facade).find(),
                 "the scan must see the facade's real transferNow( call");
+        assertTrue(QUALIFIED_BUNDLE_CALL.matcher(facade).find(), "the scan must see the facade's real requestBundle( call");
         assertFalse(EVALUATE_ANY.matcher(facade).find(), "the facade goes through the entry points, not their bodies");
         assertFalse(STATIC_IMPORT.matcher(facade).find(), "the facade names the service on every call");
     }
@@ -188,7 +198,8 @@ class SupplyEntryPointTest {
         String facade = sources.get(SUPPLY_DIR + FACADE);
         assertNotNull(facade);
         assertEquals(FACADE_PUBLIC_STATICS, publicStaticMethods(facade),
-                ROUTED + "a public static beside withdraw/grantableEstimate/grantablePreview could pass request(/transferNow( through");
+                ROUTED + "a public static beside withdraw/withdrawBundle/grantableEstimate/grantablePreview could pass"
+                        + " request(/requestBundle(/transferNow( through");
         // The preview is advisory: it reaches neither entry point.
         int at = facade.indexOf("public static int grantablePreview(");
         assertTrue(at >= 0, "grantablePreview not found in the facade");
@@ -273,7 +284,8 @@ class SupplyEntryPointTest {
         assertNotNull(service);
         assertEquals(1, count(BARE_REQUEST_CALL, service), "request( must appear only as its declaration");
         assertEquals(1, count(TRANSFER_NOW_CALL, service), "transferNow( must appear only as its declaration");
-        assertFalse(SELF_REFERENCE.matcher(service).find(), "no method reference to request/transferNow");
+        assertEquals(1, count(BARE_BUNDLE_CALL, service), "requestBundle( must appear only as its declaration");
+        assertFalse(SELF_REFERENCE.matcher(service).find(), "no method reference to request/requestBundle/transferNow");
     }
 
     @Test
@@ -290,6 +302,11 @@ class SupplyEntryPointTest {
                 "evaluateTransfer may be named only by its declaration and its one call in transferNow(");
         assertEquals(1, count(REQUEST_PINNED_CALL, service), "request( must open by calling evaluateRequest(");
         assertEquals(1, count(TRANSFER_PINNED_CALL, service), "transferNow( must open by calling evaluateTransfer(");
+        assertTrue(service.contains("private static BundleRequestOutcome evaluateBundleRequest("),
+                "evaluateBundleRequest( declaration moved, renamed or made non-private");
+        assertEquals(2, count(EVALUATE_BUNDLE, service),
+                "evaluateBundleRequest may be named only by its declaration and its one call in requestBundle(");
+        assertEquals(1, count(BUNDLE_PINNED_CALL, service), "requestBundle( must open by calling evaluateBundleRequest(");
     }
 
     @Test
@@ -314,6 +331,16 @@ class SupplyEntryPointTest {
         assertTrue(TRANSFER_NOW.matcher("service.transferNow(bot, pos, fp, 2)").find());
         assertFalse(QUALIFIED_USE.matcher("SupplyRequestService.register(); SupplyRequestService.answer(p, id, c);").find());
         assertFalse(QUALIFIED_USE.matcher("SupplyRequestService.requestCount()").find());
+        assertTrue(QUALIFIED_USE.matcher("SupplyRequestService.requestBundle(bot, pos, lines, p, m);").find());
+        assertTrue(QUALIFIED_BUNDLE_CALL.matcher("x = SupplyRequestService . requestBundle (bot, pos, lines, p, m);").find());
+        assertFalse(QUALIFIED_BUNDLE_CALL.matcher("SupplyRequestService.requestBundles()").find());
+        assertEquals(1, count(BARE_BUNDLE_CALL, "static BundleRequestOutcome requestBundle(ServerPlayerEntity bot) { }"));
+        assertEquals(0, count(BARE_BUNDLE_CALL, "LOGGER.info(\"[supply] request-bundle bot={}\"); x.requestBundle(1);"));
+        assertTrue(EVALUATE_ANY.matcher("BundleRequestOutcome o = evaluateBundleRequest(bot, pos, lines, p, m);").find());
+        assertTrue(BUNDLE_PINNED_CALL.matcher("public static BundleRequestOutcome requestBundle(ServerPlayerEntity bot, BlockPos chestPos, List<BundleAsk> lines,\n"
+                + "        String purpose, List<Shown> stillMissing) {\n"
+                + "    BundleRequestOutcome outcome = evaluateBundleRequest(bot, chestPos, lines, purpose, stillMissing);").find());
+        assertTrue(REFLECTIVE_NAME.matcher("c.getDeclaredMethod(\"requestBundle\")").find());
         // The facade's policy names the service's status enums; those are not entry points.
         assertFalse(QUALIFIED_USE.matcher("import x.SupplyRequestService.RequestStatus; SupplyRequestService.TransferStatus s;").find());
         assertFalse(TRANSFER_NOW.matcher("TransferStatus.NO_ROOM; TransferOutcome o;").find());
