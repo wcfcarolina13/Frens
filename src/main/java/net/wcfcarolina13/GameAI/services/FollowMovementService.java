@@ -488,6 +488,7 @@ public final class FollowMovementService {
         }
         AIRBORNE_HALT_LOGGED.remove(bot.getUuid());
         if (!bot.isOnGround() || bot.hasVehicle() || bot.isUsingItem() || bot.isTouchingWater()) {
+            diagSkip(bot, world, targetPos);
             return false;
         }
 
@@ -542,6 +543,7 @@ public final class FollowMovementService {
             BlindWalkGuardPolicy.Decision line =
                     MovementService.blindLineDecisionOnServerThread(world, bot, targetBlock);
             if (DropGuardExemptionPolicy.exemptAfterBlindLine(true, line != null ? line.verdict() : null)) {
+                diag(bot, "exempt", front, targetPos, line != null ? String.valueOf(line.verdict()) : "null");
                 return false;
             }
             maybeLogDropRefusal(bot, front, targetBlock, line.reason());
@@ -552,6 +554,7 @@ public final class FollowMovementService {
                         ? Math.max(DropGuardExemptionPolicy.minBypassStandY(referenceY), bot.getBlockY())
                         : Integer.MIN_VALUE,
                 referenceY == null);
+        diag(bot, safeBypass != null ? "bypass " + safeBypass.toShortString() : "stop", front, targetPos, "");
         if (safeBypass != null) {
             LookController.faceBlock(bot, safeBypass);
             BotActions.sprint(bot, false);
@@ -1049,6 +1052,62 @@ public final class FollowMovementService {
     }
 
     /** One INFO line per bot per drop-warning cooldown when the blind-line check withdraws an exemption. */
+    // DIAGNOSTIC (claude/diag-canopy-drop, not for merge): canopy walk-off trace.
+    private static final java.util.Map<UUID, Long> DIAG_LAST_MS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void diag(ServerPlayerEntity bot, String action, BlockPos front, Vec3d targetPos, String extra) {
+        long now = System.currentTimeMillis();
+        Long last = DIAG_LAST_MS.get(bot.getUuid());
+        if (last != null && now - last < 250L) {
+            return;
+        }
+        DIAG_LAST_MS.put(bot.getUuid(), now);
+        LOGGER.info("[DropDiag] {} action={} pos={} y={} onGround={} vel={} front={} target={} stepDown={} {}",
+                bot.getName().getString(), action, bot.getBlockPos().toShortString(),
+                String.format(java.util.Locale.ROOT, "%.2f", bot.getY()), bot.isOnGround(),
+                String.format(java.util.Locale.ROOT, "%.2f,%.2f,%.2f", bot.getVelocity().x, bot.getVelocity().y, bot.getVelocity().z),
+                front != null ? front.toShortString() : "-",
+                String.format(java.util.Locale.ROOT, "%.1f,%.1f,%.1f", targetPos.x, targetPos.y, targetPos.z),
+                String.format(java.util.Locale.ROOT, "%.2f", bot.getY() - targetPos.y), extra);
+    }
+
+    private static final java.util.Map<UUID, Boolean> DIAG_WAS_GROUNDED = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Called each FOLLOW tick: logs the tick a grounded bot leaves the ground over a 3+ drop. */
+    public static void diagFallStart(ServerPlayerEntity bot, String waypointHead) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        boolean grounded = bot.isOnGround();
+        Boolean was = DIAG_WAS_GROUNDED.put(bot.getUuid(), grounded);
+        if (Boolean.TRUE.equals(was) && !grounded && isDangerousDropCell(world, bot.getBlockPos())) {
+            LOGGER.info("[DropDiag] {} fall-start pos={} y={} vel={} waypointHead={} lastGuard={}ms ago",
+                    bot.getName().getString(), bot.getBlockPos().toShortString(),
+                    String.format(java.util.Locale.ROOT, "%.2f", bot.getY()),
+                    String.format(java.util.Locale.ROOT, "%.2f,%.2f,%.2f", bot.getVelocity().x, bot.getVelocity().y, bot.getVelocity().z),
+                    waypointHead,
+                    DIAG_LAST_MS.containsKey(bot.getUuid()) ? System.currentTimeMillis() - DIAG_LAST_MS.get(bot.getUuid()) : -1L);
+        }
+    }
+
+    /** Airborne (or in water/vehicle/using item): log only when the cell ahead along the motion is a drop. */
+    private static void diagSkip(ServerPlayerEntity bot, ServerWorld world, Vec3d targetPos) {
+        Vec3d v = bot.getVelocity();
+        Vec3d dir = new Vec3d(v.x, 0.0D, v.z);
+        if (dir.lengthSquared() < 1.0E-4D) {
+            dir = new Vec3d(targetPos.x - bot.getX(), 0.0D, targetPos.z - bot.getZ());
+        }
+        if (dir.lengthSquared() < 1.0E-4D) {
+            return;
+        }
+        dir = dir.normalize();
+        BlockPos ahead = BlockPos.ofFloored(bot.getX() + dir.x, bot.getY(), bot.getZ() + dir.z);
+        BlockPos under = bot.getBlockPos();
+        if (isDangerousDropCell(world, ahead) || isDangerousDropCell(world, under)) {
+            diag(bot, "skip-airborne", ahead, targetPos, "underDrop=" + isDangerousDropCell(world, under));
+        }
+    }
+
     private static void maybeLogDropRefusal(ServerPlayerEntity bot, BlockPos front, BlockPos targetBlock, String reason) {
         long now = System.currentTimeMillis();
         long last = LAST_DROP_REFUSAL_LOG_MS.getOrDefault(bot.getUuid(), 0L);
