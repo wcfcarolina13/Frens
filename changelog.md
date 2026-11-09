@@ -2,15 +2,6 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
-## Quick Store / Quick Fetch: follow no longer steers the bot, `/bot stop` interrupts the walk (unreleased, 2026-11-05)
-
-Same gap as the `/bot craft` fix: the Quick Store / Quick Fetch worker (`ChestRegistryNetworkManager`, on `CompletableFuture.runAsync`) takes a task ticket but runs outside `SkillManager.runSkill`, so a following bot was steered by the follow tick while `ChestStoreService` walked it to the chest, and the ticket had no executing thread, so `/bot stop` only latched the abort.
-
-- The worker now attaches its thread to the ticket, suspends follow, and after the ticket completes resumes follow unless the task was aborted (the `runAmbient` order).
-- The walk runs on its own daemon executor (`frens-quick-transfer`) instead of `ForkJoinPool.commonPool`, because `/bot stop` interrupts the ticket's attached thread and that must never be a shared pool thread (review finding).
-- **Cost:** a following bot stops following for the trip and picks it up after; an aborted trip leaves follow off.
-- **Not changed:** `SurfaceRecoveryService` (runs from flee; a different case).
-- Tests 3857 → 3858 (`QuickStoreFollowWiringTest`, source-reading). **Sandbox check:** with the bot following, Quick Store into a chest 10 blocks away: it walks there without snapping back, stores, follows again; `/bot stop` mid-walk stops it.
 ## CI runs the test suite (2026-11-05, unreleased)
 
 CI ran `./gradlew build -x test`, so the JUnit suite (about 3900 tests: pure policy, wiring and
