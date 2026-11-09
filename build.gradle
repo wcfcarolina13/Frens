@@ -138,3 +138,18 @@ tasks.withType(Test).configureEach {
 	// shared, unordered test JVM would otherwise decide which test "wins" the flag.
 	systemProperty 'net.bytebuddy.experimental', 'true'
 }
+
+// Writes docs/wiki/Guide*.md from the in-game Guide (src/main/resources/assets/frens/guide/topics.json).
+// GuideWikiExportTest fails when the committed pages are out of date.
+tasks.register('wikiExport', JavaExec) {
+	group = 'documentation'
+	description = 'Generates the Guide wiki pages in docs/wiki from the in-game Guide topics.'
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = 'net.wcfcarolina13.guide.GuideWikiExporter'
+	args file('docs/wiki').absolutePath
+}
+
+// GuideWikiExportTest reads docs/wiki, so a hand edit there must rerun the tests.
+tasks.named('test') {
+	inputs.dir('docs/wiki').withPathSensitivity(PathSensitivity.RELATIVE)
+}

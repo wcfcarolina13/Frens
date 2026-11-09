@@ -1,0 +1,19 @@
+# Frens wiki
+
+Frens adds companions ("frens") to Minecraft Java: full fake players that follow you, gather, farm, mine, build and defend, with their own inventory and stats. Everything works with no AI model. Talking back in their own words (Souls, through a local Ollama model) is optional.
+
+## Pages
+
+- [Getting started](Getting-Started.md): install, pick a world mode, spawn your first fren.
+- [FAQ](FAQ.md): common questions and fixes.
+- [Work loops](Work-Loops.md): frens that go back to the same job every morning.
+- [In-game Guide](Guide.md): every card from the Guide screen (press ] in game), grouped by topic.
+- [Companion questing guide](../../COMPANION_QUESTING_GUIDE.md): how recruiting works in Questing mode.
+- [Crafting cheatsheet](../../CRAFTING_CHEATSHEET.md)
+- [README](../../README.md): install and requirements.
+
+## How these pages are made
+
+The `Guide*.md` pages are generated from `src/main/resources/assets/frens/guide/topics.json`, the same file the in-game Guide reads, so the two always match. To change a Guide card, edit that file, run `./gradlew wikiExport`, and commit both. `GuideWikiExportTest` fails if they differ.
+
+Pages without the `Guide` prefix, like this one, are written by hand.

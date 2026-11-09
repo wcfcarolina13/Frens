@@ -52,7 +52,8 @@ class PlayerTextPunctuationGuardTest {
             "\";IN:\"",
             ".replace(\"—\", \"-\")",
             "\"On it [-—] .+\\\\.\"",
-            "\"empty plan has no end cell; use the search start\"");
+            "\"empty plan has no end cell; use the search start\"",
+            "return s.replace(\"&\", \"&amp;\")");
 
     private static final Pattern LITERAL = Pattern.compile("\"(?:[^\"\\\\\\n]|\\\\.)*\"");
     private static final Pattern LOG_CALL = Pattern.compile(
@@ -92,7 +93,7 @@ class PlayerTextPunctuationGuardTest {
             for (Path file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".json"))::iterator) {
                 String rel = RESOURCES.relativize(file).toString().replace('\\', '/');
                 if (rel.contains("/souls/") || rel.contains("/quests/") || rel.contains("/lang/")
-                        || rel.contains("/dialogue/") || rel.contains("/lines/")) {
+                        || rel.contains("/dialogue/") || rel.contains("/lines/") || rel.contains("/guide/")) {
                     scanJson(rel, JsonParser.parseString(Files.readString(file)),
                             !rel.contains("/souls/") && !rel.contains("/quests/"), hits);
                 }
