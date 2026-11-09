@@ -30,6 +30,10 @@ public final class BotAutoCookingService {
     // which bots have one in flight.
     private static final Map<UUID, Long> NEXT_FUEL_GATHER_TICK = new ConcurrentHashMap<>();
     private static final java.util.Set<UUID> FUEL_GATHER_IN_FLIGHT = ConcurrentHashMap.newKeySet();
+    // At most one "why no cook" line per bot per minute while it is hungry, so a field run can see
+    // which gate held auto-cook back.
+    private static final long DIAGNOSTIC_LOG_TICKS = 20L * 60L;
+    private static final Map<UUID, Long> NEXT_DIAGNOSTIC_TICK = new ConcurrentHashMap<>();
 
     /**
      * Auto-cook decision gate.
@@ -41,6 +45,7 @@ public final class BotAutoCookingService {
         NEXT_DECISION_TICK.clear();
         NEXT_FUEL_GATHER_TICK.clear();
         FUEL_GATHER_IN_FLIGHT.clear();
+        NEXT_DIAGNOSTIC_TICK.clear();
     }
 
 
@@ -53,7 +58,11 @@ public final class BotAutoCookingService {
         }
         long nowTick = server.getTicks();
         for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(server)) {
-            if (!isEligible(bot)) {
+            String ineligible = ineligibleReason(bot);
+            if (ineligible != null) {
+                if (bot != null && bot.isAlive() && bot.getHungerManager().getFoodLevel() <= COOK_HUNGER_THRESHOLD) {
+                    logDiagnostic(bot, nowTick, "not eligible: " + ineligible);
+                }
                 continue;
             }
             long next = NEXT_DECISION_TICK.getOrDefault(bot.getUuid(), 0L);
@@ -93,6 +102,16 @@ public final class BotAutoCookingService {
                                 () -> BotIdleHobbiesService.hasLeafLitterForFuelRun(bot))
                         && startFuelGatherThenCook(server, bot, nowTick)) {
                     continue;
+                }
+                if (hasCookableFood && !hasFuel) {
+                    UUID id = bot.getUuid();
+                    logDiagnostic(bot, nowTick, "raw food but no fuel; no leaf-litter run (hobby="
+                            + BotHomeService.isHobbyEnabled(bot, "leaf_litter")
+                            + " inFlight=" + FUEL_GATHER_IN_FLIGHT.contains(id)
+                            + " cooldownTicks=" + Math.max(0L, NEXT_FUEL_GATHER_TICK.getOrDefault(id, 0L) - nowTick)
+                            + " litterNearby=" + BotIdleHobbiesService.hasLeafLitterForFuelRun(bot) + ")");
+                } else if (!hasCookableFood) {
+                    logDiagnostic(bot, nowTick, "nothing cookable on the bot (food=" + hunger + ")");
                 }
                 NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 120L + RNG.nextInt(80));
                 continue;
@@ -166,24 +185,43 @@ public final class BotAutoCookingService {
     }
 
     private static boolean isEligible(ServerPlayerEntity bot) {
-        if (bot == null || bot.isRemoved() || !bot.isAlive() || bot.isSleeping()) {
-            return false;
+        return ineligibleReason(bot) == null;
+    }
+
+    /** Why auto-cook skips this bot now, or null when it may decide. */
+    private static String ineligibleReason(ServerPlayerEntity bot) {
+        if (bot == null || bot.isRemoved() || !bot.isAlive()) {
+            return "gone";
+        }
+        if (bot.isSleeping()) {
+            return "sleeping";
         }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
+            return "no server world";
         }
         if (world.getRegistryKey() != World.OVERWORLD) {
-            return false;
+            return "not in the Overworld";
         }
         if (TaskService.hasActiveTask(bot.getUuid())) {
-            return false;
+            return "task running";
         }
-        if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
-            return false;
+        BotEventHandler.Mode mode = BotEventHandler.getCurrentMode(bot);
+        if (mode != BotEventHandler.Mode.IDLE) {
+            return "mode " + mode;
         }
         if (BotFleeService.isBreakingFree(bot.getUuid()) || BotFleeService.isInShelter(bot.getUuid())) {
-            return false;
+            return "fleeing or sheltering";
         }
-        return true;
+        return null;
+    }
+
+    private static void logDiagnostic(ServerPlayerEntity bot, long nowTick, String why) {
+        UUID id = bot.getUuid();
+        if (nowTick < NEXT_DIAGNOSTIC_TICK.getOrDefault(id, 0L)) {
+            return;
+        }
+        NEXT_DIAGNOSTIC_TICK.put(id, nowTick + DIAGNOSTIC_LOG_TICKS);
+        LOGGER.info("Auto-cook: no cook for {} at food {}: {}",
+                bot.getName().getString(), bot.getHungerManager().getFoodLevel(), why);
     }
 }
