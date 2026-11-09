@@ -29,4 +29,41 @@ public final class TreeStuckDropPolicy {
         return Math.abs(x - (tx + 0.5D)) <= CLEAR_OF_LIP && Math.abs(z - (tz + 0.5D)) <= CLEAR_OF_LIP
                 && (vx * vx + vz * vz) > 1.0E-6D;
     }
+
+    /** Ticks the bot may spend edging onto one hole before it gives up on that hole. */
+    public static final int HOLE_NUDGE_MAX_TICKS = 40;
+
+    /** Fastest sideways speed, in blocks per tick, used to edge onto the hole. */
+    public static final double HOLE_NUDGE_MAX_SPEED = 0.1D;
+
+    /**
+     * Standing on the ground with the cell under its block position open: the hitbox is resting on
+     * the lip of a neighbouring leaf, usually over the hole the bot just broke to get down. The leaf
+     * break reads "below is air" and stops, and the bot stays there (sandbox 2026-11-09, 3 of 4 runs).
+     * It edges onto the hole when the support is a leaf, the drop into the hole costs no health, the
+     * commander is lower down (or unknown), and this hole has not already had its time.
+     *
+     * @param holeDrop open cells below the feet before the first block it would land on
+     * @param commanderFeetY the commander's block Y, or {@code null} when there is none
+     */
+    public static boolean shouldEdgeIntoHole(boolean onGround, boolean belowOpen, boolean supportIsLeaf,
+                                             int holeDrop, int botFeetY, Integer commanderFeetY,
+                                             long ticksOnThisHole) {
+        if (!onGround || !belowOpen || !supportIsLeaf) {
+            return false;
+        }
+        if (holeDrop < 1 || !isSafeDrop(holeDrop)) {
+            return false;
+        }
+        if (commanderFeetY != null && commanderFeetY >= botFeetY) {
+            return false;
+        }
+        return ticksOnThisHole <= HOLE_NUDGE_MAX_TICKS;
+    }
+
+    /** Sideways speed on one axis that moves the centre {@code pos} toward the column centre {@code columnCentre}. */
+    public static double edgeSpeed(double pos, double columnCentre) {
+        double v = (columnCentre - pos) * 0.5D;
+        return Math.max(-HOLE_NUDGE_MAX_SPEED, Math.min(HOLE_NUDGE_MAX_SPEED, v));
+    }
 }

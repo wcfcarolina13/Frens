@@ -48,6 +48,8 @@ public final class TreeStuckEscapeService {
     private static final ConcurrentHashMap<UUID, Long> ESCAPE_TARGET_SET_TICK = new ConcurrentHashMap<>();
     /** Bots that already tried safe-drop steering and failed — skip to leaf breaking. */
     private static final Set<UUID> SAFE_DROP_EXHAUSTED = ConcurrentHashMap.newKeySet();
+    /** The hole the bot is edging onto and when it started (see {@link #tryEdgeIntoHole}). */
+    private static final ConcurrentHashMap<UUID, HoleNudge> HOLE_NUDGE = new ConcurrentHashMap<>();
 
     // ── Tuning constants ─────────────────────────────────────────────────────
     /** Ticks the bot must be near the same spot on leaves before we consider it stuck. */
@@ -161,9 +163,13 @@ public final class TreeStuckEscapeService {
         BlockPos belowFeet = bot.getBlockPos().down();
         BlockState belowState = world.getBlockState(belowFeet);
         if (!belowState.isIn(BlockTags.LEAVES)) {
+            if (tryEdgeIntoHole(bot, world, server, belowFeet, now)) {
+                return true;
+            }
             clearState(botId);
             return false;
         }
+        HOLE_NUDGE.remove(botId);
 
         // Track how long we've been on leaves.
         TREE_STUCK_SINCE_TICK.putIfAbsent(botId, now);
@@ -262,6 +268,56 @@ public final class TreeStuckEscapeService {
         // No viable escape this tick — remain in stuck-handling state.
         return true;
     }
+
+    /**
+     * The bot stands on the lip of a leaf with the cell under it open, usually the hole it broke to
+     * get down: edge it onto that hole so it drops through (see
+     * {@link TreeStuckDropPolicy#shouldEdgeIntoHole}). Runs on the server thread, from follow.
+     */
+    private static boolean tryEdgeIntoHole(ServerPlayerEntity bot, ServerWorld world, MinecraftServer server,
+                                           BlockPos belowFeet, long now) {
+        UUID botId = bot.getUuid();
+        BlockPos column = bot.getBlockPos();
+        boolean belowOpen = isOpenNonLeaf(world, belowFeet);
+        BlockPos support = bot.supportingBlockPos.orElse(null);
+        boolean supportIsLeaf = support != null && !support.equals(belowFeet)
+                && world.getBlockState(support).isIn(BlockTags.LEAVES);
+        int holeDrop = 0;
+        BlockPos probe = belowFeet;
+        while (holeDrop <= SAFE_DROP_HEIGHT && isOpenNonLeaf(world, probe)) {
+            holeDrop++;
+            probe = probe.down();
+        }
+        ServerPlayerEntity commander = resolveCommander(bot, server);
+        Integer commanderY = commander == null ? null : commander.getBlockY();
+        HoleNudge nudge = HOLE_NUDGE.get(botId);
+        if (nudge == null || !nudge.column().equals(column)) {
+            nudge = new HoleNudge(column, now);
+        }
+        if (!TreeStuckDropPolicy.shouldEdgeIntoHole(bot.isOnGround(), belowOpen, supportIsLeaf, holeDrop,
+                column.getY(), commanderY, now - nudge.since())) {
+            return false;
+        }
+        if (nudge.since() == now) {
+            LOGGER.info("TreeStuck: {} on the lip of the hole at {} (drop {}), edging onto it",
+                    bot.getName().getString(), belowFeet.toShortString(), holeDrop);
+        }
+        HOLE_NUDGE.put(botId, nudge);
+        BotActions.stop(bot);
+        Vec3d v = bot.getVelocity();
+        bot.setVelocity(TreeStuckDropPolicy.edgeSpeed(bot.getX(), column.getX() + 0.5D), v.y,
+                TreeStuckDropPolicy.edgeSpeed(bot.getZ(), column.getZ() + 0.5D));
+        bot.velocityDirty = true;
+        return true;
+    }
+
+    private static boolean isOpenNonLeaf(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        return !state.isIn(BlockTags.LEAVES) && state.getCollisionShape(world, pos).isEmpty()
+                && state.getFluidState().isEmpty();
+    }
+
+    private record HoleNudge(BlockPos column, long since) {}
 
     /**
      * Clear all per-bot state. Called when the bot is no longer on leaves.
