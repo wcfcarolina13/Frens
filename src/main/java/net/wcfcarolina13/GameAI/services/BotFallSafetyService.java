@@ -15,6 +15,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import net.minecraft.world.attribute.EnvironmentAttributes;
+import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 
@@ -37,6 +38,8 @@ public final class BotFallSafetyService {
     private static final long SUCCESS_COOLDOWN_TICKS = 20L;
 
     private static final Map<UUID, Long> NEXT_ATTEMPT_TICK = new ConcurrentHashMap<>();
+    /** Water a clutch placed, which the bot scoops back up once it has landed. */
+    private static final Map<UUID, PendingScoop> PENDING_SCOOP = new ConcurrentHashMap<>();
 
     /**
      * Fall-safety attempt gate.
@@ -46,6 +49,7 @@ public final class BotFallSafetyService {
      */
     public static void resetSession() {
         NEXT_ATTEMPT_TICK.clear();
+        PENDING_SCOOP.clear();
     }
 
 
@@ -61,6 +65,7 @@ public final class BotFallSafetyService {
             if (bot == null || bot.isRemoved() || !bot.isAlive()) {
                 continue;
             }
+            maybeScoopClutchWater(bot, nowTick);
             maybeClutchFall(bot, nowTick);
         }
     }
@@ -136,6 +141,7 @@ public final class BotFallSafetyService {
                 String.format(java.util.Locale.ROOT, "%.1f", bot.fallDistance));
         if (used) {
             NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + SUCCESS_COOLDOWN_TICKS);
+            PENDING_SCOOP.put(bot.getUuid(), new PendingScoop(landing.placePos().toImmutable(), nowTick));
         } else {
             NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + RETRY_INTERVAL_TICKS);
         }
@@ -157,6 +163,74 @@ public final class BotFallSafetyService {
     }
 
     private record LandingTarget(BlockPos supportPos, BlockPos placePos, double heightDelta) {}
+
+    private record PendingScoop(BlockPos waterPos, long placedTick) {}
+
+    /**
+     * After a clutch, pick the water back up once the bot has landed, as a player would: the bot
+     * keeps a full bucket for the next fall and leaves no water source behind. Gives up (and
+     * leaves the water) if the source is gone, out of reach, or not scooped within
+     * {@link FallClutchPolicy#SCOOP_GIVE_UP_TICKS}.
+     */
+    private static void maybeScoopClutchWater(ServerPlayerEntity bot, long nowTick) {
+        PendingScoop pending = PENDING_SCOOP.get(bot.getUuid());
+        if (pending == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        boolean landed = bot.fallDistance <= 0.0D
+                && (bot.isOnGround() || bot.isTouchingWater())
+                && bot.getVelocity().y > -0.2D;
+        switch (FallClutchPolicy.scoopStep(nowTick - pending.placedTick(), landed)) {
+            case WAIT -> {
+                return;
+            }
+            case GIVE_UP -> {
+                PENDING_SCOOP.remove(bot.getUuid());
+                LOGGER.info("Fall clutch: {} left the water at {} (not scooped in time)",
+                        bot.getName().getString(), pending.waterPos().toShortString());
+                return;
+            }
+            case TRY -> {
+            }
+        }
+        BlockPos waterPos = pending.waterPos();
+        var fluid = world.getFluidState(waterPos);
+        if (!fluid.isIn(FluidTags.WATER) || !fluid.isStill()) {
+            PENDING_SCOOP.remove(bot.getUuid()); // gone or no longer a source: nothing to take back
+            return;
+        }
+        if (bot.getEyePos().squaredDistanceTo(Vec3d.ofCenter(waterPos))
+                > bot.getBlockInteractionRange() * bot.getBlockInteractionRange()) {
+            return; // drifted out of reach: retry until the give-up tick
+        }
+        if (!BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, waterPos).allowed()) {
+            PENDING_SCOOP.remove(bot.getUuid());
+            return;
+        }
+        int previousSlot = bot.getInventory().getSelectedSlot();
+        boolean scooped = false;
+        try {
+            if (!BotActions.ensureHotbarItem(bot, Items.BUCKET)) {
+                PENDING_SCOOP.remove(bot.getUuid());
+                return;
+            }
+            // Same vanilla path as the placement: an empty bucket fills through Item.use, a
+            // raycast from the eyes that takes fluid sources. Aim at the water cell itself.
+            LookController.faceBlock(bot, waterPos);
+            ActionResult result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
+            if (result.isAccepted()) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+            }
+            scooped = bot.getMainHandStack().isOf(Items.WATER_BUCKET);
+        } finally {
+            BotActions.selectHotbarSlot(bot, previousSlot);
+        }
+        if (scooped) {
+            PENDING_SCOOP.remove(bot.getUuid());
+            LOGGER.info("Fall clutch: {} scooped the water back up at {}",
+                    bot.getName().getString(), waterPos.toShortString());
+        }
+    }
 
     private static LandingTarget predictLanding(ServerWorld world, ServerPlayerEntity bot) {
         if (world == null || bot == null) {

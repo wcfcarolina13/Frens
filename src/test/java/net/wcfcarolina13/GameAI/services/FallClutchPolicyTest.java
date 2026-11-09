@@ -51,4 +51,25 @@ class FallClutchPolicyTest {
         assertTrue(src.contains("FallClutchPolicy.projectedLethal(bot.fallDistance, landing.heightDelta(), effectiveHealth)"));
         assertTrue(src.contains("FallClutchPolicy.inPlaceWindow(landing.heightDelta(), bot.getEyeY() - bot.getBoundingBox().minY, bot.getBlockInteractionRange())"));
     }
+
+    @Test
+    void scoopWaitsForTheLandingThenTriesUntilTheGiveUpTick() {
+        assertEquals(FallClutchPolicy.ScoopStep.WAIT, FallClutchPolicy.scoopStep(0, true), "same tick as placing");
+        assertEquals(FallClutchPolicy.ScoopStep.WAIT, FallClutchPolicy.scoopStep(5, false), "still falling");
+        assertEquals(FallClutchPolicy.ScoopStep.TRY, FallClutchPolicy.scoopStep(3, true));
+        assertEquals(FallClutchPolicy.ScoopStep.GIVE_UP, FallClutchPolicy.scoopStep(60, true));
+        assertEquals(FallClutchPolicy.ScoopStep.GIVE_UP, FallClutchPolicy.scoopStep(80, false));
+    }
+
+    @Test
+    void scoopUsesTheEmptyBucketThroughTheSameVanillaPath() throws IOException {
+        String src = Files.readString(Path.of("src/main/java/net/wcfcarolina13/GameAI/services/BotFallSafetyService.java"));
+        int scoop = src.indexOf("private static void maybeScoopClutchWater(");
+        assertTrue(scoop > 0, "scoop step exists");
+        String body = src.substring(scoop);
+        assertTrue(body.contains("BotActions.ensureHotbarItem(bot, Items.BUCKET)"));
+        assertTrue(body.contains("bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND)"));
+        assertTrue(body.contains("authorizeBlockMutation(bot, world, waterPos)"), "territory rules apply to the scoop too");
+        assertTrue(src.contains("PENDING_SCOOP.put(bot.getUuid(), new PendingScoop(landing.placePos()"), "armed only by a placement");
+    }
 }

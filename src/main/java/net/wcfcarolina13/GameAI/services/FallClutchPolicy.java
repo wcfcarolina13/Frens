@@ -42,4 +42,26 @@ public final class FallClutchPolicy {
     public static boolean inPlaceWindow(double feetAboveFace, double eyeHeight, double blockReach) {
         return feetAboveFace > 0.05D && feetAboveFace + eyeHeight <= blockReach;
     }
+
+    /** Ticks after placing before the bot tries to scoop the water back (it must have landed). */
+    public static final long SCOOP_MIN_TICKS = 2L;
+    /** Ticks after placing after which the bot leaves the water where it is. */
+    public static final long SCOOP_GIVE_UP_TICKS = 60L;
+
+    public enum ScoopStep { WAIT, TRY, GIVE_UP }
+
+    /**
+     * After a clutch the bot picks its water back up, as a player would: once it has landed (no
+     * fall distance left and on the ground or in the water), from {@link #SCOOP_MIN_TICKS} after
+     * placing, retrying until {@link #SCOOP_GIVE_UP_TICKS}.
+     */
+    public static ScoopStep scoopStep(long ticksSincePlace, boolean landed) {
+        if (ticksSincePlace >= SCOOP_GIVE_UP_TICKS) {
+            return ScoopStep.GIVE_UP;
+        }
+        if (ticksSincePlace < SCOOP_MIN_TICKS || !landed) {
+            return ScoopStep.WAIT;
+        }
+        return ScoopStep.TRY;
+    }
 }
