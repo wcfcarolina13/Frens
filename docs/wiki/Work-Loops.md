@@ -8,7 +8,7 @@ The short version is on the Guide card [Daily Work Loops](Guide-Gathering.md#dai
 
 - A **lodestone** at the work spot (eight chiseled stone bricks around an iron ingot).
 - A **compass** bound to that lodestone (use the compass on the lodestone), in the fren's inventory.
-- A **place to sleep**: a base, or a bed the fren has slept in. With neither, it goes to the world spawn. See [Home & Bases Explained](Guide-Basics.md#home--bases-explained).
+- A **place to sleep**: a base, or a bed the fren has slept in. With neither, it goes to the world spawn. See [Bases and home](Bases-and-Home.md).
 - **Food** in its inventory. Fast travel costs 1 hunger point per 20 blocks. See [Fast travel](Fast-Travel.md).
 
 ## Setting up a woodcutting loop
