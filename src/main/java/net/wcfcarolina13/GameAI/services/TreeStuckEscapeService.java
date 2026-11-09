@@ -282,9 +282,9 @@ public final class TreeStuckEscapeService {
                                            BlockPos belowFeet, long now) {
         UUID botId = bot.getUuid();
         BlockPos column = bot.getBlockPos();
-        if (bot.isSneaking()) {
-            // A sneaking player is held at ledges (PlayerEntity.clipAtLedge), so the move would do
-            // nothing for 40 ticks while follow waits; leave it to the sneak lock's owner.
+        if (SneakLockService.isLocked(botId)) {
+            // A sneaking player is held at ledges (PlayerEntity.clipAtLedge) and BotActions.stop keeps a
+            // locked sneak on, so the move would do nothing for 40 ticks; leave it to the lock's owner.
             return false;
         }
         boolean belowOpen = world.getBlockState(belowFeet).isAir();
