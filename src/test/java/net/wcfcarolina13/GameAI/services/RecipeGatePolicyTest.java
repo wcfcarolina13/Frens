@@ -42,9 +42,9 @@ class RecipeGatePolicyTest {
 
     @Test
     void theLockedLineNamesTheCommanderTheRecipeAndTheRule() {
-        assertEquals("Steve hasn't unlocked the white bed recipe yet, and limitedCrafting is on, so I can't craft it.",
+        assertEquals("Steve hasn't unlocked the white bed recipe yet, and the limited_crafting rule is on, so I can't craft it.",
                 RecipeGatePolicy.lockedLine("Steve", "white_bed"));
-        assertEquals("You haven't unlocked that recipe yet, and limitedCrafting is on, so I can't craft it.",
+        assertEquals("You haven't unlocked that recipe yet, and the limited_crafting rule is on, so I can't craft it.",
                 RecipeGatePolicy.lockedLine(" ", null));
     }
 }

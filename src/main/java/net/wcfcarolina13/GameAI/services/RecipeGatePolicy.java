@@ -51,6 +51,6 @@ public final class RecipeGatePolicy {
         String what = recipePath == null || recipePath.isBlank()
                 ? "that recipe"
                 : "the " + recipePath.replace('_', ' ') + " recipe";
-        return who + " unlocked " + what + " yet, and limitedCrafting is on, so I can't craft it.";
+        return who + " unlocked " + what + " yet, and the limited_crafting rule is on, so I can't craft it.";
     }
 }
