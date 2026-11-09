@@ -198,6 +198,33 @@ public final class SoulConversationService {
         }
     }
 
+    /**
+     * Guide card text for a how-to question ("how do I fast travel?"), so the soul answers from
+     * the Guide instead of inventing. Off the server thread, so the asker's operator status is
+     * unknown here: admin-only and quest-only cards are left out. Logs topic ids and sizes only.
+     */
+    private static List<String> guideLines(SoulTypes.AcceptedTurn turn, UUID correlationId) {
+        try {
+            List<net.wcfcarolina13.guide.GuideQuestionMatcher.Match> matches =
+                    net.wcfcarolina13.guide.GuideQuestionMatcher.answer(turn.playerMessage(),
+                            net.wcfcarolina13.guide.GuideCatalog.topics(),
+                            net.wcfcarolina13.guide.GuideQuestionMatcher.Visibility.PUBLIC, 2);
+            if (matches.isEmpty()) {
+                return List.of();
+            }
+            List<String> lines = net.wcfcarolina13.guide.GuideChatAnswer.promptLines(matches,
+                    turn.botDisplayName(), net.wcfcarolina13.guide.GuideChatAnswer.MAX_PROMPT_CHARS);
+            org.slf4j.LoggerFactory.getLogger("frens-souls").info(
+                    "[souls] guide correlationId={} topics={} lines={} chars={}", correlationId,
+                    matches.stream().map(m -> m.topic().id()).collect(java.util.stream.Collectors.joining(",")),
+                    lines.size(), lines.stream().mapToInt(String::length).sum());
+            return lines;
+        } catch (Throwable ignored) {
+            // Guide grounding is additive, never load-bearing for a turn.
+            return List.of();
+        }
+    }
+
     /** Assembles the bounded prompt and schedules exactly one provider generation call. */
     private CompletableFuture<SoulTypes.ProviderResult> dispatchProvider(
             SoulTypes.AcceptedTurn turn, SoulTypes.TurnToken token, UUID correlationId,
@@ -241,8 +268,9 @@ public final class SoulConversationService {
         List<String> aboutPlayer = store.cachedMind(turn.key().botId())
                 .map(mind -> SoulMemoryDigestOps.aboutLines(mind, turn.key().playerId(), audience))
                 .orElse(List.of());
+        List<String> guideLines = guideLines(turn, correlationId);
         SoulTypes.ProviderRequest request = prompts.assemble(correlationId, settings.model(), profile,
-                turn.grounding(), history, events, relevantKnowledge, aboutPlayer,
+                turn.grounding(), history, events, relevantKnowledge, aboutPlayer, guideLines,
                 turn.playerMessage(), settings.timeout());
 
         stages.queueDepthAtSubmit = scheduler.queueDepth();

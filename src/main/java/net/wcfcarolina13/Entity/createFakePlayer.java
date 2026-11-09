@@ -366,10 +366,19 @@ public class createFakePlayer extends ServerPlayerEntity {
                 true, true, senderIsBot, content)) {
             return;
         }
-        net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome outcome =
-                net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRoute(this, sender, content.trim());
+        // Same rule as public chat: a how-to question the Guide can answer reaches the soul only
+        // when every soul gate is open, and otherwise gets the Guide answer below.
+        boolean guideQuestion = !net.wcfcarolina13.GameAI.services.GuideChatAnswerService
+                .matchesFor(sender, content.trim()).isEmpty();
+        net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome outcome = guideQuestion
+                ? net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRouteSilently(this, sender, content.trim())
+                : net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRoute(this, sender, content.trim());
         SOULS_LOGGER.info("[souls] whisper bot={} player={} outcome={}",
                 this.getUuid(), sender.getUuid(), outcome);
+        if (guideQuestion && outcome == net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome.NOT_SOUL) {
+            // No soul took the whisper: a how-to question still gets a Guide answer.
+            net.wcfcarolina13.GameAI.services.GuideChatAnswerService.tryAnswer(this, sender, content.trim());
+        }
     }
 
     @Override

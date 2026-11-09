@@ -625,6 +625,8 @@ public class Frens implements ModInitializer {
         // Guide -> remote bot inventory open
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.GuideOpenInventoryPayload.ID, net.wcfcarolina13.network.GuideOpenInventoryPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.GuideInventoryAccessPayload.ID, net.wcfcarolina13.network.GuideInventoryAccessPayload.CODEC);
+        // Fren chat answer -> open the Guide on one card (/frens guide <topic>)
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.GuideOpenTopicPayload.ID, net.wcfcarolina13.network.GuideOpenTopicPayload.CODEC);
 
         // Bot enchanting screen
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BotEnchantOpenPayload.ID, net.wcfcarolina13.network.BotEnchantOpenPayload.CODEC);
@@ -792,6 +794,7 @@ public class Frens implements ModInitializer {
         configCommand.register();
         net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.register();
         net.wcfcarolina13.Commands.SupplyCommands.register();
+        net.wcfcarolina13.Commands.GuideCommands.register();
         // Knowledge graph: project recipes/tags once the data is loaded, and again after /reload
         // swaps datapacks. Build failure installs an empty graph (souls degrade gracefully).
         ServerLifecycleEvents.SERVER_STARTED.register(
@@ -1503,8 +1506,16 @@ public class Frens implements ModInitializer {
                     ServerPlayerEntity soulBot = routedBots.get(0);
                     if (soulBot != null) {
                         try {
-                            if (net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRoute(soulBot, sender, target.prompt())
-                                    == net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome.CONSUMED) {
+                            // A how-to question the Guide can answer goes to the soul only when
+                            // every soul gate is open (silent route). Otherwise -- not the owner,
+                            // memory loading, model not ready -- the fren answers from the Guide
+                            // below instead of sending a refusal notice.
+                            boolean guideQuestion = !net.wcfcarolina13.GameAI.services.GuideChatAnswerService
+                                    .matchesFor(sender, target.prompt()).isEmpty();
+                            net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome soulOutcome = guideQuestion
+                                    ? net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRouteSilently(soulBot, sender, target.prompt())
+                                    : net.wcfcarolina13.GameAI.souls.SoulChatRouter.tryRoute(soulBot, sender, target.prompt());
+                            if (soulOutcome == net.wcfcarolina13.GameAI.souls.SoulChatRouter.RouteOutcome.CONSUMED) {
                                 return;
                             }
                         } catch (Throwable t) {
@@ -1514,6 +1525,10 @@ public class Frens implements ModInitializer {
                     }
                 }
 
+                // No soul took it: a how-to question gets an answer from the Guide (no LLM).
+                if (!target.prompt().isEmpty() && tryAnswerFromGuide(routedBots, sender, target.prompt())) {
+                    return;
+                }
                 maybeSendAiChatOffHint(routedBots, target, sender);
                 return;
             }
@@ -1719,6 +1734,42 @@ public class Frens implements ModInitializer {
             deduped.putIfAbsent(bot.getUuid(), bot);
         }
         return new ArrayList<>(deduped.values());
+    }
+
+    /**
+     * Server thread (chat callback). One fren answers a how-to question from the Guide: the only
+     * addressed bot, or for "Bots, ..." the nearest addressed bot in the sender's world. Any
+     * player may ask; the answer goes to them alone and starts nothing.
+     */
+    private static boolean tryAnswerFromGuide(List<ServerPlayerEntity> routedBots, ServerPlayerEntity sender,
+                                              String prompt) {
+        if (sender == null || routedBots == null || routedBots.isEmpty()) {
+            return false;
+        }
+        ServerPlayerEntity answerer = null;
+        double best = Double.POSITIVE_INFINITY;
+        for (ServerPlayerEntity bot : routedBots) {
+            if (bot == null || bot.isRemoved()) {
+                continue;
+            }
+            double d = bot.getEntityWorld() == sender.getEntityWorld()
+                    ? bot.squaredDistanceTo(sender)
+                    : Double.MAX_VALUE;
+            if (answerer == null || d < best) {
+                answerer = bot;
+                best = d;
+            }
+        }
+        if (answerer == null) {
+            return false;
+        }
+        try {
+            return net.wcfcarolina13.GameAI.services.GuideChatAnswerService.tryAnswer(answerer, sender, prompt);
+        } catch (Throwable t) {
+            // Never let the Guide answer break chat.
+            LOGGER.warn("Guide answer threw; treating line as unanswered: {}", t.toString());
+            return false;
+        }
     }
 
     /** Players who already saw the AI-chat-off notice this session; cleared on disconnect and stop. */
