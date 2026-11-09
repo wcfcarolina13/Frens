@@ -66,6 +66,13 @@ class GuideQuestionMatcherTest {
         assertEquals("", best("want to go fishing?"), "a bare ? needs more than one title word");
         assertEquals("", best("what do you think about the weather?"));
         assertEquals("", best("how do I build a wall"), "build is too generic to pick Build Farm");
+        // Conversational questions that open with a bare what/where/why/how-far (pre-merge review).
+        assertEquals("", best("what's in your inventory?"));
+        assertEquals("", best("how far is the base?"));
+        assertEquals("", best("where is home?"));
+        assertEquals("", best("how's the farm going?"));
+        assertEquals("", best("why so quiet?"));
+        assertEquals("", best("where is the nearest village?"));
         assertEquals("", best(""));
         assertEquals("", best(null));
     }
@@ -80,6 +87,11 @@ class GuideQuestionMatcherTest {
         assertFalse(GuideQuestionMatcher.isHowToQuestion("follow me"));
         assertFalse(GuideQuestionMatcher.isHowToQuestion("showing off my house"));
         assertFalse(GuideQuestionMatcher.hasQuestionOpener("can you come here?"));
+        assertTrue(GuideQuestionMatcher.hasHowToOpener("how do I fish"));
+        assertTrue(GuideQuestionMatcher.hasHowToOpener("where can I find my compass list"));
+        assertTrue(GuideQuestionMatcher.hasHowToOpener("what does stand down do"));
+        assertFalse(GuideQuestionMatcher.hasHowToOpener("where is home?"));
+        assertFalse(GuideQuestionMatcher.hasHowToOpener("how's the farm going?"));
     }
 
     @Test

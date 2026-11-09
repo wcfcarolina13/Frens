@@ -28,9 +28,9 @@ public final class GuideQuestionMatcher {
     /** Lowest score that counts as a match: one title word, or two tag words. */
     public static final int MIN_SCORE = 3;
     /**
-     * Lowest score for a line that is a question only by its trailing "?" ("want to go
-     * fishing?", "can you come here?"): two words, or a word and a phrase. Those are mostly
-     * ordinary talk, so one stray title word is not enough.
+     * Lowest score for a question that doesn't ask how to do something: a trailing "?" alone
+     * ("want to go fishing?") or a bare "what/where/why" ("where is home?"). Those are mostly
+     * ordinary talk, so one stray title word is not enough: two words, or a word and a phrase.
      */
     public static final int MIN_SCORE_BARE_QUESTION = 5;
     static final int TITLE_POINTS = 3;
@@ -61,6 +61,22 @@ public final class GuideQuestionMatcher {
     private static final Pattern HOW_DOES_IT_WORK = Pattern.compile(
             "(?i)^(\\W*how\\b.*?)\\s+work(?:s|ing)?\\W*$");
     private static final Pattern FORMAT_CODE = Pattern.compile("§.");
+
+    /**
+     * Openers that ask how to do something ("how do I", "where can I", "explain", "can you
+     * help"). Only these get the low {@link #MIN_SCORE}; a line that opens with a bare "what",
+     * "where", "why" or "how far/how's" is usually ordinary talk ("what's in your inventory?",
+     * "where is home?") and needs {@link #MIN_SCORE_BARE_QUESTION}.
+     */
+    private static final Pattern HOW_TO_OPENER = Pattern.compile(
+            "^(?:(?:hey|so|ok|okay|um|uh|please|quick question)\\W+)*"
+                    + "(?:how (?:do|does|did|can|could|should|would|to|i|we)"
+                    + "|(?:what|where|which) (?:do|does|can|should) (?:i|we|you)"
+                    + "|what does|what do"
+                    + "|explain|teach me|tell me (?:about|how)|show me how|help"
+                    + "|is there a way|do you know how|any tips"
+                    + "|i (?:need|want) (?:help|to know|to learn)|i don't know how|i dont know how"
+                    + "|(?:can|could|would) you (?:explain|tell me|show me|teach me|help))\\b");
 
     /** Openers that make a line a how-to question even without a question mark. */
     private static final Pattern QUESTION_OPENER = Pattern.compile(
@@ -120,6 +136,15 @@ public final class GuideQuestionMatcher {
         return trimmed.endsWith("?") || hasQuestionOpener(trimmed);
     }
 
+    /** Whether the line asks how to do something ("how do I", "where can I", "explain", "can you help"). */
+    public static boolean hasHowToOpener(String prompt) {
+        if (prompt == null) {
+            return false;
+        }
+        String lower = prompt.trim().toLowerCase(Locale.ROOT).replace('\u2019', '\'');
+        return HOW_TO_OPENER.matcher(lower).find();
+    }
+
     /** Whether the line opens like a request for help ("how", "what is", "explain", "can you help"). */
     public static boolean hasQuestionOpener(String prompt) {
         if (prompt == null) {
@@ -161,7 +186,8 @@ public final class GuideQuestionMatcher {
 
     /**
      * {@link #match} behind the {@link #isHowToQuestion} gate: empty unless both pass. A line
-     * with no question opener needs {@link #MIN_SCORE_BARE_QUESTION} for its best topic.
+     * that does not open by asking how to do something ({@link #hasHowToOpener}) needs
+     * {@link #MIN_SCORE_BARE_QUESTION} for its best topic.
      */
     public static List<Match> answer(String prompt, List<GuideCatalog.Topic> topics,
                                      Visibility visibility, int max) {
@@ -169,7 +195,7 @@ public final class GuideQuestionMatcher {
             return List.of();
         }
         List<Match> matches = match(prompt, topics, visibility, max);
-        if (matches.isEmpty() || hasQuestionOpener(prompt)) {
+        if (matches.isEmpty() || hasHowToOpener(prompt)) {
             return matches;
         }
         return matches.get(0).score() >= MIN_SCORE_BARE_QUESTION ? matches : List.of();
