@@ -833,6 +833,11 @@ public final class SmeltingService {
         return !listCookableFoodIds(bot, world, Blocks.FURNACE.getDefaultState()).isEmpty();
     }
 
+    /** Server thread: what {@code /bot cook [item]} would find to cook, at any station type. */
+    public static boolean hasCookablesForCommand(ServerPlayerEntity bot, ServerWorld world, String itemFilter) {
+        return bot != null && world != null && hasMatchingCookables(bot, world, itemFilter, false);
+    }
+
     public static boolean hasFuelForAutoCook(ServerPlayerEntity bot, ServerWorld world) {
         return bot != null && world != null && hasFuel(bot, world);
     }
