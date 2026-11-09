@@ -73,5 +73,28 @@ class GuideCatalogTest {
         assertEquals("", t.get(0).shortcuts());
         assertFalse(t.get(0).adminOnly());
         assertFalse(t.get(0).questingOnly());
+        assertEquals("", t.get(0).answer());
+    }
+
+    @Test
+    void answerIsParsedAndResolved() throws Exception {
+        List<GuideCatalog.Topic> t = GuideCatalog.parse(json(
+                "{\"topics\":[{\"id\":\"a\",\"category\":\"c\",\"title\":\"t\",\"summary\":\"s\","
+                        + "\"answer\":\"Type /bot stop {bot}.\",\"details\":[\"d\"]}]}"));
+        assertEquals("Type /bot stop {bot}.", t.get(0).answer());
+        assertEquals("Type /bot stop Jake.", t.get(0).resolve("Jake", "]").answer());
+    }
+
+    /** Frens speak these in chat: short, plain, no Minecraft formatting codes. */
+    @Test
+    void everyBundledTopicHasAShortPlainAnswer() {
+        for (GuideCatalog.Topic t : GuideCatalog.loadBundled()) {
+            String a = t.answer();
+            assertFalse(a.isBlank(), t.id() + " has no answer");
+            assertFalse(a.contains("\u00A7"), t.id() + " answer has a formatting code");
+            assertTrue(a.length() <= 300, t.id() + " answer is " + a.length() + " chars");
+            int sentences = a.split("[.!?](\\s|$)").length;
+            assertTrue(sentences <= 3, t.id() + " answer has " + sentences + " sentences");
+        }
     }
 }

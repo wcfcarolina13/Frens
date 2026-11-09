@@ -34,6 +34,9 @@ public final class GuideCatalog {
      *
      * @param adminOnly    hidden from players who are not an operator or the host
      * @param questingOnly hidden while Questing world mode is off
+     * @param answer       what a fren says when asked how to use this: one to three plain
+     *                     sentences in the fren's own voice, no formatting codes; "" when the
+     *                     topic has none
      */
     public record Topic(String id,
                         String category,
@@ -44,10 +47,18 @@ public final class GuideCatalog {
                         String shortcuts,
                         String tags,
                         boolean adminOnly,
-                        boolean questingOnly) {
+                        boolean questingOnly,
+                        String answer) {
 
         public Topic {
             details = List.copyOf(details);
+            answer = answer == null ? "" : answer;
+        }
+
+        /** A topic without a spoken answer. */
+        public Topic(String id, String category, String title, String summary, List<String> details,
+                     String command, String shortcuts, String tags, boolean adminOnly, boolean questingOnly) {
+            this(id, category, title, summary, details, command, shortcuts, tags, adminOnly, questingOnly, "");
         }
 
         /** Fills in the placeholders for display in game. */
@@ -58,7 +69,7 @@ public final class GuideCatalog {
             }
             return new Topic(id, category, fill(title, bot, guideKey), fill(summary, bot, guideKey),
                     resolvedDetails, fill(command, bot, guideKey), fill(shortcuts, bot, guideKey),
-                    tags, adminOnly, questingOnly);
+                    tags, adminOnly, questingOnly, fill(answer, bot, guideKey));
         }
     }
 
@@ -120,7 +131,8 @@ public final class GuideCatalog {
                     optionalText(node, "shortcuts"),
                     optionalText(node, "tags"),
                     node.path("adminOnly").asBoolean(false),
-                    node.path("questingOnly").asBoolean(false)));
+                    node.path("questingOnly").asBoolean(false),
+                    optionalText(node, "answer")));
         }
         return List.copyOf(out);
     }

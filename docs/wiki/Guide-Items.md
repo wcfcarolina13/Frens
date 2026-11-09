@@ -23,7 +23,7 @@ A rare magical item that unlocks companion spells and abilities.
 Give your companion a Compass, Map, or Eye of Ender to unlock autonomous navigation.
 
 - Compass / Map (basic): bot can navigate to its nearest or preferred base, same dimension only.
-- Eye of Ender (enhanced): navigate to any named base, cross-dimension, instant teleport. Either you or the bot can hold it.
+- Eye of Ender (enhanced): navigate to any named base, cross-dimension, at full fast-travel speed. Either you or the bot can hold it.
 - Use /bot open &lt;alias&gt; to give items to your companion via its inventory screen.
 - Navigation artifacts are reusable. They are not consumed.
 
