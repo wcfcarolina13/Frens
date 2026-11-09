@@ -75,9 +75,6 @@ public final class BotFallSafetyService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
-        if (waterEvaporatesAt(world, bot.getBlockPos())) {
-            return;
-        }
         if (bot.isOnGround() || bot.isClimbing() || bot.isTouchingWater() || bot.isSubmergedInWater()) {
             return;
         }
@@ -88,6 +85,9 @@ public final class BotFallSafetyService {
             return;
         }
         if (!isLikelyLethal(bot)) {
+            return;
+        }
+        if (waterEvaporatesAt(world, bot.getBlockPos())) {
             return;
         }
         long next = NEXT_ATTEMPT_TICK.getOrDefault(bot.getUuid(), 0L);
