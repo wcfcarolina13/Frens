@@ -923,7 +923,7 @@ public class modCommandRegistry {
                         .then(literal("cook")
                                 .executes(context -> executeCook(context, getActiveBotOrThrow(context), null, null))
                                 .then(CommandManager.argument("item", StringArgumentType.string())
-                                        .executes(context -> executeCook(context, getActiveBotOrThrow(context), StringArgumentType.getString(context, "item"), null))
+                                        .executes(context -> executeCookFirstWord(context, StringArgumentType.getString(context, "item")))
                                         .then(CommandManager.argument("fuel", StringArgumentType.string())
                                                 .executes(context -> executeCookItemAndSecondWord(context,
                                                         StringArgumentType.getString(context, "item"),
@@ -2803,6 +2803,23 @@ public class modCommandRegistry {
             return executeCook(context, named, itemFilter, null);
         }
         return executeCook(context, getActiveBotOrThrow(context), itemFilter, word);
+    }
+
+    /**
+     * {@code /bot cook <word>}: brigadier tries the {@code <item>} argument first, so the sibling
+     * {@code cook <fuel>} and {@code cook <bot>} branches never run for a single word, and
+     * {@code /bot cook Bob} looked for an item called "Bob". A fuel keyword is the fuel and a bot's
+     * name is the bot ({@link CookCommandArgsPolicy#firstWordRole}); anything else stays the item.
+     */
+    private static int executeCookFirstWord(CommandContext<ServerCommandSource> context, String word)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayerEntity named = word == null ? null : context.getSource().getServer().getPlayerManager().getPlayer(word.trim());
+        boolean namesBot = named instanceof net.wcfcarolina13.Entity.createFakePlayer;
+        return switch (CookCommandArgsPolicy.firstWordRole(word, SmeltingService.namesItem(word), namesBot)) {
+            case BOT -> executeCook(context, named, null, null);
+            case FUEL -> executeCook(context, getActiveBotOrThrow(context), null, word);
+            case ITEM -> executeCook(context, getActiveBotOrThrow(context), word, null);
+        };
     }
 
     private static int executeCook(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemFilter, String fuelSpec) {
