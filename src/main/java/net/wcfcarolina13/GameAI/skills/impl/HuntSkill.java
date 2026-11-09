@@ -1677,18 +1677,36 @@ public final class HuntSkill implements Skill {
                 BlockPos target = homeTarget.get();
                 double distSq = bot.getBlockPos().getSquaredDistance(target);
                 if (distSq > 16.0D) {
-                    String returnMsg = "Returned from the hunt (" + killMsg + ").";
+                    String returnMsg = "Done hunting (" + killMsg + ").";
                     if (!lootSummary.isEmpty()) {
                         returnMsg += " I've got " + lootSummary + ".";
                     }
-                    ChatUtils.sendSystemMessage(source, returnMsg);
+                    int blocks = (int) Math.round(Math.sqrt(distSq));
+                    boolean teleport = net.wcfcarolina13.GameAI.skills.SkillPreferences.teleportDuringSkills(bot);
+                    HuntReturnPolicy.Decision decision = HuntReturnPolicy.decide(blocks, teleport);
+                    LOGGER.info("Hunt return for {}: base {} blocks away at {}, teleport={} -> {}",
+                            bot.getName().getString(), blocks, target.toShortString(), teleport, decision);
+                    if (decision == HuntReturnPolicy.Decision.TOO_FAR) {
+                        ChatUtils.sendSystemMessage(source, returnMsg + " " + HuntReturnPolicy.tooFarLine(blocks));
+                        return;
+                    }
+                    ChatUtils.sendSystemMessage(source, returnMsg + " Heading back to base.");
 
                     // Deposit loot at base chests if available
                     if (bot.getEntityWorld() instanceof ServerWorld) {
                         Optional<MovementService.MovementPlan> plan =
                                 MovementService.planLootApproach(bot, target, MovementService.MovementOptions.skillLoot());
+                        boolean arrived = false;
                         if (plan.isPresent()) {
-                            MovementService.execute(source, bot, plan.get(), Boolean.FALSE, true);
+                            MovementService.MovementResult res = MovementService.execute(source, bot, plan.get(),
+                                    decision == HuntReturnPolicy.Decision.TELEPORT, true);
+                            arrived = res != null && res.success();
+                            LOGGER.info("Hunt return for {}: {}", bot.getName().getString(),
+                                    res == null ? "no result" : res.detail());
+                        }
+                        if (!arrived && bot.getBlockPos().getSquaredDistance(target) > 36.0D) {
+                            ChatUtils.sendSystemMessage(source, HuntReturnPolicy.couldNotReturnLine(
+                                    (int) Math.round(Math.sqrt(bot.getBlockPos().getSquaredDistance(target)))));
                         }
                     }
                     return;

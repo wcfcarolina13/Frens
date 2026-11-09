@@ -98,6 +98,21 @@ public final class SmeltingService {
         LOGGER.info("cookAllFoodSync: {} starting cook cycle at furnace {}", bot.getName().getString(), furnacePos.toShortString());
         long totalStartMs = System.currentTimeMillis();
         boolean anyCooked = false;
+        // What the fuel slot held before this cycle first fuelled it: a stop gives back only the
+        // fuel the bot itself put in (FurnaceTakeBackPolicy.fuelToTakeBack).
+        java.util.concurrent.atomic.AtomicReference<ItemStack> fuelBaseline = new java.util.concurrent.atomic.AtomicReference<>();
+        // What the bot's own refuels put in the fuel slot this cycle, counted at each refuel (same
+        // item as the slot); a player adding the same fuel mid-cycle cannot be told apart.
+        java.util.concurrent.atomic.AtomicInteger fuelAddedByBot = new java.util.concurrent.atomic.AtomicInteger();
+        // The food type in the input slot and how many of it the bot itself loaded (owner's same-kind
+        // food already in the slot is not counted).
+        java.util.concurrent.atomic.AtomicReference<Item> inputItemLoaded = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicInteger inputAddedByBot = new java.util.concurrent.atomic.AtomicInteger();
+        // Cooked food that left the output slot since the last load (eaten or evacuated), and what the
+        // output slot still held right after that load: together they say how much of the bot's raw
+        // food has already cooked, so a stop never hands back more raw food than it has left.
+        java.util.concurrent.atomic.AtomicInteger outputRemovedSinceLoad = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger outputAtLoad = new java.util.concurrent.atomic.AtomicInteger();
         // Walk-backs after losing furnace reach mid-cycle (FurnaceReachRecoveryPolicy budget).
         int walkBacksUsed = 0;
 
@@ -111,7 +126,10 @@ public final class SmeltingService {
 
         List<Item> itemTypes = new ArrayList<>(allCookables.keySet());
         for (Item rawItem : itemTypes) {
-            if (Thread.currentThread().isInterrupted() || TaskService.isServerStopping()) {
+            // A /bot stop raises the abort latch without always interrupting this thread: checked
+            // here too, or the cycle loaded the next food type after the stop and left it behind.
+            if (Thread.currentThread().isInterrupted() || TaskService.isServerStopping()
+                    || TaskService.isAbortRequested(botId)) {
                 break;
             }
             if (System.currentTimeMillis() - totalStartMs > COOK_TOTAL_TIMEOUT_MS) {
@@ -150,26 +168,26 @@ public final class SmeltingService {
                         return;
                     }
 
-                    // Evacuate output
+                    // What is in the furnace now is not the bot's: it takes its own share at the end
+                    // of each batch. If the output (another item, or a full stack) or a different raw
+                    // food in the input would stop this food cooking, skip this food here rather than
+                    // sweep someone else's food into the bot's pack.
                     ItemStack output = furnace.getStack(2);
-                    if (!output.isEmpty()) {
-                        ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
-                        if (remaining != null && remaining.isEmpty()) {
-                            furnace.setStack(2, ItemStack.EMPTY);
-                        } else if (remaining != null && remaining.getCount() < output.getCount()) {
-                            furnace.setStack(2, remaining);
-                        }
-                    }
-
-                    // Evacuate input if different item type
+                    var cookType = recipeTypeFor(liveWorld.getBlockState(furnacePos));
+                    var cookRecipe = cookType == null ? null
+                            : findMatchingCookingRecipe(new ItemStack(rawItem), liveWorld, cookType);
+                    ItemStack cookResult = cookRecipe == null ? ItemStack.EMPTY
+                            : cookRecipe.value().craft(new SingleStackRecipeInput(new ItemStack(rawItem)), liveWorld.getRegistryManager());
                     ItemStack existingInput = furnace.getStack(0);
-                    if (!existingInput.isEmpty() && !existingInput.isOf(rawItem)) {
-                        ItemStack remaining = evacuateInput(liveBot, source, existingInput.copy(), STATION_REACH_SQ);
-                        if (remaining != null && remaining.isEmpty()) {
-                            furnace.setStack(0, ItemStack.EMPTY);
-                        } else if (remaining != null && remaining.getCount() < existingInput.getCount()) {
-                            furnace.setStack(0, remaining);
-                        }
+                    if (FurnaceTakeBackPolicy.outputBlocksLoad(output.isEmpty(),
+                            !cookResult.isEmpty() && ItemStack.areItemsAndComponentsEqual(output, cookResult),
+                            output.getCount(), output.getMaxCount())
+                            || (!existingInput.isEmpty() && !existingInput.isOf(rawItem))) {
+                        LOGGER.info("cookAllFoodSync: {} leaves {} uncooked here: the furnace holds someone else's {}",
+                                liveBot.getName().getString(), rawItem.getName().getString(),
+                                (output.isEmpty() ? existingInput : output).getName().getString());
+                        loadResult.complete(false);
+                        return;
                     }
 
                     // Load all stacks of this raw food type
@@ -178,21 +196,31 @@ public final class SmeltingService {
                     Map<Item, List<ItemStack>> liveCookables = findCookables(liveBot, liveWorld, liveFurnaceState, "", true);
                     List<ItemStack> liveStacks = liveCookables.get(rawItem);
                     int inserted = 0;
+                    ItemStack inputBefore = furnace.getStack(FurnaceTakeBackPolicy.INPUT_SLOT);
+                    int inputCountBefore = inputBefore.isOf(rawItem) ? inputBefore.getCount() : 0;
                     if (liveStacks != null) {
                         for (ItemStack stack : liveStacks) {
-                            if (insertIntoInput(furnace, stack.copy())) {
-                                consumeFromInventory(liveBot, stack);
+                            int loadedNow = insertIntoInput(furnace, stack.copy());
+                            if (loadedNow > 0) {
+                                consumeFromInventory(liveBot, stack.copyWithCount(loadedNow));
                                 inserted++;
                             }
                         }
                     }
+                    ItemStack inputAfter = furnace.getStack(FurnaceTakeBackPolicy.INPUT_SLOT);
+                    inputItemLoaded.set(rawItem);
+                    inputAddedByBot.set(FurnaceTakeBackPolicy.refuelAdded(inputAfter.isOf(rawItem),
+                            inputCountBefore, inputAfter.getCount()));
+                    outputRemovedSinceLoad.set(0);
+                    outputAtLoad.set(furnace.getStack(FurnaceTakeBackPolicy.OUTPUT_SLOT).getCount());
                     if (inserted == 0) {
                         loadResult.complete(false);
                         return;
                     }
 
                     // Ensure fuel
-                    ensureFuel(liveBot, source, furnace, liveWorld, "auto");
+                    fuelBaseline.compareAndSet(null, furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT).copy());
+                    refuelCounting(liveBot, source, furnace, liveWorld, fuelAddedByBot);
                     loadResult.complete(true);
                 } catch (Throwable t) {
                     LOGGER.warn("cookAllFoodSync: load failed: {}", t.getMessage());
@@ -259,11 +287,14 @@ public final class SmeltingService {
 
                         // Eat from output if hungry
                         ItemStack output = furnace.getStack(2);
-                        if (!output.isEmpty() && liveBot.getHungerManager().getFoodLevel() < 18) {
-                            ItemStack taken = output.copy();
+                        int eatAllowance = FurnaceTakeBackPolicy.outputAllowance(inputAddedByBot.get(), outputRemovedSinceLoad.get());
+                        if (!output.isEmpty() && eatAllowance > 0 && liveBot.getHungerManager().getFoodLevel() < 18) {
+                            ItemStack taken = output.copyWithCount(Math.min(output.getCount(), eatAllowance));
+                            int offered = taken.getCount();
                             liveBot.getInventory().insertStack(taken);
-                            int consumed = output.getCount() - taken.getCount();
+                            int consumed = offered - taken.getCount();
                             if (consumed > 0) {
+                                outputRemovedSinceLoad.addAndGet(consumed);
                                 output.decrement(consumed);
                                 if (output.isEmpty()) {
                                     furnace.setStack(2, ItemStack.EMPTY);
@@ -276,7 +307,7 @@ public final class SmeltingService {
                         // Refuel if needed and input still has items
                         ItemStack input = furnace.getStack(0);
                         if (!input.isEmpty() && needsFuel(furnace)) {
-                            ensureFuel(liveBot, source, furnace, liveWorld, "auto");
+                            refuelCounting(liveBot, source, furnace, liveWorld, fuelAddedByBot);
                         }
 
                         // Check if batch is done (input slot empty)
@@ -336,12 +367,17 @@ public final class SmeltingService {
                         var be = liveWorld.getBlockEntity(furnacePos);
                         if (be instanceof AbstractFurnaceBlockEntity furnace) {
                             ItemStack output = furnace.getStack(2);
-                            if (!output.isEmpty()) {
-                                ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
-                                if (remaining != null && remaining.isEmpty()) {
-                                    furnace.setStack(2, ItemStack.EMPTY);
-                                } else if (remaining != null && remaining.getCount() < output.getCount()) {
-                                    furnace.setStack(2, remaining);
+                            // Only as much cooked food as the bot loaded raw: the rest cooked from the
+                            // owner's food in the slot and stays in the furnace for the owner.
+                            int want = Math.min(output.getCount(),
+                                    FurnaceTakeBackPolicy.outputAllowance(inputAddedByBot.get(), outputRemovedSinceLoad.get()));
+                            if (want > 0) {
+                                ItemStack remaining = evacuateOutput(liveBot, source, output.copyWithCount(want), STATION_REACH_SQ);
+                                int evacuated = remaining == null ? 0 : want - remaining.getCount();
+                                if (evacuated > 0) {
+                                    outputRemovedSinceLoad.addAndGet(evacuated);
+                                    int left = output.getCount() - evacuated;
+                                    furnace.setStack(2, left <= 0 ? ItemStack.EMPTY : output.copyWithCount(left));
                                 }
                             }
                             // Eat cooked food if hungry
@@ -374,11 +410,125 @@ public final class SmeltingService {
             }
         }
 
+        boolean stoppedEarly = Thread.currentThread().isInterrupted() || TaskService.isAbortRequested(botId);
+        if (FurnaceTakeBackPolicy.shouldTakeBack(stoppedEarly, TaskService.isServerStopping(), fuelBaseline.get() != null)) {
+            takeBackAfterStop(bot, source, server, worldKey, botId, furnacePos, fuelBaseline.get(), fuelAddedByBot,
+                    inputItemLoaded.get(), inputAddedByBot, outputRemovedSinceLoad, outputAtLoad);
+        }
+
         if (anyCooked) {
             LOGGER.info("cookAllFoodSync: {} finished cooking cycle ({}ms)",
                     bot.getName().getString(), System.currentTimeMillis() - totalStartMs);
         }
         return anyCooked;
+    }
+
+    /** Server thread: {@link #ensureFuel} for the cook cycle, adding to {@code added} what it put in the fuel slot. */
+    private static void refuelCounting(ServerPlayerEntity bot, ServerCommandSource source, AbstractFurnaceBlockEntity furnace,
+                                       ServerWorld world, java.util.concurrent.atomic.AtomicInteger added) {
+        ItemStack before = furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT).copy();
+        ensureFuel(bot, source, furnace, world, "auto");
+        ItemStack after = furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT);
+        boolean sameItem = before.isEmpty() || ItemStack.areItemsAndComponentsEqual(before, after);
+        added.addAndGet(FurnaceTakeBackPolicy.refuelAdded(sameItem, before.getCount(), after.getCount()));
+    }
+
+    /**
+     * A cook cycle stopped part way (a /bot stop interrupts its thread): take the food back out of
+     * the furnace, the raw input and whatever has cooked, so the bot does not walk off and leave it
+     * there, and the fuel it put in itself this cycle (fuel that was there before stays). In reach only; the
+     * thread's interrupt is set aside for this one short server hop and put back afterwards.
+     */
+    private static void takeBackAfterStop(ServerPlayerEntity bot, ServerCommandSource source,
+                                          net.minecraft.server.MinecraftServer server,
+                                          net.minecraft.registry.RegistryKey<net.minecraft.world.World> worldKey,
+                                          UUID botId, BlockPos furnacePos, ItemStack fuelBefore,
+                                          java.util.concurrent.atomic.AtomicInteger fuelAddedCounter, Item inputItem,
+                                          java.util.concurrent.atomic.AtomicInteger inputAddedCounter,
+                                          java.util.concurrent.atomic.AtomicInteger outputRemovedCounter,
+                                          java.util.concurrent.atomic.AtomicInteger outputAtLoadCounter) {
+        boolean interrupted = Thread.interrupted();
+        try {
+            CompletableFuture<String> done = new CompletableFuture<>();
+            server.execute(() -> {
+                try {
+                    ServerWorld liveWorld = server.getWorld(worldKey);
+                    ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                    if (liveWorld == null || liveBot == null || liveBot.isRemoved()
+                            || liveBot.getEntityWorld() != liveWorld) {
+                        done.complete("bot gone");
+                        return;
+                    }
+                    if (!(liveWorld.getBlockEntity(furnacePos) instanceof AbstractFurnaceBlockEntity furnace)) {
+                        done.complete("furnace gone");
+                        return;
+                    }
+                    if (!ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
+                        done.complete("out of reach");
+                        return;
+                    }
+                    // Read the counters here on the server thread, where every refuel, load and eat
+                    // that touched them ran, not as a snapshot taken on the worker.
+                    int fuelAdded = fuelAddedCounter.get();
+                    int inputAdded = inputAddedCounter.get();
+                    int cookedSinceLoad = outputRemovedCounter.get() + Math.max(0,
+                            furnace.getStack(FurnaceTakeBackPolicy.OUTPUT_SLOT).getCount() - outputAtLoadCounter.get());
+                    int taken = 0;
+                    for (int slot : FurnaceTakeBackPolicy.SLOTS) {
+                        ItemStack stack = furnace.getStack(slot);
+                        if (stack.isEmpty()) {
+                            continue;
+                        }
+                        // Input: only the bot's own loading of the food it was cooking comes back.
+                        int want = slot == FurnaceTakeBackPolicy.OUTPUT_SLOT
+                                ? Math.min(stack.getCount(), FurnaceTakeBackPolicy.outputAllowance(inputAdded, outputRemovedCounter.get()))
+                                : FurnaceTakeBackPolicy.inputToTakeBack(inputItem != null && stack.isOf(inputItem),
+                                        stack.getCount(), inputAdded, cookedSinceLoad);
+                        if (want <= 0) {
+                            continue;
+                        }
+                        ItemStack part = stack.copyWithCount(want);
+                        ItemStack remaining = slot == FurnaceTakeBackPolicy.OUTPUT_SLOT
+                                ? evacuateOutput(liveBot, source, part, STATION_REACH_SQ)
+                                : evacuateInput(liveBot, source, part, STATION_REACH_SQ);
+                        int notMoved = remaining == null ? want : remaining.getCount();
+                        int moved = want - notMoved;
+                        taken += moved;
+                        int left = stack.getCount() - moved;
+                        furnace.setStack(slot, left <= 0 ? ItemStack.EMPTY : stack.copyWithCount(left));
+                    }
+                    if (fuelBefore != null) {
+                        ItemStack fuel = furnace.getStack(FurnaceTakeBackPolicy.FUEL_SLOT);
+                        int give = FurnaceTakeBackPolicy.fuelToTakeBack(fuelBefore.isEmpty(),
+                                fuelBefore.isEmpty() || ItemStack.areItemsAndComponentsEqual(fuelBefore, fuel),
+                                fuelBefore.getCount(), fuel.getCount(), fuelAdded);
+                        if (give > 0) {
+                            ItemStack back = fuel.copyWithCount(give);
+                            liveBot.getInventory().insertStack(back);
+                            int moved = give - back.getCount();
+                            if (moved > 0) {
+                                fuel.decrement(moved);
+                                furnace.setStack(FurnaceTakeBackPolicy.FUEL_SLOT, fuel.isEmpty() ? ItemStack.EMPTY : fuel);
+                                taken += moved;
+                            }
+                        }
+                    }
+                    furnace.markDirty();
+                    done.complete("took back " + taken + " item(s)");
+                } catch (Throwable t) {
+                    done.complete("failed: " + t.getMessage());
+                }
+            });
+            String outcome = done.get(3, TimeUnit.SECONDS);
+            LOGGER.info("cookAllFoodSync: {} stopped mid-cook at {}: {}", bot.getName().getString(),
+                    furnacePos.toShortString(), outcome);
+        } catch (Exception e) {
+            LOGGER.warn("cookAllFoodSync: take-back after stop failed for {}: {}", bot.getName().getString(), e.toString());
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     /**
@@ -596,8 +746,9 @@ public final class SmeltingService {
                 for (Map.Entry<Item, List<ItemStack>> entry : cookables.entrySet()) {
                     String name = entry.getKey().getName().getString();
                     for (ItemStack stack : entry.getValue()) {
-                        if (insertIntoInput(furnace, stack.copy())) {
-                            consumeFromInventory(liveBot, stack);
+                        int moved = insertIntoInput(furnace, stack.copy());
+                        if (moved > 0) {
+                            consumeFromInventory(liveBot, stack.copyWithCount(moved));
                             inserted++;
                             ChatUtils.sendSystemMessage(source, "Added raw stack: " + name);
                         }
@@ -1236,29 +1387,32 @@ public final class SmeltingService {
         return options;
     }
 
-    private static boolean insertIntoInput(net.minecraft.block.entity.AbstractFurnaceBlockEntity furnace, ItemStack stack) {
-        if (stack.isEmpty()) return false;
+    /** Puts {@code stack} into the input slot; returns how many items went in (only those leave the bot). */
+    private static int insertIntoInput(net.minecraft.block.entity.AbstractFurnaceBlockEntity furnace, ItemStack stack) {
+        if (stack.isEmpty()) return 0;
         ItemStack input = furnace.getStack(0);
         if (input.isEmpty()) {
+            int all = stack.getCount();
             furnace.setStack(0, stack);
             furnace.markDirty();
-            return true;
+            return all;
         }
-        if (ItemStack.areItemsEqual(input, stack) && ItemStack.areEqual(input, stack) && input.getCount() < input.getMaxCount()) {
-            int transfer = Math.min(stack.getCount(), input.getMaxCount() - input.getCount());
+        int transfer = FurnaceInputPolicy.transfer(ItemStack.areItemsAndComponentsEqual(input, stack),
+                input.getCount(), input.getMaxCount(), stack.getCount());
+        if (transfer > 0) {
             input.increment(transfer);
             stack.decrement(transfer);
             furnace.markDirty();
-            return transfer > 0;
+            return transfer;
         }
-        return false;
+        return 0;
     }
 
     private static void consumeFromInventory(ServerPlayerEntity bot, ItemStack template) {
         int remaining = template.getCount();
         for (int i = 0; i < bot.getInventory().size() && remaining > 0; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
-            if (!ItemStack.areItemsEqual(stack, template)) {
+            if (!ItemStack.areItemsAndComponentsEqual(stack, template)) {
                 continue;
             }
             int take = Math.min(stack.getCount(), remaining);

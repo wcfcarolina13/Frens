@@ -145,6 +145,38 @@ class SoulSideChannelOpsTest {
         assertEquals(4, fx.droppedFacts());
     }
 
+    // === noteSharedHardship (OWNER_DAMAGE peer rule) ===
+
+    @Test
+    void sharedHardshipRaisesTrustOncePerDayPerPeerAndSkipsSelf() {
+        UUID self = UUID.nameUUIDFromBytes("self".getBytes());
+        UUID other = UUID.nameUUIDFromBytes("other".getBytes());
+        SoulTypes.SoulMind once = SoulMindOps.noteSharedHardship(SoulTypes.SoulMind.empty(), self,
+                java.util.Arrays.asList(PEER, other, self, null), 3);
+        assertEquals(SoulTypes.Stance.BASELINE.trust() + 1, once.peerStances().get(PEER).stance().trust());
+        assertEquals(SoulTypes.Stance.BASELINE.trust() + 1, once.peerStances().get(other).stance().trust());
+        assertFalse(once.peerStances().containsKey(self));
+        assertSame(once, SoulMindOps.noteSharedHardship(once, self, List.of(PEER, other), 3),
+                "a second fight the same day adds nothing");
+        SoulTypes.SoulMind nextDay = SoulMindOps.noteSharedHardship(once, self, List.of(PEER), 4);
+        assertEquals(SoulTypes.Stance.BASELINE.trust() + 2, nextDay.peerStances().get(PEER).stance().trust());
+    }
+
+    @Test
+    void sharedHardshipSharesTheSceneTrustBudget() {
+        SoulTypes.SoulMind chatted = SoulMindOps.bumpPeerStance(SoulTypes.SoulMind.empty(), PEER,
+                SoulSideChannelOps.Axis.WARMTH, 1, 9);
+        assertSame(chatted, SoulMindOps.noteSharedHardship(chatted, null, List.of(PEER), 9));
+    }
+
+    @Test
+    void sharedHardshipIgnoresUnknownDayAndEmptyPeers() {
+        SoulTypes.SoulMind m = SoulTypes.SoulMind.empty();
+        assertSame(m, SoulMindOps.noteSharedHardship(m, null, List.of(PEER), -1));
+        assertSame(m, SoulMindOps.noteSharedHardship(m, null, List.of(), 2));
+        assertSame(m, SoulMindOps.noteSharedHardship(m, null, null, 2));
+    }
+
     // === bumpPeerStance ===
 
     private static final UUID PEER = UUID.nameUUIDFromBytes("peer".getBytes());

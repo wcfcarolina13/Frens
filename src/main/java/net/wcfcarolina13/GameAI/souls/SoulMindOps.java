@@ -141,6 +141,26 @@ final class SoulMindOps {
         return withStance(mind, new SoulTypes.Stance(s.trust(), s.exasperation(), s.curiosity() + 1));
     }
 
+    /**
+     * Shared hardship (phase-3 spec, the OWNER_DAMAGE peer rule): the owner was hurt in a fight
+     * while this bot and {@code peers} all saw it, so trust toward each peer rises by 1. Uses the
+     * same once-per-Minecraft-day-per-pair trust guard as the "we both spoke" scene rule, so a
+     * fight and a chat on one day still add only +1. Pure; null or self ids are skipped.
+     */
+    static SoulTypes.SoulMind noteSharedHardship(SoulTypes.SoulMind mind, UUID selfId,
+                                                 java.util.Collection<UUID> peers, int day) {
+        if (mind == null || peers == null || peers.isEmpty() || day < 0) {
+            return mind;
+        }
+        SoulTypes.SoulMind next = mind;
+        for (UUID peer : peers) {
+            if (peer != null && !peer.equals(selfId)) {
+                next = bumpPeerStance(next, peer, SoulSideChannelOps.Axis.WARMTH, 1, day);
+            }
+        }
+        return next;
+    }
+
     // === peer stance rules (conversation ontology Phase 3a) ===
 
     /** At most this many peers are remembered; the flattest stance is evicted first. */
@@ -156,7 +176,13 @@ final class SoulMindOps {
      *       → curiosity +1 toward that peer, at most once per Minecraft day per pair;</li>
      *   <li>this bot asked the peer something and the peer never spoke again in the scene
      *       → exasperation +1, sharing the same once-per-day guard;</li>
-     *   <li>both of them spoke → trust +1, at most once per Minecraft day per pair.</li>
+     *   <li>both of them spoke → trust +1, at most once per Minecraft day per pair;</li>
+     *   <li>the scene was seeded as a TEASE act ({@link SoulSpeechAct#TEASE}), delivered with at
+     *       least two lines, and both of them spoke → exasperation +1 (banter is affectionate
+     *       friction), on the same once-per-day guard as the ask rules and never a second
+     *       exasperation step in one scene. Its trust +1 half is rule 3, which already covers
+     *       every pair this rule reaches. A 3c side-channel FRICTION or CURIOSITY claim lands
+     *       before playback and spends the same guard, so it suppresses this step that day.</li>
      * </ol>
      *
      * @param selfIndex this bot's index into {@code rosterIds}
@@ -165,6 +191,17 @@ final class SoulMindOps {
     static SoulTypes.SoulMind notePeerScene(SoulTypes.SoulMind mind, int selfIndex, List<String> rosterNames,
                                             List<UUID> rosterIds, List<SoulGroupTypes.SceneLine> delivered,
                                             int day) {
+        return notePeerScene(mind, selfIndex, rosterNames, rosterIds, delivered, day, null);
+    }
+
+    /**
+     * {@link #notePeerScene(SoulTypes.SoulMind, int, List, List, List, int)} with the act the
+     * scene was seeded with; {@code null} (no act, e.g. a player-addressed or local turn) applies
+     * the first three rules only.
+     */
+    static SoulTypes.SoulMind notePeerScene(SoulTypes.SoulMind mind, int selfIndex, List<String> rosterNames,
+                                            List<UUID> rosterIds, List<SoulGroupTypes.SceneLine> delivered,
+                                            int day, SoulSpeechAct act) {
         if (rosterNames == null || rosterIds == null || delivered == null || delivered.isEmpty()
                 || rosterNames.size() != rosterIds.size()
                 || selfIndex < 0 || selfIndex >= rosterIds.size()) {
@@ -179,6 +216,7 @@ final class SoulMindOps {
             }
         }
         boolean selfSpoke = lastLine.containsKey(selfIndex);
+        boolean teaseScene = act == SoulSpeechAct.TEASE && delivered.size() >= 2;
 
         Map<UUID, SoulTypes.PeerStance> peers = new LinkedHashMap<>(mind.peerStances());
         Set<UUID> touchedIds = new LinkedHashSet<>();
@@ -214,7 +252,14 @@ final class SoulMindOps {
                 askFired = true;
             }
             int myAsk = lastAskIndex(delivered, selfIndex, peerName);
+            boolean exasperated = false;
             if (askAllowed && myAsk >= 0 && lastLine.getOrDefault(p, -1) < myAsk) {
+                exasperation++;
+                touched = true;
+                askFired = true;
+                exasperated = true;
+            }
+            if (askAllowed && !exasperated && teaseScene && selfSpoke && lastLine.containsKey(p)) {
                 exasperation++;
                 touched = true;
                 askFired = true;

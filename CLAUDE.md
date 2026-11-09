@@ -12,11 +12,11 @@ Minecraft Fabric mod ("Frens") that adds intelligent NPC bot companions with aut
 JAVA_HOME=<your JDK 21> ./gradlew build   # JDK 21 required (JDK 25 breaks Gradle 8.14.2)
 ```
 
-JUnit suite under `src/test/java` (3857 tests as of 2026-11-04, pure-logic policy/director/pathfinding tests; run with `./gradlew test`, or `./gradlew build` which includes it). CI still runs `./gradlew build -x test`. Gameplay behaviour is verified manually in-game.
+JUnit suite under `src/test/java` (3857 tests as of 2026-11-04, pure-logic policy/director/pathfinding tests; run with `./gradlew test`, or `./gradlew build` which includes it). CI runs `./gradlew build -x test` and then `./gradlew test` as a separate step (test reports are uploaded when it fails). Gameplay behaviour is verified manually in-game.
 
 **Test policy (hard rules, learned 2026-09-04):** no `net.minecraft.*` types in test code — extract the decision as a static pure helper over ints/strings/records and test that (`*Policy.java` convention: `TravelWaitPolicy`, `BundleReachPolicy`, `ScaffoldSlotPolicy`, `FuelOffloadPolicy`). `ManualConfig` is built in tests via its private constructor with reflection (see `SoulFoundationTest.newRealConfig()`); never call `save()`/`load()`. Classes whose static init touches `Blocks`/`SoundEvents` (e.g. `BotFleeService`) throw `ExceptionInInitializerError` under JUnit — put the pure helper in a separate class (`PlayerUtils/TickFreshness` is the precedent). If `./gradlew test` reports UP-TO-DATE, use `./gradlew cleanTest test`; stale incremental classes after `build -x test` are fixed by `./gradlew clean build`.
 
-**Parallel agents in this one worktree** (the 2026-09-04 release loop ran 3–5 at once): give each agent a disjoint file set and tell it to stage only its own paths (`git add <paths>`, never `-A`); sequence any two that share a file. Concurrent gradle runs race on `build/` (`remapJar NoSuchFileException`, `cleanTest` XML write failures, transient `compileTestJava` errors from another agent's in-flight file) — rerun once when the tree is quiet; the controller does one `./gradlew clean build` before release.
+**Parallel agents in this one worktree** (the 2026-09-04 release loop ran 3–5 at once): give each agent a disjoint file set and tell it to stage only its own paths (`git add <paths>`, never `-A`); sequence any two that share a file. Concurrent gradle runs race on `build/` (`remapJar NoSuchFileException`, `cleanTest` XML write failures, transient `compileTestJava` errors from another agent's in-flight file) — rerun once when the tree is quiet; the controller does one `./gradlew clean build` before release. Memory is the other limit: concurrent builds each start a daemon and test JVMs, so give agents `--max-workers=1` and keep two or three full builds in flight at most (`docs/GUARDRAILS.md`, "Parallel Gradle Builds Run Out of Memory").
 
 JAR output: `build/libs/frens-*.jar`
 
@@ -26,10 +26,21 @@ Never overwrite a JAR in a running game's `mods/` folder: the game crashes later
 
 ## Repository Conventions
 
-- **`changelog.md`** — History and reasoning log. Add a concise entry after code changes.
+- **`changelog.md`** — History and reasoning log. Add a concise entry after code changes on `main`. On a PR branch, see Parallel sessions.
 - **`RALPH_TASK.md`** — Current session handoff (top) + project backlog (below, including "Recovered deferrals"). Single source of truth for all pending work. Name kept from the retired Ralph loop.
 - **`docs/GUARDRAILS.md`** — Lessons learned ("Signs") from past failures. Read before acting.
 - **`docs/handoffs/ARCHIVE_2026.md`** — Superseded handoffs, old session notes and the Ralph loop log. Grep it, don't read it whole.
+
+### Parallel sessions
+
+Several Claude sessions may work in this repo at once, in the cloud and on Bradley's Mac. A rule agreed in one session's chat doesn't reach the others, so the rules live here.
+
+- On a PR branch, don't edit `changelog.md` or `RALPH_TASK.md`, because parallel PRs all conflict there. End the PR body with a line starting `Changelog text for the release wave:`; the release collects it. Put handoff notes for the next session in the PR body too.
+- Don't bump `mod_version` on a PR branch. The Mac release wave bumps it.
+- Never push to a branch you didn't create unless its owner hands it over in writing on the PR. Report problems on it with evidence instead.
+- Check open PRs before starting, so you don't redo or collide with work in flight.
+- A behaviour fix counts only after a sandbox run on the Mac. If you can't run one, end the PR body with a `## Sandbox check needed` section: what it needs, the branch and commit, the exact step, the log line that shows it worked, and where to report.
+- Results come back as a PR comment naming the commit tested. This repo is public, so comments carry no local paths, world names or private-repo content.
 
 ### Agent Workflow
 
@@ -38,7 +49,7 @@ Never overwrite a JAR in a running game's `mods/` folder: the game crashes later
    grep target, not a read. `grep -n '^\- \[ \]' RALPH_TASK.md` lists open criteria.
 2. Check git status/last commits to avoid redoing completed work.
 3. Work on exactly one clearly bounded task at a time; finish or reach a clean stop before switching.
-4. After code changes: run `./gradlew build -x test` (full `./gradlew build` before any release), update `changelog.md`, commit.
+4. After code changes: run `./gradlew build -x test` (full `./gradlew build` before any release), update `changelog.md` (on `main` only; a PR branch puts it in the PR body), commit.
    **Invoke the `frens-release-loop` skill** for any "ship X as 1.1.NNN" / "next batch" request — it carries the dispatch briefs and the release checklist. Summary of the loop that shipped 1.1.203–1.1.208: read-only scoping agent → implementer agents (disjoint files) → one batch review → one fix wave → scoped re-review → bump `mod_version` → prepend changelog (after the 3-line header; the file is ~1 MB, never read it whole) → RALPH_TASK handoff + checkboxes → `./gradlew clean build` → commit → push → pre-deploy check → deploy → add a field-checklist phase to `docs/testing/FIELD_SESSION_1.1.202.md` → update auto-memory. Scoping comes FIRST: two backlog items this way were wrong as written ("delete legacy CompanionSpellsScreen" was the live Spells keybind target; "escape-with-full-inventory" was not an inventory problem).
 5. Don't deploy until the game is closed: report the artifact path and wait for confirmation.
 6. Wrap-up: summarize what changed and where; note completion vs follow-up needed.
@@ -110,8 +121,8 @@ Each service handles a single concern. Key ones:
 - `ScaffoldService` — Pillaring/scaffolding primitives
 
 ### PathFinding (`PathFinding/`)
-- `PathFinder.java` — Classic A* pathfinder
-- `BaritoneStylePathFinder.java` — Baritone-style pathfinder (opt-in fallback since 1.1.261 when unified became the default: `/bot config pathfinder unified|baritone|classic`)
+- `PathFinder.java` — Finder dispatch (unified by default, `unified/` package) and path helpers; the classic bidirectional A* was removed in Slice D (2026-11-08)
+- `BaritoneStylePathFinder.java` — Baritone-style pathfinder (opt-in fallback since 1.1.261 when unified became the default: `/bot config pathfinder unified|baritone`)
 - `ChartPathToBlock.java`, `GoTo.java`, `PathTracer.java`, `Segment.java` — Navigation helpers
 
 ### Commands

@@ -124,14 +124,12 @@ public final class PathCompareService {
             // The primary's re-check after the shadows, back to back with theirs, on this thread's own view.
             values.put(primaryChoice, primaryValue(primary, primaryPath, world));
 
-            Value bidir = values.get(PathFinderChoice.BIDIR);
             Value baritone = values.get(PathFinderChoice.BARITONE);
             Value unified = values.get(PathFinderChoice.UNIFIED);
             String line = PathCompareFormat.line(botName,
                     start.getX(), start.getY(), start.getZ(),
                     target.getX(), target.getY(), target.getZ(),
                     primaryChoice,
-                    bidir.ms(), bidir.len(), bidir.status(),
                     baritone.ms(), baritone.len(), baritone.status(),
                     unified.ms(), unified.len(), unified.status(), unified.reason(),
                     primary.planId());

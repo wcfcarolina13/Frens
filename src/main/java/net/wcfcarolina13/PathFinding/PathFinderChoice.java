@@ -6,11 +6,10 @@ import java.util.List;
 /**
  * The finders {@link PathFinder} can dispatch to. {@link #label()} is the token the logs use.
  * UNIFIED (the 1.1.242 merged finder) is the default since 1.1.261, after the swapped A/B of
- * 2026-10-17 (docs/testing/PATHFINDER_AB_2026-10-17.md); BARITONE is the opt-in fallback; BIDIR is
- * the classic finder, still selectable.
+ * 2026-10-17 (docs/testing/PATHFINDER_AB_2026-10-17.md); BARITONE is the opt-in fallback. The classic
+ * bidirectional finder was removed (Slice D, ruling 2026-11-08): a saved "classic" now loads as the default.
  */
 public enum PathFinderChoice {
-    BIDIR("bidir"),
     BARITONE("baritone"),
     UNIFIED("unified");
 
@@ -38,7 +37,7 @@ public enum PathFinderChoice {
         return out;
     }
 
-    /** Parses a command token: unified, baritone, classic/bidir. Anything else (including "default") is null. */
+    /** Parses a command token: unified or baritone. Anything else (including "default" and the removed "classic") is null. */
     public static PathFinderChoice parse(String token) {
         if (token == null) {
             return null;
@@ -48,9 +47,6 @@ public enum PathFinderChoice {
                 return UNIFIED;
             case "baritone":
                 return BARITONE;
-            case "classic":
-            case "bidir":
-                return BIDIR;
             default:
                 return null;
         }

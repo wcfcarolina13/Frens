@@ -132,20 +132,49 @@ public final class BotControlApplier {
         // but may not have a BotSpawn entry yet (e.g., manually spawned bots).
         Map<String, Integer> worldCounts = BotWorldStateService.debugAliasWorldCounts();
         if (worldCounts != null) {
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (String c : candidates) {
+                seen.add(c.toLowerCase(Locale.ROOT));
+            }
             for (String wAlias : worldCounts.keySet()) {
+                // Already a candidate under its spelled settings key: the lower-cased key adds nothing.
+                if (seen.contains(wAlias.toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
                 if (BotWorldStateService.loadState(server, wAlias).isPresent()) {
                     candidates.add(wAlias);
                 }
             }
         }
 
+        long newestSaved = BotWorldStateService.newestSavedAtMs(server);
+        int quietSkips = 0;
         AtomicInteger baseline = new AtomicInteger(-1);
         AtomicInteger dispatched = new AtomicInteger(0);
         AtomicInteger skipped = new AtomicInteger(0);
         boolean queuedAny = false;
-        for (String alias : candidates) {
-            if (alias == null || alias.equalsIgnoreCase("default")) {
+        for (String rawAlias : candidates) {
+            if (rawAlias == null || rawAlias.equalsIgnoreCase("default")) {
                 continue;
+            }
+            if (Frens.CONFIG.getBotSpawn(rawAlias, currentWorldKey) == null
+                    && Frens.CONFIG.getEffectiveBotControl(rawAlias, currentWorldKey) == null) {
+                // Known only from the world-state store (the settings file was reset or never had
+                // it): bring back only a bot active in this world's last session, never one put away.
+                var entry = BotWorldStateService.currentEntry(server, rawAlias).orElse(null);
+                if (entry != null && !AutoSpawnActivityPolicy.bringBack(entry.shelved(), entry.savedAtMs(), newestSaved)) {
+                    if (Boolean.TRUE.equals(entry.shelved())) {
+                        Frens.LOGGER.info("Auto-spawn skipped for {}: put away with /bot despawn in this world", rawAlias);
+                    } else {
+                        quietSkips++;
+                    }
+                    continue;
+                }
+            }
+            // Only a lower-case key (from the world-state store) needs its spelling looked up.
+            String alias = rawAlias.equals(rawAlias.toLowerCase(Locale.ROOT)) ? spelledName(server, rawAlias) : rawAlias;
+            if (!alias.equals(rawAlias)) {
+                Frens.LOGGER.info("Auto-spawn: {} is spawned as {}, the name it was saved under", rawAlias, alias);
             }
             // Must have a saved spawn point for the current world, OR world state for the current world.
             ManualConfig.BotSpawn spawn = Frens.CONFIG.getBotSpawn(alias, currentWorldKey);
@@ -231,10 +260,36 @@ public final class BotControlApplier {
             server.execute(task);
             queuedAny = true;
         }
+        if (quietSkips > 0) {
+            Frens.LOGGER.info("Auto-spawn skipped {} bot(s) known only from the world-state store and not active in this world's last session",
+                    quietSkips);
+        }
         if (queuedAny) {
             // Runs after every per-alias task above (server.execute is FIFO on the server thread).
             server.execute(() -> notifySkipped(server, skipped.get()));
         }
+    }
+
+    /**
+     * {@code alias} as the bot's name is spelled ({@link AutoSpawnNamePolicy}): the saved world-state
+     * name, else the user-cache name for a UUID in its inventory snapshot names (a local lookup only).
+     */
+    private static String spelledName(MinecraftServer server, String alias) {
+        String saved = BotWorldStateService.savedDisplayName(alias).orElse(null);
+        java.util.List<String> candidates = new java.util.ArrayList<>();
+        try {
+            var cache = server.getApiServices().nameToIdCache();
+            for (String uuid : BotInventoryStorageService.snapshotUuidsForAlias(server, alias)) {
+                try {
+                    cache.getByUuid(java.util.UUID.fromString(uuid)).ifPresent(entry -> candidates.add(entry.name()));
+                } catch (IllegalArgumentException notAUuid) {
+                    // another bot's file whose name starts with this alias and an underscore
+                }
+            }
+        } catch (RuntimeException e) {
+            Frens.LOGGER.debug("Auto-spawn name lookup for {} failed: {}", alias, e.toString());
+        }
+        return AutoSpawnNamePolicy.spawnName(alias, saved, candidates);
     }
 
     private static void notifySkipped(MinecraftServer server, int skipped) {
