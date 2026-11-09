@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Attempts a last-second water-bucket clutch when a lethal fall is detected.
  */
 public final class BotFallSafetyService {
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("bot-fall-safety");
 
     private static final float MIN_LETHAL_FALL_DISTANCE = 7.5F;
     private static final double MIN_DESCENT_SPEED = -0.65D;
@@ -87,11 +88,14 @@ public final class BotFallSafetyService {
         if (!isLikelyLethal(bot)) {
             return;
         }
-        if (waterEvaporatesAt(world, bot.getBlockPos())) {
-            return;
-        }
         long next = NEXT_ATTEMPT_TICK.getOrDefault(bot.getUuid(), 0L);
         if (nowTick < next) {
+            return;
+        }
+        if (waterEvaporatesAt(world, bot.getBlockPos())) {
+            NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + SUCCESS_COOLDOWN_TICKS);
+            LOGGER.info("Fall clutch: {} skipped the water bucket, water evaporates here (fallDistance={})",
+                    bot.getName().getString(), String.format(java.util.Locale.ROOT, "%.1f", bot.fallDistance));
             return;
         }
 
@@ -121,6 +125,9 @@ public final class BotFallSafetyService {
             BotActions.selectHotbarSlot(bot, previousSlot);
         }
 
+        LOGGER.info("Fall clutch: {} {} water at {} (fallDistance={})", bot.getName().getString(),
+                used ? "placed" : "failed to place", landing.supportPos().toShortString(),
+                String.format(java.util.Locale.ROOT, "%.1f", bot.fallDistance));
         if (used) {
             NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + SUCCESS_COOLDOWN_TICKS);
         } else {
