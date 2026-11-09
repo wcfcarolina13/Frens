@@ -22,8 +22,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Detects when a bot is stranded on top of a tree canopy (e.g. after elytra landing
- * on leaves) and helps it escape via safe drop, leaf breaking, elytra descent,
- * or — as a last resort — jumping off.
+ * on leaves) and helps it escape via a safe drop, elytra descent or leaf breaking; after
+ * 10 s stuck it breaks the leaf below over a fall that may cost health (never lava or over 8).
  *
  * <p>Called from the follow tick in {@link BotEventHandler} when the bot is on the ground
  * and follow-mode is active. The entry-point {@link #tryEscape} is lightweight: it
