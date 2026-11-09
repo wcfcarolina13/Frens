@@ -2,6 +2,9 @@ package net.wcfcarolina13.GameAI.services;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -48,5 +51,17 @@ class TreeStuckDropPolicyTest {
         assertEquals(-0.1, TreeStuckDropPolicy.edgeSpeed(44203.0, 44202.5), 1e-9);
         assertEquals(0.05, TreeStuckDropPolicy.edgeSpeed(44202.4, 44202.5), 1e-9);
         assertEquals(0.0, TreeStuckDropPolicy.edgeSpeed(44202.5, 44202.5), 1e-9);
+    }
+
+    @Test
+    void theEscapeBreaksALeafOnlyOverASafeFallAndLeavesABotWithItsCommanderAlone() throws Exception {
+        String src = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/TreeStuckEscapeService.java"));
+        int sameTree = src.indexOf("if (commanderOnSameTree) {");
+        int strategy1 = src.indexOf("Strategy 1: Find a safe drop edge");
+        assertTrue(sameTree > 0 && sameTree < strategy1, "a bot with its commander on the canopy runs no strategy");
+        assertTrue(src.contains("isIn(BlockTags.LEAVES) && TreeStuckDropPolicy.isSafeDrop(fallThroughLeaf)"),
+                "the leaf under the bot goes only over a safe fall");
+        assertTrue(src.indexOf("dropCanopyWaypoints(bot);") < src.indexOf("Strategy 1: Find a safe drop edge"),
+                "the canopy path is dropped when the bot gets down");
     }
 }

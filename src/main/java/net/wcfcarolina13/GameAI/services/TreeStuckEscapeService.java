@@ -110,6 +110,7 @@ public final class TreeStuckEscapeService {
                 BlockState belowState = world.getBlockState(bot.getBlockPos().down());
                 if (!belowState.isIn(BlockTags.LEAVES)) {
                     LOGGER.info("TreeStuck: {} escaped tree canopy", bot.getName().getString());
+                    dropCanopyWaypoints(bot);
                     clearState(botId);
                     return false;
                 }
@@ -167,6 +168,10 @@ public final class TreeStuckEscapeService {
                 return true;
             }
             HoleNudge spent = HOLE_NUDGE.get(botId);
+            if (LAST_TREE_ESCAPE_ATTEMPT_TICK.containsKey(botId) || spent != null) {
+                // Only after an escape actually ran: walking off a leaf patch is not leaving a canopy.
+                dropCanopyWaypoints(bot);
+            }
             clearState(botId);
             if (spent != null && spent.column().equals(bot.getBlockPos())) {
                 HOLE_NUDGE.put(botId, spent); // keep this hole's spent budget while the bot stays on it
@@ -203,9 +208,13 @@ public final class TreeStuckEscapeService {
             BlockState cmdBelow = world.getBlockState(commander.getBlockPos().down());
             commanderOnSameTree = cmdBelow.isIn(BlockTags.LEAVES);
         }
-        if (!commanderOnSameTree) {
-            showDialogue(bot, STUCK_LINES[new Random().nextInt(STUCK_LINES.length)]);
+        if (commanderOnSameTree) {
+            // Up here with the commander, the bot is not stranded: digging under it only drops it a
+            // block and it hops back (sandbox 2026-11-09, commander one block away on the canopy).
+            TREE_STUCK_SINCE_TICK.put(botId, now);
+            return false;
         }
+        showDialogue(bot, STUCK_LINES[new Random().nextInt(STUCK_LINES.length)]);
 
         // ── Strategy 1: Find a safe drop edge and steer toward it ──
         // Skip if we already tried safe-drop and it was unreachable.
@@ -233,9 +242,11 @@ public final class TreeStuckEscapeService {
         // ── Strategy 3: Break leaves below to fall through ──
         // Simplest and most reliable: just break the leaf under the bot's feet.
         BlockPos leafBelow = bot.getBlockPos().down();
-        if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES)) {
+        int fallThroughLeaf = fallThroughLeaf(world, leafBelow);
+        if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES) && TreeStuckDropPolicy.isSafeDrop(fallThroughLeaf)) {
             showDialogue(bot, LEAF_BREAK_LINE);
-            LOGGER.info("TreeStuck: {} breaking leaf below at {}", bot.getName().getString(), leafBelow.toShortString());
+            LOGGER.info("TreeStuck: {} breaking leaf below at {} (fall {})", bot.getName().getString(),
+                    leafBelow.toShortString(), fallThroughLeaf);
             startLeafMine(bot, leafBelow);
             return true;
         }
@@ -323,6 +334,33 @@ public final class TreeStuckEscapeService {
                 TreeStuckDropPolicy.edgeSpeed(bot.getZ(), column.getZ() + 0.5D));
         bot.velocityDirty = true;
         return true;
+    }
+
+    /**
+     * How far the bot falls if the leaf at {@code leafPos} under it goes: that cell plus the air
+     * below, onto a landing that does no harm; {@link Integer#MAX_VALUE} when the landing is unsafe or
+     * deeper than a safe drop. The leaf break used to open columns over a terrace 4-6 blocks down
+     * (sandbox 2026-11-09: 1-3 HP lost in 3 of 6 runs).
+     */
+    private static int fallThroughLeaf(ServerWorld world, BlockPos leafPos) {
+        int fall = 1;
+        BlockPos probe = leafPos.down();
+        while (fall <= SAFE_DROP_HEIGHT && world.getBlockState(probe).isAir()) {
+            fall++;
+            probe = probe.down();
+        }
+        return isSafeLanding(world, probe) ? fall : Integer.MAX_VALUE;
+    }
+
+    /**
+     * Forget the follow path planned from the canopy. Once the bot is down, its next waypoint can sit
+     * six blocks over its head and follow keeps it ("waypoints preserved") while the bot stands at the
+     * trunk (sandbox 2026-11-09, 2 of 6 runs).
+     */
+    private static void dropCanopyWaypoints(ServerPlayerEntity bot) {
+        if (FollowStateService.FOLLOW_WAYPOINTS.remove(bot.getUuid()) != null) {
+            LOGGER.info("TreeStuck: {} off the canopy, dropping the follow path planned up there", bot.getName().getString());
+        }
     }
 
     private static boolean isSafeLanding(ServerWorld world, BlockPos pos) {
