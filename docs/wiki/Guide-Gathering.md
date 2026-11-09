@@ -48,7 +48,7 @@ Clears the bot's saved fishing stand so it picks a fresh spot next time.
 - When a bot is mid-session the sunset auto-return saves the current stand so it can resume there at sunrise.
 - If the saved spot is bad (unreachable, no nearby chest, unsafe shoreline), the bot can end up fast-travelling back to it every morning and failing.
 - Running this clears the saved session and the sunrise-resume record for the target bot.
-- Lodestone compasses are NOT touched. The next fresh /bot fish still fast-travels to the nearest compass target.
+- Lodestone compasses are NOT touched. The next /bot fish walks to a fishing spot it remembers within 64 blocks, or finds water near where it stands. It doesn't use a compass for that: on its own it uses one only to go home at sunset and back to work at sunrise (see Daily Work Loops).
 
 **Command:** `/bot fish forget <bot>`
 
@@ -77,6 +77,7 @@ Send a fren to a far work spot that it returns to every morning: home at sunset,
 - Give the fren somewhere to sleep: a base or a bed it has slept in (see Home &amp; Bases Explained). With neither, it goes to the world spawn.
 - Start the job with no count, for example /bot skill woodcut &lt;bot&gt; or /bot skill fish &lt;bot&gt;. A job with a count ends when the count is reached and is not picked up again.
 - At sunset the fren stops, remembers the job and where it stopped, and goes home. It remembers the job when it holds a compass whose lodestone still stands in this dimension (or when it is at a base, or sheltered in place).
+- With any lodestone compass in its pack, it fast-travels home at sunset instead of walking, when home is at least 16 blocks away.
 - At sunrise it fast-travels to the lodestone nearest the spot where it stopped, lands beside it and starts the same job again. That lodestone must be within 128 blocks of the spot. If none is, it starts the job again wherever it woke up. Hunting has its own loop and is not resumed this way.
 - Fast travel still needs a gate (a bound lodestone compass is one) and food. See Fast-Travel Gates.
 - If a lodestone is broken, the compass stops working: /bot compass list &lt;bot&gt; shows each compass and any that lost their lodestone.
