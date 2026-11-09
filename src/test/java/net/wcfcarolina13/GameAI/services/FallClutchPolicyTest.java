@@ -68,8 +68,13 @@ class FallClutchPolicyTest {
         assertTrue(scoop > 0, "scoop step exists");
         String body = src.substring(scoop);
         assertTrue(body.contains("BotActions.ensureHotbarItem(bot, Items.BUCKET)"));
-        assertTrue(body.contains("bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND)"));
+        int guard = body.indexOf("if (!hand.isOf(Items.BUCKET))");
+        int use = body.indexOf("bot.interactionManager.interactItem(bot, world, hand, Hand.MAIN_HAND)");
+        assertTrue(guard > 0 && use > guard, "uses the item only once the empty bucket is really in hand");
+        assertTrue(body.contains("scooped = result.isAccepted() && !isWaterSource(world, waterPos)"),
+                "success is judged by the water cell, so a stack of buckets still counts");
         assertTrue(body.contains("authorizeBlockMutation(bot, world, waterPos)"), "territory rules apply to the scoop too");
-        assertTrue(src.contains("PENDING_SCOOP.put(bot.getUuid(), new PendingScoop(landing.placePos()"), "armed only by a placement");
+        assertTrue(src.contains("PENDING_SCOOP.put(bot.getUuid(), new PendingScoop(placedSourcePos(world, landing.placePos())"),
+                "armed only by a placement, at the cell that took the source");
     }
 }

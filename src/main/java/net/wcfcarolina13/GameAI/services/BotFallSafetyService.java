@@ -141,7 +141,7 @@ public final class BotFallSafetyService {
                 String.format(java.util.Locale.ROOT, "%.1f", bot.fallDistance));
         if (used) {
             NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + SUCCESS_COOLDOWN_TICKS);
-            PENDING_SCOOP.put(bot.getUuid(), new PendingScoop(landing.placePos().toImmutable(), nowTick));
+            PENDING_SCOOP.put(bot.getUuid(), new PendingScoop(placedSourcePos(world, landing.placePos()), nowTick));
         } else {
             NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + RETRY_INTERVAL_TICKS);
         }
@@ -160,6 +160,24 @@ public final class BotFallSafetyService {
         Boolean evaporates = world.getEnvironmentAttributes()
                 .getAttributeValue(EnvironmentAttributes.WATER_EVAPORATES_GAMEPLAY, pos);
         return Boolean.TRUE.equals(evaporates);
+    }
+
+    /**
+     * The cell that actually took the water source. Tall grass or a flower on the support block
+     * can make the source land one cell higher than predicted, leaving flowing water below.
+     */
+    private static BlockPos placedSourcePos(ServerWorld world, BlockPos placePos) {
+        BlockPos predicted = placePos.toImmutable();
+        if (isWaterSource(world, predicted)) {
+            return predicted;
+        }
+        BlockPos above = predicted.up();
+        return isWaterSource(world, above) ? above : predicted;
+    }
+
+    private static boolean isWaterSource(ServerWorld world, BlockPos pos) {
+        var fluid = world.getFluidState(pos);
+        return fluid.isIn(FluidTags.WATER) && fluid.isStill();
     }
 
     private record LandingTarget(BlockPos supportPos, BlockPos placePos, double heightDelta) {}
@@ -194,8 +212,7 @@ public final class BotFallSafetyService {
             }
         }
         BlockPos waterPos = pending.waterPos();
-        var fluid = world.getFluidState(waterPos);
-        if (!fluid.isIn(FluidTags.WATER) || !fluid.isStill()) {
+        if (!isWaterSource(world, waterPos)) {
             PENDING_SCOOP.remove(bot.getUuid()); // gone or no longer a source: nothing to take back
             return;
         }
@@ -217,11 +234,17 @@ public final class BotFallSafetyService {
             // Same vanilla path as the placement: an empty bucket fills through Item.use, a
             // raycast from the eyes that takes fluid sources. Aim at the water cell itself.
             LookController.faceBlock(bot, waterPos);
-            ActionResult result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
+            ItemStack hand = bot.getMainHandStack();
+            if (!hand.isOf(Items.BUCKET)) {
+                return; // slot locked or swap refused: retry until the give-up tick
+            }
+            ActionResult result = bot.interactionManager.interactItem(bot, world, hand, Hand.MAIN_HAND);
             if (result.isAccepted()) {
                 bot.swingHand(Hand.MAIN_HAND, true);
             }
-            scooped = bot.getMainHandStack().isOf(Items.WATER_BUCKET);
+            // With a stack of empty buckets the filled one goes elsewhere in the inventory, so
+            // judge by the water cell, not the hand.
+            scooped = result.isAccepted() && !isWaterSource(world, waterPos);
         } finally {
             BotActions.selectHotbarSlot(bot, previousSlot);
         }
