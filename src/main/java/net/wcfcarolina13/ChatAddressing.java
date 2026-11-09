@@ -249,6 +249,19 @@ public final class ChatAddressing {
             }
         }
 
+        // "You and <bot>" right after a leading address: "Jake, you and Wren go mine" is said to
+        // Jake and Wren both. Only the first two tokens of the tail are read, and only "you and"
+        // followed by another bot name counts ("Jake, you and I" or "Jake, you and the others"
+        // stay with Jake). The prompt keeps the clause as written.
+        if (matchedNameIndex >= 0 && leading && consumed + 2 < tokens.length
+                && normalizeToken(tokens[consumed]).equals("you")
+                && normalizeToken(tokens[consumed + 1]).equals("and")) {
+            int youAndIdx = botIndex(botNames, normalizeToken(tokens[consumed + 2]));
+            if (youAndIdx >= 0 && !indices.contains(youAndIdx)) {
+                indices.add(youAndIdx);
+            }
+        }
+
         String prompt;
         if (leading) {
             prompt = consumed >= tokens.length
