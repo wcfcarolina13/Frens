@@ -59,8 +59,10 @@ class TreeStuckDropPolicyTest {
         int sameTree = src.indexOf("if (commanderOnSameTree) {");
         int strategy1 = src.indexOf("Strategy 1: Find a safe drop edge");
         assertTrue(sameTree > 0 && sameTree < strategy1, "a bot with its commander on the canopy runs no strategy");
-        assertTrue(src.contains("isIn(BlockTags.LEAVES) && TreeStuckDropPolicy.isSafeDrop(fallThroughLeaf)"),
-                "the leaf under the bot goes only over a safe fall");
+        assertTrue(src.contains("isIn(BlockTags.LEAVES) && (belowIsSafe || lastResort)"),
+                "the leaf under the bot goes only over a safe fall, or after 10 s stuck");
+        assertTrue(src.contains("findLeafTowardTrunk(world, bot.getBlockPos(), trunk, belowIsSafe || lastResort)"),
+                "the trunk strategy obeys the same rule for the leaf below");
         assertTrue(src.indexOf("dropCanopyWaypoints(bot);") < src.indexOf("Strategy 1: Find a safe drop edge"),
                 "the canopy path is dropped when the bot gets down");
     }

@@ -56,6 +56,13 @@ public final class TreeStuckEscapeService {
     private static final long STUCK_THRESHOLD_TICKS = 30L;
     /** Minimum ticks between escape strategy re-evaluation. */
     private static final long ESCAPE_ATTEMPT_INTERVAL_TICKS = 40L;
+    /**
+     * Stuck this long (10 s), the bot breaks the leaf under it even over a fall that costs health, as
+     * before the safe-fall check: a few hearts beat staying stranded on the tree.
+     */
+    private static final long LAST_RESORT_TICKS = 200L;
+    /** Bots whose last evaluation found no safe way down yet: follow runs between evaluations. */
+    private static final Set<UUID> WAITING_FOR_SAFE_WAY = ConcurrentHashMap.newKeySet();
     /** Maximum ticks to steer toward a safe drop before escalating. */
     private static final long ESCAPE_TARGET_STALE_TICKS = 120L;
     /** Dialogue cooldown (ms). */
@@ -168,7 +175,8 @@ public final class TreeStuckEscapeService {
                 return true;
             }
             HoleNudge spent = HOLE_NUDGE.get(botId);
-            if (LAST_TREE_ESCAPE_ATTEMPT_TICK.containsKey(botId) || spent != null) {
+            if (LAST_TREE_ESCAPE_ATTEMPT_TICK.containsKey(botId)
+                    || (spent != null && !spent.column().equals(bot.getBlockPos()))) {
                 // Only after an escape actually ran: walking off a leaf patch is not leaving a canopy.
                 dropCanopyWaypoints(bot);
             }
@@ -196,8 +204,9 @@ public final class TreeStuckEscapeService {
         // ── Throttle strategy re-evaluation ──
         long lastAttempt = LAST_TREE_ESCAPE_ATTEMPT_TICK.getOrDefault(botId, 0L);
         if (now - lastAttempt < ESCAPE_ATTEMPT_INTERVAL_TICKS) {
-            return true;
+            return !WAITING_FOR_SAFE_WAY.contains(botId);
         }
+        WAITING_FOR_SAFE_WAY.remove(botId);
         LAST_TREE_ESCAPE_ATTEMPT_TICK.put(botId, now);
 
         // Show initial stuck dialogue (once per cooldown), but suppress it when the
@@ -206,14 +215,17 @@ public final class TreeStuckEscapeService {
         ServerPlayerEntity commander = resolveCommander(bot, server);
         if (commander != null && commander.isOnGround() && bot.squaredDistanceTo(commander) < 64.0) {
             BlockState cmdBelow = world.getBlockState(commander.getBlockPos().down());
-            commanderOnSameTree = cmdBelow.isIn(BlockTags.LEAVES);
+            // Not a commander on a lower leaf layer, another tree's lower canopy or a bush below.
+            commanderOnSameTree = cmdBelow.isIn(BlockTags.LEAVES) && commander.getBlockY() >= bot.getBlockY() - 1;
         }
         if (commanderOnSameTree) {
             // Up here with the commander, the bot is not stranded: digging under it only drops it a
             // block and it hops back (sandbox 2026-11-09, commander one block away on the canopy).
             TREE_STUCK_SINCE_TICK.put(botId, now);
+            LAST_TREE_ESCAPE_ATTEMPT_TICK.remove(botId);
             return false;
         }
+        boolean lastResort = stuckDuration >= LAST_RESORT_TICKS;
         showDialogue(bot, STUCK_LINES[new Random().nextInt(STUCK_LINES.length)]);
 
         // ── Strategy 1: Find a safe drop edge and steer toward it ──
@@ -243,7 +255,8 @@ public final class TreeStuckEscapeService {
         // Simplest and most reliable: just break the leaf under the bot's feet.
         BlockPos leafBelow = bot.getBlockPos().down();
         int fallThroughLeaf = fallThroughLeaf(world, leafBelow);
-        if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES) && TreeStuckDropPolicy.isSafeDrop(fallThroughLeaf)) {
+        boolean belowIsSafe = TreeStuckDropPolicy.isSafeDrop(fallThroughLeaf);
+        if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES) && (belowIsSafe || lastResort)) {
             showDialogue(bot, LEAF_BREAK_LINE);
             LOGGER.info("TreeStuck: {} breaking leaf below at {} (fall {})", bot.getName().getString(),
                     leafBelow.toShortString(), fallThroughLeaf);
@@ -254,7 +267,7 @@ public final class TreeStuckEscapeService {
         // ── Strategy 4: Break leaves toward trunk ──
         BlockPos trunk = findNearbyTrunk(world, bot.getBlockPos());
         if (trunk != null) {
-            BlockPos leafToBreak = findLeafTowardTrunk(world, bot.getBlockPos(), trunk);
+            BlockPos leafToBreak = findLeafTowardTrunk(world, bot.getBlockPos(), trunk, belowIsSafe || lastResort);
             if (leafToBreak != null) {
                 showDialogue(bot, LEAF_BREAK_LINE);
                 LOGGER.info("TreeStuck: {} breaking leaf at {} toward trunk at {}",
@@ -265,7 +278,7 @@ public final class TreeStuckEscapeService {
         }
 
         // ── Strategy 5: Jump off and take the damage ──
-        int dropHeight = measureDropBelow(world, bot.getBlockPos());
+        int dropHeight = lastResort ? measureDropBelow(world, bot.getBlockPos()) : 0;
         if (dropHeight > 0 && dropHeight <= SURVIVABLE_DROP_HEIGHT) {
             showDialogue(bot, JUMP_OFF_LINE);
             LOGGER.info("TreeStuck: {} jumping off tree (drop={})", bot.getName().getString(), dropHeight);
@@ -280,7 +293,12 @@ public final class TreeStuckEscapeService {
             return true;
         }
 
-        // No viable escape this tick — remain in stuck-handling state.
+        // No safe way down yet: let follow run (its planner may find a way along the trunk) until the
+        // next evaluation, and until the last resort breaks the leaf below anyway.
+        if (!lastResort) {
+            WAITING_FOR_SAFE_WAY.add(botId);
+            return false;
+        }
         return true;
     }
 
@@ -391,6 +409,7 @@ public final class TreeStuckEscapeService {
         ESCAPE_TARGET_SET_TICK.remove(botId);
         SAFE_DROP_EXHAUSTED.remove(botId);
         HOLE_NUDGE.remove(botId);
+        WAITING_FOR_SAFE_WAY.remove(botId);
         // Don't clear dialogue cooldown — let it expire naturally.
         LEAF_MINE_INFLIGHT.remove(botId);
     }
@@ -466,7 +485,7 @@ public final class TreeStuckEscapeService {
      * Find a leaf block between the bot's position and a trunk block that we can break
      * to make a path toward the trunk.
      */
-    private static BlockPos findLeafTowardTrunk(ServerWorld world, BlockPos botPos, BlockPos trunk) {
+    private static BlockPos findLeafTowardTrunk(ServerWorld world, BlockPos botPos, BlockPos trunk, boolean belowAllowed) {
         // Simple: step toward the trunk and find the first leaf block in the way.
         int dx = Integer.signum(trunk.getX() - botPos.getX());
         int dz = Integer.signum(trunk.getZ() - botPos.getZ());
@@ -480,7 +499,7 @@ public final class TreeStuckEscapeService {
         }
         // Also check directly below (for descending along trunk).
         BlockPos below = botPos.down();
-        if (world.getBlockState(below).isIn(BlockTags.LEAVES)) {
+        if (belowAllowed && world.getBlockState(below).isIn(BlockTags.LEAVES)) {
             return below;
         }
         return null;
