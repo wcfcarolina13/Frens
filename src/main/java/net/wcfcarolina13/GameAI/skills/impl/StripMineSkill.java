@@ -140,10 +140,7 @@ public final class StripMineSkill implements Skill {
                 }
                 // Store current position for resume
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                SkillResumeService.flagManualResume(player);
-                if (MiningHazardDetector.isProtectedZoneHazard(hazard)) {
-                    SkillResumeService.flagZoneOverridePending(player);
-                }
+                SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
             }

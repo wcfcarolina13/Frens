@@ -375,6 +375,19 @@ public final class SkillResumeService {
         }
     }
 
+    /**
+     * A skill paused by a blocking mining hazard: flag it for Resume, and when the hazard is a
+     * protected zone also flag the zone override, which is what the hazard's "Press Resume to
+     * override" message promises. Without it Resume re-ran the skill into the same zone (only
+     * Stripmine flagged it; issue #120).
+     */
+    public static void flagManualResumeForHazard(ServerPlayerEntity bot, boolean protectedZoneHazard) {
+        flagManualResume(bot);
+        if (protectedZoneHazard) {
+            flagZoneOverridePending(bot);
+        }
+    }
+
     public static void flagManualResume(ServerPlayerEntity bot) {
         if (bot == null) {
             return;

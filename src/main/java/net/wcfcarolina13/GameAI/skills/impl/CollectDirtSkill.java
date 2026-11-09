@@ -1432,7 +1432,7 @@ public class CollectDirtSkill implements Skill {
             if (detection.blockingHazard().isPresent()) {
                 Hazard hazard = detection.blockingHazard().get();
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                SkillResumeService.flagManualResume(player);
+                SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
             }
@@ -1737,7 +1737,7 @@ public class CollectDirtSkill implements Skill {
             if (hazardCheck.blockingHazard().isPresent()) {
                 Hazard hazard = hazardCheck.blockingHazard().get();
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                SkillResumeService.flagManualResume(player);
+                SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(
                         net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
@@ -2064,7 +2064,7 @@ public class CollectDirtSkill implements Skill {
                         feet.toShortString(), hazard.failureMessage(),
                         hazard.location() == null ? "?" : hazard.location().toShortString());
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                SkillResumeService.flagManualResume(player);
+                SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(
                         net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
