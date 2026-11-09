@@ -231,17 +231,26 @@ public final class SkillManager {
             ticket.setOpenEnded(inferOpenEnded(name, context));
         } catch (Exception ignored) {
         }
-        TaskService.attachExecutingThread(ticket, Thread.currentThread());
-        if (botPlayer != null) {
-            boolean hadIdleSweepState = BackgroundSweepPolicy.clearPendingIdleSweepState(botPlayer.getUuid());
-            boolean hadInFlightSweep = DropSweepService.isInProgressFor(botPlayer);
-            DropSweepService.requestCancel(botPlayer, "skill-start");
-            if (hadIdleSweepState || hadInFlightSweep) {
-                LOGGER.info("Background drop sweep canceled for {} because skill '{}' started", botName, name);
+        FollowResumeState followResume;
+        // Everything between taking the ticket and the try below must release it if it throws:
+        // a pooled worker thread stays alive, so beginSkill's dead-thread recovery never frees the
+        // slot and every later skill for this bot reads "Another skill is already running."
+        try {
+            TaskService.attachExecutingThread(ticket, Thread.currentThread());
+            if (botPlayer != null) {
+                boolean hadIdleSweepState = BackgroundSweepPolicy.clearPendingIdleSweepState(botPlayer.getUuid());
+                boolean hadInFlightSweep = DropSweepService.isInProgressFor(botPlayer);
+                DropSweepService.requestCancel(botPlayer, "skill-start");
+                if (hadIdleSweepState || hadInFlightSweep) {
+                    LOGGER.info("Background drop sweep canceled for {} because skill '{}' started", botName, name);
+                }
             }
+            followResume = suspendFollowMode(botPlayer);
+        } catch (Throwable startFailure) {
+            LOGGER.error("Skill '{}' failed to start for bot {}: {}", name, botName, startFailure.toString(), startFailure);
+            TaskService.complete(ticket, false);
+            return SkillExecutionResult.failure("Skill '" + name + "' could not start.");
         }
-
-        FollowResumeState followResume = suspendFollowMode(botPlayer);
 
         AutoFaceEntity.setBotExecutingTask(true);
         SkillExecutionResult result = SkillExecutionResult.failure("Skill '" + name + "' ended unexpectedly.");
