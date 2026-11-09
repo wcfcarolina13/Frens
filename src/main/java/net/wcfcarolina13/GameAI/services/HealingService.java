@@ -48,6 +48,11 @@ public final class HealingService {
     
     // Track when we last complained about hunger to avoid spam
     private static final Map<UUID, Long> LAST_HUNGER_WARNING = new ConcurrentHashMap<>();
+    /** Until when (wall clock) the bot is holding raw meat for the furnace; see {@link RawMeatHoldPolicy}. */
+    private static final Map<UUID, Long> RAW_MEAT_HELD_UNTIL_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> RAW_MEAT_HOLD_LOGGED_MS = new ConcurrentHashMap<>();
+    private static final long RAW_MEAT_HOLD_WINDOW_MS = 5_000L;
+    private static final long RAW_MEAT_HOLD_LOG_MS = 60_000L;
     private static final Map<UUID, Integer> LAST_WARNED_LEVEL = new ConcurrentHashMap<>();
     private static final long WARNING_COOLDOWN_MS = 30000; // 30 seconds
 
@@ -289,7 +294,38 @@ public final class HealingService {
             }
         }
 
+        // Only raw meat left (the food search prefers anything else): hold it for the furnace
+        // while auto-cook can cook it soon, instead of eating it raw at half the value.
+        if (!emergency && isRawMeat(inv.getStack(foodSlot.getAsInt()))
+                && RawMeatHoldPolicy.shouldHold(foodLevel, maxHealth > 0.0F ? health / maxHealth : 0.0F,
+                        () -> BotAutoCookingService.canCookRawMeatSoon(bot))) {
+            noteRawMeatHeld(bot, inv.getStack(foodSlot.getAsInt()), foodLevel);
+            return false;
+        }
+
         return consumeFood(bot, foodSlot.getAsInt());
+    }
+
+    /**
+     * True for a few seconds after {@link #autoEat} held raw meat for the furnace, so callers that
+     * would otherwise go looking for food (chests, other bots) leave the bot to auto-cook.
+     */
+    public static boolean isHoldingRawMeatForCook(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        Long until = RAW_MEAT_HELD_UNTIL_MS.get(bot.getUuid());
+        return until != null && System.currentTimeMillis() < until;
+    }
+
+    private static void noteRawMeatHeld(ServerPlayerEntity bot, ItemStack raw, int foodLevel) {
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        RAW_MEAT_HELD_UNTIL_MS.put(id, now + RAW_MEAT_HOLD_WINDOW_MS);
+        Long logged = RAW_MEAT_HOLD_LOGGED_MS.get(id);
+        if (logged == null || now - logged >= RAW_MEAT_HOLD_LOG_MS) {
+            RAW_MEAT_HOLD_LOGGED_MS.put(id, now);
+            LOGGER.info("Auto-eat: {} is holding {} for the furnace instead of eating it raw (food={})",
+                    bot.getName().getString(), raw.getItem().getName().getString(), foodLevel);
+        }
     }
 
     /**

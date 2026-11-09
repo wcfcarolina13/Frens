@@ -842,6 +842,25 @@ public final class SmeltingService {
         return bot != null && world != null && hasFuel(bot, world);
     }
 
+    /**
+     * Server thread: a food-capable station the auto-cook would walk to without placing or
+     * crafting one: a valid shared furnace or smoker within 64 blocks, or a placed one within
+     * {@link #COMMANDER_LOOK_RANGE} (steps 2 and 3 of {@code resolveFurnaceTarget}).
+     */
+    public static boolean hasFoodStationNear(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        BlockPos botPos = bot.getBlockPos();
+        for (BlockPos shared : BotFurnaceRegistryService.listValidSharedFurnacePositions(bot, world, botPos, 64.0D * 64.0D)) {
+            if (stationMatchesPreference(world.getBlockState(shared), FurnacePreference.FOOD)) {
+                return true;
+            }
+        }
+        BlockPos nearest = findNearestFurnace(world, botPos, 24, 4, FurnacePreference.FOOD);
+        return nearest != null && botPos.getSquaredDistance(nearest) <= COMMANDER_LOOK_RANGE * COMMANDER_LOOK_RANGE;
+    }
+
     public static boolean hasReadyFoodOutput(ServerPlayerEntity bot, ServerWorld world) {
         return findReadyFoodFurnace(bot, world) != null;
     }
