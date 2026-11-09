@@ -96,7 +96,6 @@ public final class TreeStuckEscapeService {
             "Wait, I'm stuck up here."
     };
     private static final String LEAF_BREAK_LINE = "Let me break through these leaves.";
-    private static final String JUMP_OFF_LINE = "This is going to hurt...";
 
     private TreeStuckEscapeService() {}
 
@@ -186,7 +185,10 @@ public final class TreeStuckEscapeService {
                 return true;
             }
             Integer canopyY = CANOPY_FEET_Y.get(botId);
-            if (TREE_STUCK_SINCE_TICK.containsKey(botId) && canopyY != null && bot.getBlockY() >= canopyY
+            Long stuckSince = TREE_STUCK_SINCE_TICK.get(botId);
+            boolean reallyStuck = stuckSince != null
+                    && (now - stuckSince >= STUCK_THRESHOLD_TICKS || WAITING_FOR_SAFE_WAY.contains(botId));
+            if (reallyStuck && canopyY != null && bot.getBlockY() >= canopyY
                     && OFF_LEAF_TICKS.merge(botId, 1, Integer::sum) <= OFF_LEAF_GRACE_TICKS) {
                 return false; // still up at the canopy level: keep the stuck clock
             }
@@ -306,22 +308,6 @@ public final class TreeStuckEscapeService {
                 startLeafMine(bot, leafToBreak);
                 return true;
             }
-        }
-
-        // ── Strategy 5: Jump off and take the damage ──
-        int dropHeight = lastResort ? measureDropBelow(world, bot.getBlockPos()) : 0;
-        if (dropHeight > 0 && dropHeight <= SURVIVABLE_DROP_HEIGHT) {
-            showDialogue(bot, JUMP_OFF_LINE);
-            LOGGER.info("TreeStuck: {} jumping off tree (drop={})", bot.getName().getString(), dropHeight);
-            Vec3d jumpDir = getFollowTargetDirection(bot, server);
-            if (jumpDir != null) {
-                Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-                LookController.faceBlock(bot, BlockPos.ofFloored(botPos.add(jumpDir)));
-                BotActions.applyMovementInput(bot, botPos.add(jumpDir.multiply(2.0)), 0.30D);
-            }
-            bot.jump();
-            clearState(botId);
-            return true;
         }
 
         // No safe way down yet: let follow run (its planner may find a way along the trunk) until the
@@ -540,27 +526,6 @@ public final class TreeStuckEscapeService {
         return null;
     }
 
-    /**
-     * Measure the drop distance below the bot's feet through air/leaves to solid ground.
-     * Returns 0 if no ground found within scan range.
-     */
-    private static int measureDropBelow(ServerWorld world, BlockPos botPos) {
-        int drop = 0;
-        BlockPos probe = botPos.down();
-        while (drop < SURVIVABLE_DROP_HEIGHT + 2) {
-            BlockState state = world.getBlockState(probe);
-            if (isSolidNonLeafGround(state)) {
-                return drop;
-            }
-            if (!isPassable(state) && !state.isIn(BlockTags.LEAVES)) {
-                return 0; // Non-passable non-leaf — can't fall through.
-            }
-            drop++;
-            probe = probe.down();
-        }
-        return 0; // Too far or no ground.
-    }
-
     // ── Utility helpers ──────────────────────────────────────────────────────
 
     private static boolean isPassable(BlockState state) {
@@ -611,17 +576,6 @@ public final class TreeStuckEscapeService {
         ServerPlayerEntity target = server.getPlayerManager().getPlayer(targetUuid);
         if (target == null || target.isRemoved()) return null;
         return target;
-    }
-
-    private static Vec3d getFollowTargetDirection(ServerPlayerEntity bot, MinecraftServer server) {
-        ServerPlayerEntity target = resolveCommander(bot, server);
-        if (target == null) return null;
-        Vec3d targetPos = new Vec3d(target.getX(), target.getY(), target.getZ());
-        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        Vec3d dir = targetPos.subtract(botPos);
-        double len = dir.horizontalLength();
-        if (len < 0.01) return null;
-        return new Vec3d(dir.x / len, 0, dir.z / len);
     }
 
     private static void showDialogue(ServerPlayerEntity bot, String line) {
