@@ -678,13 +678,16 @@ public final class FollowMovementService {
         if (column.getX() == bot.getBlockX() && column.getZ() == bot.getBlockZ()) {
             return false;
         }
-        int minDepth = DropGuardExemptionPolicy.FOLLOW_MIN_DEPTH;
-        boolean overDropNow = isDangerousDropCell(world, bot.getBlockPos(), minDepth);
-        boolean headingIntoDrop = !overDropNow && isDangerousDropCell(world, column, minDepth);
+        // Depths from stand levels, not the airborne feet: mid-hop the feet are up to a block high.
+        int standHere = standLevelAt(world, bot.getBlockPos(), bot.getBlockY());
+        boolean overDropNow = DropGuardExemptionPolicy.airOverDrop(bot.getBlockY(), standHere);
+        boolean headingIntoDrop = !overDropNow
+                && DropGuardExemptionPolicy.airHeadingIntoDrop(standHere, standLevelAt(world, column, standHere))
+                && hasTwoHighClearance(world, column.withY(standHere));
         boolean exempt = false;
         if (headingIntoDrop) {
             BlockPos targetBlock = BlockPos.ofFloored(targetPos);
-            exempt = DropGuardExemptionPolicy.exempt(false, bot.getY() - targetPos.y,
+            exempt = DropGuardExemptionPolicy.exempt(false, standHere - targetPos.y,
                     isGroundedTwoHighClearance(world, targetBlock),
                     column.getX(), column.getZ(), targetBlock.getX(), targetBlock.getZ());
             if (exempt) {

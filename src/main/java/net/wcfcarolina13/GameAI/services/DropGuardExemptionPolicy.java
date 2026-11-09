@@ -105,6 +105,25 @@ public final class DropGuardExemptionPolicy {
      * Follow has no planned gap-jump move, so the only thing this costs is an improvised hop
      * across a deep gap, which now lands back on the edge it left.
      */
+    /**
+     * In the air, the bot's own column is already a drop: its feet block is {@link #FOLLOW_MIN_DEPTH}
+     * or more above where it would land there ({@code standHere}). Measured from the landing level,
+     * not the feet, so the top of a hop over the canopy (feet up to a block higher) still reads as
+     * over support.
+     */
+    public static boolean airOverDrop(int feetBlockY, int standHere) {
+        return feetBlockY - standHere >= FOLLOW_MIN_DEPTH;
+    }
+
+    /**
+     * In the air, the heading column is a drop: where the bot would land there ({@code standAhead})
+     * is {@link #FOLLOW_MIN_DEPTH} or more below where it would land in its own column. Stand level
+     * against stand level, so a hop does not make a 2-block step read as 3.
+     */
+    public static boolean airHeadingIntoDrop(int standHere, int standAhead) {
+        return standHere - standAhead >= FOLLOW_MIN_DEPTH;
+    }
+
     public static boolean followHaltInAir(boolean onGround, boolean inWaterOrVehicle, boolean overDropNow,
                                           boolean headingIntoDrop, boolean exemptOnGround) {
         return !onGround && !inWaterOrVehicle && !overDropNow && headingIntoDrop && !exemptOnGround;

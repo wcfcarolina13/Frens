@@ -124,4 +124,17 @@ class DropGuardExemptionPolicyTest {
         assertTrue(start >= 0 && air > start && groundOnly > air, "airborne follow check runs before the ground-only return");
         assertTrue(src.contains("DropGuardExemptionPolicy.followHaltInAir("));
     }
+
+    @Test
+    void airDepthsAreMeasuredFromStandLevelsNotTheHoppingFeet() {
+        // Hop on the canopy: lands at 126, feet block 127 at the top of the hop.
+        assertFalse(DropGuardExemptionPolicy.airOverDrop(127, 126));
+        // Just past the edge: lands at 118, feet block still 126.
+        assertTrue(DropGuardExemptionPolicy.airOverDrop(126, 118));
+        // A 2-block step ahead stays a step mid-hop; 3 is a drop.
+        assertFalse(DropGuardExemptionPolicy.airHeadingIntoDrop(126, 124));
+        assertTrue(DropGuardExemptionPolicy.airHeadingIntoDrop(126, 123));
+        // A wall ahead (stand level above) is no drop.
+        assertFalse(DropGuardExemptionPolicy.airHeadingIntoDrop(126, 127));
+    }
 }

@@ -17,8 +17,10 @@ class TreeStuckDropPolicyTest {
 
     @Test
     void sidewaysMomentumIsDroppedOnlyOverTheChosenColumn() {
-        assertTrue(TreeStuckDropPolicy.holdOverTarget(5, 7, 5, 7, 0.2, 0.0));
-        assertFalse(TreeStuckDropPolicy.holdOverTarget(4, 7, 5, 7, 0.2, 0.0), "not there yet");
-        assertFalse(TreeStuckDropPolicy.holdOverTarget(5, 7, 5, 7, 0.0, 0.0), "already still");
+        assertTrue(TreeStuckDropPolicy.holdOverTarget(5.5, 7.5, 5, 7, 0.2, 0.0));
+        assertTrue(TreeStuckDropPolicy.holdOverTarget(5.32, 7.65, 5, 7, 0.2, 0.0), "hitbox inside the column");
+        assertFalse(TreeStuckDropPolicy.holdOverTarget(5.1, 7.5, 5, 7, 0.2, 0.0), "centre in, hitbox still over the lip");
+        assertFalse(TreeStuckDropPolicy.holdOverTarget(4.6, 7.5, 5, 7, 0.2, 0.0), "not there yet");
+        assertFalse(TreeStuckDropPolicy.holdOverTarget(5.5, 7.5, 5, 7, 0.0, 0.0), "already still");
     }
 }

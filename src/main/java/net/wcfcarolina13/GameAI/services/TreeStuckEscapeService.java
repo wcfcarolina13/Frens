@@ -118,7 +118,7 @@ public final class TreeStuckEscapeService {
             // and hops carried it on past it, over the deeper drop beyond (sandbox 2026-11-09).
             if (!bot.isOnGround()) {
                 Vec3d v = bot.getVelocity();
-                if (TreeStuckDropPolicy.holdOverTarget(bot.getBlockX(), bot.getBlockZ(),
+                if (TreeStuckDropPolicy.holdOverTarget(bot.getX(), bot.getZ(),
                         activeTarget.getX(), activeTarget.getZ(), v.x, v.z)) {
                     bot.setVelocity(0.0D, v.y, 0.0D);
                     bot.velocityDirty = true;
@@ -144,14 +144,10 @@ public final class TreeStuckEscapeService {
                 // Push harder when close to the edge to force stepping into the air column.
                 double impulse = distSq <= 2.25 ? 0.35D : 0.28D;
                 BotActions.applyMovementInput(bot, Vec3d.ofCenter(activeTarget), impulse);
-                // Jump more frequently near the edge to step over leaf boundaries.
-                if (distSq <= 2.25) {
-                    if (targetAge % 5 == 0) {
-                        bot.jump();
-                    }
-                } else if (targetAge % 15 == 0) {
-                    bot.jump();
-                }
+                // Hop only over a block in the way. The old timed hops near the edge (every 5
+                // ticks) added up to 1.25 blocks to the fall: a hop into a 3-deep column fell
+                // about 4 and cost health (review of the canopy fix, 2026-11-09).
+                BotActions.autoJumpIfNeeded(bot);
                 return true;
             }
         }
