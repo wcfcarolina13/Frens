@@ -752,9 +752,14 @@ final class BotSoulCommands {
         // A bot named after a registered profile gets its own persona (Bob → frens:bob);
         // anything else keeps the Jake fallback that the pilot shipped with. Field-reported
         // 2026-08-29: "Bob was speaking as Jake" — because every enable bound frens:jake.
-        String boundProfileId = profileId(botName).orElse(JAKE_PROFILE_ID);
-        String personaName = boundProfileId.equals(JAKE_PROFILE_ID) ? "Jake" : botName;
-        runtime.bindProfile(botId, boundProfileId).whenComplete((boundState, bindErr) -> {
+        // A persona picked on purpose in AI setup is kept (PersonaBindingPolicy).
+        net.wcfcarolina13.GameAI.souls.PersonaBindingPolicy.EnableBinding binding =
+                runtime.enableBinding(botId, profileId(botName).orElse(JAKE_PROFILE_ID));
+        String boundProfileId = binding.profileId();
+        String personaName = binding.keep()
+                ? net.wcfcarolina13.GameAI.souls.SoulProfileRegistry.require(boundProfileId).displayName()
+                : boundProfileId.equals(JAKE_PROFILE_ID) ? "Jake" : botName;
+        runtime.bindForEnable(botId, binding).whenComplete((boundState, bindErr) -> {
             if (bindErr != null) {
                 server.execute(() -> {
                     LOGGER.warn("[souls] enable (bind {}) failed for bot {}: {}", boundProfileId, botId,
@@ -773,7 +778,8 @@ final class BotSoulCommands {
                     // Ollama down) instead of an unconditional success line.
                     boolean soulsOn = runtime.isMasterEnabled();
                     String validation = runtime.safeValidationError();
-                    boolean fallback = AiSetupActionPolicy.isFallbackPersona(botName, boundProfileId, JAKE_PROFILE_ID);
+                    boolean fallback = !binding.keep()
+                            && AiSetupActionPolicy.isFallbackPersona(botName, boundProfileId, JAKE_PROFILE_ID);
                     java.util.concurrent.CompletableFuture<Boolean> health =
                             soulsOn && (validation == null || validation.isBlank())
                                     ? runtime.providerHealth().exceptionally(ex -> false)

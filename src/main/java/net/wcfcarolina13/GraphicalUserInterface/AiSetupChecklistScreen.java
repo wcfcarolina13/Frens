@@ -41,6 +41,7 @@ public class AiSetupChecklistScreen extends Screen {
     private static final int PAD = 8;
     private static final int MAX_BTN_W = 104;
     private static final int BOT_BTN_W = 60;
+    private static final int PICK_BTN_W = 44;
     private static final int BOT_ROW_H = 16;
     private static final int MAX_BOT_ROWS = 3;
     private static final int HEADER_H = 26;
@@ -219,6 +220,19 @@ public class AiSetupChecklistScreen extends Screen {
                     .build();
             enable.active = row.enableButton() && available;
             addDrawableChild(enable);
+            // Persona and voice preset for this bot (servers that send the persona list only).
+            if (status != null && status.offersPickers()) {
+                ButtonWidget pick = ButtonWidget.builder(Text.literal("Pick…"), b -> {
+                            if (this.client != null) {
+                                this.client.setScreen(new BotSoulPickerScreen(this, row.uuid()));
+                            }
+                        })
+                        .dimensions(right - BOT_BTN_W - 2 - PICK_BTN_W, rowY + i * BOT_ROW_H - 2, PICK_BTN_W, 14)
+                        .build();
+                pick.active = available;
+                pick.setTooltip(Tooltip.of(Text.literal("Persona and voice for " + row.name())));
+                addDrawableChild(pick);
+            }
         }
 
         refreshButton = ButtonWidget.builder(Text.literal("Refresh"), b -> request())
@@ -354,7 +368,8 @@ public class AiSetupChecklistScreen extends Screen {
             AiSetupChecklistPolicy.BotRow row = rows.get(botScroll + i);
             context.drawTextWithShadow(this.textRenderer, row.state().icon(), cx + PAD + 12, rowY + i * BOT_ROW_H,
                     colour(row.state()));
-            context.drawTextWithShadow(this.textRenderer, elide(row.name(), w - PAD * 2 - BOT_BTN_W - 32), cx + PAD + 24,
+            int pickW = status != null && status.offersPickers() ? PICK_BTN_W + 2 : 0;
+            context.drawTextWithShadow(this.textRenderer, elide(row.name(), w - PAD * 2 - BOT_BTN_W - pickW - 32), cx + PAD + 24,
                     rowY + i * BOT_ROW_H, COL_TXT);
         }
 

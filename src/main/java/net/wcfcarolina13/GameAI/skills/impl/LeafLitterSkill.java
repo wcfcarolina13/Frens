@@ -46,6 +46,12 @@ public final class LeafLitterSkill implements Skill {
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-leaf-litter");
     private static final Random RNG = new Random();
 
+    /**
+     * Set by the cook fuel fallback (BotIdleHobbiesService.startLeafLitterFuelRun): the run gathers
+     * fuel for a cook, so it keeps the litter instead of storing it in a nearby chest.
+     */
+    public static final String KEEP_FOR_FUEL_PARAM = "_keep_for_fuel";
+
     private static final int DEFAULT_COUNT = 5;
     private static final int COMMAND_COUNT = 64;
     private static final int DEFAULT_RADIUS = 12;
@@ -194,7 +200,7 @@ public final class LeafLitterSkill implements Skill {
             LOGGER.debug("Final drop sweep failed: {}", e.getMessage());
         }
 
-        int deposited = depositNearbyLeafLitter(source, bot, world);
+        int deposited = isKeepForFuel(context.parameters()) ? 0 : depositNearbyLeafLitter(source, bot, world);
         String msg = "Collected " + gathered + " leaf litter";
         if (deposited > 0) {
             msg += " and stored " + deposited + ".";
@@ -431,6 +437,12 @@ public final class LeafLitterSkill implements Skill {
     private static boolean isSurvivalMode(Map<String, Object> params) {
         if (params == null) return false;
         Object val = params.get("survival_mode");
+        return Boolean.TRUE.equals(val) || "true".equalsIgnoreCase(String.valueOf(val));
+    }
+
+    private static boolean isKeepForFuel(Map<String, Object> params) {
+        if (params == null) return false;
+        Object val = params.get(KEEP_FOR_FUEL_PARAM);
         return Boolean.TRUE.equals(val) || "true".equalsIgnoreCase(String.valueOf(val));
     }
 

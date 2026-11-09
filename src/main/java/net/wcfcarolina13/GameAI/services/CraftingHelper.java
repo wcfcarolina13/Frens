@@ -496,7 +496,19 @@ public final class CraftingHelper {
                                    String item,
                                    int amount,
                                    String materialPreference) {
-        int crafted = craftGenericInternal(source, bot, commander, item, amount, materialPreference);
+        // The commander for the plank sub-step's recipe gate (ensurePlanksFromLogs has no commander argument).
+        ServerPlayerEntity previousCommander = CRAFT_COMMANDER.get();
+        CRAFT_COMMANDER.set(commander);
+        int crafted;
+        try {
+            crafted = craftGenericInternal(source, bot, commander, item, amount, materialPreference);
+        } finally {
+            if (previousCommander == null) {
+                CRAFT_COMMANDER.remove();
+            } else {
+                CRAFT_COMMANDER.set(previousCommander);
+            }
+        }
         if (crafted > 0 && bot != null) {
             // Any successful craft clears the unknown-name message cooldown for this bot,
             // which is also the only eviction path for that map.
@@ -558,6 +570,18 @@ public final class CraftingHelper {
             Item target = Registries.ITEM.get(Identifier.of("minecraft", normalized));
             return craftPlanks(bot, source, commander, amount, target);
         }
+        // Iron, golden and diamond armour (backlog 1217); netherite is a smithing upgrade.
+        if (ArmorCraftPolicy.isNetheriteArmor(normalized)) {
+            if (source != null) say(source, "Netherite armor isn't crafted. It's upgraded from diamond armor at a smithing table with a netherite ingot and an upgrade template.");
+            return 0;
+        }
+        ArmorCraftPolicy.Piece armorPiece = ArmorCraftPolicy.piece(normalized);
+        if (armorPiece != null) {
+            return craftMetalArmor(bot, source, commander, amount,
+                    Registries.ITEM.get(Identifier.of(armorPiece.itemId())),
+                    Registries.ITEM.get(Identifier.of(armorPiece.materialId())),
+                    armorPiece.perPiece());
+        }
         return switch (normalized) {
             case "crafting_table" -> craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amount, false, true);
             case "sticks", "stick" -> craftSticks(bot, source, commander, amount);
@@ -606,6 +630,7 @@ public final class CraftingHelper {
         int needed = Math.max(1, amount);
         int logsNeeded = (int) Math.ceil(needed / (double) PLANKS_PER_LOG);
         int crafted = 0;
+        String lockedLine = null;
 
         // The scan reads slots on the caller's thread; each conversion (those logs out, their
         // planks in) is one commit, which checks the slot again on the server thread.
@@ -622,6 +647,10 @@ public final class CraftingHelper {
             if (plankItem == null || plankItem == Items.AIR) {
                 continue;
             }
+            if (!hasRecipePermission(commander, source.getServer(), plankItem)) {
+                lockedLine = recipeRefusalLine(); // this log's planks are locked: try the next log
+                continue;
+            }
             CraftCommitPolicy.Outcome outcome = commitLogsToPlanks(bot, i, stack.getItem(), stack.getCount(), use, plankItem);
             if (!CraftCommitPolicy.continueScan(outcome)) {
                 break;
@@ -635,7 +664,9 @@ public final class CraftingHelper {
         }
 
         if (crafted == 0) {
-            if (targetPlank != null && targetPlank != Items.AIR) {
+            if (lockedLine != null) {
+                say(source, lockedLine);
+            } else if (targetPlank != null && targetPlank != Items.AIR) {
                 say(source, "I need matching logs to craft " + targetPlank.getName().getString() + ".");
             } else {
                 say(source, "I need logs to craft planks.");
@@ -651,7 +682,7 @@ public final class CraftingHelper {
         }
         // Ladder: 7 sticks => 3 ladders (3x3 recipe)
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "ladder"))) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         // One combined chest ask for the sticks (or the planks or logs they come from) and the
@@ -732,7 +763,7 @@ public final class CraftingHelper {
                 .filter(r -> hasRecipePermission(commander, source.getServer(), r.recipeId()))
                 .toList();
         if (recipes.isEmpty()) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
 
@@ -946,19 +977,54 @@ public final class CraftingHelper {
         return reportConsumeShortfall(bot, "planks", needed, remaining);
     }
 
+    /** The commander of the {@link #craftGeneric} running on this thread, for sub-steps that take no commander. */
+    private static final ThreadLocal<ServerPlayerEntity> CRAFT_COMMANDER = new ThreadLocal<>();
+
+    /** The refusal line the last {@link #hasRecipePermission} on this thread chose, or null for the generic one. */
+    private static final ThreadLocal<String> RECIPE_REFUSAL_LINE = new ThreadLocal<>();
+
+    /**
+     * Backlog 1224: under the {@code limitedCrafting} game rule a bot only crafts what its human
+     * commander has unlocked, as vanilla gates the player. The decision is
+     * {@link RecipeGatePolicy#decide}; a refusal leaves its line for {@link #recipeRefusalLine()}.
+     */
     private static boolean hasRecipePermission(ServerPlayerEntity commander, MinecraftServer server, Identifier recipeId) {
+        RECIPE_REFUSAL_LINE.remove();
         if (commander == null) {
             return true;
         }
+        if (server == null) {
+            server = commander.getEntityWorld().getServer();
+        }
         var key = net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.RECIPE, recipeId);
         Optional<RecipeEntry<?>> recipe = server.getRecipeManager().get(key);
-        if (recipe.isEmpty()) {
-            return false;
+        boolean human = !(commander instanceof net.wcfcarolina13.Entity.createFakePlayer);
+        boolean limited = human && Boolean.TRUE.equals(commander.getEntityWorld().getGameRules()
+                .getValue(net.minecraft.world.rule.GameRules.LIMITED_CRAFTING));
+        RecipeGatePolicy.Decision decision = RecipeGatePolicy.decide(
+                recipe.isPresent(),
+                human,
+                limited,
+                recipe.isPresent() && recipe.get().value().isIgnoredInRecipeBook(),
+                limited && commander.getRecipeBook().isUnlocked(key));
+        if (decision == RecipeGatePolicy.Decision.LOCKED) {
+            RECIPE_REFUSAL_LINE.set(RecipeGatePolicy.lockedLine(commander.getName().getString(), recipeId.getPath()));
+            LOGGER.info("Recipe gate: refused {} for {} (limitedCrafting on, recipe locked)",
+                    recipeId, commander.getName().getString());
         }
-        if (commander.isCreative()) {
-            return true;
-        }
-        return true; // Fallback: server recipes are present; per-player gating not exposed here
+        return decision == RecipeGatePolicy.Decision.ALLOW;
+    }
+
+    /** {@link #hasRecipePermission} for a craft whose vanilla recipe id is its output's item id. */
+    private static boolean hasRecipePermission(ServerPlayerEntity commander, MinecraftServer server, Item output) {
+        return hasRecipePermission(commander, server, Registries.ITEM.getId(output));
+    }
+
+    /** The line for a failed {@link #hasRecipePermission} just before: the locked-recipe line, or the generic one. */
+    private static String recipeRefusalLine() {
+        String line = RECIPE_REFUSAL_LINE.get();
+        RECIPE_REFUSAL_LINE.remove();
+        return line != null ? line : "I don't know how to craft that yet.";
     }
 
     private static int craftWithPlanks(ServerPlayerEntity bot,
@@ -973,7 +1039,7 @@ public final class CraftingHelper {
         // The recipe-permission check comes before the ask: a craft the bot may not make never
         // takes its planks from the chest and then says it does not know the recipe.
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            if (!quiet) say(source, "I don't know how to craft that yet.");
+            if (!quiet) say(source, recipeRefusalLine());
             return 0;
         }
         if (askChest) {
@@ -1072,7 +1138,7 @@ public final class CraftingHelper {
         }
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "stick"))) {
             if (!quiet) {
-                say(source, "I don't know how to craft that yet.");
+                say(source, recipeRefusalLine());
             }
             return 0;
         }
@@ -1109,7 +1175,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "torch");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int targetTorches = Math.max(1, amountRequested);
@@ -1245,7 +1311,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
 
@@ -1329,7 +1395,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = (int) Math.ceil(amountRequested / 3.0);
@@ -1384,7 +1450,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "lead");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = (int) Math.ceil(amountRequested / 2.0);
@@ -1422,7 +1488,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "bundle");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1456,7 +1522,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "leather");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1490,7 +1556,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "saddle");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1528,7 +1594,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "carrot_on_a_stick");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1568,7 +1634,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "warped_fungus_on_a_stick");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1659,10 +1725,22 @@ public final class CraftingHelper {
             LOGGER.info("Crafting {}: {} of {} materials held, those first",
                     kind.name().toLowerCase(Locale.ROOT), materials.stream().filter(heldEnough).count(), materials.size());
         }
+        String lockedLine = null;
+        int lockedMaterials = 0;
         for (ToolMaterial mat : toTry) {
             int crafts = craftToolWithMaterial(bot, source, commander, kind, amount, mat, shortfall);
             if (crafts > 0) {
                 return crafts;
+            }
+            if (crafts == RECIPE_LOCKED) {
+                // limitedCrafting: this material's recipe is locked for the commander, so the next
+                // material is tried; a strict craft answers with the lock line.
+                lockedLine = recipeRefusalLine();
+                lockedMaterials++;
+                if (shortfall != null && shortfall.message == null) {
+                    shortfall.message = lockedLine;
+                }
+                continue;
             }
             if (crafts == SUPPLY_DECLINED) {
                 // The owner declined the one combined chest ask, or never answered: one line (already
@@ -1691,6 +1769,10 @@ public final class CraftingHelper {
             if (shortfall.message != null && source != null) {
                 say(source, shortfall.message);
             }
+            return 0;
+        }
+        if (lockedLine != null && lockedMaterials == toTry.size()) {
+            say(source, lockedLine); // every material was locked: the lock is the answer, not materials
             return 0;
         }
         sendCraftTableNeededOnce(bot, source, "Missing materials for " + kind.name().toLowerCase(Locale.ROOT) + ".");
@@ -1729,6 +1811,8 @@ public final class CraftingHelper {
     private static final int STATION_UNAVAILABLE = -1;
     /** {@link #craftToolWithMaterial}'s answer when the owner declined (or never answered) the one combined chest ask. */
     private static final int SUPPLY_DECLINED = -2;
+    /** {@link #craftToolWithMaterial}'s answer when limitedCrafting locks this material's recipe; the line waits in {@link #recipeRefusalLine()}. */
+    private static final int RECIPE_LOCKED = -3;
 
     /** Head items one tool of this kind takes. */
     private static int headCountFor(ToolKind kind, ToolMaterial mat) {
@@ -1765,6 +1849,10 @@ public final class CraftingHelper {
             default -> 2;
         };
         int headCount = headCountFor(kind, mat);
+        // The recipe gate comes first: a locked material asks no chest and needs no table.
+        if (!hasRecipePermission(commander, serverOf(bot), toolOutput(kind, mat))) {
+            return RECIPE_LOCKED;
+        }
 
         // One combined chest ask for everything this craft lacks (the table's planks included), before
         // the station and the per-item sub-steps below, which then find the materials in the pack.
@@ -2235,6 +2323,10 @@ public final class CraftingHelper {
                                    ServerCommandSource source,
                                    ServerPlayerEntity commander,
                                    int amount) {
+        if (!hasRecipePermission(commander, serverOf(bot), Items.SHIELD)) {
+            say(source, recipeRefusalLine());
+            return 0;
+        }
         // One combined chest ask for the planks, the iron ingot and the table's planks.
         switch (askChestForKnownCraft(bot, source, Items.SHIELD, amount, s -> s.isOf(Items.IRON_INGOT), true)) {
             case STOP_SILENT, STOP_WITH_LINE -> {
@@ -3544,6 +3636,10 @@ public final class CraftingHelper {
                                    net.minecraft.item.Item output,
                                    net.minecraft.item.Item input,
                                    int per) {
+        if (!hasRecipePermission(commander, serverOf(bot), output)) {
+            say(source, recipeRefusalLine());
+            return 0;
+        }
         // One combined chest ask for the ingots (and the bucket's table planks).
         switch (askChestForKnownCraft(bot, source, output, amount, s -> s.isOf(input), output.equals(Items.BUCKET))) {
             case STOP_SILENT, STOP_WITH_LINE -> {
@@ -3586,6 +3682,10 @@ public final class CraftingHelper {
                                           int amount,
                                           net.minecraft.item.Item output,
                                           int leatherPer) {
+        if (!hasRecipePermission(commander, serverOf(bot), output)) {
+            say(source, recipeRefusalLine());
+            return 0;
+        }
         if (!ensureCraftingStation(bot, source)) {
             return 0;
         }
@@ -3608,12 +3708,64 @@ public final class CraftingHelper {
         return crafts;
     }
 
+    /**
+     * Iron, golden or diamond armour ({@link ArmorCraftPolicy}): {@code per} of {@code material}
+     * per piece at a crafting table, as {@link #craftSimple} does for a bucket, with one combined
+     * chest ask for the material and the table's planks first.
+     */
+    private static int craftMetalArmor(ServerPlayerEntity bot,
+                                       ServerCommandSource source,
+                                       ServerPlayerEntity commander,
+                                       int amount,
+                                       net.minecraft.item.Item output,
+                                       net.minecraft.item.Item material,
+                                       int per) {
+        if (!hasRecipePermission(commander, serverOf(bot), output)) {
+            say(source, recipeRefusalLine());
+            return 0;
+        }
+        switch (askChestForKnownCraft(bot, source, output, amount, s -> s.isOf(material), true)) {
+            case STOP_SILENT, STOP_WITH_LINE -> {
+                return 0;
+            }
+            default -> {
+            }
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft armor.");
+            return 0;
+        }
+        ensureItemAvailable(bot, source, material, per * amount);
+        int have = countItem(bot, material);
+        int crafts = Math.min(amount, have / per);
+        if (crafts <= 0) {
+            say(source, "I need " + per + " " + material.getName().getString() + " for each "
+                    + output.getName().getString() + ".");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(material, crafts * per);
+        if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
+        if (commitCraft(bot, output, crafts,
+                () -> consumeItemOnServer(bot, material, crafts * per)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
+        recordCraftHistory(commander, output);
+        return crafts;
+    }
+
     private static int craftCobbleBlock(ServerPlayerEntity bot,
                                         ServerCommandSource source,
                                         ServerPlayerEntity commander,
                                         int amount,
                                         net.minecraft.item.Item output,
                                         int per) {
+        if (!hasRecipePermission(commander, serverOf(bot), output)) {
+            say(source, recipeRefusalLine());
+            return 0;
+        }
         // One combined chest ask for the cobblestone-like blocks (and the furnace's table planks).
         switch (askChestForKnownCraft(bot, source, output, amount, CraftingHelper::isStoneCraftingMaterial,
                 output.equals(Items.FURNACE))) {
@@ -3655,6 +3807,10 @@ public final class CraftingHelper {
                                        ServerCommandSource source,
                                        ServerPlayerEntity commander,
                                        int amount) {
+        if (!hasRecipePermission(commander, serverOf(bot), Items.FISHING_ROD)) {
+            say(source, recipeRefusalLine());
+            return 0;
+        }
         if (!ensureCraftingStation(bot, source)) {
             sendCraftTableNeededOnce(bot, source, "Fishing rods require a nearby crafting table.");
             return 0;
@@ -4877,6 +5033,11 @@ public final class CraftingHelper {
             }
             int convert = Math.min(stack.getCount(), logsNeeded);
             Item plankItem = mapLogToPlank(stack.getItem());
+            if (plankItem != null && plankItem != Items.AIR
+                    && !hasRecipePermission(CRAFT_COMMANDER.get(), serverOf(bot), plankItem)) {
+                RECIPE_REFUSAL_LINE.remove(); // the craft reports its plank shortfall, not this line
+                continue; // limitedCrafting: these planks are locked for the commander
+            }
             CraftCommitPolicy.Outcome outcome = commitLogsToPlanks(bot, i, stack.getItem(), stack.getCount(), convert, plankItem);
             if (!CraftCommitPolicy.continueScan(outcome)) {
                 break;

@@ -839,6 +839,87 @@ public final class BotIdleHobbiesService {
         return false;
     }
 
+    /** Count and radius limits of a leaf_litter hobby run; the cook fuel fallback uses the same. */
+    private static void putLeafLitterRunParams(Map<String, Object> params, boolean survival, boolean forestBiome) {
+        int countMin  = survival ? 6 : 3;
+        int countRange = (survival ? 5 : 3) + (forestBiome ? 2 : 0);   // survival 6-10(+2), ambient 3-5(+2)
+        int radiusMin  = survival ? 14 : 10;
+        int radiusRange = (survival ? 7 : 5) + (forestBiome ? 4 : 0);  // survival 14-20(+4), ambient 10-14(+4)
+
+        params.put("count", countMin + RNG.nextInt(countRange));
+        params.put("radius", radiusMin + RNG.nextInt(radiusRange));
+        if (survival) {
+            params.put("survival_mode", true);
+        }
+        if (forestBiome) {
+            params.put("forest_biome", true);
+        }
+    }
+
+    /** Server thread: true when leaf litter lies within the hobby's scan box (radius 14, +-2 Y). */
+    public static boolean hasLeafLitterForFuelRun(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        return hasNearbyLeafLitter(world, bot.getBlockPos(), 14);
+    }
+
+    /**
+     * Cook fuel fallback (backlog 1238): one survival-mode leaf_litter run with the hobby's limits,
+     * on the hobby's worker pool, keeping what it gathers (no chest deposit). Call on the server
+     * thread. {@code onServerDone} then runs on the server thread with true when the run was not
+     * stopped and the bot is still alive, false otherwise; it is skipped only if the server stops.
+     *
+     * @return false when the run could not be submitted ({@code onServerDone} is not called)
+     */
+    public static boolean startLeafLitterFuelRun(ServerPlayerEntity bot, java.util.function.Consumer<Boolean> onServerDone) {
+        if (bot == null || onServerDone == null || TaskService.isServerStopping()) {
+            return false;
+        }
+        MinecraftServer server = bot.getEntityWorld().getServer();
+        if (server == null) {
+            return false;
+        }
+        UUID botUuid = bot.getUuid();
+        ServerCommandSource botSource = bot.getCommandSource().withSilent();
+        Map<String, Object> params = new HashMap<>();
+        params.put("_origin", "ambient");
+        params.put("open_ended", false);
+        boolean forestBiome = bot.getEntityWorld() instanceof ServerWorld sw && isLeafLitterFriendlyBiome(sw, bot.getBlockPos());
+        putLeafLitterRunParams(params, true, forestBiome);
+        params.put(net.wcfcarolina13.GameAI.skills.impl.LeafLitterSkill.KEEP_FOR_FUEL_PARAM, true);
+        try {
+            AMBIENT_EXECUTOR.submit(() -> {
+                boolean mayContinue = false;
+                try {
+                    if (TaskService.isServerStopping()) {
+                        return;
+                    }
+                    SkillContext skillContext = new SkillContext(botSource, SharedStateService.safeSharedState("cook-fuel-fallback"), params, botSource);
+                    SkillExecutionResult result = SkillManager.runSkill("leaf_litter", skillContext);
+                    // Sampled on the worker, as the hobby does: a later tick can clear the latch.
+                    mayContinue = !TaskService.isAbortRequested(botUuid);
+                    LOGGER.info("Cook fuel fallback: leaf_litter for {} finished: success={} msg='{}'",
+                            bot.getName().getString(), result != null && result.success(),
+                            result != null ? result.message() : "null");
+                } catch (Throwable t) {
+                    LOGGER.warn("Cook fuel fallback crashed for {}: {}", bot.getName().getString(), t.toString());
+                } finally {
+                    boolean cont = mayContinue;
+                    if (!TaskService.isServerStopping()) {
+                        server.execute(() -> {
+                            ServerPlayerEntity live = server.getPlayerManager().getPlayer(botUuid);
+                            onServerDone.accept(cont && live != null && !live.isRemoved() && live.isAlive());
+                        });
+                    }
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            return false;
+        }
+        return true;
+    }
+
     private static boolean hasNearbyLeafLitter(ServerWorld world, BlockPos origin, int radius) {
         if (world == null || origin == null) {
             return false;
@@ -1032,20 +1113,7 @@ public final class BotIdleHobbiesService {
             ServerWorld sw = bot.getEntityWorld() instanceof ServerWorld s ? s : null;
             boolean survival = sw != null && needsLeafLitterForSurvival(bot, sw);
             boolean forestBiome = sw != null && isLeafLitterFriendlyBiome(sw, bot.getBlockPos());
-
-            int countMin  = survival ? 6 : 3;
-            int countRange = (survival ? 5 : 3) + (forestBiome ? 2 : 0);   // survival 6-10(+2), ambient 3-5(+2)
-            int radiusMin  = survival ? 14 : 10;
-            int radiusRange = (survival ? 7 : 5) + (forestBiome ? 4 : 0);  // survival 14-20(+4), ambient 10-14(+4)
-
-            params.put("count", countMin + RNG.nextInt(countRange));
-            params.put("radius", radiusMin + RNG.nextInt(radiusRange));
-            if (survival) {
-                params.put("survival_mode", true);
-            }
-            if (forestBiome) {
-                params.put("forest_biome", true);
-            }
+            putLeafLitterRunParams(params, survival, forestBiome);
         }
 
         if ("honey_collect".equalsIgnoreCase(runSkillName)) {
