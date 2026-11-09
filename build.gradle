@@ -152,4 +152,5 @@ tasks.register('wikiExport', JavaExec) {
 // GuideWikiExportTest reads docs/wiki, so a hand edit there must rerun the tests.
 tasks.named('test') {
 	inputs.dir('docs/wiki').withPathSensitivity(PathSensitivity.RELATIVE)
+	inputs.file('mkdocs.yml').withPathSensitivity(PathSensitivity.RELATIVE)
 }

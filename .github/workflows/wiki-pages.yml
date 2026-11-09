@@ -15,7 +15,8 @@ permissions:
 
 concurrency:
   group: wiki-pages-${{ github.ref }}
-  cancel-in-progress: true
+  # Don't cancel a deployment halfway (GitHub's Pages template does the same).
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -27,13 +28,14 @@ jobs:
           python-version: '3.12'
       - run: pip install mkdocs-material==9.5.39
       - run: mkdocs build --strict --site-dir _site
-      - if: github.event_name != 'pull_request'
+      - if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
   deploy:
-    if: github.event_name != 'pull_request'
+    # Only main deploys, also for a manual run started from another branch.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
