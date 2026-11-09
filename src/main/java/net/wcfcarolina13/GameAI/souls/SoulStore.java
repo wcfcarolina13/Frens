@@ -83,6 +83,12 @@ public final class SoulStore {
     private final ObjectMapper mapper;
     private final ConcurrentHashMap<UUID, SoulTypes.SoulState> cachedStates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, SoulTypes.KnowledgeMemory> cachedKnowledge = new ConcurrentHashMap<>();
+    /**
+     * Persona picks (AI setup persona picker): bot → the profile id picked on purpose. Kept in a
+     * sidecar file beside soul.json, not in it, so an older jar still reads soul.json. A pick
+     * only counts while it names the current binding ({@link PersonaBindingPolicy#isPicked}).
+     */
+    private final ConcurrentHashMap<UUID, String> cachedPicks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, SoulTypes.SoulMind> cachedMinds = new ConcurrentHashMap<>();
     // Only ever read/written from inside submit() tasks, i.e. on this store's single writer
     // thread -- a plain HashMap is race-free here the same way the rest of this class's
@@ -143,14 +149,65 @@ public final class SoulStore {
         return submit(() -> loadState(botId));
     }
 
+    /** A plain binding (enable, migration, command): any earlier persona pick is dropped. */
     public CompletableFuture<SoulTypes.SoulState> bindProfile(UUID botId, String profileId) {
         return submit(() -> {
             SoulTypes.SoulState state = loadState(botId);
             SoulTypes.SoulState updated = new SoulTypes.SoulState(
                     state.schemaVersion(), botId, profileId, state.active(), state.conversations());
             saveState(updated);
+            clearPick(botId);
             return updated;
         });
+    }
+
+    /**
+     * A binding picked on purpose (AI setup persona picker): binds like {@link #bindProfile} and
+     * records the pick, so re-enabling and the legacy migration keep it. Active flag untouched.
+     */
+    public CompletableFuture<SoulTypes.SoulState> bindPickedProfile(UUID botId, String profileId) {
+        return submit(() -> {
+            SoulTypes.SoulState state = loadState(botId);
+            SoulTypes.SoulState updated = new SoulTypes.SoulState(
+                    state.schemaVersion(), botId, profileId, state.active(), state.conversations());
+            saveState(updated);
+            Path file = pickedPersonaFile(botId);
+            Path tmp = file.resolveSibling(file.getFileName().toString() + ".tmp-" + UUID.randomUUID());
+            Files.writeString(tmp, profileId);
+            atomicReplace(tmp, file);
+            cachedPicks.put(botId, profileId);
+            return updated;
+        });
+    }
+
+    /** The profile id last picked on purpose for {@code botId}, if any (may be stale; see the field). */
+    public Optional<String> cachedPickedProfile(UUID botId) {
+        return Optional.ofNullable(cachedPicks.get(botId));
+    }
+
+    /** Writer thread only. */
+    private void clearPick(UUID botId) throws IOException {
+        if (cachedPicks.remove(botId) != null || Files.exists(pickedPersonaFile(botId))) {
+            Files.deleteIfExists(pickedPersonaFile(botId));
+        }
+    }
+
+    /** A sidecar's profile id, or null when it is missing, oversized or holds control characters. */
+    private static String readPick(Path file) {
+        try {
+            if (!Files.isRegularFile(file) || Files.size(file) > 256) {
+                return null;
+            }
+            String id = Files.readString(file).trim();
+            for (int i = 0; i < id.length(); i++) {
+                if (Character.isISOControl(id.charAt(i))) {
+                    return null;
+                }
+            }
+            return id.isEmpty() ? null : id;
+        } catch (IOException | RuntimeException unreadable) {
+            return null;
+        }
     }
 
     public CompletableFuture<SoulTypes.SoulState> setActive(UUID botId, boolean active) {
@@ -823,6 +880,10 @@ public final class SoulStore {
                 if (Files.exists(soulJson)) {
                     cachedStates.put(botId, mapper.readValue(soulJson.toFile(), SoulTypes.SoulState.class));
                 }
+                String pick = readPick(botDir.resolve(PICKED_PERSONA_FILE));
+                if (pick != null) {
+                    cachedPicks.put(botId, pick);
+                }
                 preloadMind(botId, botDir.resolve("mind.json"));
             }
         }
@@ -963,6 +1024,12 @@ public final class SoulStore {
 
     private Path soulJsonFile(UUID botId) {
         return botDir(botId).resolve("soul.json");
+    }
+
+    static final String PICKED_PERSONA_FILE = "picked-persona.txt";
+
+    private Path pickedPersonaFile(UUID botId) {
+        return botDir(botId).resolve(PICKED_PERSONA_FILE);
     }
 
     private Path conversationsDir(UUID botId) {
