@@ -16,6 +16,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
+import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
@@ -74,7 +75,7 @@ public final class BotFallSafetyService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
-        if (isUltrawarm(world)) {
+        if (waterEvaporatesAt(world, bot.getBlockPos())) {
             return;
         }
         if (bot.isOnGround() || bot.isClimbing() || bot.isTouchingWater() || bot.isSubmergedInWater()) {
@@ -133,26 +134,19 @@ public final class BotFallSafetyService {
         return projectedDamage >= Math.max(4.0D, effectiveHealth - 0.5D);
     }
 
-    private static boolean isUltrawarm(ServerWorld world) {
-        if (world == null || world.getDimension() == null) {
+    /**
+     * True where placed water evaporates (the Nether in vanilla), so a clutch there would only
+     * empty the bucket. 1.21.11 moved this from {@code DimensionType} to the environment attribute
+     * {@code WATER_EVAPORATES_GAMEPLAY}, which vanilla's bucket checks per position. The old
+     * reflective {@code isUltrawarm()} lookup found no such method and always answered false.
+     */
+    private static boolean waterEvaporatesAt(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
             return false;
         }
-        Object dim = world.getDimension();
-        try {
-            Object out = dim.getClass().getMethod("isUltrawarm").invoke(dim);
-            if (out instanceof Boolean b) {
-                return b;
-            }
-        } catch (ReflectiveOperationException ignored) {
-        }
-        try {
-            Object out = dim.getClass().getMethod("ultrawarm").invoke(dim);
-            if (out instanceof Boolean b) {
-                return b;
-            }
-        } catch (ReflectiveOperationException ignored) {
-        }
-        return false;
+        Boolean evaporates = world.getEnvironmentAttributes()
+                .getAttributeValue(EnvironmentAttributes.WATER_EVAPORATES_GAMEPLAY, pos);
+        return Boolean.TRUE.equals(evaporates);
     }
 
     private record LandingTarget(BlockPos supportPos, BlockPos placePos, double heightDelta) {}
@@ -184,6 +178,9 @@ public final class BotFallSafetyService {
             return false;
         }
         if (!world.isChunkLoaded(placePos)) {
+            return false;
+        }
+        if (waterEvaporatesAt(world, placePos)) {
             return false;
         }
         if (!world.getFluidState(placePos).isEmpty()) {
