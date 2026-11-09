@@ -50,6 +50,7 @@ Every card from the Guide screen in game (press ] by default). `<bot>` stands fo
 - [Fishing](Guide-Gathering.md#fishing): Fish until sunset or a chosen catch count.
 - [Forget Fishing Spot](Guide-Gathering.md#forget-fishing-spot): Clears the bot's saved fishing stand so it picks a fresh spot next time.
 - [Woodcut](Guide-Gathering.md#woodcut): Fells nearby trees. Defaults to 'Until sunset' mode. Use +/- to set a specific tree count.
+- [Daily Work Loops (Lodestone Compass)](Guide-Gathering.md#daily-work-loops-lodestone-compass): Send a fren to a far work spot that it returns to every morning: home at sunset, back to work at sunrise.
 - [Wool](Guide-Gathering.md#wool): Shears sheep and gathers wool.
 - [Leaf Litter](Guide-Gathering.md#leaf-litter): Collects leaf litter from the ground for cheap furnace fuel.
 
