@@ -2,13 +2,6 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
-## A skill that throws while starting no longer locks the bot's task slot (unreleased, 2026-11-05)
-
-Found while scoping the `TaskService.resetAll` review minor (that minor needs no change: every worker clears its own ticket in a `finally` on its own thread, and clearing it from other threads would hide the cancel from a worker still unwinding). `SkillManager.runSkill` took the task ticket, then ran start-up steps (attach the thread, cancel the drop sweep, suspend follow) before the `try` whose `finally` completes it. A throw there left the ticket in the bot's slot. Skills run on pooled worker threads that stay alive, so `beginSkill`'s dead-thread recovery never freed it, and every later skill for that bot answered "Another skill is already running." until `/bot stop`.
-
-- Those steps now sit in a guard that completes the ticket as failed and returns "Skill '<name>' could not start." The log gets an ERROR with the stack.
-- **Cost:** if `suspendFollowMode` throws after it has already paused follow, follow is not resumed (no resume state was returned). A stuck slot was judged worse.
-- **Limits:** no field report of this; the gap was found by reading the code. Covered by a source-reading wiring test (`SkillManagerTicketReleaseWiringTest`; SkillManager touches server types). Tests 3857 → 3858. Nothing to check in the sandbox beyond a normal skill start, since the failing path cannot be triggered on purpose.
 ## CI runs the test suite (2026-11-05, unreleased)
 
 CI ran `./gradlew build -x test`, so the JUnit suite (about 3900 tests: pure policy, wiring and
