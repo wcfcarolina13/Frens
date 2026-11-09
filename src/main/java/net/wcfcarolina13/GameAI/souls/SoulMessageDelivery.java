@@ -111,7 +111,7 @@ public final class SoulMessageDelivery implements SoulConversationService.Delive
                             // whatever the model said. A system line, so voice never speaks it.
                             try {
                                 net.wcfcarolina13.GameAI.services.GuideChatAnswerService
-                                        .sendLinkAfterSoulReply(bot, player, turn.playerMessage());
+                                        .sendLinkAfterSoulReply(bot, player, turn.playerMessage(), safeText);
                             } catch (RuntimeException linkFailure) {
                                 LOGGER.warn("[souls] guide link failed: {}", linkFailure.toString());
                             }

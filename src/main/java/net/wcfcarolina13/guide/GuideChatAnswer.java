@@ -85,6 +85,35 @@ public final class GuideChatAnswer {
         return c;
     }
 
+    /** The card that explains who may command a bot on a shared world. */
+    public static final String FRIEND_ACCESS_TOPIC_ID = "settings_friend_bots";
+    public static final String OPERATOR_NOTE = "/bot commands need an operator on this server.";
+
+    /**
+     * Whether the answer leans on a {@code /bot} command the asker can't run. The whole
+     * {@code /bot} tree needs an operator or the singleplayer/LAN host, and many spoken answers
+     * say "type /bot ...", which are right in singleplayer but fail for a guest on a server.
+     */
+    public static boolean needsOperatorNote(Answer answer, boolean canUseBotCommands) {
+        if (answer == null || canUseBotCommands) {
+            return false;
+        }
+        return mentionsBotCommand(answer.spoken()) || mentionsBotCommand(answer.commandHint());
+    }
+
+    /** The answer as shown to someone who can't run {@code /bot}: no clickable {@code /bot} hint. */
+    public static Answer forAsker(Answer answer, boolean canUseBotCommands) {
+        if (answer == null || canUseBotCommands || !mentionsBotCommand(answer.commandHint())) {
+            return answer;
+        }
+        return new Answer(answer.spoken(), "", answer.topicId(), answer.topicTitle(),
+                answer.alsoTopicId(), answer.alsoTopicTitle());
+    }
+
+    static boolean mentionsBotCommand(String text) {
+        return text != null && text.toLowerCase(Locale.ROOT).contains("/bot ");
+    }
+
     /** The command an [Open in Guide] link runs; the bot name fills {bot} on the card. */
     public static String openCommand(String topicId, String botName) {
         String bot = botName == null ? "" : botName.trim();

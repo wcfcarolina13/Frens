@@ -67,9 +67,13 @@ public final class GuideChatAnswerService {
         if (answer.isEmpty()) {
             return false;
         }
-        GuideChatAnswer.Answer a = answer.get();
+        boolean canUseBot = canUseBotCommands(sender);
+        GuideChatAnswer.Answer a = GuideChatAnswer.forAsker(answer.get(), canUseBot);
         sender.sendMessage(Text.literal(botName + ": " + a.spoken()), false);
         sender.sendMessage(linkLine(a, botName), false);
+        if (GuideChatAnswer.needsOperatorNote(answer.get(), canUseBot)) {
+            sender.sendMessage(operatorNote(botName), false);
+        }
         LOGGER.info("[guide-answer] bot={} player={} topic={} score={} also={}",
                 botName, sender.getName().getString(), a.topicId(), matches.get(0).score(),
                 a.alsoTopicId().isEmpty() ? "-" : a.alsoTopicId());
@@ -80,7 +84,8 @@ public final class GuideChatAnswerService {
      * After a soul's spoken reply to a how-to question: the same [Open in Guide] link line, so
      * the exact source is one click away from whatever the model said.
      */
-    public static void sendLinkAfterSoulReply(ServerPlayerEntity bot, ServerPlayerEntity player, String prompt) {
+    public static void sendLinkAfterSoulReply(ServerPlayerEntity bot, ServerPlayerEntity player, String prompt,
+                                              String replyText) {
         if (bot == null || player == null) {
             return;
         }
@@ -90,9 +95,26 @@ public final class GuideChatAnswerService {
             GuideChatAnswer.Answer linkOnly = new GuideChatAnswer.Answer(a.spoken(), "", a.topicId(),
                     a.topicTitle(), a.alsoTopicId(), a.alsoTopicTitle());
             player.sendMessage(linkLine(linkOnly, botName), false);
+            // The soul repeated a /bot command from the Guide that this player can't run.
+            GuideChatAnswer.Answer spoken = new GuideChatAnswer.Answer(replyText == null ? "" : replyText,
+                    "", a.topicId(), a.topicTitle(), "", "");
+            if (GuideChatAnswer.needsOperatorNote(spoken, canUseBotCommands(player))) {
+                player.sendMessage(operatorNote(botName), false);
+            }
             LOGGER.info("[guide-answer] soul-link bot={} player={} topic={} score={}",
                     botName, player.getName().getString(), a.topicId(), matches.get(0).score());
         });
+    }
+
+    /** Whether {@code player} may run {@code /bot}: an operator or the singleplayer/LAN host. */
+    static boolean canUseBotCommands(ServerPlayerEntity player) {
+        return net.wcfcarolina13.Frens.hasBotCommandPermission(player.getCommandSource());
+    }
+
+    /** "  /bot commands need an operator on this server. [Let a Friend Use Bots]" */
+    static MutableText operatorNote(String botName) {
+        return Text.literal("  " + GuideChatAnswer.OPERATOR_NOTE + " ").formatted(Formatting.GRAY)
+                .append(link("[Who can command bots]", GuideChatAnswer.FRIEND_ACCESS_TOPIC_ID, botName));
     }
 
     /** "  Try /bot ...  [Open in Guide: Title]  [Also: Title]": command in yellow, links in green. */

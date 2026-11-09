@@ -42,6 +42,21 @@ class GuideChatAnswerTest {
     }
 
     @Test
+    void askerWithoutBotCommandsGetsNoBotHintAndANote() {
+        GuideChatAnswer.Answer stop = GuideChatAnswer.build(matches("how do I stop you"), "Jake").orElseThrow();
+        assertTrue(GuideChatAnswer.needsOperatorNote(stop, false));
+        assertFalse(GuideChatAnswer.needsOperatorNote(stop, true));
+        assertEquals("", GuideChatAnswer.forAsker(stop, false).commandHint());
+        assertEquals("/bot stop Jake", GuideChatAnswer.forAsker(stop, true).commandHint());
+        assertEquals(stop.spoken(), GuideChatAnswer.forAsker(stop, false).spoken());
+
+        GuideChatAnswer.Answer noCommand = new GuideChatAnswer.Answer("Open the Spells tab.", "", "x", "X", "", "");
+        assertFalse(GuideChatAnswer.needsOperatorNote(noCommand, false));
+        assertTrue(GUIDE.stream().anyMatch(t -> t.id().equals(GuideChatAnswer.FRIEND_ACCESS_TOPIC_ID)),
+                "the note links a card that exists");
+    }
+
+    @Test
     void noMatchNoAnswer() {
         assertTrue(GuideChatAnswer.build(List.of(), "Jake").isEmpty());
         assertTrue(GuideChatAnswer.build(null, "Jake").isEmpty());
