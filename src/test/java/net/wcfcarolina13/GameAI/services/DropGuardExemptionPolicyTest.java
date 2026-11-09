@@ -100,4 +100,28 @@ class DropGuardExemptionPolicyTest {
         org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.refusesStep(122, 123, 123, false));
         org.junit.jupiter.api.Assertions.assertTrue(DropGuardExemptionPolicy.refusesStep(122, 124, 124, false));
     }
+
+    @Test
+    void aFollowingBotInTheAirStopsShortOfAnEdgeItWouldNotWalkOff() {
+        // Hopping on a canopy toward a commander 8 below: still over leaves, heading cell a drop, not exempt.
+        assertTrue(DropGuardExemptionPolicy.followHaltInAir(false, false, false, true, false));
+        // On the ground the ground guard decides; in water or a vehicle nothing changes.
+        assertFalse(DropGuardExemptionPolicy.followHaltInAir(true, false, false, true, false));
+        assertFalse(DropGuardExemptionPolicy.followHaltInAir(false, true, false, true, false));
+        // Already over the drop: stopping would only drop it straight down.
+        assertFalse(DropGuardExemptionPolicy.followHaltInAir(false, false, true, true, false));
+        // A step down the ground guard allows (waypoint or target within 4.5 and grounded), or no drop ahead.
+        assertFalse(DropGuardExemptionPolicy.followHaltInAir(false, false, false, true, true));
+        assertFalse(DropGuardExemptionPolicy.followHaltInAir(false, false, false, false, false));
+    }
+
+    @Test
+    void theFollowGuardChecksTheAirBeforeTheGroundOnlyEarlyReturn() throws java.io.IOException {
+        String src = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/FollowMovementService.java"));
+        int start = src.indexOf("private static boolean tryDropoffGuard(ServerPlayerEntity bot, Vec3d targetPos, boolean stayOutOfHoles)");
+        int air = src.indexOf("return tryFollowAirborneDropGuard(bot, world, targetPos);", start);
+        int groundOnly = src.indexOf("if (!bot.isOnGround() || bot.hasVehicle()", start);
+        assertTrue(start >= 0 && air > start && groundOnly > air, "airborne follow check runs before the ground-only return");
+        assertTrue(src.contains("DropGuardExemptionPolicy.followHaltInAir("));
+    }
 }

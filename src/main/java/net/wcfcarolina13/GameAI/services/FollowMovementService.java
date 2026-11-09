@@ -486,6 +486,9 @@ public final class FollowMovementService {
         if (stayOutOfHoles && !bot.isOnGround()) {
             return tryAirborneHoleGuard(bot, world, targetPos);
         }
+        if (!stayOutOfHoles && !bot.isOnGround()) {
+            return tryFollowAirborneDropGuard(bot, world, targetPos);
+        }
         AIRBORNE_HALT_LOGGED.remove(bot.getUuid());
         if (!bot.isOnGround() || bot.hasVehicle() || bot.isUsingItem() || bot.isTouchingWater()) {
             return false;
@@ -650,6 +653,59 @@ public final class FollowMovementService {
 
     /** Bots whose current airborne stretch already logged a halt (cleared once they are on the ground). */
     private static final java.util.Set<UUID> AIRBORNE_HALT_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * Follow in the air (DropGuardExemptionPolicy.followHaltInAir): still over support, heading
+     * (a block ahead along the motion, or toward the target when nearly still) into a drop the
+     * ground guard would refuse, so drop the forward input and the sideways momentum and land
+     * where it is. Returns true when it halted the move.
+     */
+    private static boolean tryFollowAirborneDropGuard(ServerPlayerEntity bot, ServerWorld world, Vec3d targetPos) {
+        boolean inWaterOrVehicle = bot.hasVehicle() || bot.isTouchingWater() || bot.isInLava();
+        if (inWaterOrVehicle || bot.isGliding()) {
+            return false;
+        }
+        Vec3d v = bot.getVelocity();
+        Vec3d dir = new Vec3d(v.x, 0.0D, v.z);
+        if (dir.lengthSquared() < 4.0E-4D) {
+            dir = new Vec3d(targetPos.x - bot.getX(), 0.0D, targetPos.z - bot.getZ());
+        }
+        if (dir.lengthSquared() < 1.0E-6D) {
+            return false;
+        }
+        dir = dir.normalize().multiply(DropGuardExemptionPolicy.AIRBORNE_PROBE_BLOCKS);
+        BlockPos column = BlockPos.ofFloored(bot.getX() + dir.x, bot.getY(), bot.getZ() + dir.z);
+        if (column.getX() == bot.getBlockX() && column.getZ() == bot.getBlockZ()) {
+            return false;
+        }
+        int minDepth = DropGuardExemptionPolicy.FOLLOW_MIN_DEPTH;
+        boolean overDropNow = isDangerousDropCell(world, bot.getBlockPos(), minDepth);
+        boolean headingIntoDrop = !overDropNow && isDangerousDropCell(world, column, minDepth);
+        boolean exempt = false;
+        if (headingIntoDrop) {
+            BlockPos targetBlock = BlockPos.ofFloored(targetPos);
+            exempt = DropGuardExemptionPolicy.exempt(false, bot.getY() - targetPos.y,
+                    isGroundedTwoHighClearance(world, targetBlock),
+                    column.getX(), column.getZ(), targetBlock.getX(), targetBlock.getZ());
+            if (exempt) {
+                BlindWalkGuardPolicy.Decision line =
+                        MovementService.blindLineDecisionOnServerThread(world, bot, targetBlock);
+                exempt = DropGuardExemptionPolicy.exemptAfterBlindLine(true, line != null ? line.verdict() : null);
+            }
+        }
+        if (!DropGuardExemptionPolicy.followHaltInAir(false, false, overDropNow, headingIntoDrop, exempt)) {
+            return false;
+        }
+        BotActions.stop(bot);
+        bot.setVelocity(0.0D, v.y, 0.0D);
+        bot.velocityDirty = true;
+        if (AIRBORNE_HALT_LOGGED.add(bot.getUuid())) {
+            LOGGER.info("drop guard: {} in the air heading off an edge at {} toward {}; dropping forward momentum",
+                    bot.getName().getString(), column.toShortString(), BlockPos.ofFloored(targetPos).toShortString());
+        }
+        maybeShowDropWarning(bot);
+        return true;
+    }
 
     /** Guard and patrol: the target stands at least {@link DropGuardExemptionPolicy#GUARD_MIN_DEPTH} below the guarded ground. */
     private static boolean guardTargetDownThere(ServerWorld world, int referenceY, Vec3d targetPos) {

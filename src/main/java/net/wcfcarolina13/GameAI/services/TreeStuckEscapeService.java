@@ -58,8 +58,11 @@ public final class TreeStuckEscapeService {
     private static final long ESCAPE_TARGET_STALE_TICKS = 120L;
     /** Dialogue cooldown (ms). */
     private static final long DIALOGUE_COOLDOWN_MS = 12_000L;
-    /** Max safe fall height (blocks) — vanilla is ~3.5 for no damage; 4 is survivable. */
-    private static final int SAFE_DROP_HEIGHT = 4;
+    /**
+     * Max safe fall height (blocks). Vanilla fall damage is fall distance minus 3, so 3 is the
+     * most that costs nothing; 4 cost a heart once bots took fall damage (sandbox 2026-11-09).
+     */
+    private static final int SAFE_DROP_HEIGHT = TreeStuckDropPolicy.SAFE_DROP_HEIGHT;
     /** Max survivable fall height (takes damage but lives). */
     private static final int SURVIVABLE_DROP_HEIGHT = 8;
     /** Horizontal scan radius for safe-drop search. */
@@ -110,8 +113,16 @@ public final class TreeStuckEscapeService {
                 }
             }
 
-            // If airborne (falling off edge), let gravity work — don't steer.
+            // If airborne (falling off edge), let gravity work — don't steer. Once over the chosen
+            // column, drop the sideways momentum so the bot comes down that column: the edge pushes
+            // and hops carried it on past it, over the deeper drop beyond (sandbox 2026-11-09).
             if (!bot.isOnGround()) {
+                Vec3d v = bot.getVelocity();
+                if (TreeStuckDropPolicy.holdOverTarget(bot.getBlockX(), bot.getBlockZ(),
+                        activeTarget.getX(), activeTarget.getZ(), v.x, v.z)) {
+                    bot.setVelocity(0.0D, v.y, 0.0D);
+                    bot.velocityDirty = true;
+                }
                 return true;
             }
 
@@ -296,7 +307,7 @@ public final class TreeStuckEscapeService {
                     BlockState probeState = world.getBlockState(probe);
                     if (isSolidNonLeafGround(probeState)) {
                         // Found safe landing. Drop is the number of air blocks.
-                        if (drop <= SAFE_DROP_HEIGHT && drop < bestDrop) {
+                        if (TreeStuckDropPolicy.isSafeDrop(drop) && drop < bestDrop) {
                             best = candidate;
                             bestDrop = drop;
                         }
