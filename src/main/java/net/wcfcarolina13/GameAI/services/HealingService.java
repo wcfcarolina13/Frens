@@ -51,6 +51,8 @@ public final class HealingService {
     /** Until when (wall clock) the bot is holding raw meat for the furnace; see {@link RawMeatHoldPolicy}. */
     private static final Map<UUID, Long> RAW_MEAT_HELD_UNTIL_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> RAW_MEAT_HOLD_LOGGED_MS = new ConcurrentHashMap<>();
+    /** When the current hold first reached auto-cook's food level; caps the hold there. */
+    private static final Map<UUID, Long> RAW_MEAT_HOLD_AT_COOK_LEVEL_SINCE_MS = new ConcurrentHashMap<>();
     private static final long RAW_MEAT_HOLD_WINDOW_MS = 5_000L;
     private static final long RAW_MEAT_HOLD_LOG_MS = 60_000L;
     private static final Map<UUID, Integer> LAST_WARNED_LEVEL = new ConcurrentHashMap<>();
@@ -298,6 +300,7 @@ public final class HealingService {
         // while auto-cook can cook it soon, instead of eating it raw at half the value.
         if (!emergency && isRawMeat(inv.getStack(foodSlot.getAsInt()))
                 && RawMeatHoldPolicy.shouldHold(foodLevel, maxHealth > 0.0F ? health / maxHealth : 0.0F,
+                        heldAtCookLevelMs(bot, foodLevel),
                         () -> BotAutoCookingService.canCookRawMeatSoon(bot))) {
             noteRawMeatHeld(bot, inv.getStack(foodSlot.getAsInt()), foodLevel);
             return false;
@@ -316,9 +319,24 @@ public final class HealingService {
         return until != null && System.currentTimeMillis() < until;
     }
 
+    /** How long the current hold has lasted at auto-cook's food level; 0 above it or with no hold. */
+    private static long heldAtCookLevelMs(ServerPlayerEntity bot, int foodLevel) {
+        if (foodLevel > RawMeatHoldPolicy.COOK_FOOD_LEVEL || !isHoldingRawMeatForCook(bot)) {
+            return 0L;
+        }
+        Long since = RAW_MEAT_HOLD_AT_COOK_LEVEL_SINCE_MS.get(bot.getUuid());
+        return since == null ? 0L : Math.max(0L, System.currentTimeMillis() - since);
+    }
+
     private static void noteRawMeatHeld(ServerPlayerEntity bot, ItemStack raw, int foodLevel) {
         UUID id = bot.getUuid();
         long now = System.currentTimeMillis();
+        boolean continuing = isHoldingRawMeatForCook(bot);
+        if (foodLevel > RawMeatHoldPolicy.COOK_FOOD_LEVEL) {
+            RAW_MEAT_HOLD_AT_COOK_LEVEL_SINCE_MS.remove(id);
+        } else if (!continuing || !RAW_MEAT_HOLD_AT_COOK_LEVEL_SINCE_MS.containsKey(id)) {
+            RAW_MEAT_HOLD_AT_COOK_LEVEL_SINCE_MS.put(id, now); // a new hold, or it just reached the level
+        }
         RAW_MEAT_HELD_UNTIL_MS.put(id, now + RAW_MEAT_HOLD_WINDOW_MS);
         Long logged = RAW_MEAT_HOLD_LOGGED_MS.get(id);
         if (logged == null || now - logged >= RAW_MEAT_HOLD_LOG_MS) {

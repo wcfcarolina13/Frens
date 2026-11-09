@@ -15,24 +15,45 @@ class RawMeatHoldPolicyTest {
 
     @Test
     void holdsAboveSixFoodAtHalfHealthWhenACookIsPossible() {
-        assertTrue(RawMeatHoldPolicy.shouldHold(14, 1.0F, () -> true));
-        assertTrue(RawMeatHoldPolicy.shouldHold(7, 0.5F, () -> true));
+        assertTrue(RawMeatHoldPolicy.shouldHold(14, 1.0F, 0L, () -> true));
+        assertTrue(RawMeatHoldPolicy.shouldHold(7, 0.5F, 0L, () -> true));
     }
 
     @Test
     void eatsRawAtSixFoodOrBelowHalfHealthOrWithNoCook() {
-        assertFalse(RawMeatHoldPolicy.shouldHold(6, 1.0F, () -> true), "can't sprint at 6");
-        assertFalse(RawMeatHoldPolicy.shouldHold(14, 0.45F, () -> true), "hurt bot eats what it has");
-        assertFalse(RawMeatHoldPolicy.shouldHold(14, Float.NaN, () -> true));
-        assertFalse(RawMeatHoldPolicy.shouldHold(14, 1.0F, () -> false), "no furnace, fuel or idle time");
-        assertFalse(RawMeatHoldPolicy.shouldHold(14, 1.0F, null));
+        assertFalse(RawMeatHoldPolicy.shouldHold(6, 1.0F, 0L, () -> true), "can't sprint at 6");
+        assertFalse(RawMeatHoldPolicy.shouldHold(14, 0.45F, 0L, () -> true), "hurt bot eats what it has");
+        assertFalse(RawMeatHoldPolicy.shouldHold(14, Float.NaN, 0L, () -> true));
+        assertFalse(RawMeatHoldPolicy.shouldHold(14, 1.0F, 0L, () -> false), "no furnace, fuel or idle time");
+        assertFalse(RawMeatHoldPolicy.shouldHold(14, 1.0F, 0L, null));
+    }
+
+    @Test
+    void aHurtBotAboveTheCookLevelEatsButHoldsAtIt() {
+        assertFalse(RawMeatHoldPolicy.shouldHold(14, 0.8F, 0L, () -> true), "auto-cook can't start above 10");
+        assertTrue(RawMeatHoldPolicy.shouldHold(10, 0.8F, 0L, () -> true), "the cook is due now");
+    }
+
+    @Test
+    void theHoldAtTheCookLevelEndsAfterAboutADozenCookAttempts() {
+        long cap = RawMeatHoldPolicy.MAX_HOLD_AT_COOK_LEVEL_MS;
+        assertTrue(RawMeatHoldPolicy.shouldHold(10, 1.0F, cap, () -> true));
+        assertFalse(RawMeatHoldPolicy.shouldHold(10, 1.0F, cap + 1, () -> true), "a cook that keeps loading nothing");
+        assertTrue(RawMeatHoldPolicy.shouldHold(12, 1.0F, cap + 1, () -> true), "the cap counts only at the cook level");
+    }
+
+    @Test
+    void theCookLevelMatchesAutoCook() throws IOException {
+        String cook = Files.readString(Path.of("src/main/java/net/wcfcarolina13/GameAI/services/BotAutoCookingService.java"));
+        assertTrue(cook.contains("COOK_HUNGER_THRESHOLD = " + RawMeatHoldPolicy.COOK_FOOD_LEVEL + ";"));
     }
 
     @Test
     void theFurnaceCheckRunsOnlyWhenTheCheapGatesPass() {
         AtomicInteger calls = new AtomicInteger();
-        RawMeatHoldPolicy.shouldHold(5, 1.0F, () -> calls.incrementAndGet() > 0);
-        RawMeatHoldPolicy.shouldHold(12, 0.2F, () -> calls.incrementAndGet() > 0);
+        RawMeatHoldPolicy.shouldHold(5, 1.0F, 0L, () -> calls.incrementAndGet() > 0);
+        RawMeatHoldPolicy.shouldHold(12, 0.2F, 0L, () -> calls.incrementAndGet() > 0);
+        RawMeatHoldPolicy.shouldHold(9, 1.0F, RawMeatHoldPolicy.MAX_HOLD_AT_COOK_LEVEL_MS + 1, () -> calls.incrementAndGet() > 0);
         assertEquals(0, calls.get());
     }
 
