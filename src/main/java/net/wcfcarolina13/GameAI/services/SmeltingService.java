@@ -778,7 +778,10 @@ public final class SmeltingService {
                 if (ensureFuel(liveBot, source, furnace, liveWorld, fuelSpec)) {
                     ChatUtils.sendSystemMessage(source, "Loaded fuel.");
                 } else if (needsFuel(furnace) && hasFuel(liveBot, liveWorld)) {
-                    ChatUtils.sendSystemMessage(source, "Fuel available (leaves/planks/logs). Re-run with '/bot cook [item] fuel auto' to use it.");
+                    FuelStack spare = findCheapestFuel(liveBot, liveWorld);
+                    String filterWord = itemFilter == null || itemFilter.isBlank() ? "<item>" : itemFilter.trim();
+                    ChatUtils.sendSystemMessage(source, "I didn't load fuel. I have " + (spare != null ? spare.name() : "fuel")
+                            + ": run '/bot cook " + filterWord + " auto' to burn it.");
                 }
                 ChatUtils.sendSystemMessage(source, "Added " + inserted + " raw stack" + (inserted == 1 ? "" : "s") + " to the furnace.");
             });
@@ -1596,7 +1599,7 @@ public final class SmeltingService {
         String name = "";
         for (int i = 0; i < bot.getInventory().size(); i++) {
             ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) continue;
+            if (stack.isEmpty() || !isAutoFuel(stack)) continue;
             int fuelCost = getFuelCost(world, stack);
             if (fuelCost == Integer.MAX_VALUE) {
                 continue;
@@ -1612,6 +1615,16 @@ public final class SmeltingService {
             return null;
         }
         return new FuelStack(best, name);
+    }
+
+    /** Plain fuel the bot may burn unasked ({@link AutoFuelPolicy}): never its tools, chests or wool. */
+    private static boolean isAutoFuel(ItemStack stack) {
+        return AutoFuelPolicy.isAutoFuel(
+                Registries.ITEM.getId(stack.getItem()).toString(),
+                stack.isIn(net.minecraft.registry.tag.ItemTags.LEAVES),
+                stack.isIn(net.minecraft.registry.tag.ItemTags.SAPLINGS),
+                stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS_THAT_BURN),
+                stack.isIn(net.minecraft.registry.tag.ItemTags.PLANKS));
     }
 
     private static int getFuelCost(ServerWorld world, ItemStack stack) {
