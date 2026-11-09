@@ -925,7 +925,7 @@ public class modCommandRegistry {
                                 .then(CommandManager.argument("item", StringArgumentType.string())
                                         .executes(context -> executeCook(context, getActiveBotOrThrow(context), StringArgumentType.getString(context, "item"), null))
                                         .then(CommandManager.argument("fuel", StringArgumentType.string())
-                                                .executes(context -> executeCook(context, getActiveBotOrThrow(context),
+                                                .executes(context -> executeCookItemAndSecondWord(context,
                                                         StringArgumentType.getString(context, "item"),
                                                         StringArgumentType.getString(context, "fuel")))
                                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
@@ -2789,6 +2789,20 @@ public class modCommandRegistry {
         for (String line : PlacePosPolicy.reportLines(run.placed(), run.stop(), item)) {
             ChatUtils.sendSystemMessage(source, line);
         }
+    }
+
+    /**
+     * {@code /bot cook <item> <word>}: the word is the fuel, unless it is no fuel word and no item
+     * but names a bot ({@link CookCommandArgsPolicy}); then it is {@code /bot cook <item>} for that bot.
+     */
+    private static int executeCookItemAndSecondWord(CommandContext<ServerCommandSource> context, String itemFilter, String word)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayerEntity named = word == null ? null : context.getSource().getServer().getPlayerManager().getPlayer(word.trim());
+        boolean namesBot = named instanceof net.wcfcarolina13.Entity.createFakePlayer;
+        if (CookCommandArgsPolicy.fuelSlotNamesBot(word, SmeltingService.namesItem(word), namesBot)) {
+            return executeCook(context, named, itemFilter, null);
+        }
+        return executeCook(context, getActiveBotOrThrow(context), itemFilter, word);
     }
 
     private static int executeCook(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemFilter, String fuelSpec) {

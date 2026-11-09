@@ -1704,6 +1704,11 @@ public final class SmeltingService {
         return furnace != null && furnace.getStack(1).isEmpty();
     }
 
+    /** True when {@code raw} is an item id, with or without {@code minecraft:}, as the fuel argument reads it. */
+    public static boolean namesItem(String raw) {
+        return resolveItem(raw == null ? null : raw.trim().toLowerCase(Locale.ROOT)) != null;
+    }
+
     private static Item resolveItem(String raw) {
         if (raw == null || raw.isBlank()) {
             return null;
