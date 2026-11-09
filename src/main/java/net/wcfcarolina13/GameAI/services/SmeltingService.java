@@ -691,6 +691,22 @@ public final class SmeltingService {
                     return;
                 }
 
+                // Checked before the output is swept or any fuel goes in: a food cook with no item
+                // named leaves a furnace alone while it holds someone else's work.
+                ItemStack inputNow = furnace.getStack(0);
+                ItemStack outputNow = furnace.getStack(2);
+                boolean inputIsBotsFood = inputNow.isEmpty() || cookables.containsKey(inputNow.getItem());
+                boolean outputIsFood = outputNow.isEmpty()
+                        || outputNow.getComponents().get(net.minecraft.component.DataComponentTypes.FOOD) != null;
+                if (AutoCookFurnaceInputPolicy.furnaceBusyWithOtherWork(foodOnly,
+                        itemFilter == null || itemFilter.isBlank(), inputIsBotsFood, outputIsFood)) {
+                    LOGGER.info("Food cook: {} left the furnace at {} alone, it holds {} / {}",
+                            liveBot.getName().getString(), furnacePos.toShortString(),
+                            inputNow.getItem().getName().getString(), outputNow.getItem().getName().getString());
+                    ChatUtils.sendSystemMessage(source, "That furnace is busy with something else.");
+                    return;
+                }
+
                 ItemStack output = furnace.getStack(2);
                 if (!output.isEmpty()) {
                     ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
@@ -709,16 +725,6 @@ public final class SmeltingService {
                 ItemStack input = furnace.getStack(0);
                 if (!input.isEmpty()) {
                     boolean autoCook = itemFilter == null || itemFilter.isBlank();
-                    var stationType = recipeTypeFor(liveWorld.getBlockState(furnacePos));
-                    boolean inputCooksToFood = stationType != null
-                            && matchesCookablePolicy(input, liveWorld, stationType, true);
-                    if (AutoCookFurnaceInputPolicy.furnaceBusyWithOtherWork(foodOnly, autoCook, inputCooksToFood)) {
-                        LOGGER.info("Food cook: {} left the furnace at {} alone, its input holds {}",
-                                liveBot.getName().getString(), furnacePos.toShortString(),
-                                input.getItem().getName().getString());
-                        ChatUtils.sendSystemMessage(source, "That furnace is busy with something else.");
-                        return;
-                    }
                     boolean filterMatchesInput = autoCook || matchesFilter(input, itemFilter);
                     if (!filterMatchesInput) {
                         Item desired = pickDesiredCookable(cookables);
