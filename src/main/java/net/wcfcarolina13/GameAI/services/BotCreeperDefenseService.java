@@ -175,6 +175,24 @@ public final class BotCreeperDefenseService {
         if (hasShield && (dist <= shieldRaiseRadius || cornered)) {
             BotActions.raiseShieldFacing(bot, tracked);
         }
+        // Backlog 986 ruling: no shield, a melee weapon, the creeper in reach and no ground gained
+        // for half a second (a wall behind): swing to knock it back, then keep backing off.
+        if (CreeperEvasionPolicy.backoffSwing(BotActions.hasMeleeWeapon(bot), hasShield, dist,
+                (int) (nowTick - bestTick))
+                && CreeperEvasionPolicy.swingReady(bot.getAttackCooldownProgress(0.5F))
+                && CreeperEvasionPolicy.inSwingReach(Math.sqrt(bot.squaredDistanceTo(tracked)))
+                && bot.canSee(tracked)) {
+            // Face it and land one full-strength hit this tick (a half-charged swing barely pushes
+            // it). Only a swing that really happened (the cooldown reset) holds the bot this tick;
+            // attackTarget can still refuse (a hotbar lock), and then the backoff below goes on.
+            net.wcfcarolina13.Entity.LookController.faceEntity(bot, tracked);
+            BotActions.attackTarget(bot, tracked);
+            if (!CreeperEvasionPolicy.swingReady(bot.getAttackCooldownProgress(0.5F))) {
+                LOGGER.info("[creeper-defense] {} cornered at {} blocks with no shield: swung to knock the creeper back",
+                        bot.getName().getString(), String.format("%.1f", dist));
+                return true;
+            }
+        }
 
         boolean sprint = !bot.isSubmergedInWater();
         BotActions.sprint(bot, sprint);

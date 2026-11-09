@@ -49,15 +49,30 @@ class BaritoneDefaultMigrationTest {
     }
 
     @Test
-    void classicPickedUnder1240IsKeptAsClassic() throws Exception {
+    void classicPickedUnder1240MovesToUnified() throws Exception {
+        // Slice D removed the classic finder, so an old explicit classic pick becomes the default.
         ManualConfig config = newRealConfig();
         config.applyBaritoneDefaultMigration(); // marker already set in the file
         config.setBaritonePathfinderEnabled(false); // explicit classic pick
 
         assertTrue(runBothMigrations(config));
-        assertEquals("classic", config.getPathfinder());
-        assertEquals(PathFinderChoice.BIDIR, config.getPathfinderChoice());
+        assertNull(config.getPathfinder());
+        assertEquals(PathFinderChoice.UNIFIED, config.getPathfinderChoice());
         assertFalse(config.isBaritonePathfinderEnabled());
+    }
+
+    @Test
+    void savedClassicIsClearedOnEveryLoad() throws Exception {
+        ManualConfig config = newRealConfig();
+        assertTrue(runBothMigrations(config));
+        config.setPathfinder("classic"); // a config written before Slice D
+        assertTrue(config.isPathfinderExplicitlySet());
+
+        assertTrue(config.applyUnifiedDefaultMigration());
+        assertNull(config.getPathfinder());
+        assertFalse(config.isPathfinderExplicitlySet());
+        assertEquals(PathFinderChoice.UNIFIED, config.getPathfinderChoice());
+        assertFalse(config.applyUnifiedDefaultMigration());
     }
 
     @Test
@@ -81,8 +96,6 @@ class BaritoneDefaultMigrationTest {
         config.setPathfinderChoice(PathFinderChoice.UNIFIED);
         assertEquals("unified", config.getPathfinder());
         assertFalse(config.isBaritonePathfinderEnabled());
-        config.setPathfinderChoice(PathFinderChoice.BIDIR);
-        assertEquals("classic", config.getPathfinder());
         config.setPathfinderChoice(PathFinderChoice.BARITONE);
         assertEquals("baritone", config.getPathfinder());
         assertTrue(config.isBaritonePathfinderEnabled());
@@ -107,7 +120,7 @@ class BaritoneDefaultMigrationTest {
         config.setBaritonePathfinderEnabled(false);
         config.applyBaritoneDefaultMigration();
 
-        config.setBaritonePathfinderEnabled(false); // user picks classic later
+        config.setBaritonePathfinderEnabled(false); // the legacy flag only, as an older client might write
         assertFalse(config.applyBaritoneDefaultMigration());
         assertFalse(config.isBaritonePathfinderEnabled());
     }

@@ -15,19 +15,16 @@ class PathCompareFormatTest {
     @Test
     void lineMatchesTheFixedFormatExactly() {
         String line = PathCompareFormat.line("Jake", 12, 64, -30, 40, 66, -8,
-                PathFinderChoice.BARITONE,
-                1840L, 0, PathCompareFormat.NONE,
-                37L, 31, PathCompareFormat.EXEC);
-        assertEquals("[PathCompare] bot=Jake from=12,64,-30 to=40,66,-8 primary=baritone"
-                + " bidir=1840ms/0/none baritone=37ms/31/exec", line);
-    }
-
-    @Test
-    void primaryLabelFollowsTheChoice() {
-        String line = PathCompareFormat.line("Bob", 0, 70, 0, 5, 70, 5,
-                PathFinderChoice.BIDIR, 12L, 9, PathCompareFormat.NOEXEC, 8L, 7, PathCompareFormat.EXEC);
-        assertTrue(line.contains(" primary=bidir "));
-        assertTrue(line.endsWith(" bidir=12ms/9/noexec baritone=8ms/7/exec"));
+                PathFinderChoice.UNIFIED,
+                37L, 31, PathCompareFormat.EXEC,
+                2L, 29, PathCompareFormat.NOEXEC, null,
+                12L);
+        assertEquals("[PathCompare] bot=Jake from=12,64,-30 to=40,66,-8 primary=unified"
+                + " baritone=37ms/31/exec unified=2ms/29/noexec plan=p12", line);
+        String noPlan = PathCompareFormat.line("Jake", 0, 0, 0, 1, 1, 1, PathFinderChoice.BARITONE,
+                1L, 1, "exec", 1L, 1, "exec", null, 0L);
+        assertTrue(noPlan.contains(" primary=baritone "));
+        assertTrue(noPlan.endsWith(" unified=1ms/1/exec"));
     }
 
     @Test
@@ -35,21 +32,22 @@ class PathCompareFormatTest {
         // tools/logs/frens_log_report.py KV_RE and FINDER_VAL_RE.
         Pattern kv = Pattern.compile("(\\w+)=(\\S+)");
         Pattern finder = Pattern.compile("^(-?\\d+)ms/(-?\\d+)/(\\w+)");
-        String line = PathCompareFormat.line("Two Words", -1, -2, -3, 4, 5, 6,
-                PathFinderChoice.BARITONE, 5L, 3, "exec", 6L, 4, "noexec");
+        String line = PathCompareFormat.line("Two Words", -1, -2, -3, 4, 5, 6, PathFinderChoice.UNIFIED,
+                6L, 4, "noexec", 1L, 5, "exec", null, 7L);
         Matcher m = kv.matcher(line.substring("[PathCompare] ".length()));
-        int finders = 0;
-        int plain = 0;
+        java.util.Set<String> finders = new java.util.HashSet<>();
+        java.util.Map<String, String> plain = new java.util.HashMap<>();
         while (m.find()) {
             if (finder.matcher(m.group(2)).find()) {
-                finders++;
-                assertTrue(m.group(1).equals("bidir") || m.group(1).equals("baritone"));
+                finders.add(m.group(1));
             } else {
-                plain++;
+                plain.put(m.group(1), m.group(2));
             }
         }
-        assertEquals(2, finders);
-        assertEquals(4, plain); // bot, from, to, primary
+        assertEquals(java.util.Set.of("baritone", "unified"), finders);
+        assertEquals("p7", plain.get("plan"));
+        assertEquals("unified", plain.get("primary"));
+        assertEquals(5, plain.size()); // bot, from, to, primary, plan
         assertTrue(line.contains("bot=Two_Words "));
     }
 
@@ -104,46 +102,9 @@ class PathCompareFormatTest {
     }
 
     @Test
-    void threeFinderLineMatchesTheFixedFormat() {
-        String line = PathCompareFormat.line("Jake", 12, 64, -30, 40, 66, -8,
-                PathFinderChoice.UNIFIED,
-                1840L, 0, PathCompareFormat.NONE,
-                37L, 31, PathCompareFormat.EXEC,
-                2L, 29, PathCompareFormat.NOEXEC,
-                12L);
-        assertEquals("[PathCompare] bot=Jake from=12,64,-30 to=40,66,-8 primary=unified"
-                + " bidir=1840ms/0/none baritone=37ms/31/exec unified=2ms/29/noexec plan=p12", line);
-        String noPlan = PathCompareFormat.line("Jake", 0, 0, 0, 1, 1, 1, PathFinderChoice.BARITONE,
-                1L, 1, "exec", 1L, 1, "exec", 1L, 1, "exec", 0L);
-        assertTrue(noPlan.endsWith(" unified=1ms/1/exec"));
-    }
-
-    @Test
-    void threeFinderLineParsesWithTheAnalyzerRegexes() {
-        Pattern kv = Pattern.compile("(\\w+)=(\\S+)");
-        Pattern finder = Pattern.compile("^(-?\\d+)ms/(-?\\d+)/(\\w+)");
-        String line = PathCompareFormat.line("Bob", -1, -2, -3, 4, 5, 6, PathFinderChoice.UNIFIED,
-                5L, 3, "exec", 6L, 4, "noexec", 1L, 5, "exec", 7L);
-        Matcher m = kv.matcher(line.substring("[PathCompare] ".length()));
-        java.util.Set<String> finders = new java.util.HashSet<>();
-        java.util.Map<String, String> plain = new java.util.HashMap<>();
-        while (m.find()) {
-            if (finder.matcher(m.group(2)).find()) {
-                finders.add(m.group(1));
-            } else {
-                plain.put(m.group(1), m.group(2));
-            }
-        }
-        assertEquals(java.util.Set.of("bidir", "baritone", "unified"), finders);
-        assertEquals("p7", plain.get("plan"));
-        assertEquals("unified", plain.get("primary"));
-        assertEquals(5, plain.size()); // bot, from, to, primary, plan
-    }
-
-    @Test
     void unifiedReasonSuffixRidesOnTheFinderValue() {
         String line = PathCompareFormat.line("Eve", 29, 78, 142, 17, 73, 166, PathFinderChoice.UNIFIED,
-                1L, 0, "none", 32L, 11, "exec", 0L, 0, "none",
+                32L, 11, "exec", 0L, 0, "none",
                 PathCompareFormat.unifiedReason("GOAL_NOT_STANDABLE"), 12L);
         assertTrue(line.endsWith(" unified=0ms/0/none:GOAL_NOT_STANDABLE plan=p12"), line);
         assertNull(PathCompareFormat.unifiedReason("NONE"));

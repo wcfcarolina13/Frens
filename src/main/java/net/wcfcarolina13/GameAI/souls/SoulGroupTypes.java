@@ -90,11 +90,14 @@ public final class SoulGroupTypes {
      * exception. Empty means unknown, and withholds every DM-private memory.
      * {@code privateSeedOwner} is non-null only when the director placed that player's private
      * memory anchor in the retained seed; it survives later mind cache changes.
+     * {@code speechAct} is the act the banter director seeded the scene with, or null for every
+     * other turn; peer stance rules read it on delivery ({@code SoulMindOps.notePeerScene}).
      */
     public record GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
                                   List<SceneParticipant> roster, String playerMessage,
                                   Instant acceptedAt, UUID routingId, boolean addressPlayer,
-                                  Set<UUID> onlineHumanIds, UUID privateSeedOwner) {
+                                  Set<UUID> onlineHumanIds, UUID privateSeedOwner,
+                                  SoulSpeechAct speechAct) {
         public GroupSceneTurn {
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(ownerId, "ownerId");
@@ -104,6 +107,15 @@ public final class SoulGroupTypes {
             playerMessage = playerMessage == null ? "" : playerMessage;
             roster = roster == null ? List.of() : List.copyOf(roster);
             onlineHumanIds = onlineHumanIds == null ? Set.of() : Set.copyOf(onlineHumanIds);
+        }
+
+        /** Turns not seeded by the banter director carry no speech act. */
+        public GroupSceneTurn(SceneKind kind, UUID ownerId, String ownerDisplayName,
+                               List<SceneParticipant> roster, String playerMessage,
+                               Instant acceptedAt, UUID routingId, boolean addressPlayer,
+                               Set<UUID> onlineHumanIds, UUID privateSeedOwner) {
+            this(kind, ownerId, ownerDisplayName, roster, playerMessage, acceptedAt,
+                    routingId, addressPlayer, onlineHumanIds, privateSeedOwner, null);
         }
 
         /** Existing callers with no seed provenance have no private anchor in their seed. */

@@ -17,6 +17,92 @@ Costs and limits:
   call. Human nicknames are in a separate PR.
 
 Tests: `ChatAddressingTest` (2 new).
+## CI runs the test suite (2026-11-05, unreleased)
+
+CI ran `./gradlew build -x test`, so the JUnit suite (about 3900 tests: pure policy, wiring and
+file-system tests that need no game) never ran on a pull request. Every "tests pass" claim rested
+on a local run. `ci-build.yml` now runs `./gradlew test` as its own step after the build and
+uploads the HTML test report when that step fails. The release workflow is unchanged.
+
+Costs and limits:
+- A few more CI minutes per push.
+- A red test now blocks a PR's check.
+- The SoulStore close test (`closeShutsDownInjectedExecutorLeavingNoThreadAlive`) is
+  timing-sensitive under load. The open SoulStore close-test PR (#19) makes it wait for the
+  worker, so merge that first, or expect a rare re-run.
+- The root-only `persistCursorFailure` test fails only when run as root; the GitHub runner is not
+  root.
+## Release wave: 16 PRs merged by Bradley's "review and merge all open PRs you can"; 1.1.300 (2026-11-08)
+
+Bradley asked on 2026-11-08 to review and merge every open PR that needs nothing from him. Merged as one release PR (merge commits, so GitHub marks each as merged). Full suite 4282 tests in the cloud, only the root-container `SoulStoreTest.persistCursorFailure…` failing; one Fable review of the combined diff (one should-fix, fixed below).
+
+- **Included:** #13, #18, #19, #22, #25, #26, #57, #67, #69, #73, #74, #75, #76, #77, #78, #79.
+- **Left out:** #29 (stacked on #13; never triggered in a run), #4 and #10 (regression check only), #15, #40, #62, #71, #32 (need a game run or Bradley in game), #5, #12, #53 (need a second player), #8, #14, #41, #55, #1 (need a ruling).
+- **#57 ruling:** the 1-3 block mining overshoot that kept #57 out of 1.1.299 is the blocks mined to reach the target, not a counting bug, so the PR ships as is.
+- **Conflict:** #74 and #77 both added a method at the end of `CraftingStationPolicy` (and its test); both are kept. The review traced the two together: the nested table #74 uses is in range, so #77's cooldown still stops a third table.
+- **Release fix (review should-fix on #78):** a cook stopped before its first load no longer empties the furnace. The take-back ran on any stop, so a stop between the walk to the furnace and the first load took food out of a shared furnace that the bot never put there. Cost: none.
+
+From the PR bodies:
+- #57: Mining stops before a redirect once the amount is reached; the water escape no longer scans for paintings off the server thread.
+- #73: Follow tries the vertical reroute before asking to regroup, from a 3-block height gap (was 6); a reroute that gets the bot no closer no longer hides the regroup prompt.
+- #74: Full-pack wooden tool craft: the table its make-room chest placed is used instead of failing on spent planks; the offload keeps the logs a wood craft still needs; the shortfall line counts held logs. Cost: a full pack still pays 2 logs for the make-room chest.
+- #75: Per-bot `teleportDuringSkills` / `inventoryFullPause` commands are saved, so the next follow/stop/come no longer resets them. A teleport `/bot come` right after `/bot stop` no longer answers "direct: aborted". Cost: the command toggle now persists like the screen toggle.
+- #76: After a settings reset, auto-spawned bots keep their name's spelling (from a name now saved with each bot's world position, or the user cache for older saves) instead of coming back lower-case. Bots with no recorded spelling still come back lower-case.
+- #77: A second craft within a minute in a new place makes its own crafting table; the one-minute table cooldown now applies only while a table is in range.
+- #78: Stopping a bot mid-cook takes its food and its own fuel back out of the furnace, and it no longer loads the next food type after the stop.
+- #79: A bot that hand-digs out of a pit takes the last 1-high step onto open ground and ends level with it, instead of stopping in a notch one block down; it still never digs into a hillside.
+- #26: New Sign in `docs/GUARDRAILS.md`, "Parallel Gradle Builds Run Out of Memory".
+- #69: `docs/reliability/FOLLOW_COME_ASSERT_RUNBOOK.md` step 2 starts the come from more than 8 blocks away; step 3 (`/bot come_safe`) is retired.
+
+### LeafClearAction and LeafClearResult moved off MovementService (unreleased, 2026-11-05)
+
+- The nested `MovementService.LeafClearAction` enum and `MovementService.LeafClearResult` record (with `countsAsCleared()`) are now top-level types in `GameAI/services/`, next to `LeafClearService`; `LeafClearService`, `ChestStoreService` and `BotEventHandler` reference them directly.
+- No behaviour change: pure type move; the `MovementService.clearLeafObstructionDetailed` wrapper keeps its signature.
+- Tests: 3857 before, 3857 after (no test touched the moved types).
+
+### Fortify: inline single-caller carve delegates (unreleased, 2026-11-05)
+
+- `FortifyVillageSkill`: inlined the single-caller wrappers `isCarveEligibleForBreakAttempt` and `attemptFinalizeCarveTransaction` (call sites now call `carveHelper.*` directly) and deleted the 3-arg `tryBreakThroughObstacle` overload, which had no callers (1.1.210 review Minor 3).
+- Kept the 4-arg `tryBreakThroughObstacle(bot, world, target, causeContext)`: it has four callers (patch-start preflight, breakthrough fallback, two in the stuck-recovery loop), so the backlog's "single-caller" note did not hold for it. None of the four are `FortifySkillOps` interface methods.
+- Pure refactor, no behaviour change. Tests 3857 before and after (only the known root-container `SoulStoreTest.persistCursorFailure…` failure; `closeShutsDown…` flaked once under memory pressure and passed on rerun).
+
+### Test: the soul store close check waits for the worker to exit (unreleased, 2026-11-05)
+
+`SoulStoreTest.closeShutsDownInjectedExecutorLeavingNoThreadAlive` checked for a live executor thread right after `close()`, but `close()` only calls `shutdown()`, and the worker exits a moment later. Under load (parallel builds in a cloud container) it failed on unrelated branches. The test now joins the thread for up to 5 s before checking. A thread that `close()` never stops still fails. No main code changed. Tests 3857, unchanged count.
+
+### Tests for 2 untested policies (unreleased, 2026-11-05)
+
+- Audit: 185 `*Policy.java` (plus `*Ops.java` in `GameAI/souls`) classes; 4 had no real test. `DirtNavigationPolicy` and `ExplorationMovePolicy` take `BlockPos` in every method, so they stay untested under the no-`net.minecraft` test rule.
+- New `ExecutionPolicyTest` (8 tests): defaults, smallest and largest accepted values, each guard field rejecting zero and negative values, and which field is reported first.
+- New `BotSleepProximityPolicyTest` (6 tests): the 16-block co-sleep radius is inclusive at 256 squared, is measured on squared distance, and treats NaN and infinity as out of range. It was only checked as a source string in `WakeUpDelayWiringTest` before.
+- Tests: 3857 before, 3871 after. No suspected bugs. Every `ExecutionPolicy` call site passes a positive time budget (the FortifyVillageSkill segment budget is checked for `<= 0` first).
+
+### Navigation outcome counters no longer lose concurrent updates (unreleased, 2026-11-05)
+
+`DirtNavigationPolicy` and `ExplorationMovePolicy` kept success and failure counts as plain `int++` on a shared object inside a `ConcurrentHashMap`; the map is thread-safe but the counts were not, so worker threads recording at the same moment could drop a count (found by the policy test sweep). The two counter methods are now `synchronized`. Both classes gain int-offset overloads (`scoreOffset`, `recordOffset`) so they can be tested without `BlockPos`, and a test seam to clear them.
+
+- Cost: one uncontended lock per recorded move; these are recorded once per step, not per tick.
+- Tests 3857 → 3863 (3 per class, including an 8-thread race that fails without the lock). No sandbox check needed.
+
+### The cook hobby no longer runs alongside a second hobby (2026-11-07, unreleased)
+
+Found by running the mod on a headless dedicated server. The idle scheduler only waits 4 to 8
+seconds after starting a hobby, and relies on that hobby's task slot to keep the next one from
+starting. The cook hobby took no slot, so a wander started 3 seconds into the cook and walked the
+bot off the furnace. The cook lost reach twice and spent the cycle walking back.
+
+The cook hobby now holds an ambient, open-ended task (`skill:hobby-cook`) for its whole cycle,
+like the other hobbies. Headless, the scheduler then reported "active-task" for the full
+80-second cook, no other hobby started, and the bot collected all 8 cooked beef.
+
+Costs and limits:
+- While the cook runs the bot counts as busy: the next hobby waits, and so does any other code
+  that checks `TaskService.hasActiveTask` (I did not audit each of those callers). Sunset return
+  can still interrupt it, because ambient tasks are open-ended.
+- `/bot stop` now reaches the cook worker (the thread is attached to the task). That was not
+  exercised headless.
+
+Tests: `CookHobbyTaskWiringTest` (1).
 
 ## Release wave: 37 sandbox-proven PRs, their 2 stack bases and the handoff; 1.1.299 (2026-11-08)
 

@@ -223,14 +223,27 @@ public final class SoulEventObserver {
         String src = classifySource(source);
         long tick = server.getTicks();
         UUID ownerId = player.getUuid();
+        java.util.List<UUID> ownBots = new java.util.ArrayList<>();
+        java.util.List<UUID> witnesses = new java.util.ArrayList<>();
         for (ServerPlayerEntity bot : BotRegistry.getPlayers(server)) {
             ServerPlayerEntity controller = CompanionCommunicationPolicy.resolveController(server, bot);
             if (controller == null || !controller.getUuid().equals(ownerId)) {
                 continue;
             }
-            boolean witnessed = CompanionCommunicationPolicy.isWithinVisibleRange(
-                    bot, player, CompanionCommunicationPolicy.VISIBLE_RANGE_BLOCKS);
-            observer.noteOwnerDamage(bot.getUuid(), ownerId, witnessed, dimension, biome, amount, src, tick);
+            ownBots.add(bot.getUuid());
+            if (CompanionCommunicationPolicy.isWithinVisibleRange(
+                    bot, player, CompanionCommunicationPolicy.VISIBLE_RANGE_BLOCKS)) {
+                witnesses.add(bot.getUuid());
+            }
+        }
+        Entity attacker = source == null ? null : source.getAttacker();
+        boolean fight = SharedHardshipPolicy.isFight(attacker != null,
+                attacker != null && attacker.getUuid().equals(ownerId),
+                attacker != null && BotRegistry.isRegistered(attacker.getUuid()));
+        List<UUID> hardshipPeers = fight ? witnesses : List.of();
+        for (UUID botId : ownBots) {
+            observer.noteOwnerDamage(botId, ownerId, witnesses.contains(botId), dimension, biome, amount, src,
+                    tick, hardshipPeers);
         }
     }
 
@@ -491,11 +504,35 @@ public final class SoulEventObserver {
      */
     void noteOwnerDamage(UUID botId, UUID ownerId, boolean witnessed, String dimension, String biome,
                           float amount, String source, long worldTick) {
+        noteOwnerDamage(botId, ownerId, witnessed, dimension, biome, amount, source, worldTick, List.of());
+    }
+
+    /**
+     * As above, with every bot that witnessed the same hurt. The caller passes witnesses only for a
+     * fight ({@link SharedHardshipPolicy#isFight}); as a second guard, an
+     * {@link #isEnvironmentalDamage environmental} source never lists them. The other witnesses with an active soul are
+     * added to the event's participants after the owner, and the runtime turns them into a
+     * shared-hardship trust bump ({@link SoulMindOps#noteSharedHardship}; Bradley's ruling
+     * 2026-11-08: combat hurts only).
+     */
+    void noteOwnerDamage(UUID botId, UUID ownerId, boolean witnessed, String dimension, String biome,
+                          float amount, String source, long worldTick, List<UUID> witnesses) {
         if (botId == null || !witnessed || !sink.accepts(botId)) {
             return;
         }
         Map<String, String> facts = factMap("amount", formatAmount(amount), "source", nullToEmpty(source));
-        List<UUID> participants = ownerId != null ? List.of(ownerId) : List.of();
+        List<UUID> participants = new java.util.ArrayList<>();
+        if (ownerId != null) {
+            participants.add(ownerId);
+        }
+        if (witnesses != null && !isEnvironmentalDamage(source)) {
+            for (UUID peer : witnesses) {
+                if (peer != null && !peer.equals(botId) && !peer.equals(ownerId) && !participants.contains(peer)
+                        && sink.accepts(peer)) {
+                    participants.add(peer);
+                }
+            }
+        }
         emit(botId, SoulTypes.EventType.OWNER_DAMAGE, dimension, biome, facts, SoulTypes.Witness.LOCAL,
                 worldTick, SoulTypes.Salience.NORMAL, participants);
     }

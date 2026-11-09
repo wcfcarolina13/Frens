@@ -237,6 +237,76 @@ public final class HandDigStairPolicy {
      *                   listed are tried after, in {@link Dir} order
      * @param stepsTaken hand-dig steps already taken in this ascent
      */
+    /**
+     * After a hand-dig ascent reached open sky: the side to take one more step on, or null. Bradley's
+     * ruling (2026-11-08): when the next cell is a 1-high step onto open ground, the bot takes it and
+     * ends level with the ground, so it does not stop in a notch one block below grade beside its
+     * pit; it never digs into a hillside. So a side counts only when the block at the bot's feet
+     * level there is a usable tread and the three cells above it (feet, head, one more) are already
+     * air: no block is mined. The caller also requires open sky over the feet cell. The preferred
+     * direction (the stair's) is tried first, then the rest in a fixed order.
+     */
+    public static Dir stepOntoGround(CellView view, List<Dir> preference) {
+        if (view == null) {
+            return null;
+        }
+        java.util.List<Dir> order = new java.util.ArrayList<>();
+        if (preference != null) {
+            for (Dir d : preference) {
+                if (d != null && !order.contains(d)) order.add(d);
+            }
+        }
+        for (Dir d : Dir.values()) {
+            if (!order.contains(d)) order.add(d);
+        }
+        for (Dir d : order) {
+            Cell tread = view.at(d.dx, 0, d.dz);
+            if (tread == null || !tread.usableTread()) {
+                continue;
+            }
+            boolean clear = true;
+            for (int dy = 1; dy <= 3; dy++) {
+                Cell c = view.at(d.dx, dy, d.dz);
+                if (c == null || c.kind() != Kind.AIR) {
+                    clear = false;
+                    break;
+                }
+            }
+            if (clear) {
+                return d;
+            }
+        }
+        return null;
+    }
+
+    /** Worst case for one hand-dug step: three cells at the per-cell cap, plus the step-up and its hop. */
+    public static final long STEP_BUDGET_MILLIS = 3L * MAX_CELL_BREAK_TICKS * 50L + 5_000L;
+
+    /**
+     * Runtime budget for an ascent the bot digs by hand: one {@link #STEP_BUDGET_MILLIS} per block to
+     * climb, at most {@link #MAX_STEPS} steps, never below {@code floorMillis} (the flat cap that
+     * held before). A surface-mode climb whose target is far above counts as {@link #MAX_STEPS}.
+     */
+    public static long climbBudgetMillis(int blocksToClimb, long floorMillis) {
+        int steps = Math.min(MAX_STEPS, Math.max(1, blocksToClimb));
+        return Math.max(floorMillis, steps * STEP_BUDGET_MILLIS);
+    }
+
+    /**
+     * Whether this climb is a hand-dig climb, latched: once a step was dug by hand the bot keeps
+     * the hand-dig budget, even after the dug dirt gives it blocks to pillar with. Without the latch
+     * the first picked-up block dropped the cap to the flat 60 s, and the time already spent on
+     * hand-dug steps ended the climb.
+     */
+    public static boolean handDigging(int handDugSteps, int scaffoldBlocks) {
+        return handDugSteps > 0 || scaffoldBlocks <= 0;
+    }
+
+    /** The ascent's runtime cap: the hand-dig budget while the bot has no blocks, else the flat cap. */
+    public static long runtimeCapMillis(boolean handDigging, long handDigBudgetMillis, long flatCapMillis) {
+        return handDigging ? Math.max(flatCapMillis, handDigBudgetMillis) : flatCapMillis;
+    }
+
     public static Decision decide(CellView view, List<Dir> preference, int stepsTaken) {
         Map<Dir, Refusal> per = new EnumMap<>(Dir.class);
         if (stepsTaken >= MAX_STEPS) {
