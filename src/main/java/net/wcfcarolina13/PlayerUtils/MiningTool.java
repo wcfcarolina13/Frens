@@ -537,6 +537,11 @@ public class MiningTool {
             final int slot = foundSlot;
             final ItemStack expected = tool;
             ToolSwitchPolicy.Outcome outcome = hopWithRetry(bot, "slot " + slot, () -> {
+                // A first hop that started just before its timeout still finishes; for slot >= 9 it
+                // has already swapped the tool into the hotbar, so the retry must see it in hand.
+                if (ToolSelector.slotStillMatches(expected, bot.getMainHandStack())) {
+                    return true;
+                }
                 PlayerInventory inv = bot.getInventory();
                 if (!ToolSelector.slotStillMatches(expected, inv.getStack(slot))) {
                     LOGGER.debug("Tool switch: slot {} no longer holds {} — aborting swap for {}",
@@ -567,6 +572,10 @@ public class MiningTool {
             // Only worth a bundle hop when nothing matching sits in a direct slot but a bundle holds one.
             // Extraction and the follow-up equip must be the same server-thread unit.
             ToolSwitchPolicy.Outcome reached = hopWithRetry(bot, "bundle reach", () -> {
+                // Same late-first-hop case: the tool may already have been reached and equipped.
+                if (ToolSelector.slotStillMatches(wanted, bot.getMainHandStack())) {
+                    return true;
+                }
                 if (InventoryIterator.countDirect(bot, match) != 0
                         || InventoryIterator.count(bot, match) == 0
                         || !net.wcfcarolina13.GameAI.services.BundleService.reachFirst(bot, match)) {
@@ -584,7 +593,9 @@ public class MiningTool {
     /**
      * One tool-switch step as a server-thread unit, sent again once if the hop timed out
      * ({@link ToolSwitchPolicy}). The step's own throw is caught inside the hop and reported as
-     * NOT_SWITCHED, so only a hop that never ran (and was cancelled) is retried.
+     * NOT_SWITCHED, so only a hop that timed out is retried. A hop the server thread had already
+     * started when the 2 s ran out still finishes, so each step first returns true when the tool is
+     * already in the main hand; that makes the retry idempotent.
      */
     private static ToolSwitchPolicy.Outcome hopWithRetry(ServerPlayerEntity bot, String what,
                                                          java.util.function.BooleanSupplier step) {
@@ -598,10 +609,12 @@ public class MiningTool {
                     return ToolSwitchPolicy.Outcome.NOT_SWITCHED;
                 }
             }, ToolSwitchPolicy.Outcome.TIMED_OUT);
-            if (!ToolSwitchPolicy.retry(outcome, attempt, Thread.currentThread().isInterrupted())) {
-                if (outcome == ToolSwitchPolicy.Outcome.TIMED_OUT) {
-                    LOGGER.info("Tool switch ({}) for {}: server hop timed out {} times",
-                            what, bot.getName().getString(), attempt);
+            boolean interrupted = Thread.currentThread().isInterrupted();
+            if (!ToolSwitchPolicy.retry(outcome, attempt, interrupted)) {
+                String why = ToolSwitchPolicy.giveUpDetail(outcome, attempt, interrupted);
+                if (why != null) {
+                    LOGGER.info("Tool switch ({}) for {}: server hop {}",
+                            what, bot.getName().getString(), why);
                 }
                 return outcome;
             }
@@ -657,8 +670,9 @@ public class MiningTool {
     }
 
     /**
-     * One fallback hop. TIMED_OUT is the hop's own fallback, so it means the step never ran (the
-     * shared hop cancels a timed-out task); a step that ran and threw reports NO_SAFE_ITEM.
+     * One fallback hop. TIMED_OUT is the hop's own fallback: the step did not answer in time (the
+     * shared hop cancels it if still queued; one already running finishes, and re-running the
+     * equip is harmless); a step that ran and threw reports NO_SAFE_ITEM.
      */
     private static HarmlessFallbackPolicy.Outcome switchToHarmlessFallback(ServerPlayerEntity bot, BlockState target) {
         if (bot == null) {
