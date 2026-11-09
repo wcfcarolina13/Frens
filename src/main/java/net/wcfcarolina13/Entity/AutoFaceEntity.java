@@ -443,8 +443,8 @@ public class AutoFaceEntity {
     /**
      * Restarts the auto-face loop on the new entity vanilla made for {@code bot} ({@code alive}: it
      * left the End rather than died). The running task is aborted either way: its skill holds the old
-     * entity. {@link net.wcfcarolina13.GameAI.services.RespawnResetPolicy} picks the message and
-     * whether the death path's pause runs.
+     * entity. {@link net.wcfcarolina13.GameAI.services.RespawnResetPolicy} picks the abort message.
+     * Neither path pauses before the restart (see below).
      */
     public static void handleBotRespawn(ServerPlayerEntity bot, boolean alive) {
         net.wcfcarolina13.GameAI.services.RespawnResetPolicy.Plan plan =
