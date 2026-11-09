@@ -3195,7 +3195,7 @@ public class BotEventHandler {
 
         double distanceFromCenter = positionOf(bot).distanceTo(center);
         if (distanceFromCenter > 1.5D) {
-            moveToward(bot, center, 0.9D, false);
+            moveTowardStayingOutOfHoles(bot, center, 0.9D);
             return true;
         }
 
@@ -3361,7 +3361,7 @@ public class BotEventHandler {
             if (server != null) {
                 GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), server.getTicks() + 20L);
             }
-            moveToward(bot, center, 2.0D, false);
+            moveTowardStayingOutOfHoles(bot, center, 2.0D);
             return true;
         }
 
@@ -3369,7 +3369,7 @@ public class BotEventHandler {
         if (patrolTarget != null) {
             double dist = positionOf(bot).distanceTo(patrolTarget);
             if (dist > 1.35D) {
-                moveToward(bot, patrolTarget, 1.1D, false);
+                moveTowardStayingOutOfHoles(bot, patrolTarget, 1.1D);
                 return true;
             }
             GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
@@ -3382,10 +3382,10 @@ public class BotEventHandler {
             long nowTick = server.getTicks();
             long nextPickTick = GuardPatrolService.getNextPatrolPickTick(bot.getUuid());
             if (nowTick >= nextPickTick) {
-                Vec3d next = randomPointWithin(center, radius * 0.85D);
+                Vec3d next = groundedNear(bot, randomPointWithin(center, radius * 0.85D), center);
                 GuardPatrolService.setPatrolTarget(bot.getUuid(), next);
                 GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), nowTick + 40L + RANDOM.nextInt(40));
-                moveToward(bot, next, 1.1D, false);
+                moveTowardStayingOutOfHoles(bot, next, 1.1D);
                 return true;
             }
         }
@@ -4079,7 +4079,7 @@ public class BotEventHandler {
                 BotActions.raiseShieldFacing(bot, closest);
             } else {
                 lowerShieldTracking(bot);
-                moveToward(bot, positionOf(closest), preferredStopDistance, true);
+                moveTowardInCombat(bot, positionOf(closest), preferredStopDistance);
             }
         } else if (shouldBlock) {
             // In melee range with a sword: stop sprinting when 2+ mobs are close so
@@ -4171,7 +4171,7 @@ public class BotEventHandler {
                         BotActions.raiseShieldFacing(bot, closest);
                     } else {
                         BotActions.sprint(bot, true);
-                        moveToward(bot, positionOf(closest), BotActions.getPreferredMeleeStopDistance(bot.getMainHandStack()), true);
+                        moveTowardInCombat(bot, positionOf(closest), BotActions.getPreferredMeleeStopDistance(bot.getMainHandStack()));
                     }
                 }
                 // Hit-and-retreat kiting: after swinging, backpedal during cooldown reset
@@ -4190,7 +4190,7 @@ public class BotEventHandler {
                                 .shouldSuppressPursuit(bot, closest)) {
                             BotActions.raiseShieldFacing(bot, closest);
                         } else {
-                            moveToward(bot, positionOf(closest), 1.5D, false);
+                            moveTowardInCombat(bot, positionOf(closest), 1.5D, false);
                         }
                     }
                 }
@@ -4305,6 +4305,26 @@ public class BotEventHandler {
 
     private static void moveToward(ServerPlayerEntity bot, Vec3d target, double stopDistance, boolean sprint) {
         FollowMovementService.moveToward(bot, target, stopDistance, sprint, () -> lowerShieldTracking(bot));
+    }
+
+    /**
+     * The melee approach: a guarding or patrolling bot steps around a hole on its way to the mob, as
+     * on its way back to its point (it crossed the open pit beside its point to reach a zombie on the
+     * far side and fell in, sandbox 2026-11-08). Other modes keep the plain approach.
+     */
+    private static void moveTowardInCombat(ServerPlayerEntity bot, Vec3d target, double stopDistance) {
+        moveTowardInCombat(bot, target, stopDistance, true);
+    }
+
+    private static void moveTowardInCombat(ServerPlayerEntity bot, Vec3d target, double stopDistance, boolean sprint) {
+        BotCommandStateService.State st = stateFor(bot);
+        boolean stayOutOfHoles = st != null && (st.mode == Mode.GUARD || st.mode == Mode.PATROL);
+        FollowMovementService.moveToward(bot, target, stopDistance, sprint, () -> lowerShieldTracking(bot), stayOutOfHoles);
+    }
+
+    /** Guard and patrol walking back to their point: a hole in front is stepped around (DropGuardExemptionPolicy). */
+    private static void moveTowardStayingOutOfHoles(ServerPlayerEntity bot, Vec3d target, double stopDistance) {
+        FollowMovementService.moveToward(bot, target, stopDistance, false, () -> lowerShieldTracking(bot), true);
     }
 
     private static void followInputStep(ServerPlayerEntity bot, Vec3d targetPos, double distanceSq, boolean allowCloseStop, double followPersonalSpace) {
@@ -7587,6 +7607,35 @@ public class BotEventHandler {
 
     private static List<Entity> findHostilesAround(ServerPlayerEntity player, double radius) {
         return BotThreatService.findHostilesAround(player, radius);
+    }
+
+    /**
+     * A patrol point on the ground: randomPointWithin keeps the centre's Y, so on a slope a point
+     * downhill hung in the air and the drop rules misjudged it. Takes the standable level nearest the
+     * centre's height (within 12, below before above at equal distance), looking through leaves.
+     * Points far below the centre are allowed: patrol judges drops from where it stands (Bradley's
+     * pick 2026-11-08), and a point over an escaped pit is the accepted risk.
+     */
+    private static Vec3d groundedNear(ServerPlayerEntity bot, Vec3d point, Vec3d center) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world) || point == null) {
+            return point;
+        }
+        // The standable level nearest the centre's height, below before above. Scanning
+        // down from high above put points under a roof on the roof and points by a trunk on the log.
+        BlockPos base = BlockPos.ofFloored(point.x, center.y, point.z);
+        for (int k = 0; k <= 24; k++) {
+            int dy = (k % 2 == 1) ? -((k + 1) / 2) : k / 2;   // 0, -1, +1, -2, +2 ...
+            BlockPos feet = base.up(dy);
+            BlockPos below = feet.down();
+            BlockState belowState = world.getBlockState(below);
+            if (world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
+                    && world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty()
+                    && !belowState.getCollisionShape(world, below).isEmpty()
+                    && !belowState.isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
+                return new Vec3d(point.x, feet.getY(), point.z);
+            }
+        }
+        return point;
     }
 
     private static Vec3d randomPointWithin(Vec3d center, double radius) {
