@@ -44,7 +44,7 @@ class CookFuelFallbackPolicyTest {
         BooleanSupplier counting = () -> { scans.incrementAndGet(); return true; };
         CookFuelFallbackPolicy.shouldGatherForEmergencyCook(true, true, false, true, false, 10L, 500L, counting);
         CookFuelFallbackPolicy.shouldGatherForEmergencyCook(true, true, true, true, false, 600L, 500L, counting);
-        CookFuelFallbackPolicy.shouldGatherForCookCommand(null, true, false, counting);
+        CookFuelFallbackPolicy.shouldGatherForCookCommand("off", true, false, counting);
         assertEquals(0, scans.get());
         CookFuelFallbackPolicy.shouldGatherForEmergencyCook(true, true, false, true, false, 600L, 500L, counting);
         assertEquals(1, scans.get());
@@ -54,7 +54,8 @@ class CookFuelFallbackPolicyTest {
     void cookCommandGathersOnlyForAFuelArgumentLeafLitterCanMeet() {
         assertTrue(CookFuelFallbackPolicy.shouldGatherForCookCommand("auto", true, false, LITTER));
         assertTrue(CookFuelFallbackPolicy.shouldGatherForCookCommand("leaf_litter", true, false, LITTER));
-        assertFalse(CookFuelFallbackPolicy.shouldGatherForCookCommand(null, true, false, LITTER), "no fuel argument loads no fuel");
+        assertTrue(CookFuelFallbackPolicy.shouldGatherForCookCommand(null, true, false, LITTER), "no fuel argument means auto");
+        assertFalse(CookFuelFallbackPolicy.shouldGatherForCookCommand("none", true, false, LITTER), "none loads no fuel");
         assertFalse(CookFuelFallbackPolicy.shouldGatherForCookCommand("coal", true, false, LITTER), "named other fuel");
         assertFalse(CookFuelFallbackPolicy.shouldGatherForCookCommand("off", true, false, LITTER));
     }
@@ -68,12 +69,20 @@ class CookFuelFallbackPolicyTest {
 
     @Test
     void fuelArgumentWordsMatchEnsureFuel() {
-        for (String spec : new String[] {"true", "on", "auto", "use", " AUTO ", "leaf_litter", "minecraft:leaf_litter"}) {
+        for (String spec : new String[] {null, "", "  ", "true", "on", "auto", "use", " AUTO ", "leaf_litter", "minecraft:leaf_litter"}) {
             assertTrue(CookFuelFallbackPolicy.specCanUseLeafLitter(spec), spec);
         }
-        for (String spec : new String[] {null, "", "false", "off", "none", "coal", "oak_planks"}) {
+        for (String spec : new String[] {"false", "off", "none", "coal", "oak_planks"}) {
             assertFalse(CookFuelFallbackPolicy.specCanUseLeafLitter(spec), String.valueOf(spec));
         }
+    }
+
+    @Test
+    void noFuelWordMeansAuto() {
+        assertEquals("auto", CookFuelFallbackPolicy.effectiveFuelSpec(null));
+        assertEquals("auto", CookFuelFallbackPolicy.effectiveFuelSpec("  "));
+        assertEquals("none", CookFuelFallbackPolicy.effectiveFuelSpec(" None "));
+        assertEquals("coal", CookFuelFallbackPolicy.effectiveFuelSpec("coal"));
     }
 
     @Test

@@ -1724,8 +1724,8 @@ public final class SmeltingService {
         if (furnace.getStack(1) != null && !furnace.getStack(1).isEmpty()) {
             return false;
         }
-        String spec = fuelSpec != null ? fuelSpec.trim().toLowerCase(Locale.ROOT) : "";
-        if (spec.isEmpty() || spec.equals("false") || spec.equals("off") || spec.equals("none")) {
+        String spec = CookFuelFallbackPolicy.effectiveFuelSpec(fuelSpec);
+        if (spec.equals("false") || spec.equals("off") || spec.equals("none")) {
             return false;
         }
         FuelStack fuel;
