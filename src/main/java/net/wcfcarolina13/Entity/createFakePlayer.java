@@ -2,7 +2,6 @@ package net.wcfcarolina13.Entity;
 
 import com.google.gson.Gson;
 import com.mojang.authlib.GameProfile;
-import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.EntityPosition;
@@ -25,7 +24,6 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.storage.ReadView;
 import net.minecraft.text.Text;
 import net.minecraft.text.TranslatableTextContent;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.TeleportTarget;
@@ -273,6 +271,9 @@ public class createFakePlayer extends ServerPlayerEntity {
             this.networkHandler.syncWithPlayerPosition();
             this.getEntityWorld().getChunkManager().updatePosition(this);
         }
+        double startX = this.getX();
+        double startY = this.getY();
+        double startZ = this.getZ();
         try
         {
             super.tick();
@@ -283,6 +284,7 @@ public class createFakePlayer extends ServerPlayerEntity {
             // happens with that paper port thingy - not sure what that would fix, but hey
             // the game is not going to crash violently.
         }
+        trackFall(startX, startY, startZ);
 
 
     }
@@ -375,9 +377,33 @@ public class createFakePlayer extends ServerPlayerEntity {
         return true;
     }
 
-    @Override
-    protected void fall(double y, boolean onGround, BlockState state, BlockPos pos) {
-        handleFall(0.0, y, 0.0, onGround);
+    /**
+     * Fall damage for the bot (see {@link FakePlayerFallPolicy}): vanilla only tracks a player's
+     * falls from its movement packets ({@code ServerPlayNetworkHandler.onPlayerMove}), which a bot
+     * never sends, so fall distance stayed 0 and bots took no fall damage. Called once per tick
+     * with where the bot stood before its movement tick, and does what the network handler does:
+     * {@code handleFall} with the move and the ground flag ({@code Entity.move} keeps it current
+     * for a bot), then a reset after any upward move, so a bot knocked up mid-fall lands as a
+     * player would.
+     */
+    private void trackFall(double startX, double startY, double startZ) {
+        if (this.isRemoved()) {
+            return;
+        }
+        double dx = this.getX() - startX;
+        double dy = this.getY() - startY;
+        double dz = this.getZ() - startZ;
+        switch (FakePlayerFallPolicy.classify(dx, dy, dz, this.hasVehicle(), this.isSpectator(), this.isAlive())) {
+            case SKIP -> {
+            }
+            case TELEPORT -> this.onLanding();
+            case MOVE -> {
+                handleFall(dx, dy, dz, this.isOnGround());
+                if (dy > 0.0D) {
+                    this.onLanding();
+                }
+            }
+        }
     }
 
     @Override
