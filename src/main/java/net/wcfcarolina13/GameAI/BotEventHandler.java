@@ -1403,6 +1403,11 @@ public class BotEventHandler {
 
         switch (mode) {
             case FOLLOW -> {
+                {
+                    java.util.Deque<BlockPos> diagWps = FOLLOW_WAYPOINTS.get(bot.getUuid());
+                    net.wcfcarolina13.GameAI.services.FollowMovementService.diagFallStart(bot,
+                            diagWps == null || diagWps.isEmpty() ? "none" : diagWps.peekFirst().toShortString() + "(" + diagWps.size() + ")");
+                }
                 // Arrow recovery during FOLLOW: only allow short, bounded detours when we're not far from
                 // the commander (or fixed goal). This makes post-combat arrow pickup much more reliable.
                 if (augmentedHostiles.isEmpty()) {
