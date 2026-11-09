@@ -5,6 +5,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.FireBlock;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.util.ActionResult;
@@ -15,8 +16,10 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.world.World;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
@@ -768,10 +771,23 @@ public final class MovementService {
             LOGGER.info("Movement choosing path walk: {} -> {}", player.getName().getString(), destination);
             WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan, allowSnap);
             if (!walkResult.success() && allowPursuit) {
+                // Blind-walk guard: pursuit steps straight at the goal with no floor check. Refuse
+                // when the straight line drops 4+, or crosses lava/fire/deep water, within reach.
+                BlindLineSnapshot guard = guardBlindWalk(player, destination, label + "-pursuit");
+                if (!guard.decision().allowed()) {
+                    return new MovementResult(false, mode, walkResult.arrivedAt(),
+                            walkResult.detail() + " (pursuit refused: " + guard.decision().reason() + ")");
+                }
                 long pursuitBudget = fastReplan ? 1200L : TimeUnit.SECONDS.toMillis(3);
-                boolean pursued = pursuitUntilClose(player, destination, pursuitBudget, CLOSE_ENOUGH_DISTANCE_SQ, label);
-                if (pursued) {
+                BlockPos pursuitTarget = guard.walkTarget(destination);
+                boolean pursued = pursuitUntilClose(player, pursuitTarget, pursuitBudget, CLOSE_ENOUGH_DISTANCE_SQ, label);
+                if (pursued && (!guard.decision().capped()
+                        || player.squaredDistanceTo(Vec3d.ofCenter(destination)) <= CLOSE_ENOUGH_DISTANCE_SQ)) {
                     return new MovementResult(true, mode, destination, label + ": pursuit fallback");
+                }
+                if (guard.decision().capped()) {
+                    return new MovementResult(false, mode, player.getBlockPos(),
+                            walkResult.detail() + " (pursuit stopped before " + guard.decision().reason() + ")");
                 }
             }
             return new MovementResult(walkResult.success(), mode, walkResult.arrivedAt(), walkResult.detail());
@@ -900,10 +916,15 @@ public final class MovementService {
             double distSq = currentPos.getSquaredDistance(destination);
             int dy = Math.abs(destination.getY() - currentPos.getY());
             if (distSq <= 144.0D && dy <= 2) {
-                boolean direct = walkDirect(player, destination, fastReplan ? 900L : 2400L);
-                if (direct) {
-                    return recordAttempt(player, destination,
-                            new WalkResult(true, destination, label + ": walked directly"));
+                // Blind-walk guard: a refused shortcut is skipped (planning below sees the drop or
+                // lava); a capped one walks the safe stretch and then plans the rest.
+                BlindLineSnapshot guard = guardBlindWalk(player, destination, label + "-shortcut");
+                if (guard.decision().allowed()) {
+                    boolean direct = walkDirect(player, guard.walkTarget(destination), fastReplan ? 900L : 2400L);
+                    if (direct && !guard.decision().capped()) {
+                        return recordAttempt(player, destination,
+                                new WalkResult(true, destination, label + ": walked directly"));
+                    }
                 }
             }
         }
@@ -969,13 +990,25 @@ public final class MovementService {
                 if (tryImmediateLocalEscape(player, destination, label + "-nop-path")) {
                     continue;
                 }
-                boolean straightWalk = walkDirect(player, destination, fastReplan ? 1400L : 3500L);
-                if (straightWalk) {
+                // Blind-walk guard: the planner found nothing, so a straight march is the one move
+                // that walks a bot off a ravine lip or into lava ("likely how Jake entered the
+                // cave"). Refuse keeps the existing failure so the caller's failed-route handling runs.
+                BlindLineSnapshot guard = guardBlindWalk(player, destination, label + "-no-path");
+                if (!guard.decision().allowed()) {
+                    return recordAttempt(player, destination,
+                            new WalkResult(false, player.getBlockPos(),
+                                    label + ": no walkable path (blind walk refused: " + guard.decision().reason() + ")"));
+                }
+                boolean straightWalk = walkDirect(player, guard.walkTarget(destination), fastReplan ? 1400L : 3500L);
+                if (straightWalk && !guard.decision().capped()) {
                     return recordAttempt(player, destination,
                             new WalkResult(true, destination, label + ": walked directly (no path)"));
                 }
+                String capNote = guard.decision().capped()
+                        ? " (blind walk stopped before " + guard.decision().reason() + ")"
+                        : "";
                 return recordAttempt(player, destination,
-                        new WalkResult(false, player.getBlockPos(), label + ": no walkable path"));
+                        new WalkResult(false, player.getBlockPos(), label + ": no walkable path" + capNote));
             }
 
             boolean allOk = true;
@@ -3089,6 +3122,254 @@ public final class MovementService {
             }
         }
         return false;
+    }
+
+    /** Longest straight line the blind-walk guard inspects; walkDirect/pursuit budgets cover less. */
+    private static final int BLIND_WALK_SAMPLE_CELLS = 16;
+    /** Air cells scanned under a line cell before giving up on finding a floor (> MAX_SAFE_DROP). */
+    private static final int BLIND_WALK_DROP_SCAN = BlindWalkGuardPolicy.MAX_SAFE_DROP + 2;
+
+    /**
+     * One server-thread snapshot of the straight line from the bot toward {@code destination}
+     * plus the policy's verdict. {@code cells} holds the feet position the sampler expects the
+     * bot to occupy at each line cell (it follows one-block steps up and down), parallel to the
+     * facts handed to {@link BlindWalkGuardPolicy}. {@code startInWater} is the bot's
+     * {@code isTouchingWater()} read in the same server-thread call: a bot already swimming may
+     * cross deep water on this walk (its own first cell would otherwise refuse the swim to shore).
+     */
+    private record BlindLineSnapshot(List<BlockPos> cells,
+                                     boolean startInWater,
+                                     BlindWalkGuardPolicy.Decision decision) {
+
+        /** Where a blind walk may aim: the goal itself, or the last safe line cell when capped. */
+        BlockPos walkTarget(BlockPos destination) {
+            if (!decision.capped() || cells.isEmpty()) {
+                return destination;
+            }
+            int index = Math.min(cells.size(), decision.safeCells()) - 1;
+            return index >= 0 ? cells.get(index) : destination;
+        }
+    }
+
+    /**
+     * Samples the straight line on the server thread and asks {@link BlindWalkGuardPolicy}.
+     * Logs one INFO line per refusal. When the snapshot cannot be taken (server call timed out or
+     * the walk was aborted) the walk is allowed as before, so the guard never adds a failure mode
+     * of its own.
+     */
+    private static BlindLineSnapshot guardBlindWalk(ServerPlayerEntity player, BlockPos destination, String label) {
+        BlindLineSnapshot none = new BlindLineSnapshot(List.of(), false, BlindWalkGuardPolicy.Decision.allow(0));
+        if (player == null || destination == null) {
+            return none;
+        }
+        BlindLineSnapshot snapshot = BotActions.callOnServerThread(player, () -> {
+            ServerWorld world = getWorld(player);
+            if (world == null) {
+                return null;
+            }
+            boolean startInWater = player.isTouchingWater();
+            List<BlockPos> cells = new ArrayList<>();
+            List<BlindWalkGuardPolicy.CellFact> facts = new ArrayList<>();
+            sampleBlindLine(world, player, destination, startInWater, cells, facts);
+            return new BlindLineSnapshot(cells, startInWater, BlindWalkGuardPolicy.decide(facts, startInWater));
+        }, 750L, null);
+        if (snapshot == null) {
+            LOGGER.debug("blind-walk guard [{}]: no snapshot for {} -> {}, allowing as before",
+                    label, player.getName().getString(), destination.toShortString());
+            return none;
+        }
+        BlindWalkGuardPolicy.Decision decision = snapshot.decision();
+        if (!decision.allowed()) {
+            LOGGER.info("blind-walk guard refused [{}]: bot={} from={} to={} inWater={} reason={}",
+                    label, player.getName().getString(), player.getBlockPos().toShortString(),
+                    destination.toShortString(), snapshot.startInWater(), decision.reason());
+        } else if (decision.capped()) {
+            LOGGER.debug("blind-walk guard capped [{}]: bot={} to={} safeCells={} reason={}",
+                    label, player.getName().getString(), destination.toShortString(),
+                    decision.safeCells(), decision.reason());
+        }
+        return snapshot;
+    }
+
+    /** How far inside a cell the blind-walk guard measures a collision shape's height (block-local). */
+    private static final double BLIND_WALK_EDGE_INSET = 0.05D;
+
+    /**
+     * Server thread only. Walks the XZ cells {@link BlindLineSampler} picks on the line from the
+     * bot's exact position to {@code destination} (up to {@link #BLIND_WALK_SAMPLE_CELLS} cells,
+     * ending at the destination cell, never past it), following the terrain: a full-height rise
+     * raises the tracked feet level, a partial-height block (bottom slab, stair front, campfire)
+     * is a half step that keeps the feet level and records the standing height
+     * ({@link BlindWalkGuardPolicy#stepKind(double)}), a drop lowers it to the landing cell.
+     * Stops at the first non-passable cell (two-high wall), which it records as a wall; only a
+     * wall that hurts on side contact ({@link #hurtsOnSideContact(BlockState)}) is a hazardous
+     * one. A drop that ends in water is flagged {@code waterLanding} so the policy does not count
+     * it as a fall. With {@code startInWater} deep water is not a hazard, so the scan carries on
+     * past it.
+     */
+    private static void sampleBlindLine(ServerWorld world,
+                                        ServerPlayerEntity player,
+                                        BlockPos destination,
+                                        boolean startInWater,
+                                        List<BlockPos> cells,
+                                        List<BlindWalkGuardPolicy.CellFact> facts) {
+        List<BlindLineSampler.Cell> line = BlindLineSampler.cells(player.getX(), player.getZ(),
+                destination.getX(), destination.getZ(), BLIND_WALK_SAMPLE_CELLS);
+        int feetY = player.getBlockPos().getY();
+        // Height within the tracked feet cell the bot stands at when it leaves the cell: 0 on
+        // plain ground, 0.5 on a bottom slab, 1.0 on the back of a stair. Feeds effectiveDrop.
+        double standing = 0.0D;
+        double prevX = player.getX();
+        double prevZ = player.getZ();
+        for (int i = 0; i < line.size(); i++) {
+            BlindLineSampler.Cell cell = line.get(i);
+            int x = cell.x();
+            int z = cell.z();
+            BlockPos feet = new BlockPos(x, feetY, z);
+            BlockState feetState = world.getBlockState(feet);
+            if (!isBlindPassable(world, feet)) {
+                VoxelShape feetShape = feetState.getCollisionShape(world, feet);
+                List<BlindLineSampler.ShapeBox> boxes = shapeBoxes(feetShape);
+                BlindLineSampler.LocalPoint entry = BlindLineSampler.edgePoint(prevX, prevZ, x, z, BLIND_WALK_EDGE_INSET);
+                double entryHeight = BlindWalkGuardPolicy.entryHeight(
+                        BlindLineSampler.heightAt(boxes, entry.x(), entry.z()),
+                        feetShape.isEmpty() ? 0.0D : feetShape.getMax(Direction.Axis.Y));
+                BlindWalkGuardPolicy.StepKind kind = BlindWalkGuardPolicy.stepKind(entryHeight);
+                BlockPos head = feet.up();
+                if (!isBlindPassable(world, head) || !isBlindPassable(world, head.up())) {
+                    // Neither a step up nor a half step fits under the ceiling: a wall.
+                    cells.add(feet);
+                    facts.add(BlindWalkGuardPolicy.CellFact.wallFact(hurtsOnSideContact(feetState)));
+                    return;
+                }
+                if (kind == BlindWalkGuardPolicy.StepKind.HALF_STEP) {
+                    // Walked onto without a jump: the feet cell stays, the standing height is
+                    // where the bot leaves the block (a stair's back is 1.0, its front 0.5).
+                    double nextX = i + 1 < line.size() ? line.get(i + 1).x() + 0.5D : x + 0.5D;
+                    double nextZ = i + 1 < line.size() ? line.get(i + 1).z() + 0.5D : z + 0.5D;
+                    BlindLineSampler.LocalPoint exit = BlindLineSampler.edgePoint(nextX, nextZ, x, z, BLIND_WALK_EDGE_INSET);
+                    double exitHeight = BlindLineSampler.heightAt(boxes, exit.x(), exit.z());
+                    standing = exitHeight > 0.0D ? exitHeight : entryHeight;
+                    // The partial block is the floor the bot stands on (campfire, dripstone ...).
+                    boolean fire = BotHazardService.isDeadlyBlock(feetState);
+                    BlindWalkGuardPolicy.CellFact fact = new BlindWalkGuardPolicy.CellFact(true, 0, false, fire, false);
+                    cells.add(feet);
+                    facts.add(fact);
+                    if (BlindWalkGuardPolicy.hazardOf(fact, BlindWalkGuardPolicy.MAX_SAFE_DROP, startInWater) != null) {
+                        return;
+                    }
+                    prevX = x + 0.5D;
+                    prevZ = z + 0.5D;
+                    continue;
+                }
+                // Full-height rise: step up one block.
+                feetY++;
+                feet = head;
+                feetState = world.getBlockState(feet);
+                standing = 0.0D;
+            } else if (!isBlindPassable(world, feet.up())) {
+                // Feet free but head blocked: a low overhang the bot cannot walk under.
+                cells.add(feet);
+                facts.add(BlindWalkGuardPolicy.CellFact.wall());
+                return;
+            }
+            boolean lava = false;
+            boolean fire = false;
+            boolean deepWater = false;
+            boolean waterLanding = false;
+            if (feetState.getFluidState().isIn(FluidTags.LAVA)) {
+                lava = true;
+            } else if (BotHazardService.isDeadlyBlock(feetState)) {
+                fire = true;
+            }
+            int drop = 0;
+            BlockPos below = feet.down();
+            if (feetState.getFluidState().isIn(FluidTags.WATER)) {
+                deepWater = world.getFluidState(below).isIn(FluidTags.WATER);
+            } else {
+                while (drop < BLIND_WALK_DROP_SCAN) {
+                    BlockState state = world.getBlockState(below);
+                    FluidState fluid = state.getFluidState();
+                    if (fluid.isIn(FluidTags.LAVA)) {
+                        lava = true;
+                        break;
+                    }
+                    if (fluid.isIn(FluidTags.WATER)) {
+                        // Landing in water of any depth negates fall damage (minecraft.wiki Damage).
+                        waterLanding = true;
+                        deepWater = world.getFluidState(below.down()).isIn(FluidTags.WATER);
+                        break;
+                    }
+                    if (!state.getCollisionShape(world, below).isEmpty()) {
+                        // Magma and friends hurt only as the floor the bot would stand on.
+                        if (BotHazardService.isDeadlyBlock(state)) {
+                            fire = true;
+                        }
+                        break;
+                    }
+                    drop++;
+                    below = below.down();
+                }
+                if (drop > 0 && drop < BLIND_WALK_DROP_SCAN) {
+                    feetY -= drop;
+                    feet = new BlockPos(x, feetY, z);
+                }
+            }
+            int floorDrop = BlindWalkGuardPolicy.effectiveDrop(drop, standing);
+            standing = 0.0D;
+            BlindWalkGuardPolicy.CellFact fact =
+                    new BlindWalkGuardPolicy.CellFact(true, floorDrop, lava, fire, deepWater, waterLanding);
+            cells.add(feet);
+            facts.add(fact);
+            if (BlindWalkGuardPolicy.hazardOf(fact, BlindWalkGuardPolicy.MAX_SAFE_DROP, startInWater) != null) {
+                // The policy stops at the first hazard; nothing past it changes the verdict.
+                return;
+            }
+            prevX = x + 0.5D;
+            prevZ = z + 0.5D;
+        }
+    }
+
+    /** The collision shape's boxes in block-local coordinates for {@link BlindLineSampler#heightAt}. */
+    private static List<BlindLineSampler.ShapeBox> shapeBoxes(VoxelShape shape) {
+        if (shape == null || shape.isEmpty()) {
+            return List.of();
+        }
+        List<BlindLineSampler.ShapeBox> boxes = new ArrayList<>();
+        for (Box box : shape.getBoundingBoxes()) {
+            boxes.add(new BlindLineSampler.ShapeBox(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ));
+        }
+        return boxes;
+    }
+
+    /**
+     * Blocks that damage a bot walking into their side, so a wall made of them is a blind-walk
+     * hazard: cactus (damages on touch, minecraft.wiki Cactus), sweet berry bush (damages
+     * entities moving in its hitbox, minecraft.wiki Sweet Berry Bush) and fire. Magma is not one
+     * ("Walking into the side of a magma block doesn't cause damage", minecraft.wiki Magma Block):
+     * it counts only as a floor, via the drop scan. Fire and the bush normally have no collision
+     * shape and so never form a wall; they are listed in case a variant ever does.
+     */
+    private static boolean hurtsOnSideContact(BlockState state) {
+        if (state == null || state.isAir()) {
+            return false;
+        }
+        return state.isOf(Blocks.CACTUS)
+                || state.isOf(Blocks.SWEET_BERRY_BUSH)
+                || state.getBlock() instanceof FireBlock;
+    }
+
+    /** Enterable for a blind walk: empty collision shape, or a door/gate/trapdoor the bot can open. */
+    private static boolean isBlindPassable(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.getCollisionShape(world, pos).isEmpty()) {
+            return true;
+        }
+        if (state.getBlock() instanceof DoorBlock) {
+            return DoorBlock.canOpenByHand(state);
+        }
+        return state.getBlock() instanceof FenceGateBlock
+                || (state.getBlock() instanceof TrapdoorBlock && !state.isOf(Blocks.IRON_TRAPDOOR));
     }
 
     private static boolean walkDirect(ServerPlayerEntity player, BlockPos destination, long timeoutMs) {
