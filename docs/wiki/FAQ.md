@@ -32,6 +32,10 @@ Use Regroup (`/bot regroup <name>`) to call it back with the safer recovery beha
 
 Frens that are idle (not following you) or on an until-sunset job go home at sunset, and so do guards and patrols when that option is on. A job with a count keeps running. Where it goes depends on its beds and bases: see [Home & Bases Explained](Guide-Basics.md#home--bases-explained).
 
+## How do I make a fren fast-travel?
+
+Give it food and a lodestone compass bound to a lodestone. With those it fast-travels home at sunset, back to work at sunrise, with `/bot compass travel`, and for Storage Go and Collect. Without a compass, an Eye of Ender held by you or the fren still works for Storage trips. See [Fast travel](Fast-Travel.md).
+
 ## Can it go back to work by itself in the morning?
 
 Yes, with a lodestone compass at the work spot. See [Work loops](Work-Loops.md).
