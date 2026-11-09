@@ -709,6 +709,16 @@ public final class SmeltingService {
                 ItemStack input = furnace.getStack(0);
                 if (!input.isEmpty()) {
                     boolean autoCook = itemFilter == null || itemFilter.isBlank();
+                    var stationType = recipeTypeFor(liveWorld.getBlockState(furnacePos));
+                    boolean inputCooksToFood = stationType != null
+                            && matchesCookablePolicy(input, liveWorld, stationType, true);
+                    if (AutoCookFurnaceInputPolicy.furnaceBusyWithOtherWork(foodOnly, autoCook, inputCooksToFood)) {
+                        LOGGER.info("Food cook: {} left the furnace at {} alone, its input holds {}",
+                                liveBot.getName().getString(), furnacePos.toShortString(),
+                                input.getItem().getName().getString());
+                        ChatUtils.sendSystemMessage(source, "That furnace is busy with something else.");
+                        return;
+                    }
                     boolean filterMatchesInput = autoCook || matchesFilter(input, itemFilter);
                     if (!filterMatchesInput) {
                         Item desired = pickDesiredCookable(cookables);
