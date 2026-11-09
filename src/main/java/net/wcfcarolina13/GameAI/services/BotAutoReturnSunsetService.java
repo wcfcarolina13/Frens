@@ -116,6 +116,8 @@ public final class BotAutoReturnSunsetService {
         private long lastSegmentLogTick;
         /** The last segment refresh found no route: gate the next probe on nextRouteServerTick. */
         private boolean lastRefreshFailed;
+        /** "Returning to base." was said this session; resumes after an interruption stay quiet. */
+        private boolean returnAnnounced;
     }
 
     private static final AtomicInteger AUTO_THREAD_ID = new AtomicInteger(0);
@@ -655,7 +657,7 @@ public final class BotAutoReturnSunsetService {
         }
 
         if (!isReturningHome(bot)) {
-            startOrResumeReturn(bot, session.activeAnchor, "sunset-resume");
+            startOrResumeReturn(bot, session, session.activeAnchor, "sunset-resume");
         }
 
         double anchorDistSq = bot.getBlockPos().getSquaredDistance(session.activeAnchor);
@@ -754,7 +756,7 @@ public final class BotAutoReturnSunsetService {
         if (tryLodestoneShortcut(bot, anchor.pos())) {
             return;
         }
-        primeReturnState(bot, anchor.pos());
+        primeReturnState(bot, session, anchor.pos());
         if (!refreshTravelSegment(bot, world, session)) {
             FollowPlannerService.requestPlanToGoal(LOGGER, bot, anchor.pos().toImmutable(), true, reason == null ? "sunset-route" : reason);
         }
@@ -773,7 +775,7 @@ public final class BotAutoReturnSunsetService {
                 anchor.kind().name().toLowerCase());
     }
 
-    private static void startOrResumeReturn(ServerPlayerEntity bot, BlockPos anchor, String reason) {
+    private static void startOrResumeReturn(ServerPlayerEntity bot, SunsetSession session, BlockPos anchor, String reason) {
         if (bot == null || anchor == null) {
             return;
         }
@@ -781,7 +783,7 @@ public final class BotAutoReturnSunsetService {
         if (tryLodestoneShortcut(bot, anchor)) {
             return;
         }
-        primeReturnState(bot, anchor);
+        primeReturnState(bot, session, anchor);
         FollowPlannerService.requestPlanToGoal(LOGGER, bot, anchor.toImmutable(), true, reason == null ? "sunset-route" : reason);
     }
 
@@ -837,7 +839,7 @@ public final class BotAutoReturnSunsetService {
         return started;
     }
 
-    private static void primeReturnState(ServerPlayerEntity bot, BlockPos anchor) {
+    private static void primeReturnState(ServerPlayerEntity bot, SunsetSession session, BlockPos anchor) {
         if (bot == null || anchor == null) {
             return;
         }
@@ -854,7 +856,13 @@ public final class BotAutoReturnSunsetService {
         net.wcfcarolina13.GameAI.services.TaskService.clearAbortLatch(bot.getUuid());
 
         if (!isReturningHome(bot)) {
-            BotEventHandler.setReturnToBaseSegmented(bot, Vec3d.ofCenter(anchor));
+            boolean announced = session != null && session.returnAnnounced;
+            boolean announce = SunsetReturnAnnouncePolicy.shouldAnnounce(announced);
+            String result = BotEventHandler.setReturnToBaseSegmented(bot, Vec3d.ofCenter(anchor), announce);
+            if (session != null) {
+                session.returnAnnounced = SunsetReturnAnnouncePolicy.announcedAfter(
+                        announced, announce, BotEventHandler.RETURN_STARTED_RESULT.equals(result));
+            }
         }
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
         if (state == null) {
