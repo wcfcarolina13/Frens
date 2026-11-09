@@ -360,6 +360,9 @@ public final class BotMutualAidService {
         if (HealingService.autoEat(bot)) {
             return true;
         }
+        if (HealingService.isHoldingRawMeatForCook(bot)) {
+            return true; // raw meat waits for auto-cook; don't go asking chests or other bots for food
+        }
         if (tryImmediateChestFoodRecovery(bot, world)) {
             return true;
         }
