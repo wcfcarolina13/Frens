@@ -401,8 +401,20 @@ public final class ChestRegistryNetworkManager {
                             }
                             // Poll for combat end (check every 500ms, timeout after 30s)
                             for (int wait = 0; wait < 60; wait++) {
-                                try { Thread.sleep(500); } catch (InterruptedException ignored) { break; }
+                                try {
+                                    Thread.sleep(500);
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                    break;
+                                }
                                 if (!net.wcfcarolina13.GameAI.services.BotCombatCalloutService.isInCombat(bot.getUuid())) break;
+                            }
+                            // /bot stop during the wait: end here, before the "still in combat" line or a walk.
+                            if (QuickTransferPolicy.stopBeforeWalk(
+                                    net.wcfcarolina13.GameAI.services.TaskService.isAbortRequested(bot.getUuid()),
+                                    Thread.currentThread().isInterrupted())) {
+                                LOGGER.info("Quick {}: {} stopped during the combat wait", finalAction, botName);
+                                return;
                             }
                             // If still in combat after 30s, give up
                             if (net.wcfcarolina13.GameAI.services.BotCombatCalloutService.isInCombat(bot.getUuid())) {
@@ -412,7 +424,19 @@ public final class ChestRegistryNetworkManager {
                                 return;
                             }
                             // Brief pause after combat ends for bot to settle
-                            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                            try {
+                                Thread.sleep(1000);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+                        }
+
+                        // Stopped (during the settle pause, or before a retry): don't start the walk.
+                        if (QuickTransferPolicy.stopBeforeWalk(
+                                net.wcfcarolina13.GameAI.services.TaskService.isAbortRequested(bot.getUuid()),
+                                Thread.currentThread().isInterrupted())) {
+                            LOGGER.info("Quick {}: {} stopped before the walk", finalAction, botName);
+                            return;
                         }
 
                         // Check bot is still alive and in world
@@ -452,17 +476,13 @@ public final class ChestRegistryNetworkManager {
 
                     String verb = isDeposit ? "deposited" : "fetched";
                     final int finalMoved = moved;
-                    String msg;
-                    if (finalMoved > 0) {
-                        String suffix = (isDeposit && isKeepGear) ? " (kept its gear)." : ".";
-                        msg = "\u00A7a" + botName + " " + verb + " " + finalMoved + " items" + suffix + "\u00A7r";
-                    } else {
-                        msg = "\u00A7e" + botName + " could not " + finalAction + " any items. "
-                                + (isDeposit ? "Chest may be full or bot inventory empty." : "Chest may be empty or bot inventory full.")
-                                + "\u00A7r";
+                    // A stop during the walk returns 0 moved; don't report that as a full/empty chest.
+                    boolean stopped = net.wcfcarolina13.GameAI.services.TaskService.isAbortRequested(bot.getUuid());
+                    String msg = QuickTransferPolicy.resultMessage(botName, finalMoved, isDeposit, isKeepGear, stopped);
+                    if (msg != null) {
+                        server.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                                player.getCommandSource(), msg));
                     }
-                    server.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
-                            player.getCommandSource(), msg));
                     LOGGER.info("Quick {}: {} {} {} items at {},{},{}", finalAction, botName, verb, finalMoved, x, y, z);
                 } catch (Exception e) {
                     LOGGER.warn("Quick {} failed for {}: {}", finalAction, botName, e.getMessage());
