@@ -105,7 +105,7 @@ public final class BotAutoCookingService {
                 }
                 if (hasCookableFood && !hasFuel) {
                     UUID id = bot.getUuid();
-                    logDiagnostic(bot, nowTick, "raw food but no fuel; no leaf-litter run (hobby="
+                    logDiagnostic(bot, nowTick, "raw food but no fuel, no leaf-litter run (hobby="
                             + BotHomeService.isHobbyEnabled(bot, "leaf_litter")
                             + " inFlight=" + FUEL_GATHER_IN_FLIGHT.contains(id)
                             + " cooldownTicks=" + Math.max(0L, NEXT_FUEL_GATHER_TICK.getOrDefault(id, 0L) - nowTick)
