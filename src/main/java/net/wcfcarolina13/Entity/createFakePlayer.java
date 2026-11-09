@@ -2,7 +2,6 @@ package net.wcfcarolina13.Entity;
 
 import com.google.gson.Gson;
 import com.mojang.authlib.GameProfile;
-import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.EntityPosition;
@@ -25,7 +24,6 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.storage.ReadView;
 import net.minecraft.text.Text;
 import net.minecraft.text.TranslatableTextContent;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.TeleportTarget;
@@ -273,6 +271,9 @@ public class createFakePlayer extends ServerPlayerEntity {
             this.networkHandler.syncWithPlayerPosition();
             this.getEntityWorld().getChunkManager().updatePosition(this);
         }
+        double startX = this.getX();
+        double startY = this.getY();
+        double startZ = this.getZ();
         try
         {
             super.tick();
@@ -283,6 +284,7 @@ public class createFakePlayer extends ServerPlayerEntity {
             // happens with that paper port thingy - not sure what that would fix, but hey
             // the game is not going to crash violently.
         }
+        trackFall(startX, startY, startZ);
 
 
     }
@@ -375,9 +377,33 @@ public class createFakePlayer extends ServerPlayerEntity {
         return true;
     }
 
-    @Override
-    protected void fall(double y, boolean onGround, BlockState state, BlockPos pos) {
-        handleFall(0.0, y, 0.0, onGround);
+    /**
+     * Fall damage for the bot (see {@link FakePlayerFallPolicy}): vanilla only tracks a player's
+     * falls from its movement packets, which a bot never sends, so fall distance stayed 0 and bots
+     * took no fall damage. Called once per tick with where the bot stood before its movement tick.
+     * Landing is read from the collision under the feet, not {@code isOnGround()}, which the
+     * server never updates from a player's own move.
+     */
+    private void trackFall(double startX, double startY, double startZ) {
+        if (this.isRemoved()) {
+            return;
+        }
+        double dx = this.getX() - startX;
+        double dy = this.getY() - startY;
+        double dz = this.getZ() - startZ;
+        switch (FakePlayerFallPolicy.classify(dx, dy, dz, this.hasVehicle(), this.isSpectator(), this.isAlive())) {
+            case SKIP -> {
+            }
+            case TELEPORT -> this.onLanding();
+            case MOVE -> {
+                net.minecraft.util.math.Box box = this.getBoundingBox();
+                net.minecraft.util.math.Box underFeet = new net.minecraft.util.math.Box(
+                        box.minX + 1.0E-3D, box.minY - 0.05D, box.minZ + 1.0E-3D,
+                        box.maxX - 1.0E-3D, box.minY, box.maxZ - 1.0E-3D);
+                boolean landed = dy <= 0.0D && !this.getEntityWorld().isSpaceEmpty(this, underFeet);
+                handleFall(0.0D, dy, 0.0D, landed);
+            }
+        }
     }
 
     @Override
