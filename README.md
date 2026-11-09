@@ -95,7 +95,10 @@ generation is in flight; without it, expect frame dips on lighter machines durin
 
 ## Installation
 
-1. Install [Fabric Loader](https://fabricmc.net/) (0.17.3+) for Minecraft 1.21.10/1.21.11
+New here? The [wiki](docs/wiki/Home.md) has a step-by-step [Getting started](docs/wiki/Getting-Started.md) page and a [FAQ](docs/wiki/FAQ.md).
+
+
+1. Install [Fabric Loader](https://fabricmc.net/) (0.17.3+) for Minecraft 1.21.11
 2. Install [Fabric API](https://modrinth.com/mod/fabric-api)
 3. (Recommended) Install [Carpet Mod](https://modrinth.com/mod/carpet) for fake-player support
 4. Drop the Frens JAR into your `mods/` folder
@@ -274,7 +277,7 @@ Settings persist in `settings.json5`.
 
 ## Requirements
 
-- Minecraft 1.21.10 or 1.21.11
+- Minecraft 1.21.11
 - Fabric Loader 0.17.3+
 - Fabric API
 - Java 21+

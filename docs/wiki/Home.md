@@ -4,6 +4,9 @@ Frens adds companions ("frens") to Minecraft Java: full fake players that follow
 
 ## Pages
 
+- [Getting started](Getting-Started.md): install, pick a world mode, spawn your first fren.
+- [FAQ](FAQ.md): common questions and fixes.
+- [Work loops](Work-Loops.md): frens that go back to the same job every morning.
 - [In-game Guide](Guide.md): every card from the Guide screen (press ] in game), grouped by topic.
 - [Companion questing guide](../../COMPANION_QUESTING_GUIDE.md): how recruiting works in Questing mode.
 - [Crafting cheatsheet](../../CRAFTING_CHEATSHEET.md)
