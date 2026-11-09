@@ -161,6 +161,10 @@ public final class TreeStuckEscapeService {
         BlockPos belowFeet = bot.getBlockPos().down();
         BlockState belowState = world.getBlockState(belowFeet);
         if (!belowState.isIn(BlockTags.LEAVES)) {
+            if (TREE_STUCK_SINCE_TICK.containsKey(botId)) {
+                LOGGER.info("[DropDiag] TreeStuck: {} cleared, below is {} at {}", bot.getName().getString(),
+                        net.minecraft.registry.Registries.BLOCK.getId(belowState.getBlock()).getPath(), belowFeet.toShortString());
+            }
             clearState(botId);
             return false;
         }
@@ -261,6 +265,13 @@ public final class TreeStuckEscapeService {
 
         // No viable escape this tick — remain in stuck-handling state.
         return true;
+    }
+
+    /** DIAGNOSTIC (claude/diag-canopy-stall): one-line state for the stall trace. */
+    public static String diagState(UUID botId) {
+        return "since=" + TREE_STUCK_SINCE_TICK.get(botId) + ",target=" + ACTIVE_ESCAPE_TARGET.get(botId)
+                + ",exhausted=" + SAFE_DROP_EXHAUSTED.contains(botId)
+                + ",mine=" + (LEAF_MINE_INFLIGHT.get(botId) == null ? "none" : (LEAF_MINE_INFLIGHT.get(botId).isDone() ? "done" : "running"));
     }
 
     /**

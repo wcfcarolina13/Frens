@@ -702,6 +702,7 @@ public final class FollowMovementService {
         if (!DropGuardExemptionPolicy.followHaltInAir(false, false, overDropNow, headingIntoDrop, exempt)) {
             return false;
         }
+        diag(bot, "air-halt", column, targetPos, "standHere=" + standHere);
         BotActions.stop(bot);
         bot.setVelocity(0.0D, v.y, 0.0D);
         bot.velocityDirty = true;
@@ -1138,6 +1139,18 @@ public final class FollowMovementService {
             return;
         }
         boolean grounded = bot.isOnGround();
+        long tick = world.getServer().getTicks();
+        if (tick % 40L == 0L) {
+            BlockPos feet = bot.getBlockPos();
+            LOGGER.info("[DropDiag] {} status pos={} y={} onGround={} below={} below2={} feetBlock={} standHere={} waypointHead={} treeStuck={}",
+                    bot.getName().getString(), feet.toShortString(),
+                    String.format(java.util.Locale.ROOT, "%.2f", bot.getY()), grounded,
+                    net.minecraft.registry.Registries.BLOCK.getId(world.getBlockState(feet.down()).getBlock()).getPath(),
+                    net.minecraft.registry.Registries.BLOCK.getId(world.getBlockState(feet.down(2)).getBlock()).getPath(),
+                    net.minecraft.registry.Registries.BLOCK.getId(world.getBlockState(feet).getBlock()).getPath(),
+                    standLevelAt(world, feet, feet.getY()), waypointHead,
+                    TreeStuckEscapeService.diagState(bot.getUuid()));
+        }
         Boolean was = DIAG_WAS_GROUNDED.put(bot.getUuid(), grounded);
         if (Boolean.TRUE.equals(was) && !grounded && isDangerousDropCell(world, bot.getBlockPos())) {
             LOGGER.info("[DropDiag] {} fall-start pos={} y={} vel={} waypointHead={} lastGuard={}ms ago",
