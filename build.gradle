@@ -148,3 +148,8 @@ tasks.register('wikiExport', JavaExec) {
 	mainClass = 'net.wcfcarolina13.guide.GuideWikiExporter'
 	args file('docs/wiki').absolutePath
 }
+
+// GuideWikiExportTest reads docs/wiki, so a hand edit there must rerun the tests.
+tasks.named('test') {
+	inputs.dir('docs/wiki').withPathSensitivity(PathSensitivity.RELATIVE)
+}

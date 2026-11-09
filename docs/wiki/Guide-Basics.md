@@ -125,7 +125,7 @@ Which items/conditions let the bot fast-travel, and at what speed.
 
 **Where:** See chat when bot departs: '(fast-travel: ...)' tag
 
-## Home & Bases Explained
+## Home &amp; Bases Explained
 
 Two kinds of rows in the Base Manager, and two meanings of [Home].
 

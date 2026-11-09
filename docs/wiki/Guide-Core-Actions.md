@@ -4,7 +4,7 @@
 
 [All Guide topics](Guide.md)
 
-## Quick Store & Quick Fetch
+## Quick Store &amp; Quick Fetch
 
 Point at a nearby chest and click to deposit or take items.
 

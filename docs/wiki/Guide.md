@@ -14,7 +14,7 @@ Every card from the Guide screen in game (press ] by default). `<bot>` stands fo
 - [Switch Active Bot (Inventory)](Guide-Basics.md#switch-active-bot-inventory): Cycle to another companion from the inventory UI without retyping commands.
 - [Bot Controls Panel](Guide-Basics.md#bot-controls-panel): Configure spawn behavior and per-bot preferences in one place.
 - [Fast-Travel Gates](Guide-Basics.md#fast-travel-gates): Which items/conditions let the bot fast-travel, and at what speed.
-- [Home & Bases Explained](Guide-Basics.md#home--bases-explained): Two kinds of rows in the Base Manager, and two meanings of [Home].
+- [Home &amp; Bases Explained](Guide-Basics.md#home--bases-explained): Two kinds of rows in the Base Manager, and two meanings of [Home].
 
 ## [Spawning](Guide-Spawning.md)
 
@@ -40,7 +40,7 @@ Every card from the Guide screen in game (press ] by default). `<bot>` stands fo
 - [Keep Bots Quiet](Guide-Settings.md#keep-bots-quiet): Turn down what bots say, in text or out loud.
 - [Let a Friend Use Bots](Guide-Settings.md#let-a-friend-use-bots): Who can command a bot on a shared world.
 - [Follow Teleport](Guide-Settings.md#follow-teleport): Wolf-style catch-up teleport during follow mode.
-- [Fast Travel & Navigation Tiers](Guide-Settings.md#fast-travel--navigation-tiers): Companion fast travel speed depends on held artifacts.
+- [Fast Travel &amp; Navigation Tiers](Guide-Settings.md#fast-travel--navigation-tiers): Companion fast travel speed depends on held artifacts.
 - [Preserve Expensive Gear](Guide-Settings.md#preserve-expensive-gear): Keep your bots from wearing out your best tools.
 
 ## [Gathering](Guide-Gathering.md)
@@ -99,7 +99,7 @@ Every card from the Guide screen in game (press ] by default). `<bot>` stands fo
 
 ## [Core Actions](Guide-Core-Actions.md)
 
-- [Quick Store & Quick Fetch](Guide-Core-Actions.md#quick-store--quick-fetch): Point at a nearby chest and click to deposit or take items.
+- [Quick Store &amp; Quick Fetch](Guide-Core-Actions.md#quick-store--quick-fetch): Point at a nearby chest and click to deposit or take items.
 
 ## [Utilities](Guide-Utilities.md)
 

@@ -32,7 +32,7 @@ In Admin Mode, the **Bot Roster** opens after you choose. Type a name and spawn.
 /bot spawn Jake admin
 ```
 
-Each fren needs a unique name that follows Minecraft username rules. You can reopen the roster at any time from Bot Controls, or press `-` while no frens are out ([Bot Roster](Guide-Spawning.md#bot-roster-spawn-bots)).
+Each fren needs a unique name that follows Minecraft username rules. You can reopen the roster at any time from Bot Controls. Once you have saved frens, pressing `-` while none are out also opens it ([Bot Roster](Guide-Spawning.md#bot-roster-spawn-bots)).
 
 Frens are saved with the world. When you come back, they return with their inventory, unless you turned off [Auto Spawn on Load](Guide-Spawning.md#auto-spawn-on-load).
 

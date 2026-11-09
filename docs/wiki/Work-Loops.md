@@ -39,6 +39,6 @@ So keep the lodestone close to where the work actually happens. A fren that wand
 | It works next to its bed in the morning | No lodestone within 128 blocks of where it stopped, or it was in another dimension. |
 | `/bot compass list Jake` says a compass lost its lodestone | The lodestone was broken. Place a new one and bind the compass again. |
 | It walked instead of fast-travelling | Fast travel needs a gate and enough food. See [Fast-Travel Gates](Guide-Basics.md#fast-travel-gates). |
-| It didn't go home at sunset | It was following you or on a job with a count. Only idle frens and until-sunset jobs go home. |
+| It didn't go home at sunset | It was following you or on a job with a count. Idle frens and until-sunset jobs go home, and guards or patrols do too when that option is on. |
 
 Hunting has its own day-to-day loop and doesn't use lodestones this way.

@@ -49,14 +49,14 @@ public final class GuideWikiExporter {
             Map<String, Integer> anchorsSeen = new HashMap<>();
 
             StringBuilder page = new StringBuilder(HEADER);
-            page.append("# ").append(plain(category)).append("\n\n");
+            page.append("# ").append(text(category)).append("\n\n");
             page.append("[All Guide topics](").append(INDEX_FILE).append(")\n");
 
-            index.append("\n## [").append(plain(category)).append("](").append(file).append(")\n\n");
+            index.append("\n## [").append(text(category)).append("](").append(file).append(")\n\n");
             for (GuideCatalog.Topic topic : entry.getValue()) {
                 String title = plain(topic.title());
                 String anchor = uniqueAnchor(title, anchorsSeen);
-                index.append("- [").append(title).append("](").append(file).append('#').append(anchor)
+                index.append("- [").append(escape(title)).append("](").append(file).append('#').append(anchor)
                         .append("): ").append(text(topic.summary())).append('\n');
                 appendTopic(page, topic);
             }
@@ -69,7 +69,7 @@ public final class GuideWikiExporter {
     }
 
     private static void appendTopic(StringBuilder page, GuideCatalog.Topic topic) {
-        page.append("\n## ").append(plain(topic.title())).append("\n\n");
+        page.append("\n## ").append(text(topic.title())).append("\n\n");
         page.append(text(topic.summary())).append("\n\n");
         if (topic.adminOnly()) {
             page.append("*Operators and the host only.*\n\n");

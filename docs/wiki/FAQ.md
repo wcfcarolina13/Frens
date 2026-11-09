@@ -30,7 +30,7 @@ Use Regroup (`/bot regroup <name>`) to call it back with the safer recovery beha
 
 ## My fren didn't go home at sunset
 
-Only frens that are idle (not following you) or on an until-sunset job go home at sunset. A job with a count keeps running. Where it goes depends on its beds and bases: see [Home & Bases Explained](Guide-Basics.md#home--bases-explained).
+Frens that are idle (not following you) or on an until-sunset job go home at sunset, and so do guards and patrols when that option is on. A job with a count keeps running. Where it goes depends on its beds and bases: see [Home & Bases Explained](Guide-Basics.md#home--bases-explained).
 
 ## Can it go back to work by itself in the morning?
 

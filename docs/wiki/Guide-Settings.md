@@ -34,7 +34,7 @@ Wolf-style catch-up teleport during follow mode.
 - Toggle in Bot Controls &gt; Behavior &gt; Follow Teleport.
 - Admins can control which players see this toggle in Player Settings.
 
-## Fast Travel & Navigation Tiers
+## Fast Travel &amp; Navigation Tiers
 
 Companion fast travel speed depends on held artifacts.
 

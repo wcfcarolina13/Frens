@@ -23,6 +23,8 @@ import java.util.Locale;
  */
 public final class BotGuideScreen extends Screen {
 
+    private static volatile boolean guideLoadFailed;
+
     private record GuideRow(String category, GuideCatalog.Topic topic) {
         boolean isHeader() {
             return topic == null;
@@ -742,8 +744,21 @@ public final class BotGuideScreen extends Screen {
     private List<GuideCatalog.Topic> baseTopics() {
         String target = botTarget();
         String guideKey = FrensClient.getGuideHotkeyDisplayName();
+        if (guideLoadFailed) {
+            return List.of();
+        }
+        List<GuideCatalog.Topic> all;
+        try {
+            all = GuideCatalog.topics();
+        } catch (RuntimeException e) {
+            // A broken topics file must not crash the client: show an empty Guide and log why.
+            // Logged once, and not retried every frame.
+            guideLoadFailed = true;
+            org.slf4j.LoggerFactory.getLogger("frens-guide").error("Could not load the Guide topics", e);
+            return List.of();
+        }
         List<GuideCatalog.Topic> out = new ArrayList<>();
-        for (GuideCatalog.Topic topic : GuideCatalog.topics()) {
+        for (GuideCatalog.Topic topic : all) {
             out.add(topic.resolve(target, guideKey));
         }
         return out;
