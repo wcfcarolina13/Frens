@@ -831,6 +831,20 @@ public class FrensClient implements ClientModInitializer {
             });
         });
 
+        // [Open in Guide] on a fren's chat answer: /frens guide <topic> [bot] -> open that card.
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.GuideOpenTopicPayload.ID, (payload, context) -> {
+            String topicId = payload.topicId();
+            String bot = payload.botAlias();
+            context.client().execute(() -> {
+                MinecraftClient client = context.client();
+                String alias = bot;
+                if (alias == null || alias.isBlank()) {
+                    alias = resolveQuickBotTarget(client);
+                }
+                client.setScreen(new BotGuideScreen(null, alias, topicId));
+            });
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(BasesListPayload.ID, (payload, context) -> {
             String json = payload.basesJson();
             context.client().execute(() -> BaseManagerScreen.applyBasesJson(json));

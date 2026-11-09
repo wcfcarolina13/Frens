@@ -50,6 +50,19 @@ public final class SoulPromptAssembler {
     static final int MAX_HISTORY_CHARS = 12_000;
     static final int MAX_EVENT_CHARS = 4_000;
     static final int MAX_OUTPUT_TOKENS = 220;
+
+    /**
+     * Header of the Guide block. Conditional on purpose: the matcher can pick a topic for a line
+     * that is not really a how-to question, and then the block must not take over the reply.
+     */
+    static final String GUIDE_HEADER = String.join("\n",
+            "FRENS GUIDE (how the Frens mod works, from the in-game Guide)",
+            "If the player is asking how to do something in Frens, answer from these notes only,",
+            "in your own voice and in a few sentences. Give commands exactly as written here and",
+            "never make up a command, item or setting. If the notes don't cover it, say you're not",
+            "sure and point them to the Guide. Plain sentences, no code blocks. Explaining is not",
+            "doing: don't say you did any of it. If the player is not asking how something works,",
+            "ignore this block.");
     static final int MAX_SITUATION_CHARS = 800;
     /** Bound on the RECENTLY OVERHEARD block (local-chat spec §4 consumer 3). */
     static final int MAX_OVERHEARD_CHARS = 200;
@@ -103,6 +116,27 @@ public final class SoulPromptAssembler {
             List<String> aboutPlayer,
             String currentMessage,
             Duration timeout) {
+        return assemble(correlationId, model, profile, grounding, priorHistory, recentEvents,
+                relevantKnowledge, aboutPlayer, List.of(), currentMessage, timeout);
+    }
+
+    /**
+     * @param guideLines Guide card text for a how-to question ({@code GuideChatAnswer#promptLines}),
+     *     rendered as a {@link #GUIDE_HEADER} block just before RELEVANT KNOWLEDGE. Empty adds
+     *     nothing, so prompts for other lines are byte-identical to before.
+     */
+    public SoulTypes.ProviderRequest assemble(
+            UUID correlationId,
+            String model,
+            SoulTypes.SoulProfile profile,
+            SoulTypes.GroundingSnapshot grounding,
+            List<SoulTypes.ConversationRecord> priorHistory,
+            List<SoulTypes.SoulEvent> recentEvents,
+            List<String> relevantKnowledge,
+            List<String> aboutPlayer,
+            List<String> guideLines,
+            String currentMessage,
+            Duration timeout) {
         List<SoulTypes.Message> messages = new ArrayList<>();
         messages.add(systemContract());
         messages.add(identityMessage(profile));
@@ -111,6 +145,10 @@ public final class SoulPromptAssembler {
         aboutBlock(grounding, aboutPlayer).ifPresent(messages::add);
         messages.addAll(boundedHistory(priorHistory));
         messages.addAll(boundedEvents(recentEvents));
+        if (guideLines != null && !guideLines.isEmpty()) {
+            messages.add(new SoulTypes.Message(SoulTypes.Role.SYSTEM,
+                    GUIDE_HEADER + "\n" + String.join("\n", guideLines)));
+        }
         if (relevantKnowledge != null && !relevantKnowledge.isEmpty()) {
             messages.add(new SoulTypes.Message(SoulTypes.Role.SYSTEM,
                     "RELEVANT KNOWLEDGE\n" + String.join("\n", relevantKnowledge)));

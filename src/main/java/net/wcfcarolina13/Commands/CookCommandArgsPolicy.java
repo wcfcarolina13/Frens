@@ -24,6 +24,25 @@ public final class CookCommandArgsPolicy {
         };
     }
 
+    /** What the single word of {@code /bot cook <word>} is. */
+    public enum FirstWordRole { ITEM, FUEL, BOT }
+
+    /**
+     * The single word of {@code /bot cook <word>}: a fuel keyword is the fuel, a word that is no
+     * item id but names a bot is the bot, and anything else is the item filter as before (filters
+     * like "fish" match by name, so an unknown word stays an item). An item id wins over a bot of
+     * the same name, as in {@link #fuelSlotNamesBot}.
+     */
+    public static FirstWordRole firstWordRole(String word, boolean namesItem, boolean namesBot) {
+        if (word == null || word.isBlank()) {
+            return FirstWordRole.ITEM;
+        }
+        if (isFuelKeyword(word)) {
+            return FirstWordRole.FUEL;
+        }
+        return !namesItem && namesBot ? FirstWordRole.BOT : FirstWordRole.ITEM;
+    }
+
     /**
      * True when the word in the fuel slot should be read as the bot instead: it is not a fuel
      * keyword, not an item id, and it names a bot. An item id wins over a bot of the same name,

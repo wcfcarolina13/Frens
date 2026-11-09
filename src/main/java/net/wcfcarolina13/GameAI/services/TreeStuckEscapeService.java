@@ -22,8 +22,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Detects when a bot is stranded on top of a tree canopy (e.g. after elytra landing
- * on leaves) and helps it escape via safe drop, leaf breaking, elytra descent,
- * or — as a last resort — jumping off.
+ * on leaves) and helps it escape via a safe drop, elytra descent or leaf breaking; after
+ * 10 s stuck it breaks the leaf below over a fall that may cost health (never lava or over 8).
  *
  * <p>Called from the follow tick in {@link BotEventHandler} when the bot is on the ground
  * and follow-mode is active. The entry-point {@link #tryEscape} is lightweight: it
@@ -48,18 +48,41 @@ public final class TreeStuckEscapeService {
     private static final ConcurrentHashMap<UUID, Long> ESCAPE_TARGET_SET_TICK = new ConcurrentHashMap<>();
     /** Bots that already tried safe-drop steering and failed — skip to leaf breaking. */
     private static final Set<UUID> SAFE_DROP_EXHAUSTED = ConcurrentHashMap.newKeySet();
+    /** The hole the bot is edging onto and when it started (see {@link #tryEdgeIntoHole}). */
+    private static final ConcurrentHashMap<UUID, HoleNudge> HOLE_NUDGE = new ConcurrentHashMap<>();
 
     // ── Tuning constants ─────────────────────────────────────────────────────
     /** Ticks the bot must be near the same spot on leaves before we consider it stuck. */
     private static final long STUCK_THRESHOLD_TICKS = 30L;
     /** Minimum ticks between escape strategy re-evaluation. */
     private static final long ESCAPE_ATTEMPT_INTERVAL_TICKS = 40L;
+    /**
+     * Stuck this long (10 s), the bot breaks the leaf under it even over a fall that costs health, as
+     * before the safe-fall check: a few hearts beat staying stranded on the tree.
+     */
+    private static final long LAST_RESORT_TICKS = 200L;
+    /** Bots whose last evaluation found no safe way down yet: follow runs between evaluations. */
+    private static final Set<UUID> WAITING_FOR_SAFE_WAY = ConcurrentHashMap.newKeySet();
+    /** The leaf broken as a last resort: the nudge may edge the bot onto that hole over a deeper drop. */
+    private static final ConcurrentHashMap<UUID, BlockPos> LAST_RESORT_HOLE = new ConcurrentHashMap<>();
+    /** Feet Y when the bot first stood on leaves this time: the canopy level. */
+    private static final ConcurrentHashMap<UUID, Integer> CANOPY_FEET_Y = new ConcurrentHashMap<>();
+    /** Grounded ticks off leaves at canopy level (on a log, on a lip) since it last stood on leaves. */
+    private static final ConcurrentHashMap<UUID, Integer> OFF_LEAF_TICKS = new ConcurrentHashMap<>();
+    /**
+     * Grounded ticks off leaves at canopy level that keep the stuck clock: a tick on a log or on a lip
+     * while follow runs used to restart it, so the 10 s last resort was never reached.
+     */
+    private static final int OFF_LEAF_GRACE_TICKS = 20;
     /** Maximum ticks to steer toward a safe drop before escalating. */
     private static final long ESCAPE_TARGET_STALE_TICKS = 120L;
     /** Dialogue cooldown (ms). */
     private static final long DIALOGUE_COOLDOWN_MS = 12_000L;
-    /** Max safe fall height (blocks) — vanilla is ~3.5 for no damage; 4 is survivable. */
-    private static final int SAFE_DROP_HEIGHT = 4;
+    /**
+     * Max safe fall height (blocks). Vanilla fall damage is fall distance minus 3, so 3 is the
+     * most that costs nothing; 4 cost a heart once bots took fall damage (sandbox 2026-11-09).
+     */
+    private static final int SAFE_DROP_HEIGHT = TreeStuckDropPolicy.SAFE_DROP_HEIGHT;
     /** Max survivable fall height (takes damage but lives). */
     private static final int SURVIVABLE_DROP_HEIGHT = 8;
     /** Horizontal scan radius for safe-drop search. */
@@ -73,7 +96,6 @@ public final class TreeStuckEscapeService {
             "Wait, I'm stuck up here."
     };
     private static final String LEAF_BREAK_LINE = "Let me break through these leaves.";
-    private static final String JUMP_OFF_LINE = "This is going to hurt...";
 
     private TreeStuckEscapeService() {}
 
@@ -105,13 +127,22 @@ public final class TreeStuckEscapeService {
                 BlockState belowState = world.getBlockState(bot.getBlockPos().down());
                 if (!belowState.isIn(BlockTags.LEAVES)) {
                     LOGGER.info("TreeStuck: {} escaped tree canopy", bot.getName().getString());
+                    dropCanopyWaypoints(bot);
                     clearState(botId);
                     return false;
                 }
             }
 
-            // If airborne (falling off edge), let gravity work — don't steer.
+            // If airborne (falling off edge), let gravity work — don't steer. Once over the chosen
+            // column, drop the sideways momentum so the bot comes down that column: the edge pushes
+            // and hops carried it on past it, over the deeper drop beyond (sandbox 2026-11-09).
             if (!bot.isOnGround()) {
+                Vec3d v = bot.getVelocity();
+                if (TreeStuckDropPolicy.holdOverTarget(bot.getX(), bot.getZ(),
+                        activeTarget.getX(), activeTarget.getZ(), v.x, v.z)) {
+                    bot.setVelocity(0.0D, v.y, 0.0D);
+                    bot.velocityDirty = true;
+                }
                 return true;
             }
 
@@ -133,14 +164,10 @@ public final class TreeStuckEscapeService {
                 // Push harder when close to the edge to force stepping into the air column.
                 double impulse = distSq <= 2.25 ? 0.35D : 0.28D;
                 BotActions.applyMovementInput(bot, Vec3d.ofCenter(activeTarget), impulse);
-                // Jump more frequently near the edge to step over leaf boundaries.
-                if (distSq <= 2.25) {
-                    if (targetAge % 5 == 0) {
-                        bot.jump();
-                    }
-                } else if (targetAge % 15 == 0) {
-                    bot.jump();
-                }
+                // Hop only over a block in the way. The old timed hops near the edge (every 5
+                // ticks) added up to 1.25 blocks to the fall: a hop into a 3-deep column fell
+                // about 4 and cost health (review of the canopy fix, 2026-11-09).
+                BotActions.autoJumpIfNeeded(bot);
                 return true;
             }
         }
@@ -154,12 +181,40 @@ public final class TreeStuckEscapeService {
         BlockPos belowFeet = bot.getBlockPos().down();
         BlockState belowState = world.getBlockState(belowFeet);
         if (!belowState.isIn(BlockTags.LEAVES)) {
+            if (tryEdgeIntoHole(bot, world, server, belowFeet, now)) {
+                return true;
+            }
+            Integer canopyY = CANOPY_FEET_Y.get(botId);
+            Long stuckSince = TREE_STUCK_SINCE_TICK.get(botId);
+            boolean reallyStuck = stuckSince != null
+                    && (now - stuckSince >= STUCK_THRESHOLD_TICKS || WAITING_FOR_SAFE_WAY.contains(botId));
+            if (reallyStuck && canopyY != null && bot.getBlockY() >= canopyY
+                    && OFF_LEAF_TICKS.merge(botId, 1, Integer::sum) <= OFF_LEAF_GRACE_TICKS) {
+                return false; // still up at the canopy level: keep the stuck clock
+            }
+            BlockPos lastResortHole = LAST_RESORT_HOLE.get(botId);
+            if (lastResortHole != null && bot.getBlockY() <= lastResortHole.getY()) {
+                LAST_RESORT_HOLE.remove(botId);
+            }
+            HoleNudge spent = HOLE_NUDGE.get(botId);
+            if (LAST_TREE_ESCAPE_ATTEMPT_TICK.containsKey(botId)
+                    || (spent != null && !spent.column().equals(bot.getBlockPos()))) {
+                // Only after an escape actually ran: walking off a leaf patch is not leaving a canopy.
+                dropCanopyWaypoints(bot);
+            }
             clearState(botId);
+            if (spent != null && spent.column().equals(bot.getBlockPos())) {
+                HOLE_NUDGE.put(botId, spent); // keep this hole's spent budget while the bot stays on it
+            }
             return false;
         }
+        HOLE_NUDGE.remove(botId);
+        OFF_LEAF_TICKS.remove(botId);
 
         // Track how long we've been on leaves.
-        TREE_STUCK_SINCE_TICK.putIfAbsent(botId, now);
+        if (TREE_STUCK_SINCE_TICK.putIfAbsent(botId, now) == null) {
+            CANOPY_FEET_Y.put(botId, bot.getBlockY());
+        }
         long stuckDuration = now - TREE_STUCK_SINCE_TICK.get(botId);
         if (stuckDuration < STUCK_THRESHOLD_TICKS) {
             return false; // Not stuck yet — just traversing leaves briefly.
@@ -174,8 +229,9 @@ public final class TreeStuckEscapeService {
         // ── Throttle strategy re-evaluation ──
         long lastAttempt = LAST_TREE_ESCAPE_ATTEMPT_TICK.getOrDefault(botId, 0L);
         if (now - lastAttempt < ESCAPE_ATTEMPT_INTERVAL_TICKS) {
-            return true;
+            return !WAITING_FOR_SAFE_WAY.contains(botId);
         }
+        WAITING_FOR_SAFE_WAY.remove(botId);
         LAST_TREE_ESCAPE_ATTEMPT_TICK.put(botId, now);
 
         // Show initial stuck dialogue (once per cooldown), but suppress it when the
@@ -184,11 +240,18 @@ public final class TreeStuckEscapeService {
         ServerPlayerEntity commander = resolveCommander(bot, server);
         if (commander != null && commander.isOnGround() && bot.squaredDistanceTo(commander) < 64.0) {
             BlockState cmdBelow = world.getBlockState(commander.getBlockPos().down());
-            commanderOnSameTree = cmdBelow.isIn(BlockTags.LEAVES);
+            // Not a commander on a lower leaf layer, another tree's lower canopy or a bush below.
+            commanderOnSameTree = cmdBelow.isIn(BlockTags.LEAVES) && commander.getBlockY() >= bot.getBlockY() - 1;
         }
-        if (!commanderOnSameTree) {
-            showDialogue(bot, STUCK_LINES[new Random().nextInt(STUCK_LINES.length)]);
+        if (commanderOnSameTree) {
+            // Up here with the commander, the bot is not stranded: digging under it only drops it a
+            // block and it hops back (sandbox 2026-11-09, commander one block away on the canopy).
+            TREE_STUCK_SINCE_TICK.put(botId, now);
+            LAST_TREE_ESCAPE_ATTEMPT_TICK.remove(botId);
+            return false;
         }
+        boolean lastResort = stuckDuration >= LAST_RESORT_TICKS;
+        showDialogue(bot, STUCK_LINES[new Random().nextInt(STUCK_LINES.length)]);
 
         // ── Strategy 1: Find a safe drop edge and steer toward it ──
         // Skip if we already tried safe-drop and it was unreachable.
@@ -216,9 +279,20 @@ public final class TreeStuckEscapeService {
         // ── Strategy 3: Break leaves below to fall through ──
         // Simplest and most reliable: just break the leaf under the bot's feet.
         BlockPos leafBelow = bot.getBlockPos().down();
-        if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES)) {
+        int fallThroughLeaf = fallThroughLeaf(world, leafBelow, SAFE_DROP_HEIGHT);
+        boolean belowIsSafe = TreeStuckDropPolicy.isSafeDrop(fallThroughLeaf);
+        if (!belowIsSafe && lastResort) {
+            // A fall that costs a few hearts, never lava, fire or a deadly drop.
+            fallThroughLeaf = fallThroughLeaf(world, leafBelow, SURVIVABLE_DROP_HEIGHT);
+        }
+        boolean lastResortBreak = !belowIsSafe && lastResort && fallThroughLeaf <= SURVIVABLE_DROP_HEIGHT;
+        if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES) && (belowIsSafe || lastResortBreak)) {
+            if (lastResortBreak) {
+                LAST_RESORT_HOLE.put(botId, leafBelow);
+            }
             showDialogue(bot, LEAF_BREAK_LINE);
-            LOGGER.info("TreeStuck: {} breaking leaf below at {}", bot.getName().getString(), leafBelow.toShortString());
+            LOGGER.info("TreeStuck: {} breaking leaf below at {} (fall {})", bot.getName().getString(),
+                    leafBelow.toShortString(), fallThroughLeaf);
             startLeafMine(bot, leafBelow);
             return true;
         }
@@ -226,7 +300,7 @@ public final class TreeStuckEscapeService {
         // ── Strategy 4: Break leaves toward trunk ──
         BlockPos trunk = findNearbyTrunk(world, bot.getBlockPos());
         if (trunk != null) {
-            BlockPos leafToBreak = findLeafTowardTrunk(world, bot.getBlockPos(), trunk);
+            BlockPos leafToBreak = findLeafTowardTrunk(world, bot.getBlockPos(), trunk, belowIsSafe);
             if (leafToBreak != null) {
                 showDialogue(bot, LEAF_BREAK_LINE);
                 LOGGER.info("TreeStuck: {} breaking leaf at {} toward trunk at {}",
@@ -236,25 +310,109 @@ public final class TreeStuckEscapeService {
             }
         }
 
-        // ── Strategy 5: Jump off and take the damage ──
-        int dropHeight = measureDropBelow(world, bot.getBlockPos());
-        if (dropHeight > 0 && dropHeight <= SURVIVABLE_DROP_HEIGHT) {
-            showDialogue(bot, JUMP_OFF_LINE);
-            LOGGER.info("TreeStuck: {} jumping off tree (drop={})", bot.getName().getString(), dropHeight);
-            Vec3d jumpDir = getFollowTargetDirection(bot, server);
-            if (jumpDir != null) {
-                Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-                LookController.faceBlock(bot, BlockPos.ofFloored(botPos.add(jumpDir)));
-                BotActions.applyMovementInput(bot, botPos.add(jumpDir.multiply(2.0)), 0.30D);
-            }
-            bot.jump();
-            clearState(botId);
-            return true;
-        }
+        // No safe way down: let follow run (its planner may find a way along the trunk) until the
+        // next evaluation, and keep doing so while nothing here can act.
+        WAITING_FOR_SAFE_WAY.add(botId);
+        return false;
+    }
 
-        // No viable escape this tick — remain in stuck-handling state.
+    /**
+     * The bot stands on the lip of a leaf with the cell under it open, usually the hole it broke to
+     * get down: edge it onto that hole so it drops through (see
+     * {@link TreeStuckDropPolicy#shouldEdgeIntoHole}). Runs on the server thread, from follow.
+     */
+    private static boolean tryEdgeIntoHole(ServerPlayerEntity bot, ServerWorld world, MinecraftServer server,
+                                           BlockPos belowFeet, long now) {
+        UUID botId = bot.getUuid();
+        BlockPos column = bot.getBlockPos();
+        if (SneakLockService.isLocked(botId)) {
+            // A sneaking player is held at ledges (PlayerEntity.clipAtLedge) and BotActions.stop keeps a
+            // locked sneak on, so the move would do nothing for 40 ticks; leave it to the lock's owner.
+            return false;
+        }
+        boolean belowOpen = world.getBlockState(belowFeet).isAir();
+        BlockPos support = bot.supportingBlockPos.orElse(null);
+        boolean supportIsLeaf = support != null && !support.equals(belowFeet)
+                && world.getBlockState(support).isIn(BlockTags.LEAVES);
+        // A hole broken as the last resort may be deeper than a safe drop: that is why it was broken.
+        int maxDrop = belowFeet.equals(LAST_RESORT_HOLE.get(botId)) ? SURVIVABLE_DROP_HEIGHT : SAFE_DROP_HEIGHT;
+        int holeDrop = 0;
+        BlockPos probe = belowFeet;
+        while (holeDrop <= maxDrop && world.getBlockState(probe).isAir()) {
+            holeDrop++;
+            probe = probe.down();
+        }
+        if (!isSafeLanding(world, probe)) {
+            // Only air on the way down and a landing that does no harm: lava, fire, magma, cactus or
+            // a campfire under the hole is no way down (review of the canopy hole fix, 2026-11-09).
+            holeDrop = Integer.MAX_VALUE;
+        }
+        ServerPlayerEntity commander = resolveCommander(bot, server);
+        Integer commanderY = commander == null ? null : commander.getBlockY();
+        HoleNudge nudge = HOLE_NUDGE.get(botId);
+        if (nudge == null || !nudge.column().equals(column)) {
+            nudge = new HoleNudge(column, now);
+        }
+        if (!TreeStuckDropPolicy.shouldEdgeIntoHole(bot.isOnGround(), belowOpen, supportIsLeaf, holeDrop,
+                column.getY(), commanderY, now - nudge.since(), maxDrop)) {
+            return false;
+        }
+        if (nudge.since() == now) {
+            LOGGER.info("TreeStuck: {} on the lip of the hole at {} (drop {}), edging onto it",
+                    bot.getName().getString(), belowFeet.toShortString(), holeDrop);
+        }
+        HOLE_NUDGE.put(botId, nudge);
+        BotActions.stop(bot);
+        Vec3d v = bot.getVelocity();
+        bot.setVelocity(TreeStuckDropPolicy.edgeSpeed(bot.getX(), column.getX() + 0.5D), v.y,
+                TreeStuckDropPolicy.edgeSpeed(bot.getZ(), column.getZ() + 0.5D));
+        bot.velocityDirty = true;
         return true;
     }
+
+    /**
+     * How far the bot falls if the leaf at {@code leafPos} under it goes: that cell plus the air
+     * below, onto a landing that does no harm; {@link Integer#MAX_VALUE} when the landing is unsafe or
+     * deeper than {@code maxFall}. The leaf break used to open columns over a terrace 4-6 blocks down
+     * (sandbox 2026-11-09: 1-3 HP lost in 3 of 6 runs).
+     */
+    private static int fallThroughLeaf(ServerWorld world, BlockPos leafPos, int maxFall) {
+        int fall = 1;
+        BlockPos probe = leafPos.down();
+        while (fall <= maxFall && world.getBlockState(probe).isAir()) {
+            fall++;
+            probe = probe.down();
+        }
+        return isSafeLanding(world, probe) ? fall : Integer.MAX_VALUE;
+    }
+
+    /**
+     * Forget the follow path planned from the canopy. Once the bot is down, its next waypoint can sit
+     * six blocks over its head and follow keeps it ("waypoints preserved") while the bot stands at the
+     * trunk (sandbox 2026-11-09, 2 of 6 runs).
+     */
+    private static void dropCanopyWaypoints(ServerPlayerEntity bot) {
+        if (FollowStateService.FOLLOW_WAYPOINTS.remove(bot.getUuid()) != null) {
+            LOGGER.info("TreeStuck: {} off the canopy, dropping the follow path planned up there", bot.getName().getString());
+        }
+    }
+
+    private static boolean isSafeLanding(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isIn(BlockTags.LEAVES)) {
+            return true;
+        }
+        if (!state.getFluidState().isEmpty()) {
+            return state.getFluidState().isIn(net.minecraft.registry.tag.FluidTags.WATER);
+        }
+        if (state.isOf(net.minecraft.block.Blocks.MAGMA_BLOCK) || state.isOf(net.minecraft.block.Blocks.CACTUS)
+                || state.isIn(BlockTags.CAMPFIRES) || state.isIn(BlockTags.FIRE)) {
+            return false;
+        }
+        return state.isSolidBlock(world, pos);
+    }
+
+    private record HoleNudge(BlockPos column, long since) {}
 
     /**
      * Clear all per-bot state. Called when the bot is no longer on leaves.
@@ -266,6 +424,10 @@ public final class TreeStuckEscapeService {
         ACTIVE_ESCAPE_TARGET.remove(botId);
         ESCAPE_TARGET_SET_TICK.remove(botId);
         SAFE_DROP_EXHAUSTED.remove(botId);
+        HOLE_NUDGE.remove(botId);
+        WAITING_FOR_SAFE_WAY.remove(botId);
+        CANOPY_FEET_Y.remove(botId);
+        OFF_LEAF_TICKS.remove(botId);
         // Don't clear dialogue cooldown — let it expire naturally.
         LEAF_MINE_INFLIGHT.remove(botId);
     }
@@ -296,7 +458,7 @@ public final class TreeStuckEscapeService {
                     BlockState probeState = world.getBlockState(probe);
                     if (isSolidNonLeafGround(probeState)) {
                         // Found safe landing. Drop is the number of air blocks.
-                        if (drop <= SAFE_DROP_HEIGHT && drop < bestDrop) {
+                        if (TreeStuckDropPolicy.isSafeDrop(drop) && drop < bestDrop) {
                             best = candidate;
                             bestDrop = drop;
                         }
@@ -341,7 +503,7 @@ public final class TreeStuckEscapeService {
      * Find a leaf block between the bot's position and a trunk block that we can break
      * to make a path toward the trunk.
      */
-    private static BlockPos findLeafTowardTrunk(ServerWorld world, BlockPos botPos, BlockPos trunk) {
+    private static BlockPos findLeafTowardTrunk(ServerWorld world, BlockPos botPos, BlockPos trunk, boolean belowAllowed) {
         // Simple: step toward the trunk and find the first leaf block in the way.
         int dx = Integer.signum(trunk.getX() - botPos.getX());
         int dz = Integer.signum(trunk.getZ() - botPos.getZ());
@@ -355,31 +517,10 @@ public final class TreeStuckEscapeService {
         }
         // Also check directly below (for descending along trunk).
         BlockPos below = botPos.down();
-        if (world.getBlockState(below).isIn(BlockTags.LEAVES)) {
+        if (belowAllowed && world.getBlockState(below).isIn(BlockTags.LEAVES)) {
             return below;
         }
         return null;
-    }
-
-    /**
-     * Measure the drop distance below the bot's feet through air/leaves to solid ground.
-     * Returns 0 if no ground found within scan range.
-     */
-    private static int measureDropBelow(ServerWorld world, BlockPos botPos) {
-        int drop = 0;
-        BlockPos probe = botPos.down();
-        while (drop < SURVIVABLE_DROP_HEIGHT + 2) {
-            BlockState state = world.getBlockState(probe);
-            if (isSolidNonLeafGround(state)) {
-                return drop;
-            }
-            if (!isPassable(state) && !state.isIn(BlockTags.LEAVES)) {
-                return 0; // Non-passable non-leaf — can't fall through.
-            }
-            drop++;
-            probe = probe.down();
-        }
-        return 0; // Too far or no ground.
     }
 
     // ── Utility helpers ──────────────────────────────────────────────────────
@@ -432,17 +573,6 @@ public final class TreeStuckEscapeService {
         ServerPlayerEntity target = server.getPlayerManager().getPlayer(targetUuid);
         if (target == null || target.isRemoved()) return null;
         return target;
-    }
-
-    private static Vec3d getFollowTargetDirection(ServerPlayerEntity bot, MinecraftServer server) {
-        ServerPlayerEntity target = resolveCommander(bot, server);
-        if (target == null) return null;
-        Vec3d targetPos = new Vec3d(target.getX(), target.getY(), target.getZ());
-        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        Vec3d dir = targetPos.subtract(botPos);
-        double len = dir.horizontalLength();
-        if (len < 0.01) return null;
-        return new Vec3d(dir.x / len, 0, dir.z / len);
     }
 
     private static void showDialogue(ServerPlayerEntity bot, String line) {

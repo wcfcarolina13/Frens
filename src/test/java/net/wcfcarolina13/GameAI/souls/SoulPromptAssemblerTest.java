@@ -632,6 +632,46 @@ class SoulPromptAssemblerTest {
     }
 
     @Test
+    void guideBlockSitsJustBeforeRelevantKnowledgeAndIsConditional() {
+        SoulTypes.ProviderRequest request = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, grounding,
+                priorHistory, recentEvents,
+                List.of("Torch: craft 4 at crafting table from 1 Stick (have 4)"),
+                List.of(),
+                List.of("Topic: Fast-Travel Gates", "Command: /bot home Jake"),
+                "how do I fast travel?", Duration.ofSeconds(60));
+
+        List<SoulTypes.Message> messages = request.messages();
+        int guideIdx = -1;
+        int knowledgeIdx = -1;
+        for (int i = 0; i < messages.size(); i++) {
+            if (messages.get(i).content().startsWith("FRENS GUIDE")) {
+                guideIdx = i;
+            }
+            if (messages.get(i).content().startsWith("RELEVANT KNOWLEDGE\n")) {
+                knowledgeIdx = i;
+            }
+        }
+        assertTrue(guideIdx >= 0, "guide block missing");
+        assertEquals(knowledgeIdx - 1, guideIdx, "guide block must sit just before RELEVANT KNOWLEDGE");
+        String guide = messages.get(guideIdx).content();
+        assertEquals(SoulTypes.Role.SYSTEM, messages.get(guideIdx).role());
+        assertTrue(guide.contains("ignore this block"), guide);
+        assertTrue(guide.endsWith("Topic: Fast-Travel Gates\nCommand: /bot home Jake"), guide);
+    }
+
+    @Test
+    void emptyGuideLinesKeepThePromptIdentical() {
+        SoulTypes.ProviderRequest withEmpty = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, grounding,
+                priorHistory, recentEvents, List.of(), List.of(), List.of(), "hello", Duration.ofSeconds(60));
+        SoulTypes.ProviderRequest without = assembler.assemble(
+                UUID.randomUUID(), "local-model", profile, grounding,
+                priorHistory, recentEvents, List.of(), List.of(), "hello", Duration.ofSeconds(60));
+        assertEquals(without.messages(), withEmpty.messages());
+    }
+
+    @Test
     void emptyRelevantKnowledgeAddsNoMessage() {
         SoulTypes.ProviderRequest withEmpty = assembler.assemble(
                 UUID.randomUUID(), "local-model", profile, grounding,

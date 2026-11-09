@@ -57,14 +57,21 @@ public final class CookFuelFallbackPolicy {
     }
 
     /**
+     * The fuel argument as {@code SmeltingService.ensureFuel} reads it: no fuel word means "auto"
+     * (Bradley's ruling 2026-11-09: {@code /bot cook beef} burns the bot's plain fuel; "none" or
+     * "off" still skips fuel). Trimmed and lower-cased.
+     */
+    public static String effectiveFuelSpec(String fuelSpec) {
+        String spec = fuelSpec == null ? "" : fuelSpec.trim().toLowerCase(Locale.ROOT);
+        return spec.isEmpty() ? "auto" : spec;
+    }
+
+    /**
      * True when {@code SmeltingService.ensureFuel} would load leaf litter for this fuel argument:
      * the auto words (cheapest fuel, which leaf litter is) or leaf litter named outright.
      */
     public static boolean specCanUseLeafLitter(String fuelSpec) {
-        if (fuelSpec == null) {
-            return false;
-        }
-        String spec = fuelSpec.trim().toLowerCase(Locale.ROOT);
+        String spec = effectiveFuelSpec(fuelSpec);
         return switch (spec) {
             case "true", "on", "auto", "use", "leaf_litter", "minecraft:leaf_litter" -> true;
             default -> false;

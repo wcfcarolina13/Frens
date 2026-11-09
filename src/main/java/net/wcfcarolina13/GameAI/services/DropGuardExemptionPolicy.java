@@ -92,4 +92,40 @@ public final class DropGuardExemptionPolicy {
                                     boolean refused) {
         return stayOutOfHoles && !onGround && !inWaterOrVehicle && refused;
     }
+
+    /**
+     * In the air, the bot's own column is already a drop: its feet block is {@link #FOLLOW_MIN_DEPTH}
+     * or more above where it would land there ({@code standHere}). Measured from the landing level,
+     * not the feet, so the top of a hop over the canopy (feet up to a block higher) still reads as
+     * over support.
+     */
+    public static boolean airOverDrop(int feetBlockY, int standHere) {
+        return feetBlockY - standHere >= FOLLOW_MIN_DEPTH;
+    }
+
+    /**
+     * In the air, the heading column is a drop: where the bot would land there ({@code standAhead})
+     * is {@link #FOLLOW_MIN_DEPTH} or more below where it would land in its own column. Stand level
+     * against stand level, so a hop does not make a 2-block step read as 3.
+     */
+    public static boolean airHeadingIntoDrop(int standHere, int standAhead) {
+        return standHere - standAhead >= FOLLOW_MIN_DEPTH;
+    }
+
+    /**
+     * Follow (and come/go) in the air: drop the forward momentum when the bot is still over
+     * support but its heading cell is a drop of {@link #FOLLOW_MIN_DEPTH} or more that the ground
+     * guard would not let it walk into ({@code exemptOnGround}: what {@link #exempt} and
+     * {@link #exemptAfterBlindLine} say for the same front cell and target). The ground guard only
+     * runs on the ground, and a bot hopping across an uneven leaf canopy is airborne at nearly
+     * every check: it hopped off a 7-block canopy edge toward its commander below, every guard
+     * check skipped (sandbox trace 2026-11-09, 6 HP). Once over the drop already
+     * ({@code overDropNow}) nothing is changed: stopping there only drops it straight down.
+     * Follow has no planned gap-jump move, so the only thing this costs is an improvised hop
+     * across a deep gap, which now lands back on the edge it left.
+     */
+    public static boolean followHaltInAir(boolean onGround, boolean inWaterOrVehicle, boolean overDropNow,
+                                          boolean headingIntoDrop, boolean exemptOnGround) {
+        return !onGround && !inWaterOrVehicle && !overDropNow && headingIntoDrop && !exemptOnGround;
+    }
 }
