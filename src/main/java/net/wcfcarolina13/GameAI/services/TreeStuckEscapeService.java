@@ -166,7 +166,11 @@ public final class TreeStuckEscapeService {
             if (tryEdgeIntoHole(bot, world, server, belowFeet, now)) {
                 return true;
             }
+            HoleNudge spent = HOLE_NUDGE.get(botId);
             clearState(botId);
+            if (spent != null && spent.column().equals(bot.getBlockPos())) {
+                HOLE_NUDGE.put(botId, spent); // keep this hole's spent budget while the bot stays on it
+            }
             return false;
         }
         HOLE_NUDGE.remove(botId);
@@ -278,15 +282,25 @@ public final class TreeStuckEscapeService {
                                            BlockPos belowFeet, long now) {
         UUID botId = bot.getUuid();
         BlockPos column = bot.getBlockPos();
-        boolean belowOpen = isOpenNonLeaf(world, belowFeet);
+        if (bot.isSneaking()) {
+            // A sneaking player is held at ledges (PlayerEntity.clipAtLedge), so the move would do
+            // nothing for 40 ticks while follow waits; leave it to the sneak lock's owner.
+            return false;
+        }
+        boolean belowOpen = world.getBlockState(belowFeet).isAir();
         BlockPos support = bot.supportingBlockPos.orElse(null);
         boolean supportIsLeaf = support != null && !support.equals(belowFeet)
                 && world.getBlockState(support).isIn(BlockTags.LEAVES);
         int holeDrop = 0;
         BlockPos probe = belowFeet;
-        while (holeDrop <= SAFE_DROP_HEIGHT && isOpenNonLeaf(world, probe)) {
+        while (holeDrop <= SAFE_DROP_HEIGHT && world.getBlockState(probe).isAir()) {
             holeDrop++;
             probe = probe.down();
+        }
+        if (!isSafeLanding(world, probe)) {
+            // Only air on the way down and a landing that does no harm: lava, fire, magma, cactus or
+            // a campfire under the hole is no way down (review of the canopy hole fix, 2026-11-09).
+            holeDrop = Integer.MAX_VALUE;
         }
         ServerPlayerEntity commander = resolveCommander(bot, server);
         Integer commanderY = commander == null ? null : commander.getBlockY();
@@ -311,10 +325,19 @@ public final class TreeStuckEscapeService {
         return true;
     }
 
-    private static boolean isOpenNonLeaf(ServerWorld world, BlockPos pos) {
+    private static boolean isSafeLanding(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
-        return !state.isIn(BlockTags.LEAVES) && state.getCollisionShape(world, pos).isEmpty()
-                && state.getFluidState().isEmpty();
+        if (state.isIn(BlockTags.LEAVES)) {
+            return true;
+        }
+        if (!state.getFluidState().isEmpty()) {
+            return state.getFluidState().isIn(net.minecraft.registry.tag.FluidTags.WATER);
+        }
+        if (state.isOf(net.minecraft.block.Blocks.MAGMA_BLOCK) || state.isOf(net.minecraft.block.Blocks.CACTUS)
+                || state.isIn(BlockTags.CAMPFIRES) || state.isIn(BlockTags.FIRE)) {
+            return false;
+        }
+        return state.isSolidBlock(world, pos);
     }
 
     private record HoleNudge(BlockPos column, long since) {}
@@ -329,6 +352,7 @@ public final class TreeStuckEscapeService {
         ACTIVE_ESCAPE_TARGET.remove(botId);
         ESCAPE_TARGET_SET_TICK.remove(botId);
         SAFE_DROP_EXHAUSTED.remove(botId);
+        HOLE_NUDGE.remove(botId);
         // Don't clear dialogue cooldown — let it expire naturally.
         LEAF_MINE_INFLIGHT.remove(botId);
     }
