@@ -60,6 +60,8 @@ Open the fren's inventory and action screen with `/bot open Jake`. Most jobs are
 /bot stop Jake                 stop whatever it is doing
 ```
 
+Typed `/bot` commands work for operators and for the host of a singleplayer or LAN world. On a server, other players use the buttons instead.
+
 Give the fren tools and food by putting them in its inventory, the same way you'd use a chest. With no axe, it punches a tree and crafts one.
 
 At sunset, a fren that is idle (not following you) or on an until-sunset job heads home and sleeps. To have one return to a far-off job each morning, see [Work loops](Work-Loops.md).
