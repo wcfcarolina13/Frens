@@ -58,6 +58,8 @@ public final class CraftBundleAskPolicy {
     public static final String SHEARS = "minecraft:shears";
     public static final String FURNACE = "minecraft:furnace";
     public static final String CHEST = "minecraft:chest";
+    public static final String GOLD_INGOT = "minecraft:gold_ingot";
+    public static final String DIAMOND = "minecraft:diamond";
     /** The synthetic target of one craft: the tools asked for, plus a table when one must be made. */
     public static final String CRAFT_SET = "frens:craft_set";
 
@@ -89,7 +91,11 @@ public final class CraftBundleAskPolicy {
      *   <li>shield: 6 planks (the {@code wooden_tool_materials} tag) + 1 iron ingot (3×3);</li>
      *   <li>bucket: 3 iron ingots (3×3); shears: 2 iron ingots (2×2);</li>
      *   <li>furnace: 8 {@code stone_crafting_materials} (3×3);</li>
-     *   <li>chest: 8 planks (3×3); crafting table: 4 planks (2×2).</li>
+     *   <li>chest: 8 planks (3×3); crafting table: 4 planks (2×2);</li>
+     *   <li>iron, golden and diamond armour (backlog 1217; {@code <material>_<piece>.json} and the
+     *       minecraft.wiki Helmet, Chestplate, Leggings and Boots crafting grids): helmet 5,
+     *       chestplate 8, leggings 7, boots 4 of the iron ingot, gold ingot or diamond, all 3×3
+     *       (the wiki's Armor page: "A full set ... requires 24 units of a given material").</li>
      * </ul>
      */
     private static final Map<String, KnownCraft> KNOWN = knownCrafts();
@@ -110,7 +116,22 @@ public final class CraftBundleAskPolicy {
         put(known, FURNACE, new Recipe(1, Map.of(STONE_CRAFTING, 8)), "furnace", "furnaces");
         put(known, CHEST, new Recipe(1, Map.of(PLANKS, 8)), "chest", "chests");
         put(known, CRAFTING_TABLE, new Recipe(1, Map.of(PLANKS, 4)), "crafting table", "crafting tables");
+        putArmor(known, "iron", "iron", IRON_INGOT);
+        putArmor(known, "golden", "golden", GOLD_INGOT);
+        putArmor(known, "diamond", "diamond", DIAMOND);
         return known;
+    }
+
+    /** A metal's four armour pieces: helmet 5, chestplate 8, leggings 7, boots 4 of {@code material}. */
+    private static void putArmor(Map<String, KnownCraft> known, String idPrefix, String word, String material) {
+        put(known, "minecraft:" + idPrefix + "_helmet", new Recipe(1, Map.of(material, 5)),
+                word + " helmet", word + " helmets");
+        put(known, "minecraft:" + idPrefix + "_chestplate", new Recipe(1, Map.of(material, 8)),
+                word + " chestplate", word + " chestplates");
+        put(known, "minecraft:" + idPrefix + "_leggings", new Recipe(1, Map.of(material, 7)),
+                "pair of " + word + " leggings", "pairs of " + word + " leggings");
+        put(known, "minecraft:" + idPrefix + "_boots", new Recipe(1, Map.of(material, 4)),
+                "pair of " + word + " boots", "pairs of " + word + " boots");
     }
 
     private static void put(Map<String, KnownCraft> known, String id, Recipe recipe, String singular, String plural) {
@@ -444,8 +465,13 @@ public final class CraftBundleAskPolicy {
     public static String purposeText(String singular, String plural, int amount, boolean withTable) {
         boolean blank = singular == null || singular.isBlank();
         String many = plural == null || plural.isBlank() ? (blank ? null : singular.strip() + "s") : plural.strip();
-        String what = blank ? "that" : amount > 1 ? amount + " " + many : "a " + singular.strip();
+        String what = blank ? "that" : amount > 1 ? amount + " " + many : article(singular.strip()) + " " + singular.strip();
         return withTable ? what + " and a crafting table" : what;
+    }
+
+    /** "an" before a vowel ("an iron helmet"), else "a". */
+    private static String article(String word) {
+        return !word.isEmpty() && "aeiouAEIOU".indexOf(word.charAt(0)) >= 0 ? "an" : "a";
     }
 
     /** The one line a craft ends with when the owner declined or never answered. */
