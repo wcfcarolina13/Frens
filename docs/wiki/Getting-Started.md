@@ -20,7 +20,7 @@ Put the Frens jar and Fabric API in your `mods/` folder.
 The first time you open a world with Frens, a **Choose Frens World Mode** screen asks how you want to get companions:
 
 - **Admin Mode (Manual Spawn / Commands)**: you create frens yourself, by name. It's the most stable choice, so pick this one if you're unsure.
-- **Questing Mode (Village Recruitment)**: you recruit frens in a village and unlock more as the friendship grows. It's still in development and buggier than Admin. See the [Companion questing guide](../../COMPANION_QUESTING_GUIDE.md).
+- **Questing Mode (Village Recruitment)**: you recruit frens in a village and unlock more as the friendship grows. It's still in development and buggier than Admin. See the [Companion questing guide](https://github.com/wcfcarolina13/Frens/blob/main/COMPANION_QUESTING_GUIDE.md).
 
 Only an operator or the host can choose. If you need the screen again later, run `/bot worldmode reset` ([World Mode Reset](Guide-Admin.md#world-mode-reset)).
 

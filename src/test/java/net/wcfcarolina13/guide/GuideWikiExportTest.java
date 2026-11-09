@@ -40,6 +40,16 @@ class GuideWikiExportTest {
         }
     }
 
+    /** Every generated page must be in the site navigation (mkdocs.yml), or it drops out of the sidebar. */
+    @Test
+    void siteNavigationListsEveryGuidePage() throws IOException {
+        String mkdocs = Files.readString(Path.of("mkdocs.yml"), StandardCharsets.UTF_8).replace("\r\n", "\n");
+        for (String page : GuideWikiExporter.render(GuideCatalog.loadBundled()).keySet()) {
+            assertTrue(mkdocs.contains(": " + page + "\n"),
+                    page + " is not in the nav of mkdocs.yml. Add it under In-game Guide.");
+        }
+    }
+
     @Test
     void stripsFormattingCodesFillsPlaceholdersAndNestsBullets() {
         GuideCatalog.Topic t = new GuideCatalog.Topic("x", "Core Actions", "§eGo§r", "Use {guideKey}",

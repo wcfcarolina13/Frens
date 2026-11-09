@@ -143,3 +143,7 @@ docs/PRD-vanilla-movement-refactor.md
 # Private dev tooling: symlinks into the frens-dev repo on the Mac
 /tools/sandbox
 /docs/testing
+
+# Wiki site build output (mkdocs)
+/site/
+/_site/
