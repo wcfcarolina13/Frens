@@ -57,4 +57,12 @@ class BotWaterEscapeCarveWaitTest {
         assertTrue(body.contains("callOnServer(server,\n                () -> world.getBlockState(pos).getCollisionShape"),
                 "the cell must be re-read on the server thread");
     }
+
+    @org.junit.jupiter.api.Test
+    void carveScansPaintingsOnlyOnTheServerThread() throws java.io.IOException {
+        String source = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "src/main/java/net/wcfcarolina13/GameAI/services/BotWaterEscapeService.java"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                source.contains("isNeverBreakAt(world, pos, world.getServer().isOnThread())"));
+    }
 }

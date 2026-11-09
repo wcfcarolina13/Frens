@@ -36,7 +36,7 @@ class ConfigJsonUtilRoundTripTest {
         cfg.setGameplayTipsEnabled(false);
         cfg.setIdleHobbiesAnywhereEnabled(true);
         cfg.setBotsLogOffWhenCantSleepEnabled(false);
-        cfg.setPathfinder("classic"); // syncs the legacy flag to false
+        cfg.setPathfinder("baritone"); // a non-default pick; syncs the legacy flag to true
         cfg.setFortifyForcePlaceEnabled(true);
         cfg.setGlobalTeleportDuringSkills(Boolean.TRUE);
         cfg.setFortBufferRadius(17);
@@ -275,14 +275,14 @@ class ConfigJsonUtilRoundTripTest {
 
     @Test
     void preSyncSnapshotRestoresTheLocalChoice() throws Exception {
-        for (String local : new String[] {null, "unified", "baritone", "classic"}) {
+        for (String local : new String[] {null, "unified", "baritone"}) {
             ManualConfig cfg = newRealConfig();
             cfg.setPathfinder(local);
             net.wcfcarolina13.PathFinding.PathFinderChoice before = cfg.getPathfinderChoice();
             net.wcfcarolina13.FilingSystem.SharedConfig snapshot = net.wcfcarolina13.FilingSystem.SharedConfig.capture(cfg);
 
             ManualConfig server = newRealConfig();
-            server.setPathfinder(local == null || "unified".equals(local) ? "classic" : "unified");
+            server.setPathfinder(local == null || "unified".equals(local) ? "baritone" : "unified");
             assertTrue(ConfigJsonUtil.applyConfigJson(ConfigJsonUtil.configToJson(server), cfg));
             assertEquals(server.getPathfinderChoice(), cfg.getPathfinderChoice());
 

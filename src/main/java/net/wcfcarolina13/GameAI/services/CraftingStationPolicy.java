@@ -292,4 +292,33 @@ public final class CraftingStationPolicy {
         String item = label == null ? "" : label.trim().toLowerCase(java.util.Locale.ROOT);
         return botId + "|" + item;
     }
+
+    /** What a plank craft does once its make-room step returns (see {@link #afterMakeRoom}). */
+    public enum AfterMakeRoom { CRAFT, NESTED_TABLE, SHORT }
+
+    /**
+     * A plank craft counts its planks, makes room, then commits. Making room can place a chest, and
+     * crafting that chest can craft and place a crafting table: those nested crafts spend the planks
+     * counted before. {@code stationTable}: this craft is a table for another craft's station step;
+     * {@code tableNowAvailable}: a table is now held or in reach, so a second one is never made.
+     * Otherwise the craft commits only when the planks it needs are still there.
+     */
+    public static AfterMakeRoom afterMakeRoom(boolean stationTable, boolean tableNowAvailable,
+                                              int planksHeld, int planksNeeded) {
+        if (stationTable && tableNowAvailable) {
+            return AfterMakeRoom.NESTED_TABLE;
+        }
+        return planksHeld >= planksNeeded ? AfterMakeRoom.CRAFT : AfterMakeRoom.SHORT;
+    }
+
+    /**
+     * Whether the one-minute table-craft cooldown refuses a new table. It exists so a bot that just
+     * placed a table it cannot reach does not craft table after table beside it; so it holds only
+     * while some table is in the scan range. With none in range (the bot moved on, or the table is
+     * gone) a second craft within the minute is allowed (sandbox 2026-11-08: a second
+     * /bot craft 40 blocks away answered "I need a crafting table nearby" while holding 8 logs).
+     */
+    public static boolean tableCraftCooldownBlocks(boolean cooldownActive, boolean tableInRange) {
+        return cooldownActive && tableInRange;
+    }
 }

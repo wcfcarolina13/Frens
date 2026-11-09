@@ -17,8 +17,7 @@ class PathFinderOverridesTest {
 
     @Test
     void overrideWinsOverGlobal() {
-        assertEquals(PathFinderChoice.BIDIR, PathFinderOverrides.resolve(PathFinderChoice.BIDIR, PathFinderChoice.UNIFIED));
-        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolve(PathFinderChoice.BARITONE, PathFinderChoice.BIDIR));
+        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolve(PathFinderChoice.BARITONE, PathFinderChoice.UNIFIED));
         assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolve(PathFinderChoice.UNIFIED, PathFinderChoice.BARITONE));
     }
 
@@ -36,7 +35,8 @@ class PathFinderOverridesTest {
         // 1.1.261: a null saved choice is UNIFIED, explicit picks map to their finder.
         assertEquals(PathFinderChoice.UNIFIED, PathFinderDefaultPolicy.fromSaved(null));
         assertEquals(PathFinderChoice.BARITONE, PathFinderDefaultPolicy.fromSaved("baritone"));
-        assertEquals(PathFinderChoice.BIDIR, PathFinderDefaultPolicy.fromSaved("classic"));
+        // Slice D: the removed classic finder's token loads as the default.
+        assertEquals(PathFinderChoice.UNIFIED, PathFinderDefaultPolicy.fromSaved("classic"));
         // Through the dispatch precedence: a per-bot override still beats the saved global.
         UUID bot = UUID.randomUUID();
         PathFinderOverrides.set(bot, PathFinderChoice.BARITONE);
@@ -45,18 +45,17 @@ class PathFinderOverridesTest {
     }
 
     @Test
-    void othersAreTheTwoShadowFinders() {
-        assertEquals(java.util.List.of(PathFinderChoice.BIDIR, PathFinderChoice.BARITONE), PathFinderChoice.UNIFIED.others());
-        assertEquals(java.util.List.of(PathFinderChoice.BARITONE, PathFinderChoice.UNIFIED), PathFinderChoice.BIDIR.others());
-        assertEquals(java.util.List.of(PathFinderChoice.BIDIR, PathFinderChoice.UNIFIED), PathFinderChoice.BARITONE.others());
+    void othersIsTheOneShadowFinder() {
+        assertEquals(java.util.List.of(PathFinderChoice.BARITONE), PathFinderChoice.UNIFIED.others());
+        assertEquals(java.util.List.of(PathFinderChoice.UNIFIED), PathFinderChoice.BARITONE.others());
     }
 
     @Test
     void perBotSetAndClear() {
         UUID a = UUID.randomUUID();
         UUID b = UUID.randomUUID();
-        PathFinderOverrides.set(a, PathFinderChoice.BIDIR);
-        assertEquals(PathFinderChoice.BIDIR, PathFinderOverrides.resolveFor(a, PathFinderChoice.UNIFIED));
+        PathFinderOverrides.set(a, PathFinderChoice.BARITONE);
+        assertEquals(PathFinderChoice.BARITONE, PathFinderOverrides.resolveFor(a, PathFinderChoice.UNIFIED));
         assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(b, PathFinderChoice.UNIFIED));
         assertEquals(PathFinderChoice.UNIFIED, PathFinderOverrides.resolveFor(null, PathFinderChoice.UNIFIED));
         PathFinderOverrides.set(a, null);
@@ -66,7 +65,7 @@ class PathFinderOverridesTest {
 
     @Test
     void clearAllDropsEveryOverride() {
-        PathFinderOverrides.set(UUID.randomUUID(), PathFinderChoice.BIDIR);
+        PathFinderOverrides.set(UUID.randomUUID(), PathFinderChoice.UNIFIED);
         PathFinderOverrides.set(UUID.randomUUID(), PathFinderChoice.BARITONE);
         assertEquals(2, PathFinderOverrides.size());
         PathFinderOverrides.clearAll();
@@ -78,10 +77,10 @@ class PathFinderOverridesTest {
         assertEquals(PathFinderChoice.BARITONE, PathFinderChoice.parse("Baritone"));
         assertEquals(PathFinderChoice.UNIFIED, PathFinderChoice.parse("unified"));
         assertEquals("unified", PathFinderChoice.UNIFIED.label());
-        assertEquals(PathFinderChoice.BIDIR, PathFinderChoice.parse("classic"));
-        assertEquals(PathFinderChoice.BIDIR, PathFinderChoice.parse("bidir"));
+        assertNull(PathFinderChoice.parse("classic"));
+        assertNull(PathFinderChoice.parse("bidir"));
         assertNull(PathFinderChoice.parse("default"));
         assertNull(PathFinderChoice.parse(null));
-        assertEquals("bidir", PathFinderChoice.BIDIR.label());
+        assertEquals(2, PathFinderChoice.values().length);
     }
 }

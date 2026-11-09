@@ -444,6 +444,14 @@ class SoulStoreTest {
         taggedStore.state(UUID.randomUUID()).get(2, SECONDS);
         taggedStore.close();
 
+        // close() shuts the executor down without waiting; its worker exits a moment later, and
+        // under load that moment is visible. Give it a bounded time to finish: a leaked thread
+        // (one close() never stops) still fails, a slow exit no longer does.
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            if (threadName.equals(t.getName())) {
+                t.join(5_000L);
+            }
+        }
         boolean stillAlive = Thread.getAllStackTraces().keySet().stream()
                 .anyMatch(t -> threadName.equals(t.getName()) && t.isAlive());
         assertFalse(stillAlive, "executor thread should not remain alive after close()");

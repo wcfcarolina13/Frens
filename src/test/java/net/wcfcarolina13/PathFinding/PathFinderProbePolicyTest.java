@@ -13,11 +13,6 @@ class PathFinderProbePolicyTest {
     }
 
     @Test
-    void classicHasNoBudgetedEntryAndProbesWithBaritone() {
-        assertEquals(PathFinderChoice.BARITONE, PathFinderProbePolicy.budgetedFinder(PathFinderChoice.BIDIR));
-    }
-
-    @Test
     void nullIsTheDefault() {
         assertEquals(PathFinderProbePolicy.budgetedFinder(PathFinderChoice.DEFAULT),
                 PathFinderProbePolicy.budgetedFinder(null));
@@ -43,7 +38,7 @@ class PathFinderProbePolicyTest {
         assertEquals(PathFinderChoice.UNIFIED, probeFor(null, null));
         assertEquals(PathFinderChoice.UNIFIED, probeFor(null, "unified"));
         assertEquals(PathFinderChoice.BARITONE, probeFor(null, "baritone"));
-        assertEquals(PathFinderChoice.BARITONE, probeFor(null, "classic"));
+        assertEquals(PathFinderChoice.UNIFIED, probeFor(null, "classic")); // removed finder: the default
     }
 
     @Test
@@ -52,6 +47,5 @@ class PathFinderProbePolicyTest {
         assertEquals(PathFinderChoice.BARITONE, probeFor(PathFinderChoice.BARITONE, null));
         assertEquals(PathFinderChoice.UNIFIED, probeFor(PathFinderChoice.UNIFIED, "baritone"));
         assertEquals(PathFinderChoice.UNIFIED, probeFor(PathFinderChoice.UNIFIED, "classic"));
-        assertEquals(PathFinderChoice.BARITONE, probeFor(PathFinderChoice.BIDIR, "unified"));
     }
 }
