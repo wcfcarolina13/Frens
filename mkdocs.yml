@@ -1,0 +1,70 @@
+# Builds the wiki in docs/wiki as a website (GitHub Pages, .github/workflows/wiki-pages.yml).
+site_name: Frens wiki
+site_description: Companion bots for Minecraft. Install, first steps, the in-game Guide, and how-tos.
+site_url: https://wcfcarolina13.github.io/Frens/
+repo_url: https://github.com/wcfcarolina13/Frens
+repo_name: wcfcarolina13/Frens
+edit_uri: edit/main/docs/wiki/
+docs_dir: docs/wiki
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+      # GitHub-style heading ids, so the same anchors work on github.com and on the site.
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+
+validation:
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+
+nav:
+  - Home: README.md
+  - Getting started: Getting-Started.md
+  - FAQ: FAQ.md
+  - Work loops: Work-Loops.md
+  - In-game Guide:
+      - All topics: Guide.md
+      - Basics: Guide-Basics.md
+      - Spawning: Guide-Spawning.md
+      - Admin: Guide-Admin.md
+      - Movement: Guide-Movement.md
+      - Settings: Guide-Settings.md
+      - Gathering: Guide-Gathering.md
+      - Farming: Guide-Farming.md
+      - Mining: Guide-Mining.md
+      - Construction: Guide-Construction.md
+      - Modes: Guide-Modes.md
+      - Roadmap: Guide-Roadmap.md
+      - Items: Guide-Items.md
+      - Shortcuts: Guide-Shortcuts.md
+      - Spells: Guide-Spells.md
+      - Core Actions: Guide-Core-Actions.md
+      - Utilities: Guide-Utilities.md
+      - Enchanting: Guide-Enchanting.md
