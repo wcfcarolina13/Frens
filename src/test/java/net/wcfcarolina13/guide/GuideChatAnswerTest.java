@@ -22,12 +22,23 @@ class GuideChatAnswerTest {
     void answerNamesTheCardFillsTheBotAndOffersTheRunnerUp() {
         GuideChatAnswer.Answer a = GuideChatAnswer.build(matches("how do I fast travel?"), "Jake").orElseThrow();
         assertFalse(a.spoken().contains("§"), a.spoken());
-        assertTrue(a.spoken().startsWith(a.topicTitle() + ": "), a.spoken());
+        assertEquals(topic(a.topicId()).resolve("Jake", GuideChatAnswer.GUIDE_KEY_TEXT).answer(), a.spoken(),
+                "the card's spoken answer is what the fren says");
+        assertFalse(a.spoken().contains("{bot}"), a.spoken());
         assertFalse(a.alsoTopicId().isEmpty(), "fast travel has two close cards");
         assertNotEquals(a.topicId(), a.alsoTopicId());
 
         GuideChatAnswer.Answer stop = GuideChatAnswer.build(matches("how do I stop you"), "Jake").orElseThrow();
         assertEquals("/bot stop Jake", stop.commandHint());
+    }
+
+    @Test
+    void cardWithoutAnAnswerFallsBackToTitleAndSummary() {
+        GuideCatalog.Topic t = topic("basics_stop");
+        GuideCatalog.Topic bare = new GuideCatalog.Topic(t.id(), t.category(), t.title(), t.summary(),
+                t.details(), t.command(), t.shortcuts(), t.tags(), t.adminOnly(), t.questingOnly(), "");
+        assertEquals("Stop: " + t.summary(), GuideChatAnswer.spokenText(bare));
+        assertTrue(GuideChatAnswer.spokenText(t).startsWith("Look at me"), GuideChatAnswer.spokenText(t));
     }
 
     @Test
@@ -59,6 +70,7 @@ class GuideChatAnswerTest {
         List<String> lines = GuideChatAnswer.promptLines(matches("how do I set up compass work loops?"),
                 "Jake", GuideChatAnswer.MAX_PROMPT_CHARS);
         assertEquals("Topic: Daily Work Loops (Lodestone Compass)", lines.get(0));
+        assertTrue(lines.get(1).startsWith("Short answer (in your voice): Put a lodestone"), lines.get(1));
         assertTrue(lines.contains("Command: /bot compass list Jake"), lines.toString());
         assertTrue(lines.stream().anyMatch(l -> l.contains("/bot skill woodcut Jake")), lines.toString());
         int chars = lines.stream().mapToInt(l -> l.length() + 1).sum();

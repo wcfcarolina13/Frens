@@ -55,14 +55,14 @@ public final class GuideChatAnswer {
     }
 
     /**
-     * What the fren says for {@code topic} (placeholders already filled): the card's title and
-     * summary.
-     *
-     * <p>The Guide is getting an optional per-topic {@code answer} (one to three sentences a fren
-     * can say as they are). Once {@code GuideCatalog.Topic.answer()} exists, this returns it when
-     * it isn't blank and falls back to the line below.
+     * What the fren says for {@code topic} (placeholders already filled): the card's spoken
+     * {@code answer}, or its title and summary when the card has none.
      */
     static String spokenText(GuideCatalog.Topic topic) {
+        String answer = clean(topic.answer());
+        if (!answer.isEmpty()) {
+            return answer;
+        }
         return clean(topic.title()) + ": " + clean(topic.summary());
     }
 
@@ -92,8 +92,8 @@ public final class GuideChatAnswer {
     }
 
     /**
-     * The Guide block of a soul prompt: the best topic in full (summary, details, command, where
-     * to find it) as far as {@code maxChars} allows, then one line per other match. Whole lines
+     * The Guide block of a soul prompt: the best topic in full (spoken answer, summary, command,
+     * details, where to find it) as far as {@code maxChars} allows, then one line per other match. Whole lines
      * only, so a cut never leaves half a sentence. Empty for no matches.
      */
     public static List<String> promptLines(List<GuideQuestionMatcher.Match> matches, String botName,
@@ -105,8 +105,14 @@ public final class GuideChatAnswer {
         List<String> lines = new ArrayList<>();
         int[] used = {0};
         GuideCatalog.Topic first = matches.get(0).topic().resolve(bot, GUIDE_KEY_TEXT);
-        if (!add(lines, used, maxChars, "Topic: " + clean(first.title()))
-                || !add(lines, used, maxChars, clean(first.summary()))) {
+        if (!add(lines, used, maxChars, "Topic: " + clean(first.title()))) {
+            return List.copyOf(lines);
+        }
+        String answer = clean(first.answer());
+        if (!answer.isEmpty() && !add(lines, used, maxChars, "Short answer (in your voice): " + answer)) {
+            return List.copyOf(lines);
+        }
+        if (!add(lines, used, maxChars, clean(first.summary()))) {
             return List.copyOf(lines);
         }
         String hint = commandHint(first.command());
