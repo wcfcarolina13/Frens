@@ -50,6 +50,7 @@ public final class FollowMovementService {
     private static final double DROP_GUARD_FORWARD_PROBE = 0.8D;
     private static final long DROP_WARNING_COOLDOWN_MS = 8_000L;
     private static final ConcurrentHashMap<UUID, Long> LAST_DROP_WARNING_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_DROP_REFUSAL_LOG_MS = new ConcurrentHashMap<>();
     private static final String DROP_WARNING_LINE = "woah, I almost fell into that hole";
     private static final long ELYTRA_DESCENT_COOLDOWN_MS = 30_000L;
     private static final ConcurrentHashMap<UUID, Long> LAST_ELYTRA_DESCENT_ATTEMPT_MS = new ConcurrentHashMap<>();
@@ -535,7 +536,15 @@ public final class FollowMovementService {
         if (DropGuardExemptionPolicy.exempt(stayOutOfHoles, stepDown,
                 isGroundedTwoHighClearance(world, targetBlock),
                 front.getX(), front.getZ(), targetBlock.getX(), targetBlock.getZ())) {
-            return false;
+            // The exemption reads only the target. A target level with the bot on the far rim of a
+            // ravine passed it, and the bot walked off the edge (sandbox 2026-11-09). Ask the
+            // blind-walk guard about the line itself before stepping into the drop.
+            BlindWalkGuardPolicy.Decision line =
+                    MovementService.blindLineDecisionOnServerThread(world, bot, targetBlock);
+            if (DropGuardExemptionPolicy.exemptAfterBlindLine(true, line != null ? line.verdict() : null)) {
+                return false;
+            }
+            maybeLogDropRefusal(bot, front, targetBlock, line.reason());
         }
 
         BlockPos safeBypass = selectDropoffBypassCandidate(world, bot.getBlockPos(), front, BlockPos.ofFloored(targetPos),
@@ -1037,6 +1046,18 @@ public final class FollowMovementService {
         boolean wallEast = !hasTwoHighClearance(world, pos.east());
         boolean wallWest = !hasTwoHighClearance(world, pos.west());
         return wallEast && wallWest;
+    }
+
+    /** One INFO line per bot per drop-warning cooldown when the blind-line check withdraws an exemption. */
+    private static void maybeLogDropRefusal(ServerPlayerEntity bot, BlockPos front, BlockPos targetBlock, String reason) {
+        long now = System.currentTimeMillis();
+        long last = LAST_DROP_REFUSAL_LOG_MS.getOrDefault(bot.getUuid(), 0L);
+        if (now - last < DROP_WARNING_COOLDOWN_MS) {
+            return;
+        }
+        LAST_DROP_REFUSAL_LOG_MS.put(bot.getUuid(), now);
+        LOGGER.info("drop guard: {} not exempt toward {} at front {}: blind-walk guard refused ({})",
+                bot.getName().getString(), targetBlock.toShortString(), front.toShortString(), reason);
     }
 
     private static void maybeShowDropWarning(ServerPlayerEntity bot) {

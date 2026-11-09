@@ -3195,6 +3195,25 @@ public final class MovementService {
     private static final double BLIND_WALK_EDGE_INSET = 0.05D;
 
     /**
+     * Server thread only. The {@link BlindWalkGuardPolicy} verdict for the straight line from the
+     * bot toward {@code destination}, sampled in place (no server-thread hop, no log line), for
+     * callers already on the server tick: the follow drop guard asks it before it exempts a drop
+     * because the target stands across or below it. {@code null} when there is nothing to sample.
+     */
+    static BlindWalkGuardPolicy.Decision blindLineDecisionOnServerThread(ServerWorld world,
+                                                                        ServerPlayerEntity player,
+                                                                        BlockPos destination) {
+        if (world == null || player == null || destination == null) {
+            return null;
+        }
+        boolean startInWater = player.isTouchingWater();
+        List<BlockPos> cells = new ArrayList<>();
+        List<BlindWalkGuardPolicy.CellFact> facts = new ArrayList<>();
+        sampleBlindLine(world, player, destination, startInWater, cells, facts);
+        return BlindWalkGuardPolicy.decide(facts, startInWater);
+    }
+
+    /**
      * Server thread only. Walks the XZ cells {@link BlindLineSampler} picks on the line from the
      * bot's exact position to {@code destination} (up to {@link #BLIND_WALK_SAMPLE_CELLS} cells,
      * ending at the destination cell, never past it), following the terrain: a full-height rise
