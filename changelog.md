@@ -2,21 +2,6 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
-## "You and <bot>" after a leading name addresses both bots (2026-11-07, unreleased)
-
-One of the addressee deferrals (1.1.219 handoff). "Jake, you and Wren go mine" went to Jake only,
-so Wren ignored an order meant for it. When a line opens with a bot's name and the rest starts
-with "you and" plus another bot's name, that bot is addressed too. The prompt keeps the clause as
-written.
-
-Costs and limits:
-- Only the first two words after the leading name are read: "you and I", "you and the others"
-  and a mid-sentence "you and Wren" (not after a leading name) stay as before.
-- The other two deferrals are not done. Mid-sentence third-person mentions ("I think Jake is
-  lazy") still reach Jake, because whether a bot should answer being talked about is a design
-  call. Human nicknames are in a separate PR.
-
-Tests: `ChatAddressingTest` (2 new).
 ## CI runs the test suite (2026-11-05, unreleased)
 
 CI ran `./gradlew build -x test`, so the JUnit suite (about 3900 tests: pure policy, wiring and
