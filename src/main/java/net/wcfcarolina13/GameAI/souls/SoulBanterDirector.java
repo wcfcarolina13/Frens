@@ -411,14 +411,15 @@ public final class SoulBanterDirector {
         SoulGroupTypes.GroupSceneTurn turn = new SoulGroupTypes.GroupSceneTurn(
                 kind(lane), playerId, player.getName().getString(),
                 roster, seed, Instant.now(), routingId, addressPlayer, onlineHumans,
-                privateAnchorUsed ? playerId : null);
+                privateAnchorUsed ? playerId : null, seeded.act());
         LOGGER.debug("[souls] banter privacy routingId={} withheldPrivateMemories={} onlineHumans={}",
                 routingId, withheldPrivate, onlineHumans.size());
         long armedUntilMs = now + nextDelay(lane);
         cooldowns(lane).put(playerId, armedUntilMs);
         recordVerdict(playerId, lane, "fired");
-        LOGGER.info("[souls] banter routingId={} outcome=fired rosterCount={} seedChars={} privateSeedCount={}",
-                routingId, roster.size(), seed.length(), privateAnchorUsed ? 1 : 0);
+        LOGGER.info("[souls] banter routingId={} outcome=fired rosterCount={} seedChars={} privateSeedCount={} act={}",
+                routingId, roster.size(), seed.length(), privateAnchorUsed ? 1 : 0,
+                seeded.act() != null ? seeded.act() : "none");
         LOGGER.info("[souls] banter routingId={} supportCount={} seedChars={}",
                 routingId, seeded.supportTopics().size(), seed.length());
         // 1.1.217 gap C1: hold the scripted lanes off for the 5–16 s of generation between this

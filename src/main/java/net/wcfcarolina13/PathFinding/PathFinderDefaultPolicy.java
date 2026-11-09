@@ -3,18 +3,18 @@ package net.wcfcarolina13.PathFinding;
 /**
  * Pure rules for the saved finder choice (1.1.261). The config holds a nullable string
  * ({@code pathfinder}): null means "the default", which is {@link PathFinderChoice#DEFAULT}
- * (UNIFIED). An explicit "unified", "baritone" or "classic" is the player's own pick.
+ * (UNIFIED). An explicit "unified" or "baritone" is the player's own pick. A saved "classic" (the
+ * bidirectional finder, removed in Slice D) loads as the default.
  *
- * <p>The one-time 1.1.261 migration reads the legacy boolean {@code baritonePathfinderEnabled}:
- * false was an explicit classic pick (1.1.240 already moved the old false default to true), so it
- * is kept as "classic"; true was the Baritone default, so it moves to the new default (null).
+ * <p>The one-time 1.1.261 migration reads the legacy boolean {@code baritonePathfinderEnabled}. It
+ * used to keep a false (an explicit classic pick) as "classic"; with classic gone both values move to
+ * the default (null).
  * No Minecraft imports.
  */
 public final class PathFinderDefaultPolicy {
 
     public static final String UNIFIED = "unified";
     public static final String BARITONE = "baritone";
-    public static final String CLASSIC = "classic";
 
     private PathFinderDefaultPolicy() {
     }
@@ -36,8 +36,16 @@ public final class PathFinderDefaultPolicy {
         return switch (choice) {
             case UNIFIED -> UNIFIED;
             case BARITONE -> BARITONE;
-            case BIDIR -> CLASSIC;
         };
+    }
+
+    /** A saved token for the classic finder, removed in Slice D: it is cleared to the default on load. */
+    public static boolean isRemovedFinderToken(String saved) {
+        if (saved == null) {
+            return false;
+        }
+        String t = saved.trim().toLowerCase(java.util.Locale.ROOT);
+        return t.equals("classic") || t.equals("bidir");
     }
 
     /** What the 1.1.261 migration leaves in the config. */
@@ -46,8 +54,8 @@ public final class PathFinderDefaultPolicy {
 
     /**
      * One-time migration. Already migrated: nothing changes. Not migrated with an explicit string
-     * present: the string is kept and only the marker gets stamped. Otherwise the legacy boolean
-     * decides: false is "classic", true is the default (null).
+     * present: the string is kept and only the marker gets stamped. Otherwise the default (null),
+     * whatever the legacy boolean says (its false meant classic, which no longer exists).
      *
      * @param saved          the saved {@code pathfinder} string (nullable)
      * @param legacyBaritone the legacy {@code baritonePathfinderEnabled} value, after the 1.1.240 step
@@ -60,6 +68,6 @@ public final class PathFinderDefaultPolicy {
         if (saved != null && !saved.isBlank()) {
             return new MigrationResult(saved, true);
         }
-        return new MigrationResult(legacyBaritone ? null : CLASSIC, true);
+        return new MigrationResult(null, true);
     }
 }

@@ -578,6 +578,37 @@ class SoulRuntimeTest {
         verify(store).mind(bot);
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void ownerHurtWithASoulWitnessRaisesPeerTrustAndCuriosity() {
+        SoulRuntime runtime = new SoulRuntime(settings(true, true, "test-model"), store,
+                mock(SoulModelProvider.class), scheduler, conversationService);
+        UUID bot = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+        UUID peer = UUID.randomUUID();
+        SoulTypes.SoulMind dayFive = new SoulTypes.SoulMind(SoulTypes.SoulMind.empty().schemaVersion(),
+                SoulTypes.Stance.BASELINE, List.of(), List.of(), java.util.Set.of(), 0L, 5, -1);
+        SoulTypes.SoulEvent event = new SoulTypes.SoulEvent(UUID.randomUUID(),
+                SoulTypes.EventType.OWNER_DAMAGE, owner, List.of(owner, peer), "overworld", "plains",
+                Map.of("source", "zombie"), SoulTypes.Witness.LOCAL, 0L, Instant.EPOCH, SoulTypes.Salience.NORMAL);
+        when(store.cachedMind(bot)).thenReturn(Optional.of(dayFive));
+        when(store.cachedState(peer)).thenReturn(Optional.of(
+                new SoulTypes.SoulState(1, peer, "frens:bob", true, Map.of())));
+        when(store.cachedState(owner)).thenReturn(Optional.empty());
+        when(store.appendEvent(bot, event)).thenReturn(CompletableFuture.completedFuture(null));
+        org.mockito.ArgumentCaptor<java.util.function.UnaryOperator<SoulTypes.SoulMind>> update =
+                org.mockito.ArgumentCaptor.forClass(java.util.function.UnaryOperator.class);
+        when(store.updateMind(org.mockito.ArgumentMatchers.eq(bot), update.capture()))
+                .thenReturn(CompletableFuture.completedFuture(dayFive));
+
+        runtime.recordEvent(bot, event);
+
+        SoulTypes.SoulMind after = update.getValue().apply(dayFive);
+        assertEquals(SoulTypes.Stance.BASELINE.curiosity() + 1, after.playerStance().curiosity());
+        assertEquals(SoulTypes.Stance.BASELINE.trust() + 1, after.peerStances().get(peer).stance().trust());
+        assertFalse(after.peerStances().containsKey(owner), "the owner is not a peer");
+    }
+
     /**
      * Regression test for a souls-disabled install writing soul.json on every bot death or
      * disconnect: {@code cancelBot} must not touch the store at all when the master switch is off

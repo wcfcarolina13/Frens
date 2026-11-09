@@ -1749,6 +1749,25 @@ public final class BotActions {
             newX = resolved.x;
             newY = resolved.y;
             newZ = resolved.z;
+            // A combat backpedal or step-forward is a teleport by a fraction of a block: never onto a
+            // cell with nothing solid under it within StepFloorPolicy.MAX_STEP_DOWN (a guarding bot
+            // stepped this way into the pit it had just climbed out of).
+            // Guard and patrol only: follow and stay combat keep their old backpedal.
+            BotEventHandler.Mode stepMode = BotEventHandler.getModePublic(bot);
+            boolean holdsGround = stepMode == BotEventHandler.Mode.GUARD || stepMode == BotEventHandler.Mode.PATROL;
+            BlockPos landing = BlockPos.ofFloored(newX, newY, newZ);
+            int floorDepth = holdsGround ? StepFloorPolicy.MAX_STEP_DOWN + 1 : 1;
+            for (int d = 1; holdsGround && d <= StepFloorPolicy.MAX_STEP_DOWN; d++) {
+                BlockPos below = landing.down(d);
+                if (!world.getBlockState(below).getCollisionShape(world, below).isEmpty()
+                        || !world.getFluidState(below).isEmpty()) {
+                    floorDepth = d;
+                    break;
+                }
+            }
+            if (!StepFloorPolicy.allows(floorDepth)) {
+                return;
+            }
         }
 
         bot.refreshPositionAndAngles(newX, newY, newZ, bot.getYaw(), bot.getPitch());

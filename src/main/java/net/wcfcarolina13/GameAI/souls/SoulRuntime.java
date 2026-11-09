@@ -975,7 +975,7 @@ public final class SoulRuntime {
                     new java.util.concurrent.atomic.AtomicReference<>();
             store.updateMind(botId, m -> {
                 before.set(m);
-                return SoulMindOps.notePeerScene(m, selfIndex, names, ids, delivered, day);
+                return SoulMindOps.notePeerScene(m, selfIndex, names, ids, delivered, day, turn.speechAct());
             }).thenAccept(next -> {
                 SoulTypes.SoulMind prev = before.get();
                 if (prev != null && prev != next) {
@@ -1617,7 +1617,21 @@ public final class SoulRuntime {
             int day = currentDay(botId);
             updateMind(botId, m -> SoulMindOps.noteTaskGiven(m, day));
         } else if (event.type() == SoulTypes.EventType.OWNER_DAMAGE) {
-            updateMind(botId, SoulMindOps::noteOwnerHurt);
+            // Participants after the owner are the other soul bots that saw the same fight hurt
+            // (SoulEventObserver.noteOwnerDamage). The owner and any bot without an active
+            // profile get no peer stance.
+            java.util.List<UUID> peers = new java.util.ArrayList<>();
+            for (UUID id : event.participants()) {
+                if (id != null && !id.equals(botId) && hasActiveProfile(id)) {
+                    peers.add(id);
+                }
+            }
+            if (peers.isEmpty()) {
+                updateMind(botId, SoulMindOps::noteOwnerHurt);
+            } else {
+                int day = currentDay(botId);
+                updateMind(botId, m -> SoulMindOps.noteSharedHardship(SoulMindOps.noteOwnerHurt(m), botId, peers, day));
+            }
         }
         store.appendEvent(botId, event).exceptionally(ex -> {
             LOGGER.warn("[souls] recordEvent failed for bot {}: {}", botId, ex.toString());

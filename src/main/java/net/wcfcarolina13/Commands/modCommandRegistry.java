@@ -195,6 +195,15 @@ public class modCommandRegistry {
         return name == null ? "" : name.toLowerCase(java.util.Locale.ROOT);
     }
 
+    /** Usage text for a bad pathfinder mode; the removed classic finder gets a line of its own. */
+    private static String pathfinderUsage(String mode, String args) {
+        String usage = "Usage: /bot config pathfinder " + args;
+        if ("classic".equals(mode) || "bidir".equals(mode)) {
+            return "The classic pathfinder was removed. Unified is the default and baritone the fallback. " + usage;
+        }
+        return usage;
+    }
+
     private static String describePathFinder(net.wcfcarolina13.PathFinding.PathFinderChoice choice) {
         if (choice == null) {
             return "unified (default)";
@@ -202,7 +211,6 @@ public class modCommandRegistry {
         return switch (choice) {
             case UNIFIED -> "unified (default)";
             case BARITONE -> "baritone (opt-in fallback)";
-            case BIDIR -> "classic (old)";
         };
     }
 
@@ -690,7 +698,7 @@ public class modCommandRegistry {
                                                                     net.wcfcarolina13.PathFinding.PathFinderChoice.parse(mode);
                                                             if (choice == null && !"default".equals(mode)) {
                                                                 context.getSource().sendFeedback(
-                                                                        () -> Text.literal("Usage: /bot config pathfinder <unified|baritone|classic|default> <bot>"), false);
+                                                                        () -> Text.literal(pathfinderUsage(mode, "<unified|baritone|default> <bot>")), false);
                                                                 return 0;
                                                             }
                                                             net.wcfcarolina13.PathFinding.PathFinderOverrides.set(target.getUuid(), choice);
@@ -704,14 +712,14 @@ public class modCommandRegistry {
                                                             return 1;
                                                         }))
                                                 .executes(context -> {
-                                                    // 1.1.261: all three are saved as an explicit pick (unified is the default,
-                                                    // baritone the opt-in fallback, classic still selectable).
+                                                    // 1.1.261: saved as an explicit pick (unified is the default, baritone the
+                                                    // opt-in fallback; classic was removed in Slice D).
                                                     String mode = StringArgumentType.getString(context, "mode").toLowerCase();
                                                     net.wcfcarolina13.PathFinding.PathFinderChoice choice =
                                                             net.wcfcarolina13.PathFinding.PathFinderChoice.parse(mode);
                                                     if (choice == null) {
                                                         context.getSource().sendFeedback(
-                                                                () -> Text.literal("Usage: /bot config pathfinder <unified|baritone|classic> [bot]"), false);
+                                                                () -> Text.literal(pathfinderUsage(mode, "<unified|baritone> [bot]")), false);
                                                         return 0;
                                                     }
                                                     net.wcfcarolina13.PathFinding.PathFinder.ACTIVE = choice;
@@ -4761,6 +4769,11 @@ public class modCommandRegistry {
         }
         BlockPos goal = safeGoal != null ? safeGoal : rawGoal;
 
+        // As the walk branch does: stop any running skill, then clear the abort latch, which an
+        // earlier /bot stop leaves set. The teleport below checks it first and would answer
+        // "could not reach you: direct: aborted" without moving.
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come.");
+        TaskService.clearAbortLatch(bot.getUuid());
         BotIdleHobbiesService.snoozeFor(bot, 3_600L);
 
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -5997,6 +6010,10 @@ public class modCommandRegistry {
             }
             // Save first: removal alone lost everything since the last autosave.
             BotEventHandler.unregisterBot(bot, true);
+            if (!sessionOnly) {
+                // Also kept with the bot's world position, so a settings reset does not bring it back.
+                net.wcfcarolina13.GameAI.services.BotWorldStateService.markShelved(server, bot.getName().getString(), true);
+            }
             successes++;
         }
         if (!sessionOnly && !targets.isEmpty()) {
@@ -8040,10 +8057,20 @@ public class modCommandRegistry {
             return 0;
         }
         SkillPreferences.setTeleportDuringSkills(bot.getUuid(), enabled);
+        // Kept in the bot's saved controls too: every mode command (follow, stop, come, guard)
+        // re-applies those, which reset an in-memory-only setting to the saved one.
+        savedBotControl(context, bot).setTeleportDuringSkills(enabled);
         String state = enabled ? "enabled" : "disabled";
         ChatUtils.sendSystemMessage(context.getSource(),
                 "Teleport during skill tasks " + state + " for " + bot.getName().getString() + ".");
         return 1;
+    }
+
+    /** This bot's saved per-world controls, the ones {@link net.wcfcarolina13.GameAI.services.BotControlApplier#applyToBot} re-applies. */
+    private static ManualConfig.BotControlSettings savedBotControl(CommandContext<ServerCommandSource> context,
+                                                                   ServerPlayerEntity bot) {
+        String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(context.getSource().getServer());
+        return Frens.CONFIG.getOrCreateBotControl(bot.getName().getString(), worldKey);
     }
 
     private static int executeTeleportConfigTargets(CommandContext<ServerCommandSource> context,
@@ -8055,10 +8082,13 @@ public class modCommandRegistry {
         for (ServerPlayerEntity bot : bots) {
             successes += executeTeleportConfig(context, bot, enabled);
         }
+        if (successes > 0) {
+            Frens.CONFIG.save();
+        }
         if (!bots.isEmpty()) {
             String summary = formatBotList(bots, isAll);
             ChatUtils.sendSystemMessage(context.getSource(),
-                    summary + " now " + (enabled ? "teleport" : "walk") + " during skill tasks.");
+                    summary + " will now " + (enabled ? "teleport" : "walk") + " during skill tasks.");
         }
         return successes;
     }
@@ -8071,6 +8101,7 @@ public class modCommandRegistry {
             return 0;
         }
         SkillPreferences.setPauseOnFullInventory(bot.getUuid(), enabled);
+        savedBotControl(context, bot).setPauseOnFullInventory(enabled);
         String state = enabled ? "enabled" : "disabled";
         ChatUtils.sendSystemMessage(context.getSource(),
                 "Inventory-full pause " + state + " for " + bot.getName().getString() + ".");
@@ -8085,6 +8116,9 @@ public class modCommandRegistry {
         int successes = 0;
         for (ServerPlayerEntity bot : bots) {
             successes += executeInventoryFullConfig(context, bot, enabled);
+        }
+        if (successes > 0) {
+            Frens.CONFIG.save();
         }
         if (!bots.isEmpty()) {
             String summary = formatBotList(bots, isAll);

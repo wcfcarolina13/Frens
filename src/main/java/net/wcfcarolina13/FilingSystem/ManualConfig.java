@@ -91,8 +91,8 @@ public class ManualConfig {
     // default (false). Must initialise to false — Gson keeps the initializer for fields the
     // file lacks, so an old file reads as "not migrated yet". New files are stamped true.
     private boolean baritoneDefaultMigrated = false;
-    // Saved finder choice since 1.1.261: null = the default (unified), else "unified",
-    // "baritone" or "classic" (an explicit pick, never touched by a migration).
+    // Saved finder choice since 1.1.261: null = the default (unified), else "unified" or
+    // "baritone" (an explicit pick). A saved "classic" (removed in Slice D) is cleared on load.
     private String pathfinder = null;
     // Null infers legacy files' explicit choice from the saved token. Sync can carry an
     // effective token without turning an untouched default into a saved preference.
@@ -785,7 +785,7 @@ public class ManualConfig {
     public boolean isBaritoneDefaultMigrated() { return baritoneDefaultMigrated; }
     public boolean isUnifiedDefaultMigrated() { return unifiedDefaultMigrated; }
 
-    /** The saved finder string: null is the default (unified), else "unified", "baritone" or "classic". */
+    /** The saved finder string: null is the default (unified), else "unified" or "baritone". */
     public String getPathfinder() { return pathfinder; }
 
     /** Stores an explicit pick (or null for the default) and re-syncs the legacy flag. */
@@ -804,7 +804,7 @@ public class ManualConfig {
         pathfinderExplicitlySet = explicitlySet && pathfinder != null;
     }
 
-    /** Stores an explicit pick as its saved token ("unified", "baritone", "classic"). */
+    /** Stores an explicit pick as its saved token ("unified" or "baritone"). */
     public void setPathfinderChoice(net.wcfcarolina13.PathFinding.PathFinderChoice choice) {
         setPathfinder(net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.toSaved(choice));
     }
@@ -820,18 +820,28 @@ public class ManualConfig {
 
     /**
      * One-time 1.1.261 migration (unified becomes the default). Runs after
-     * {@link #applyBaritoneDefaultMigration()}: legacy false is an explicit classic pick and is kept
-     * as "classic", legacy true (the Baritone default) moves to null (unified). An explicit string is
-     * never touched. No I/O here; {@link #load()} saves when this returns true.
+     * {@link #applyBaritoneDefaultMigration()}: the legacy flag moves to null (unified) whatever its
+     * value (its false meant classic, removed in Slice D). An explicit string is never touched,
+     * except a saved "classic" or "bidir", which is cleared to the default on every load. No I/O
+     * here; {@link #load()} saves when this returns true.
      *
      * @return true when the config changed and should be saved
      */
     public boolean applyUnifiedDefaultMigration() {
+        boolean clearedClassic = false;
+        if (net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.isRemovedFinderToken(pathfinder)) {
+            LOGGER.info("[Frens] config: the classic pathfinder was removed; using unified (the default). "
+                    + "/bot config pathfinder baritone picks the fallback.");
+            pathfinder = null;
+            pathfinderExplicitlySet = false;
+            syncLegacyPathfinderFlag();
+            clearedClassic = true;
+        }
         net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.MigrationResult result =
                 net.wcfcarolina13.PathFinding.PathFinderDefaultPolicy.migrate(
                         pathfinder, baritonePathfinderEnabled, unifiedDefaultMigrated);
         if (!result.needsSave()) {
-            return false;
+            return clearedClassic;
         }
         boolean wasBaritone = baritonePathfinderEnabled && pathfinder == null;
         unifiedDefaultMigrated = true;
@@ -847,8 +857,7 @@ public class ManualConfig {
     /**
      * One-time 1.1.240 migration: a config written before Baritone became the default holds
      * {@code baritonePathfinderEnabled=false} only because that was the old default, so flip
-     * it to true once. The marker is set either way, so a user who picks classic afterwards
-     * keeps classic. No I/O here; {@link #load()} saves when this returns true.
+     * it to true once. The marker is set either way. No I/O here; {@link #load()} saves when this returns true.
      *
      * @return true when the config changed (flag set and/or finder flipped) and should be saved
      */
@@ -859,8 +868,7 @@ public class ManualConfig {
         baritoneDefaultMigrated = true;
         if (!baritonePathfinderEnabled) {
             baritonePathfinderEnabled = true;
-            LOGGER.info("[Frens] 1.1.240 config migration: pathfinder switched to baritone (the new default); "
-                    + "use /bot config pathfinder classic to go back.");
+            LOGGER.info("[Frens] 1.1.240 config migration: pathfinder switched to baritone (the old default).");
         }
         return true;
     }
