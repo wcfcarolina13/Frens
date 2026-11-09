@@ -34,6 +34,9 @@ public final class BotAutoCookingService {
     // which gate held auto-cook back.
     private static final long DIAGNOSTIC_LOG_TICKS = 20L * 60L;
     private static final Map<UUID, Long> NEXT_DIAGNOSTIC_TICK = new ConcurrentHashMap<>();
+    /** Cached answer of {@link #canCookRawMeatSoon}: {tick, 1 or 0}. The check scans for furnaces. */
+    private static final long COOK_SOON_CACHE_TICKS = 100L;
+    private static final Map<UUID, long[]> COOK_SOON_CACHE = new ConcurrentHashMap<>();
 
     /**
      * Auto-cook decision gate.
@@ -46,6 +49,7 @@ public final class BotAutoCookingService {
         NEXT_FUEL_GATHER_TICK.clear();
         FUEL_GATHER_IN_FLIGHT.clear();
         NEXT_DIAGNOSTIC_TICK.clear();
+        COOK_SOON_CACHE.clear();
     }
 
 
@@ -174,6 +178,50 @@ public final class BotAutoCookingService {
         }
         long nowTick = server.getTicks();
         NEXT_DECISION_TICK.merge(bot.getUuid(), nowTick + Math.max(0L, delayTicks), Math::max);
+    }
+
+    /**
+     * Whether auto-cook could cook this bot's raw food soon: it may run for the bot now, the bot
+     * has something cookable, it has fuel (or a leaf-litter fuel run is available), and a furnace
+     * or smoker is nearby. {@link HealingService#autoEat} holds raw meat only while this is true.
+     * Cached for {@link #COOK_SOON_CACHE_TICKS}; off the server thread only the cache is used
+     * (no world scan there), and without a fresh answer the bot eats as before.
+     */
+    public static boolean canCookRawMeatSoon(ServerPlayerEntity bot) {
+        if (bot == null || bot.getCommandSource() == null) {
+            return false;
+        }
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null) {
+            return false;
+        }
+        long nowTick = server.getTicks();
+        long[] cached = COOK_SOON_CACHE.get(bot.getUuid());
+        if (cached != null && nowTick - cached[0] >= 0 && nowTick - cached[0] < COOK_SOON_CACHE_TICKS) {
+            return cached[1] == 1L;
+        }
+        if (!server.isOnThread()) {
+            return false;
+        }
+        boolean result = computeCanCookRawMeatSoon(bot, nowTick);
+        COOK_SOON_CACHE.put(bot.getUuid(), new long[] {nowTick, result ? 1L : 0L});
+        return result;
+    }
+
+    private static boolean computeCanCookRawMeatSoon(ServerPlayerEntity bot, long nowTick) {
+        if (ineligibleReason(bot) != null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (!SmeltingService.hasCookableFoodInventoryItems(bot, world)) {
+            return false;
+        }
+        UUID id = bot.getUuid();
+        boolean fuel = SmeltingService.hasFuelForAutoCook(bot, world)
+                || (BotHomeService.isHobbyEnabled(bot, "leaf_litter")
+                        && (FUEL_GATHER_IN_FLIGHT.contains(id)
+                                || (nowTick >= NEXT_FUEL_GATHER_TICK.getOrDefault(id, 0L)
+                                        && BotIdleHobbiesService.hasLeafLitterForFuelRun(bot))));
+        return fuel && SmeltingService.hasFoodStationNear(bot, world);
     }
 
     static boolean shouldStartEmergencyAutoCook(int hungerLevel, boolean hasCookableFood, boolean hasFuel) {
