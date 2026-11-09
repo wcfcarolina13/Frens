@@ -1,11 +1,12 @@
 {
-  "_comment": "Single source for the in-game Guide (BotGuideScreen) and the generated wiki pages in docs/wiki. Placeholders: {bot} = the selected bot's name, {guideKey} = the Guide hotkey. After editing, run ./gradlew wikiExport and commit docs/wiki.",
+  "_comment": "Single source for the in-game Guide (BotGuideScreen) and the generated wiki pages in docs/wiki. Placeholders: {bot} = the selected bot's name, {guideKey} = the Guide hotkey. answer: what a fren says when asked how to use this (1 to 3 plain sentences, spoken by the fren, no formatting codes). After editing, run ./gradlew wikiExport and commit docs/wiki.",
   "topics": [
     {
       "id": "basics_ai_setup",
       "category": "Basics",
       "title": "Set up AI companions",
       "summary": "Optional: let companions talk back in their own words. Frens works fully without it.",
+      "answer": "Press the AI setup button at the top right of the Guide and follow the checklist: install Ollama, download a model, turn Soul Chat on, then enable each fren. It all runs on the machine that hosts the world, and nothing is sent online.",
       "details": [
         "Everything else in Frens (skills, following, building, scripted lines) works with no AI at all.",
         "AI chat runs a local model through Ollama on the machine that runs the world (the server machine in multiplayer). Nothing is sent to an online service.",
@@ -24,6 +25,7 @@
       "category": "Basics",
       "title": "Talk to Nearby Bots (Group Chat)",
       "summary": "Start chat with Bots or All bots instead of naming each companion.",
+      "answer": "Type in normal chat, without a slash, and start with Bots or All bots, like: Bots, what should we do next? Up to four of your frens within 32 blocks join in, nearest first, when Soul Chat and Soul Party are on.",
       "details": [
         "Type in normal chat, without a slash: Bots, what should we do next?",
         "All bots, how is everyone doing? works too.",
@@ -42,6 +44,7 @@
       "category": "Basics",
       "title": "Stop",
       "summary": "Immediately cancels whatever the bot is doing.",
+      "answer": "Look at me and press \\, or type /bot stop {bot}. I drop whatever I was doing and wait for your next order.",
       "details": [
         "Use this if the bot behavior is wrong or unsafe.",
         "Stop clears the current task and lets you issue a new one."
@@ -55,6 +58,7 @@
       "category": "Basics",
       "title": "Stand Down",
       "summary": "Bot pauses follow + drop-sweep for 60s, then auto-resumes follow.",
+      "answer": "Hold \\ while looking at me and press 1, or type /bot standdown {bot}. I leave drops alone and stay out of your way for 60 seconds, then go back to following you.",
       "details": [
         "Use when you're sniping mobs and don't want the bot running out to grab XP, drops, or chase.",
         "Different from Stop: Stop clears all state. Stand Down keeps the follow target so the bot rejoins formation when the timer expires.",
@@ -70,6 +74,7 @@
       "category": "Basics",
       "title": "Resume",
       "summary": "Resumes a paused pending task when available.",
+      "answer": "Type /bot resume {bot}. If I have a paused task saved, I pick it back up. If I don't, nothing happens.",
       "details": [
         "If the bot asks whether to resume or stop, Resume continues that saved task.",
         "If no pending task exists, the command safely does nothing."
@@ -83,6 +88,7 @@
       "category": "Basics",
       "title": "Switch Active Bot (Inventory)",
       "summary": "Cycle to another companion from the inventory UI without retyping commands.",
+      "answer": "In a fren's inventory, press [ or ] to switch to the previous or next fren. You can also click the arrows on the switch chip.",
       "details": [
         "In Bot Inventory, press [ and ] to switch previous/next companion.",
         "You can also click < / > in the switch chip on the bot stats row or overlay header.",
@@ -97,6 +103,7 @@
       "category": "Basics",
       "title": "Bot Controls Panel",
       "summary": "Configure spawn behavior and per-bot preferences in one place.",
+      "answer": "Open my inventory, go to the Admin tab and click Bot Controls, or type /configMan. Spawning, dialogue, survival, behaviour and pathfinding settings are all there.",
       "details": [
         "Open from Admin tab: Bot Controls >.",
         "Spawn modes are Questing and Admin.",
@@ -114,6 +121,7 @@
       "category": "Spawning",
       "title": "Auto Spawn on Load",
       "summary": "Controls whether a bot automatically returns when you re-enter the world.",
+      "answer": "When it's on, I come back by myself when you load the world. Type /bot despawn {bot} to shelve me until you spawn me again, or /bot despawn session to send me away for this session only. The toggle is in Bot Controls under Spawning.",
       "details": [
         "When ON (default), the bot spawns automatically on world load with full state restored.",
         "When OFF, the bot stays shelved until you manually run /bot spawn.",
@@ -130,6 +138,7 @@
       "category": "Spawning",
       "title": "Auto Respawn",
       "summary": "Controls what happens when a bot dies.",
+      "answer": "When it's on, I respawn right away at my bed, my base or the world spawn. When it's off, I ask in chat whether to respawn and you answer yes or no. The toggle is in Bot Controls under Spawning.",
       "details": [
         "When ON (default), the bot respawns instantly at the world spawn / bed / saved base.",
         "When OFF, the bot's death triggers a chat prompt: 'Respawn now? (yes/no)'. Reply yes to bring them back, no to stand down.",
@@ -145,6 +154,7 @@
       "category": "Spawning",
       "title": "Bot Roster (Spawn Bots…)",
       "summary": "Multi-select screen for (re)spawning bots and creating new ones.",
+      "answer": "Open Bot Controls and click Spawn Bots, or press - while no frens are out. Tick the frens you want and click Spawn Selected, or type a new name to make a new fren.",
       "details": [
         "Opens automatically after you pick Admin Mode on a fresh world, or when you press the [-] go-to-look hotkey while no bots are present.",
         "You can also open it any time from Bot Controls → 'Spawn Bots…' button in the footer.",
@@ -161,6 +171,7 @@
       "category": "Spawning",
       "title": "Bulk Apply (All Bots)",
       "summary": "One-click reset buttons that set a spawning flag for every bot in this world.",
+      "answer": "Expand the global settings in Bot Controls and use the Bulk Apply buttons at the bottom. They set Auto Respawn or Auto Spawn on Load for every fren at once, and you can still change each fren afterwards.",
       "details": [
         "Expand the global toggles panel in Bot Controls to find them at the bottom.",
         "Auto Respawn: All Bots [ALL ON] / [ALL OFF]: resets the per-bot Auto Respawn flag for every bot. ALL ON also auto-spawns any inactive bot that was waiting on a respawn decision.",
@@ -176,6 +187,7 @@
       "category": "Spawning",
       "title": "No-Companions HUD Hint",
       "summary": "The on-screen notice that appears when no bots are currently in the world.",
+      "answer": "That notice shows when no frens are in the world. Press - to open the Bot Roster and spawn one, or click the small x to hide it for this session.",
       "details": [
         "Shown after ~2 seconds of no bots being present, in admin mode or when survival recruitment is complete.",
         "Press [-] (the go-to-look key) while no bots are present to jump straight to the Bot Roster. Any time, open Guide (]) > Admin > Bot Controls > Spawn Bots.",
@@ -192,6 +204,7 @@
       "category": "Admin",
       "title": "World Mode Reset",
       "summary": "Admin command to re-trigger the world mode selection (Questing vs Admin) welcome screen.",
+      "answer": "An operator types /bot worldmode reset, then rejoins the world or presses the roster key, and the world mode screen opens again.",
       "details": [
         "Useful when a recreated world inherits the old mode-selection state (save-path collision) and the welcome screen doesn't reappear.",
         "Run /bot worldmode reset. You'll get a chat confirmation.",
@@ -209,6 +222,7 @@
       "category": "Movement",
       "title": "Follow",
       "summary": "Keeps the bot near you while you travel.",
+      "answer": "Look at me and press the backtick key, or type /bot follow {bot}. Press it again to stop. The Actions menu sets how close I stay.",
       "details": [
         "Great for cave runs and travel support.",
         "Use follow distance controls in Actions to tighten or loosen spacing."
@@ -222,6 +236,7 @@
       "category": "Settings",
       "title": "Keep Bots Quiet",
       "summary": "Turn down what bots say, in text or out loud.",
+      "answer": "Open Bot Controls and turn off the dialogue toggles you don't want. Scripted Text and Scripted Voice cover the ready-made lines, and Soul Chat and Soul Voice cover AI chat. Each one works on its own.",
       "details": [
         "Open Bot Controls and find the dialogue toggles.",
         "Scripted Text and Scripted Voice cover the ready-made lines.",
@@ -237,6 +252,7 @@
       "category": "Settings",
       "title": "Let a Friend Use Bots",
       "summary": "Who can command a bot on a shared world.",
+      "answer": "A fren listens to its owner, an operator or the host. To let a friend command your frens, make them an operator on the world.",
       "details": [
         "A bot's owner, an operator or the host can command it.",
         "To let a friend command your bots, make them an operator on the world."
@@ -250,8 +266,9 @@
       "category": "Settings",
       "title": "Follow Teleport",
       "summary": "Wolf-style catch-up teleport during follow mode.",
+      "answer": "Turn on Follow Teleport in Bot Controls under Behavior. While I follow you, I teleport to a safe spot near you when you are 15 or more blocks away and out of my sight, when I am stuck for about a second and a half, or when you are out of sight 10 or more blocks above or below me.",
       "details": [
-        "When enabled, the bot teleports near you if it falls more than 15 blocks behind, gets stuck for 3 seconds, or loses vertical contact (10+ block Y gap).",
+        "When enabled, the bot teleports near you when it is 15 or more blocks away and can't see you, when it is stuck for about 1.5 seconds at least 7 blocks away, when you are out of sight 10 or more blocks above or below it, or when it is 20 or more blocks away and stuck for a second.",
         "This only affects follow mode. It does not enable teleport during skills, sweeps, or other behaviors.",
         "The bot finds a safe spot behind you, so it won't teleport into lava or off cliffs.",
         "Toggle in Bot Controls > Behavior > Follow Teleport.",
@@ -266,6 +283,7 @@
       "category": "Movement",
       "title": "Regroup",
       "summary": "Calls the companion back toward you using the safer regroup behavior.",
+      "answer": "Type /bot regroup {bot} and I come back to you the careful way. Use it when following goes wrong or you want me close right now.",
       "details": [
         "Use this when follow is struggling or you want the bot to come back to you deliberately.",
         "Preferred command: /bot regroup. Legacy alias: /bot come.",
@@ -280,6 +298,7 @@
       "category": "Movement",
       "title": "Return Home",
       "summary": "Sends the bot back to its saved home/base anchor.",
+      "answer": "Type /bot return {bot} and I head back to my home base. Run it again to cancel.",
       "details": [
         "Toggle style: pressing again can cancel and return control.",
         "Pair with Guard/Patrol for base security loops."
@@ -293,6 +312,7 @@
       "category": "Gathering",
       "title": "Cleanup (Drop Sweep)",
       "summary": "Collects nearby dropped items quickly.",
+      "answer": "Press Cleanup in the Actions menu, or type /bot skill drop_sweep {bot}, and I pick up the items lying around nearby. It helps after a fight, a mining trip or a big tree run.",
       "details": [
         "Best after combat, mining, logging, or building.",
         "Runs a focused pickup sweep to reduce item despawns."
@@ -306,6 +326,7 @@
       "category": "Gathering",
       "title": "Retrieve Drops",
       "summary": "Sends the bot to where you or another bot last died to pick up the items, then it comes back to you.",
+      "answer": "Press Retrieve Drops in my menu, or type /bot retrieve {bot} me. I fast-travel to where you died, pick up what you dropped and bring it back to you. Items only last about 5 minutes on the ground, so send me quickly and give me food for the trip.",
       "details": [
         "The bot fast travels to a safe spot next to the death position, even in another dimension. The travel rest time does not apply, but it still needs food for the trip.",
         "It goes after the items that dropped when you or the bot died, tells you how many items it got, and fast travels back to you. Other items it walks over may still be picked up. If its inventory fills up it stops and says so. It never stores items in chests there.",
@@ -323,6 +344,7 @@
       "category": "Gathering",
       "title": "Fishing",
       "summary": "Fish until sunset or a chosen catch count.",
+      "answer": "Type /bot skill fish {bot} and I fish until sunset, or add a number, like /bot skill fish 20 {bot}, to stop after that many catches. The +/- buttons in the Actions menu set the count too.",
       "details": [
         "Set a custom count from the Actions row +/- controls.",
         "When count is unset, fishing runs by default behavior."
@@ -336,6 +358,7 @@
       "category": "Gathering",
       "title": "Forget Fishing Spot",
       "summary": "Clears the bot's saved fishing stand so it picks a fresh spot next time.",
+      "answer": "Type /bot fish forget {bot}, or press Forget Spot under Fishing. I forget my saved fishing stand and pick a fresh spot next time. Your lodestone compasses stay as they are.",
       "details": [
         "When a bot is mid-session the sunset auto-return saves the current stand so it can resume there at sunrise.",
         "If the saved spot is bad (unreachable, no nearby chest, unsafe shoreline), the bot can end up fast-travelling back to it every morning and failing.",
@@ -351,6 +374,7 @@
       "category": "Gathering",
       "title": "Woodcut",
       "summary": "Fells nearby trees. Defaults to 'Until sunset' mode. Use +/- to set a specific tree count.",
+      "answer": "Type /bot skill woodcut {bot} and I cut trees until sunset, or add a number to cut that many trees. I won't cut trees inside your base, the spawn area, a protected zone or a mapped village. Give me an axe, or I punch a tree and make one.",
       "details": [
         "At the default (Until sunset), the bot cuts trees until dusk then stops.",
         "Use +/- to set a minimum tree count instead.",
@@ -368,6 +392,7 @@
       "category": "Gathering",
       "title": "Daily Work Loops (Lodestone Compass)",
       "summary": "Send a fren to a far work spot that it returns to every morning: home at sunset, back to work at sunrise.",
+      "answer": "Put a lodestone at the work spot, bind a compass to it and put the compass in my inventory. Then start the job with no count, like /bot skill woodcut {bot}. I go home at sunset and fast-travel back to that lodestone at sunrise, as long as I stopped within 128 blocks of it and have food.",
       "details": [
         "Put a lodestone at the work spot (a forest, a fishing shore), bind a compass to it, and give the compass to the fren. Name your compasses on an anvil to tell them apart.",
         "Give the fren somewhere to sleep: a base or a bed it has slept in (see Home & Bases Explained). With neither, it goes to the world spawn.",
@@ -387,6 +412,7 @@
       "category": "Gathering",
       "title": "Wool",
       "summary": "Shears sheep and gathers wool.",
+      "answer": "Set a target with the +/- buttons in the Actions menu and press Wool, or type /bot skill wool <count> {bot}. I shear the sheep around me, so it works best in open fields with sheep nearby.",
       "details": [
         "Use +/- to specify a target amount.",
         "Works best in open areas with nearby sheep."
@@ -400,6 +426,7 @@
       "category": "Gathering",
       "title": "Leaf Litter",
       "summary": "Collects leaf litter from the ground for cheap furnace fuel.",
+      "answer": "Press Leaf Litter in the Actions menu, or type /bot skill leaf_litter {bot}. I collect up to a stack of leaf litter, the cheapest furnace fuel. Forests have the most.",
       "details": [
         "Works best in forested biomes where leaf litter is abundant.",
         "Leaf litter is the cheapest fuel, always preferred over logs or coal.",
@@ -414,6 +441,7 @@
       "category": "Farming",
       "title": "Build Farm",
       "summary": "Builds and plants a small farm with irrigation.",
+      "answer": "Type /bot skill farm {bot} and I pick a spot, till rows, bring in water and plant. If the spot is unsafe, I move or tell you.",
       "details": [
         "Chooses a site, prepares tilled rows, and handles irrigation.",
         "If a site is unsafe/invalid, it should relocate or fail clearly."
@@ -427,6 +455,7 @@
       "category": "Farming",
       "title": "Plant Seeds",
       "summary": "Plants seeds on any empty tilled soil nearby.",
+      "answer": "Type /bot skill plant {bot} and I plant seeds in any empty farmland within 16 blocks. I can plant wheat, beetroot, melon, pumpkin, potato and carrot.",
       "details": [
         "Scans a 16-block radius for empty farmland and plants available seeds.",
         "Supports wheat, beetroot, melon, pumpkin, potato, and carrot."
@@ -440,6 +469,7 @@
       "category": "Farming",
       "title": "Harvest Crops",
       "summary": "Harvests fully mature crops, replants them, and keeps the field tidy.",
+      "answer": "Type /bot skill harvest {bot} and I harvest ripe crops within 16 blocks, replant them and pick up the drops. I sneak so I don't trample the farmland, and I use nearby chests if my pack fills up.",
       "details": [
         "Scans a 16-block radius for ripe crops on farmland and carefully breaks them.",
         "Sneaks to avoid trampling tilled soil, replants matching crops, then runs a drop sweep.",
@@ -454,6 +484,7 @@
       "category": "Mining",
       "title": "Collect Dirt",
       "summary": "Collects dirt-like blocks for scaffolding and builds.",
+      "answer": "Type /bot skill collect_dirt {bot}, with a number if you want a set amount. I dig dirt-like blocks for building and scaffolding.",
       "details": [
         "Useful prep for construction and terrain patching.",
         "Command supports optional target amount."
@@ -467,6 +498,7 @@
       "category": "Mining",
       "title": "Stripmine",
       "summary": "Mines a straight tunnel for ores and stone resources.",
+      "answer": "Set the tunnel length with the +/- buttons in the Actions menu, face the way you want me to dig and press the Go To key (- by default). The command is /bot skill stripmine <length> {bot}.",
       "details": [
         "Use +/- to set desired tunnel length.",
         "Then face the way to dig and press the Go To key (- by default) to start.",
@@ -481,6 +513,7 @@
       "category": "Mining",
       "title": "Ascent",
       "summary": "Climbs upward by a block count or until surface sky.",
+      "answer": "Set a block count with the +/- buttons, or turn on the ☀ toggle to go all the way to the surface, then press the Go To key (- by default). The command is /bot skill mining ascent <blocks> {bot}, or surface in place of the number.",
       "details": [
         "Use +/- for block count.",
         "Then press the Go To key (- by default) to start.",
@@ -495,6 +528,7 @@
       "category": "Mining",
       "title": "Descent",
       "summary": "Digs downward by a selected block count.",
+      "answer": "Set the depth with the +/- buttons, face the way you want me to dig and press the Go To key (- by default). The command is /bot skill mining descent <blocks> {bot}.",
       "details": [
         "Use +/- to set depth target.",
         "Then face the way to dig and press the Go To key (- by default) to start.",
@@ -509,6 +543,7 @@
       "category": "Construction",
       "title": "Fortify Village",
       "summary": "Builds a defensive wall with moat around a village using a convex hull of its structures.",
+      "answer": "Bring me to a village, give me stone bricks, cobblestone or slabs, and type /bot fortify {bot} or use Actions, Construction, Fortify Village. I build a wall with towers, a moat and a gate around it. /bot fortify dry_run shows the layout with particles first.",
       "details": [
         "The bot computes a convex hull around village structures and builds along the edges.",
         "Full cross-section: wall + slab top + inner cliff face + spider overhang + 3-wide moat + exterior clearance.",
@@ -530,6 +565,7 @@
       "category": "Basics",
       "title": "Fast-Travel Gates",
       "summary": "Which items/conditions let the bot fast-travel, and at what speed.",
+      "answer": "The quickest way to let me fast-travel is a lodestone compass in my pack or an Eye of Ender with either of us. A map and compass that show the destination also work, more slowly. Without one of these I can't fast-travel, and I tell you why.",
       "details": [
         "§eTier 2 (1.0×, instant-class)§r: any one of these alone qualifies:",
         "  • Bot holds a §flodestone compass bound to a target§r",
@@ -559,6 +595,7 @@
       "category": "Basics",
       "title": "Home & Bases Explained",
       "summary": "Two kinds of rows in the Base Manager, and two meanings of [Home].",
+      "answer": "Yellow rows in the Base Manager are bases, and white rows are lodestone compasses I carry. At sunset I go to the closest of my last bed, my preferred home base and my nearest base, so mark the one you want with Set Home and keep me near it.",
       "details": [
         "§eYellow [Base]§r rows are registered bases, saved locations with a protection radius (r=40). Use 'Set Home' to mark one as the bot's preferred home.",
         "§fWhite rows§r are lodestone compasses in the bot's inventory. They have no protection. They're just named travel targets.",
@@ -578,6 +615,7 @@
       "category": "Construction",
       "title": "Map Village",
       "summary": "Saves the nearby settlement as a shared remembered no-go zone without building a wall.",
+      "answer": "Open the Base Manager, go to the Villages section and map the village you're in. Frens then won't mine, cut trees, dig or hunt passive mobs inside it.",
       "details": [
         "Open the Base Manager and use the Villages section to map the local settlement.",
         "The saved village reuses the fortification convex hull and stores it by name.",
@@ -594,6 +632,7 @@
       "category": "Modes",
       "title": "Quest Mode",
       "summary": "Layman progression path: recruit first, then unlock more capabilities.",
+      "answer": "In Questing mode you recruit frens in a village and unlock more as the friendship grows. The dialogue topics tell you what unlocks next.",
       "details": [
         "Designed for survival progression and narrative onboarding.",
         "Dialogue topics help explain what is unlocked next.",
@@ -609,6 +648,7 @@
       "category": "Modes",
       "title": "Delegate Mode Setup",
       "summary": "Admins can permit specific non-operator players to choose world mode.",
+      "answer": "An operator types /bot recruit mode_access allow <player> to let that player choose the world mode. Use revoke to take it back, or clear to remove everyone, for this world.",
       "details": [
         "Use mode_access allow/revoke to manage delegated players.",
         "Operators can always choose mode. Delegates are world-specific.",
@@ -625,6 +665,7 @@
       "category": "Modes",
       "title": "Direct Mode",
       "summary": "Spawn/use bots with broad capabilities immediately.",
+      "answer": "In Admin mode you make frens yourself with the Bot Roster or /bot spawn <name> admin, and they can do everything right away, with no recruiting.",
       "details": [
         "Best for testing, admin workflows, and sandbox play.",
         "No recruitment progression needed.",
@@ -640,6 +681,7 @@
       "category": "Admin",
       "title": "Learning Mode (Admin)",
       "summary": "Operator-only demonstration capture used to record player examples for later bot-control tuning.",
+      "answer": "Learning Mode is an operator tool that records how you play so bot control can be tuned later. Use /bot learn status, start and stop. It doesn't change what I can do.",
       "details": [
         "Admin entries like Learning Status / Start / Stop control a recording session, not normal companion progression.",
         "Captured traces can include movement, camera, interactions, and local context for analysis.",
@@ -654,6 +696,7 @@
       "category": "Roadmap",
       "title": "Roadmap (High-Level)",
       "summary": "High-level summary of what already exists, what is being polished now, and what optional AI work is planned next.",
+      "answer": "The Roadmap card in the Guide lists what works now, what is being polished and what is planned. AI chat is optional, and everything else works without it.",
       "details": [
         "Available now: per-bot controls, recruitment progression, admin permissions, optional AI companions (Soul Chat), and Learning Mode v1 demonstration capture.",
         "Active polish: fortify tower reliability, cavity reporting, guide clarity, keybind/help cleanup, and learning trace playtesting.",
@@ -669,10 +712,11 @@
       "category": "Items",
       "title": "Wizard's Tome",
       "summary": "A rare magical item that unlocks companion spells and abilities.",
+      "answer": "Craft it in The End: hold an Eye of Ender, carry a book, a diamond, 3 redstone and 3 lapis, and sneak-right-click a fully powered enchanting table with 15 bookshelves. All of those items are used up. Open it to use all the companion spells.",
       "details": [
         "Crafted via ritual: sneak-right-click an Enchanting Table in The End.",
         "Requires a fully powered table (15 bookshelves).",
-        "Hold an Eye of Ender and have in inventory: 1 Book, 1 Diamond, 3 Redstone, 3 Lapis Lazuli.",
+        "Hold an Eye of Ender and have in inventory: 1 Book, 1 Diamond, 3 Redstone, 3 Lapis Lazuli. All of them, the Eye included, are used up.",
         "Once crafted, open it to access the companion spells menu.",
         "Can also be obtained via /give @p frens:wizard_tome in creative."
       ],
@@ -685,6 +729,7 @@
       "category": "Shortcuts",
       "title": "Command + Keybind Cheatsheet",
       "summary": "Quick reference for the most-used controls.",
+      "answer": "The main keys are {guideKey} for the Guide, backtick to toggle follow, \\ to stop me, - to send me where you look and [ for spells. Hold \\ for the hotkey menu. You can rebind them all in Minecraft's Controls screen.",
       "details": [
         "Guide -> {guideKey} -> open in-game companion guide",
         "Follow toggle -> ` -> bot follow toggle <bot>",
@@ -710,9 +755,10 @@
       "category": "Items",
       "title": "Navigation Artifacts",
       "summary": "Give your companion a Compass, Map, or Eye of Ender to unlock autonomous navigation.",
+      "answer": "Put a map and compass, a lodestone compass or an Eye of Ender in my inventory and I can fast-travel instead of walking. A lodestone compass or an Eye of Ender is the fastest. None of them get used up.",
       "details": [
         "Compass / Map (basic): bot can navigate to its nearest or preferred base, same dimension only.",
-        "Eye of Ender (enhanced): navigate to any named base, cross-dimension, instant teleport. Either you or the bot can hold it.",
+        "Eye of Ender (enhanced): navigate to any named base, cross-dimension, at full fast-travel speed. Either you or the bot can hold it.",
         "Use /bot open <alias> to give items to your companion via its inventory screen.",
         "Navigation artifacts are reusable. They are not consumed."
       ],
@@ -725,6 +771,7 @@
       "category": "Spells",
       "title": "Remote Guidance",
       "summary": "Uses paired ender pearls to guide your companion across any distance.",
+      "answer": "We both need an Ender Pearl. Open the Spells tab with [, pick Remote Guidance and choose your location or a base. Both pearls are used up and I fast-travel there.",
       "details": [
         "Both you and your companion must hold at least one Ender Pearl.",
         "Choose destination: guide to your location or to a known base.",
@@ -741,6 +788,7 @@
       "category": "Spells",
       "title": "Chorus Recall",
       "summary": "Consumes paired ender pearls and chorus fruit for an instant teleport.",
+      "answer": "We each need an Ender Pearl and a Chorus Fruit. Open the Spells tab with [ and pick Chorus Recall to teleport me to you or you to me, instantly and across dimensions. All four items are used up.",
       "details": [
         "Both you and your companion must hold one Ender Pearl AND one Chorus Fruit.",
         "Choose direction: teleport bot to you, or you to bot.",
@@ -756,6 +804,7 @@
       "category": "Settings",
       "title": "Fast Travel & Navigation Tiers",
       "summary": "Companion fast travel speed depends on held artifacts.",
+      "answer": "There's no speed setting. I fast-travel at full speed with a lodestone compass, or when either of us has an Eye of Ender or a Wizard's Tome. A map and compass that show the destination work too, more slowly, and with nothing I walk.",
       "details": [
         "Full speed: the bot holds a bound lodestone compass, the bot or you hold an Eye of Ender or a Wizard's Tome, the bot or you are within 6 blocks of an Enchanting Table, or the bot and you both hold Ender Pearls.",
         "Slower: the bot holds a Map and Compass that show the destination (underground it also needs a torch or lantern), or a smoke signal marks the destination base.",
@@ -771,6 +820,7 @@
       "category": "Settings",
       "title": "Preserve Expensive Gear",
       "summary": "Keep your bots from wearing out your best tools.",
+      "answer": "Turn on Preserve Expensive Gear in my Admin tab, Behavior section. Then I stop using enchanted, gold, diamond, netherite or turtle shell gear below 11% durability, or 3% in a fight, and swap to something cheaper. It applies to all your frens.",
       "details": [
         "When enabled, your bots refuse to use enchanted items and gear made of gold, diamond, netherite, or turtle shell once durability drops below 11%.",
         "In combat, the threshold drops to 3%, so the bot will push a risky item harder when lives are on the line.",
@@ -788,6 +838,7 @@
       "category": "Items",
       "title": "Spell Ingredients",
       "summary": "Quick reference for all spell-related items and what they unlock.",
+      "answer": "A Wizard's Tome, or standing near an enchanting table, unlocks every spell. A goat horn gives regroup and an Eye of Ender gives summon. Paired Ender Pearls cast Remote Guidance, and pearls plus chorus fruit cast Chorus Recall.",
       "details": [
         "Wizard's Tome: full access to all companion spells anywhere.",
         "Enchanting Table (nearby): full access to all spells.",
@@ -805,6 +856,7 @@
       "category": "Core Actions",
       "title": "Quick Store & Quick Fetch",
       "summary": "Point at a nearby chest and click to deposit or take items.",
+      "answer": "Open Actions, Core Actions, then Quick Store or Quick Fetch, point at a chest and left-click. I walk over and put my items in, or take them out. Shift-click Quick Store to empty everything, armour and tools too.",
       "details": [
         "Quick Store: Actions → Core Actions → Quick Store. Bot walks to the chest and deposits.",
         "Quick Fetch: Actions → Core Actions → Quick Fetch. Bot walks to the chest and takes items into its inventory.",
@@ -826,13 +878,14 @@
       "category": "Utilities",
       "title": "Storage",
       "summary": "View and manage supply chests your companions have placed in the world.",
+      "answer": "Open Actions, Utilities, Storage to see the chests I've placed or used for work. Go sends me to one, Collect has me fetch items from it, and Dismiss removes it from the list without breaking it.",
       "details": [
         "Open via Actions → Utilities → Storage.",
         "Each chest shows coordinates, status, and a snapshot of its contents.",
         "Go: fast-travel the bot to the chest location.",
         "Collect: bot fast-travels to chest, withdraws items, optionally returns (to player, home, or stays).",
         "Dismiss: removes the chest from the registry (does not break the block).",
-        "Fast travel speed depends on artifacts: Map/Compass = 2x delay, Eye of Ender or higher = standard speed.",
+        "Go and Collect use fast travel, so the bot needs a gate (see Fast-Travel Gates). A lodestone compass or an Eye of Ender gives full speed. A Map and Compass that show the chest is slower.",
         "Hover a chest row to see a tooltip of its last-known contents.",
         "Note: Only chests the bot places or uses in automated tasks appear here. Chests targeted via Quick Store/Fetch are not tracked."
       ],
@@ -845,6 +898,7 @@
       "category": "Utilities",
       "title": "Protected Zones",
       "summary": "Mark areas where bots cannot break blocks.",
+      "answer": "An operator types /bot zone wand, right-clicks two corners and presses = to name the zone. Frens never break blocks inside it.",
       "details": [
         "Admins can create protected zones using the Zone Wand.",
         "Get the wand: /bot zone wand or 'New Zone' in the Base Manager.",
@@ -866,6 +920,7 @@
       "category": "Enchanting",
       "title": "Bot Enchanting",
       "summary": "Enchant your companion's items using the bot's XP and lapis.",
+      "answer": "Stand near an enchanting table, open the Spells menu and click Enchant. You put my items and lapis in the table, and it uses my XP, not yours.",
       "details": [
         "Open the Spells menu while near an Enchanting Table.",
         "Click 'Enchant' to open the vanilla enchanting UI for your bot.",
@@ -885,6 +940,7 @@
       "category": "Enchanting",
       "title": "Bot Anvil",
       "summary": "Repair, rename, or combine your companion's items using the bot's XP.",
+      "answer": "Stand near an anvil, open the Spells menu and click Anvil. You can repair, rename or combine my items, and the XP comes from me, not you.",
       "details": [
         "Open the Spells menu while near an Anvil.",
         "Click 'Anvil' to open the vanilla anvil UI for your bot.",

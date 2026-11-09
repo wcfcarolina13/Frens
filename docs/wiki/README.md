@@ -9,6 +9,7 @@ Download: [Modrinth](https://modrinth.com/mod/mcfrens). Source and issues: [GitH
 - [Getting started](Getting-Started.md): install, pick a world mode, spawn your first fren.
 - [FAQ](FAQ.md): common questions and fixes.
 - [Work loops](Work-Loops.md): frens that go back to the same job every morning.
+- [Fast travel](Fast-Travel.md): what lets a fren skip the walk, how long it takes and what it costs.
 - [In-game Guide](Guide.md): every card from the Guide screen (press ] in game), grouped by topic.
 - [Companion questing guide](https://github.com/wcfcarolina13/Frens/blob/main/COMPANION_QUESTING_GUIDE.md): how recruiting works in Questing mode.
 - [Crafting cheatsheet](https://github.com/wcfcarolina13/Frens/blob/main/CRAFTING_CHEATSHEET.md)

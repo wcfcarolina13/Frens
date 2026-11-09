@@ -13,7 +13,7 @@ View and manage supply chests your companions have placed in the world.
 - Go: fast-travel the bot to the chest location.
 - Collect: bot fast-travels to chest, withdraws items, optionally returns (to player, home, or stays).
 - Dismiss: removes the chest from the registry (does not break the block).
-- Fast travel speed depends on artifacts: Map/Compass = 2x delay, Eye of Ender or higher = standard speed.
+- Go and Collect use fast travel, so the bot needs a gate (see Fast-Travel Gates). A lodestone compass or an Eye of Ender gives full speed. A Map and Compass that show the chest is slower.
 - Hover a chest row to see a tooltip of its last-known contents.
 - Note: Only chests the bot places or uses in automated tasks appear here. Chests targeted via Quick Store/Fetch are not tracked.
 

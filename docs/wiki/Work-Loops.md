@@ -9,7 +9,7 @@ The short version is on the Guide card [Daily Work Loops](Guide-Gathering.md#dai
 - A **lodestone** at the work spot (eight chiseled stone bricks around an iron ingot).
 - A **compass** bound to that lodestone (use the compass on the lodestone), in the fren's inventory.
 - A **place to sleep**: a base, or a bed the fren has slept in. With neither, it goes to the world spawn. See [Home & Bases Explained](Guide-Basics.md#home--bases-explained).
-- **Food** in its inventory. Fast travel costs hunger.
+- **Food** in its inventory. Fast travel costs 1 hunger point per 20 blocks. See [Fast travel](Fast-Travel.md).
 
 ## Setting up a woodcutting loop
 
@@ -38,7 +38,7 @@ So keep the lodestone close to where the work actually happens. A fren that wand
 | It finished and never went back | The job had a count. Counted jobs end and are not resumed. Start it with no count. |
 | It works next to its bed in the morning | No lodestone within 128 blocks of where it stopped, or it was in another dimension. |
 | `/bot compass list Jake` says a compass lost its lodestone | The lodestone was broken. Place a new one and bind the compass again. |
-| It walked instead of fast-travelling | Fast travel needs a gate and enough food. See [Fast-Travel Gates](Guide-Basics.md#fast-travel-gates). |
+| It walked instead of fast-travelling | Fast travel needs enough food, and the fren rests 3 minutes between trips. See [Fast travel](Fast-Travel.md). |
 | It didn't go home at sunset | It was following you or on a job with a count. Idle frens and until-sunset jobs go home, and guards or patrols do too when that option is on. |
 
 Hunting has its own day-to-day loop and doesn't use lodestones this way.
