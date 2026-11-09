@@ -663,7 +663,7 @@ public final class CraftingHelper {
         }
         // Ladder: 7 sticks => 3 ladders (3x3 recipe)
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "ladder"))) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         // One combined chest ask for the sticks (or the planks or logs they come from) and the
@@ -744,7 +744,7 @@ public final class CraftingHelper {
                 .filter(r -> hasRecipePermission(commander, source.getServer(), r.recipeId()))
                 .toList();
         if (recipes.isEmpty()) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
 
@@ -958,19 +958,43 @@ public final class CraftingHelper {
         return reportConsumeShortfall(bot, "planks", needed, remaining);
     }
 
+    /** The refusal line the last {@link #hasRecipePermission} on this thread chose, or null for the generic one. */
+    private static final ThreadLocal<String> RECIPE_REFUSAL_LINE = new ThreadLocal<>();
+
+    /**
+     * Backlog 1224: under the {@code limitedCrafting} game rule a bot only crafts what its human
+     * commander has unlocked, as vanilla gates the player. The decision is
+     * {@link RecipeGatePolicy#decide}; a refusal leaves its line for {@link #recipeRefusalLine()}.
+     */
     private static boolean hasRecipePermission(ServerPlayerEntity commander, MinecraftServer server, Identifier recipeId) {
+        RECIPE_REFUSAL_LINE.remove();
         if (commander == null) {
             return true;
         }
         var key = net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.RECIPE, recipeId);
         Optional<RecipeEntry<?>> recipe = server.getRecipeManager().get(key);
-        if (recipe.isEmpty()) {
-            return false;
+        boolean human = !(commander instanceof net.wcfcarolina13.Entity.createFakePlayer);
+        boolean limited = human && Boolean.TRUE.equals(commander.getEntityWorld().getGameRules()
+                .getValue(net.minecraft.world.rule.GameRules.LIMITED_CRAFTING));
+        RecipeGatePolicy.Decision decision = RecipeGatePolicy.decide(
+                recipe.isPresent(),
+                human,
+                limited,
+                recipe.isPresent() && recipe.get().value().isIgnoredInRecipeBook(),
+                limited && commander.getRecipeBook().isUnlocked(key));
+        if (decision == RecipeGatePolicy.Decision.LOCKED) {
+            RECIPE_REFUSAL_LINE.set(RecipeGatePolicy.lockedLine(commander.getName().getString(), recipeId.getPath()));
+            LOGGER.info("Recipe gate: refused {} for {} (limitedCrafting on, recipe locked)",
+                    recipeId, commander.getName().getString());
         }
-        if (commander.isCreative()) {
-            return true;
-        }
-        return true; // Fallback: server recipes are present; per-player gating not exposed here
+        return decision == RecipeGatePolicy.Decision.ALLOW;
+    }
+
+    /** The line for a failed {@link #hasRecipePermission} just before: the locked-recipe line, or the generic one. */
+    private static String recipeRefusalLine() {
+        String line = RECIPE_REFUSAL_LINE.get();
+        RECIPE_REFUSAL_LINE.remove();
+        return line != null ? line : "I don't know how to craft that yet.";
     }
 
     private static int craftWithPlanks(ServerPlayerEntity bot,
@@ -985,7 +1009,7 @@ public final class CraftingHelper {
         // The recipe-permission check comes before the ask: a craft the bot may not make never
         // takes its planks from the chest and then says it does not know the recipe.
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            if (!quiet) say(source, "I don't know how to craft that yet.");
+            if (!quiet) say(source, recipeRefusalLine());
             return 0;
         }
         if (askChest) {
@@ -1084,7 +1108,7 @@ public final class CraftingHelper {
         }
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "stick"))) {
             if (!quiet) {
-                say(source, "I don't know how to craft that yet.");
+                say(source, recipeRefusalLine());
             }
             return 0;
         }
@@ -1121,7 +1145,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "torch");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int targetTorches = Math.max(1, amountRequested);
@@ -1257,7 +1281,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
 
@@ -1341,7 +1365,7 @@ public final class CraftingHelper {
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = (int) Math.ceil(amountRequested / 3.0);
@@ -1396,7 +1420,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "lead");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = (int) Math.ceil(amountRequested / 2.0);
@@ -1434,7 +1458,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "bundle");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1468,7 +1492,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "leather");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1502,7 +1526,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "saddle");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1540,7 +1564,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "carrot_on_a_stick");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
@@ -1580,7 +1604,7 @@ public final class CraftingHelper {
         }
         Identifier recipeId = Identifier.of("minecraft", "warped_fungus_on_a_stick");
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
-            say(source, "I don't know how to craft that yet.");
+            say(source, recipeRefusalLine());
             return 0;
         }
         int craftsNeeded = Math.max(1, amountRequested);
