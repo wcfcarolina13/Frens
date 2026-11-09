@@ -91,4 +91,13 @@ class DropGuardExemptionPolicyTest {
         org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.haltInAir(true, false, true, true));
         org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.haltInAir(true, false, false, false));
     }
+
+    // PATROL measures from where it stands (reference = its own level): 1-block steps down a slope
+    // pass one at a time, a 2-deep drop in front is still refused.
+    @Test
+    void aPatrolJudgesDropsFromItsOwnLevel() {
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.refusesStep(123, 124, 124, false));
+        org.junit.jupiter.api.Assertions.assertFalse(DropGuardExemptionPolicy.refusesStep(122, 123, 123, false));
+        org.junit.jupiter.api.Assertions.assertTrue(DropGuardExemptionPolicy.refusesStep(122, 124, 124, false));
+    }
 }

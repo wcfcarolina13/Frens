@@ -648,8 +648,17 @@ public final class FollowMovementService {
                 && isGroundedTwoHighClearance(world, BlockPos.ofFloored(targetPos));
     }
 
-    /** The Y of the ground a guarding or patrolling bot holds: its guard point's block Y. */
+    /**
+     * The level the drop rules measure from. GUARD: its guard point's ground, so the stair of
+     * 1-block steps back into an escaped pit is refused from its second tread. PATROL (Bradley's
+     * pick 2026-11-08, "From where it stands"): the level the bot stands at now, so a patrol on a
+     * slope or a peak walks down to its points; it keeps the in-air check and the no-hop sidestep.
+     */
     private static Integer guardReferenceY(ServerPlayerEntity bot) {
+        if (net.wcfcarolina13.GameAI.BotEventHandler.getModePublic(bot) == net.wcfcarolina13.GameAI.BotEventHandler.Mode.PATROL
+                && bot.getEntityWorld() instanceof ServerWorld world) {
+            return standLevelAt(world, bot.getBlockPos(), bot.getBlockY());
+        }
         Vec3d center = GuardPatrolService.getGuardCenter(bot.getUuid());
         return center == null ? null : BlockPos.ofFloored(center).getY();
     }

@@ -3382,16 +3382,7 @@ public class BotEventHandler {
             long nowTick = server.getTicks();
             long nextPickTick = GuardPatrolService.getNextPatrolPickTick(bot.getUuid());
             if (nowTick >= nextPickTick) {
-                Vec3d next = null;
-                for (int attempt = 0; attempt < 6 && next == null; attempt++) {
-                    next = groundedNear(bot, randomPointWithin(center, radius * 0.85D), center);
-                }
-                if (next == null) {
-                    // Every point fell on ground too far below the patrol centre (a pit, a cliff): wait and re-roll.
-                    GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), nowTick + 20L);
-                    BotActions.stop(bot);
-                    return true;
-                }
+                Vec3d next = groundedNear(bot, randomPointWithin(center, radius * 0.85D), center);
                 GuardPatrolService.setPatrolTarget(bot.getUuid(), next);
                 GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), nowTick + 40L + RANDOM.nextInt(40));
                 moveTowardStayingOutOfHoles(bot, next, 1.1D);
@@ -7620,18 +7611,15 @@ public class BotEventHandler {
 
     /**
      * A patrol point on the ground: randomPointWithin keeps the centre's Y, so on a slope a point
-     * downhill hung in the air and the guard's drop rules misjudged it. Takes the standable level
-     * nearest the centre's height (within 12, below before above at equal distance), looking through leaves. Null when the ground there is
-     * {@link net.wcfcarolina13.GameAI.services.DropGuardExemptionPolicy#GUARD_MIN_DEPTH} or more
-     * below the centre: such a point (the floor of the pit the guard climbed out of) would count as
-     * "target down there" and walk the guard back in. The caller re-rolls.
+     * downhill hung in the air and the drop rules misjudged it. Takes the standable level nearest the
+     * centre's height (within 12, below before above at equal distance), looking through leaves.
+     * Points far below the centre are allowed: patrol judges drops from where it stands (Bradley's
+     * pick 2026-11-08), and a point over an escaped pit is the accepted risk.
      */
     private static Vec3d groundedNear(ServerPlayerEntity bot, Vec3d point, Vec3d center) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world) || point == null) {
             return point;
         }
-        int lowest = net.wcfcarolina13.GameAI.services.DropGuardExemptionPolicy.minBypassStandY(
-                BlockPos.ofFloored(center).getY());
         // The standable level nearest the centre's height, below before above. Scanning
         // down from high above put points under a roof on the roof and points by a trunk on the log.
         BlockPos base = BlockPos.ofFloored(point.x, center.y, point.z);
@@ -7644,7 +7632,7 @@ public class BotEventHandler {
                     && world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty()
                     && !belowState.getCollisionShape(world, below).isEmpty()
                     && !belowState.isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
-                return feet.getY() < lowest ? null : new Vec3d(point.x, feet.getY(), point.z);
+                return new Vec3d(point.x, feet.getY(), point.z);
             }
         }
         return point;
