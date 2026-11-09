@@ -149,6 +149,13 @@ class BotSoulPickerPolicyTest {
         assertFalse(BotSoulPickerPolicy.voiceProblem(VoiceCheck.NO_PRESETS).isEmpty());
     }
 
+    @Test
+    void personaMessageNoLongerWarnsAboutAReset() {
+        String msg = BotSoulPickerPolicy.personaMessage("Bob", "Silas");
+        assertTrue(msg.startsWith("Bob now speaks as Silas."));
+        assertFalse(msg.toLowerCase().contains("enabling"), "a pick survives re-enable now");
+    }
+
     // ── Picker rows ─────────────────────────────────────────────────────────
 
     @Test

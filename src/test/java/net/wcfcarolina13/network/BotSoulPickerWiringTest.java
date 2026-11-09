@@ -54,11 +54,54 @@ class BotSoulPickerWiringTest {
         int check = body.indexOf("BotSoulPickerPolicy.checkPersona(profileId,");
         int registry = body.indexOf("SoulProfileRegistry.registeredIds()");
         int reject = body.indexOf("if (check != BotSoulPickerPolicy.PersonaCheck.OK) {");
-        int bind = body.indexOf("runtime.bindProfile(botId, profileId)");
+        int bind = body.indexOf("runtime.bindPickedProfile(botId, profileId)");
         int stillValid = body.indexOf("stillValid(server, ticket)");
         assertTrue(check >= 0 && registry > check && reject > registry && bind > reject, "check, reject, then bind");
         assertTrue(stillValid > bind, "the reply re-checks the ticket after the async bind");
         assertTrue(!body.contains("setActive("), "a persona pick never changes the active flag");
+    }
+
+    private static final Path COMMANDS = Path.of("src/main/java/net/wcfcarolina13/Commands/BotSoulCommands.java");
+    private static final Path RUNTIME = Path.of("src/main/java/net/wcfcarolina13/GameAI/souls/SoulRuntime.java");
+
+    @Test
+    void checklistEnableKeepsAPickedPersona() throws IOException {
+        String body = section(Files.readString(MANAGER),
+                "private static void enableBot(", "public static void applyNewBotSoulDefault(");
+        int decide = body.indexOf("runtime.enableBinding(botId,");
+        int bind = body.indexOf("runtime.bindForEnable(botId, binding)");
+        assertTrue(decide >= 0 && bind > decide, "rebind-or-keep decided, then applied");
+        assertTrue(!body.contains("runtime.bindProfile("), "no unconditional rebind by name");
+    }
+
+    @Test
+    void commandEnableKeepsAPickedPersona() throws IOException {
+        String body = section(Files.readString(COMMANDS),
+                "private static int executeEnable(", "private static int executeDisable(");
+        int decide = body.indexOf("runtime.enableBinding(botId,");
+        int bind = body.indexOf("runtime.bindForEnable(botId, binding)");
+        assertTrue(decide >= 0 && bind > decide, "rebind-or-keep decided, then applied");
+        assertTrue(!body.contains("runtime.bindProfile("), "no unconditional rebind by name");
+    }
+
+    @Test
+    void legacyMigrationSkipsPickedBindings() throws IOException {
+        String body = section(Files.readString(RUNTIME),
+                "void migrateLegacyBindings(", "void prewarmVoices(");
+        int skip = body.indexOf("PersonaBindingPolicy.shouldMigrateLegacy(");
+        int picked = body.indexOf("isPickedBinding(bot.getUuid())", skip);
+        int bind = body.indexOf("bindProfile(botId, own.get())");
+        assertTrue(skip >= 0 && picked > skip && bind > picked, "the pick is checked before the rebind");
+    }
+
+    @Test
+    void keptBindingWritesNothing() throws IOException {
+        String body = section(Files.readString(RUNTIME),
+                "public CompletableFuture<SoulTypes.SoulState> bindForEnable(", "/**");
+        int keep = body.indexOf("if (binding.keep()) {");
+        int completed = body.indexOf("CompletableFuture.completedFuture(", keep);
+        int bind = body.indexOf("return bindProfile(botId, binding.profileId());");
+        assertTrue(keep >= 0 && completed > keep && bind > completed);
     }
 
     @Test

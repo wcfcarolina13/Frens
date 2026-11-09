@@ -100,8 +100,9 @@ public final class BotSoulPickerPolicy {
     public enum PersonaCheck { OK, NOT_ENABLED, UNKNOWN_PERSONA, UNCHANGED }
 
     /**
-     * SET_BOT_PERSONA. The bot must already be bound (enabled once): a pick before that would be
-     * replaced by the name match the first enable binds. The persona must be registered.
+     * SET_BOT_PERSONA. The bot must already be bound (enabled once), so a pick never creates soul
+     * state for a bot that has none. The persona must be registered. Once made, the pick is kept
+     * by later enables and the legacy migration ({@code PersonaBindingPolicy}).
      */
     public static PersonaCheck checkPersona(String requested, Collection<String> registeredIds,
                                             String currentProfileId) {
@@ -124,8 +125,7 @@ public final class BotSoulPickerPolicy {
     }
 
     public static String personaMessage(String botName, String personaName) {
-        return botName + " now speaks as " + personaName
-                + ". Their memories are kept. Enabling them again picks the persona that matches their name.";
+        return botName + " now speaks as " + personaName + ". Their memories are kept.";
     }
 
     // ── Voice presets ───────────────────────────────────────────────────────

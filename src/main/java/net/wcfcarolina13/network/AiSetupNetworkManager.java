@@ -22,6 +22,7 @@ import net.wcfcarolina13.GameAI.services.BotRegistry;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.souls.NewBotSoulPolicy;
 import net.wcfcarolina13.GameAI.souls.OllamaModelInstaller;
+import net.wcfcarolina13.GameAI.souls.PersonaBindingPolicy;
 import net.wcfcarolina13.GameAI.souls.SoulProfileRegistry;
 import net.wcfcarolina13.GameAI.souls.SoulRuntime;
 import net.wcfcarolina13.GameAI.souls.SoulTypes;
@@ -710,10 +711,14 @@ public final class AiSetupNetworkManager {
         UUID botId = bot.getUuid();
         String botName = bot.getName().getString();
         String jake = SoulProfileRegistry.profileIdForBotName("jake").orElse("frens:jake");
-        String profileId = SoulProfileRegistry.profileIdForBotName(botName).orElse(jake);
-        boolean fallback = AiSetupActionPolicy.isFallbackPersona(botName, profileId, jake);
-        String persona = profileId.equals(jake) ? "Jake" : botName;
-        runtime.bindProfile(botId, profileId)
+        // A persona picked on purpose (SET_BOT_PERSONA) is kept (PersonaBindingPolicy).
+        PersonaBindingPolicy.EnableBinding binding =
+                runtime.enableBinding(botId, SoulProfileRegistry.profileIdForBotName(botName).orElse(jake));
+        String profileId = binding.profileId();
+        boolean fallback = !binding.keep() && AiSetupActionPolicy.isFallbackPersona(botName, profileId, jake);
+        String persona = binding.keep() ? SoulProfileRegistry.require(profileId).displayName()
+                : profileId.equals(jake) ? "Jake" : botName;
+        runtime.bindForEnable(botId, binding)
                 .thenCompose(bound -> {
                     // Re-check on the server thread before activating: requester still online and
                     // permitted, bot still registered, no newer enable for this bot since.
@@ -751,7 +756,8 @@ public final class AiSetupNetworkManager {
 
     /**
      * SET_BOT_PERSONA (gate passed: owner, op or host; bot online and registered). Rebinds an
-     * already-bound bot to another registered profile; the active flag and every memory file stay
+     * already-bound bot to another registered profile and records it as picked, so re-enabling and
+     * the legacy migration keep it; the active flag and every memory file stay
      * (soul state is keyed by the bot's UUID, not its persona). Re-checks the ticket before replying.
      */
     private static void setBotPersona(MinecraftServer server, Ticket ticket, ServerPlayerEntity bot) {
@@ -774,7 +780,7 @@ public final class AiSetupNetworkManager {
             return;
         }
         String persona = SoulProfileRegistry.require(profileId).displayName();
-        runtime.bindProfile(botId, profileId).whenComplete((bound, err) -> server.execute(() -> {
+        runtime.bindPickedProfile(botId, profileId).whenComplete((bound, err) -> server.execute(() -> {
             if (err != null) {
                 LOGGER.warn("[ai-setup] persona change failed for bot {}: {}", botId, err.toString());
                 reply(server, playerId, "Failed to change " + botName + "'s persona.");

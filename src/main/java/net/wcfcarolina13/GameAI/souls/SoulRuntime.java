@@ -1417,8 +1417,9 @@ public final class SoulRuntime {
             String name = bot.getName().getString();
             Optional<String> own = SoulProfileRegistry.profileIdForBotName(name);
             Optional<SoulTypes.SoulState> state = cachedState(bot.getUuid());
-            if (own.isEmpty() || state.isEmpty() || own.get().equals(state.get().profileId())
-                    || !"frens:jake".equals(state.get().profileId())) {
+            // A Jake binding picked on purpose (AI setup persona picker) is not legacy.
+            if (own.isEmpty() || state.isEmpty() || !PersonaBindingPolicy.shouldMigrateLegacy(
+                    isPickedBinding(bot.getUuid()), state.get().profileId(), own.get(), "frens:jake")) {
                 continue;
             }
             UUID botId = bot.getUuid();
@@ -1500,6 +1501,47 @@ public final class SoulRuntime {
                     "Unknown soul profile id: " + profileId, unknownProfile));
         }
         return store.bindProfile(botId, profileId);
+    }
+
+    /**
+     * Binds {@code botId} to {@code profileId} as a pick made on purpose (AI setup persona
+     * picker): re-enabling the bot and {@link #migrateLegacyBindings} keep it. Validated like
+     * {@link #bindProfile}; the active flag is untouched.
+     */
+    public CompletableFuture<SoulTypes.SoulState> bindPickedProfile(UUID botId, String profileId) {
+        Objects.requireNonNull(botId, "botId");
+        Objects.requireNonNull(profileId, "profileId");
+        try {
+            SoulProfileRegistry.require(profileId);
+        } catch (RuntimeException unknownProfile) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException(
+                    "Unknown soul profile id: " + profileId, unknownProfile));
+        }
+        return store.bindPickedProfile(botId, profileId);
+    }
+
+    /** Whether the bot's current binding was picked on purpose (and is still the current one). */
+    public boolean isPickedBinding(UUID botId) {
+        String current = store.cachedState(botId).map(SoulTypes.SoulState::profileId).orElse("");
+        return PersonaBindingPolicy.isPicked(store.cachedPickedProfile(botId).orElse(null), current);
+    }
+
+    /**
+     * What an enable binds for {@code botId}: its picked binding when it has one to a registered
+     * profile ({@code keep}), else {@code nameMatchedProfileId}, as before the picker.
+     */
+    public PersonaBindingPolicy.EnableBinding enableBinding(UUID botId, String nameMatchedProfileId) {
+        String current = store.cachedState(botId).map(SoulTypes.SoulState::profileId).orElse("");
+        boolean registered = !current.isBlank() && SoulProfileRegistry.registeredIds().contains(current);
+        return PersonaBindingPolicy.onEnable(isPickedBinding(botId), current, registered, nameMatchedProfileId);
+    }
+
+    /** Applies {@link #enableBinding}: a kept binding writes nothing, otherwise a plain {@link #bindProfile}. */
+    public CompletableFuture<SoulTypes.SoulState> bindForEnable(UUID botId, PersonaBindingPolicy.EnableBinding binding) {
+        if (binding.keep()) {
+            return CompletableFuture.completedFuture(store.cachedState(botId).orElse(null));
+        }
+        return bindProfile(botId, binding.profileId());
     }
 
     /**
