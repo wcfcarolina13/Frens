@@ -558,6 +558,18 @@ public final class CraftingHelper {
             Item target = Registries.ITEM.get(Identifier.of("minecraft", normalized));
             return craftPlanks(bot, source, commander, amount, target);
         }
+        // Iron, golden and diamond armour (backlog 1217); netherite is a smithing upgrade.
+        if (ArmorCraftPolicy.isNetheriteArmor(normalized)) {
+            if (source != null) say(source, "Netherite armor isn't crafted. It's upgraded from diamond armor at a smithing table with a netherite ingot and an upgrade template.");
+            return 0;
+        }
+        ArmorCraftPolicy.Piece armorPiece = ArmorCraftPolicy.piece(normalized);
+        if (armorPiece != null) {
+            return craftMetalArmor(bot, source, commander, amount,
+                    Registries.ITEM.get(Identifier.of(armorPiece.itemId())),
+                    Registries.ITEM.get(Identifier.of(armorPiece.materialId())),
+                    armorPiece.perPiece());
+        }
         return switch (normalized) {
             case "crafting_table" -> craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amount, false, true);
             case "sticks", "stick" -> craftSticks(bot, source, commander, amount);
@@ -3602,6 +3614,50 @@ public final class CraftingHelper {
         }
         if (commitCraft(bot, output, crafts,
                 () -> consumeItemOnServer(bot, Items.LEATHER, crafts * leatherPer)) != CraftCommitPolicy.Outcome.CRAFTED) {
+            return 0;
+        }
+        recordCraftHistory(commander, output);
+        return crafts;
+    }
+
+    /**
+     * Iron, golden or diamond armour ({@link ArmorCraftPolicy}): {@code per} of {@code material}
+     * per piece at a crafting table, as {@link #craftSimple} does for a bucket, with one combined
+     * chest ask for the material and the table's planks first.
+     */
+    private static int craftMetalArmor(ServerPlayerEntity bot,
+                                       ServerCommandSource source,
+                                       ServerPlayerEntity commander,
+                                       int amount,
+                                       net.minecraft.item.Item output,
+                                       net.minecraft.item.Item material,
+                                       int per) {
+        switch (askChestForKnownCraft(bot, source, output, amount, s -> s.isOf(material), true)) {
+            case STOP_SILENT, STOP_WITH_LINE -> {
+                return 0;
+            }
+            default -> {
+            }
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            sendCraftTableNeededOnce(bot, source, "I need a crafting table placed nearby to craft armor.");
+            return 0;
+        }
+        ensureItemAvailable(bot, source, material, per * amount);
+        int have = countItem(bot, material);
+        int crafts = Math.min(amount, have / per);
+        if (crafts <= 0) {
+            say(source, "I need " + per + " " + material.getName().getString() + " for each "
+                    + output.getName().getString() + ".");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(material, crafts * per);
+        if (!ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems)) {
+            return 0;
+        }
+        if (commitCraft(bot, output, crafts,
+                () -> consumeItemOnServer(bot, material, crafts * per)) != CraftCommitPolicy.Outcome.CRAFTED) {
             return 0;
         }
         recordCraftHistory(commander, output);

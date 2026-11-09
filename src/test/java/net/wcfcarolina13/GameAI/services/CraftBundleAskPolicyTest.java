@@ -264,7 +264,10 @@ class CraftBundleAskPolicyTest {
 
     @Test
     void theKnownTableHoldsEveryCraftTheHelperMakesWithTheVanillaCounts() {
-        assertEquals(List.of(LADDER, TORCH, SHIELD, BUCKET, SHEARS, FURNACE, CHEST, CRAFTING_TABLE),
+        assertEquals(List.of(LADDER, TORCH, SHIELD, BUCKET, SHEARS, FURNACE, CHEST, CRAFTING_TABLE,
+                        "minecraft:iron_helmet", "minecraft:iron_chestplate", "minecraft:iron_leggings", "minecraft:iron_boots",
+                        "minecraft:golden_helmet", "minecraft:golden_chestplate", "minecraft:golden_leggings", "minecraft:golden_boots",
+                        "minecraft:diamond_helmet", "minecraft:diamond_chestplate", "minecraft:diamond_leggings", "minecraft:diamond_boots"),
                 CraftBundleAskPolicy.knownIds());
         // Ladder: 7 sticks -> 3 ladders (data/minecraft/recipe/ladder.json; wiki Ladder).
         assertEquals(new Recipe(3, Map.of(STICK, 7)), CraftBundleAskPolicy.known(LADDER).recipe());
@@ -286,6 +289,30 @@ class CraftBundleAskPolicyTest {
         assertEquals(new Recipe(1, Map.of(PLANKS, 4)), CraftBundleAskPolicy.known(CRAFTING_TABLE).recipe());
         assertNull(CraftBundleAskPolicy.known("minecraft:door"), "an unknown craft keeps today's path");
         assertNull(CraftBundleAskPolicy.known(null));
+    }
+
+    @Test
+    void metalArmourTakesFiveEightSevenFourOfItsMaterial() {
+        // <material>_<piece>.json and the minecraft.wiki Helmet/Chestplate/Leggings/Boots grids (backlog 1217).
+        for (String[] m : new String[][]{{"iron", "minecraft:iron_ingot"}, {"golden", "minecraft:gold_ingot"},
+                {"diamond", "minecraft:diamond"}}) {
+            assertEquals(new Recipe(1, Map.of(m[1], 5)), CraftBundleAskPolicy.known("minecraft:" + m[0] + "_helmet").recipe());
+            assertEquals(new Recipe(1, Map.of(m[1], 8)), CraftBundleAskPolicy.known("minecraft:" + m[0] + "_chestplate").recipe());
+            assertEquals(new Recipe(1, Map.of(m[1], 7)), CraftBundleAskPolicy.known("minecraft:" + m[0] + "_leggings").recipe());
+            assertEquals(new Recipe(1, Map.of(m[1], 4)), CraftBundleAskPolicy.known("minecraft:" + m[0] + "_boots").recipe());
+        }
+        assertNull(CraftBundleAskPolicy.known("minecraft:netherite_helmet"), "netherite is a smithing upgrade");
+        assertNull(CraftBundleAskPolicy.known("minecraft:leather_helmet"), "leather keeps its own path");
+        KnownCraft boots = CraftBundleAskPolicy.known("minecraft:iron_boots");
+        assertEquals("an iron helmet", CraftBundleAskPolicy.purposeText(
+                CraftBundleAskPolicy.known("minecraft:iron_helmet").singular(), null, 1, false));
+        assertEquals("a pair of iron boots", CraftBundleAskPolicy.purposeText(boots.singular(), boots.plural(), 1, false));
+        assertEquals("2 pairs of iron boots", CraftBundleAskPolicy.purposeText(boots.singular(), boots.plural(), 2, false));
+        // Every piece is three columns wide: a table-sized ask adds the table's planks when one must be made.
+        Plan plan = planKnown("minecraft:diamond_chestplate", 1, true, Map.of(), Map.of("minecraft:diamond", 8, PLANKS, 4));
+        assertTrue(plan.complete());
+        assertEquals(8, count(plan, "minecraft:diamond"));
+        assertEquals(4, count(plan, PLANKS));
     }
 
     @Test
