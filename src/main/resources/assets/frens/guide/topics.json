@@ -266,9 +266,9 @@
       "category": "Settings",
       "title": "Follow Teleport",
       "summary": "Wolf-style catch-up teleport during follow mode.",
-      "answer": "Turn on Follow Teleport in Bot Controls under Behavior. While I follow you, I teleport to a safe spot near you if I fall more than 15 blocks behind, get stuck for 3 seconds, or end up 10 or more blocks above or below you.",
+      "answer": "Turn on Follow Teleport in Bot Controls under Behavior. While I follow you, I teleport to a safe spot near you when you are 15 or more blocks away and out of my sight, when I am stuck for about a second and a half, or when you are out of sight 10 or more blocks above or below me.",
       "details": [
-        "When enabled, the bot teleports near you if it falls more than 15 blocks behind, gets stuck for 3 seconds, or loses vertical contact (10+ block Y gap).",
+        "When enabled, the bot teleports near you when it is 15 or more blocks away and can't see you, when it is stuck for about 1.5 seconds at least 7 blocks away, when you are out of sight 10 or more blocks above or below it, or when it is 20 or more blocks away and stuck for a second.",
         "This only affects follow mode. It does not enable teleport during skills, sweeps, or other behaviors.",
         "The bot finds a safe spot behind you, so it won't teleport into lava or off cliffs.",
         "Toggle in Bot Controls > Behavior > Follow Teleport.",
@@ -565,7 +565,7 @@
       "category": "Basics",
       "title": "Fast-Travel Gates",
       "summary": "Which items/conditions let the bot fast-travel, and at what speed.",
-      "answer": "I can only fast-travel when something guides me. The quickest is a lodestone compass in my pack or an Eye of Ender with either of us. A map and compass that show the destination also work, more slowly, and without a guide I walk.",
+      "answer": "The quickest way to let me fast-travel is a lodestone compass in my pack or an Eye of Ender with either of us. A map and compass that show the destination also work, more slowly. Without one of these I can't fast-travel, and I tell you why.",
       "details": [
         "§eTier 2 (1.0×, instant-class)§r: any one of these alone qualifies:",
         "  • Bot holds a §flodestone compass bound to a target§r",
@@ -712,11 +712,11 @@
       "category": "Items",
       "title": "Wizard's Tome",
       "summary": "A rare magical item that unlocks companion spells and abilities.",
-      "answer": "Craft it in The End: hold an Eye of Ender, carry a book, a diamond, 3 redstone and 3 lapis, and sneak-right-click a fully powered enchanting table with 15 bookshelves. Open it to use all the companion spells.",
+      "answer": "Craft it in The End: hold an Eye of Ender, carry a book, a diamond, 3 redstone and 3 lapis, and sneak-right-click a fully powered enchanting table with 15 bookshelves. All of those items are used up. Open it to use all the companion spells.",
       "details": [
         "Crafted via ritual: sneak-right-click an Enchanting Table in The End.",
         "Requires a fully powered table (15 bookshelves).",
-        "Hold an Eye of Ender and have in inventory: 1 Book, 1 Diamond, 3 Redstone, 3 Lapis Lazuli.",
+        "Hold an Eye of Ender and have in inventory: 1 Book, 1 Diamond, 3 Redstone, 3 Lapis Lazuli. All of them, the Eye included, are used up.",
         "Once crafted, open it to access the companion spells menu.",
         "Can also be obtained via /give @p frens:wizard_tome in creative."
       ],

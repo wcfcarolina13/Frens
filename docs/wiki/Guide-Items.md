@@ -10,7 +10,7 @@ A rare magical item that unlocks companion spells and abilities.
 
 - Crafted via ritual: sneak-right-click an Enchanting Table in The End.
 - Requires a fully powered table (15 bookshelves).
-- Hold an Eye of Ender and have in inventory: 1 Book, 1 Diamond, 3 Redstone, 3 Lapis Lazuli.
+- Hold an Eye of Ender and have in inventory: 1 Book, 1 Diamond, 3 Redstone, 3 Lapis Lazuli. All of them, the Eye included, are used up.
 - Once crafted, open it to access the companion spells menu.
 - Can also be obtained via /give @p frens:wizard_tome in creative.
 

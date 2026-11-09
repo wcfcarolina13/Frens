@@ -21,7 +21,7 @@ Chorus Recall is different: it is an instant teleport with no delay, paid for wi
 
 ## Gates: what lets it travel
 
-A fren needs a **gate** to fast-travel. A gate is an item or a place that tells it the way. The departure message in chat names the gate it used. Two trips skip this check: Retrieve Drops, and the sunset trip home (which only happens when the fren carries a lodestone compass anyway).
+A fren needs a **gate** to fast-travel. A gate is an item or a place that tells it the way. The departure message in chat names the gate it used. A few trips skip this check: Retrieve Drops, the sunset trip home (which only happens when the fren carries a lodestone compass anyway), and the recovery trip when a fren gets stuck on its way home.
 
 ### Full speed
 
@@ -71,7 +71,7 @@ The sunset trip home is the exception: it always takes 3 times the base time, wh
 ## Other limits
 
 - A fren in combat can't fast-travel.
-- A fren riding an animal takes it along. It can't take one to another dimension, so that trip is refused.
+- A fren riding an animal takes it along when the destination has room. For a trip to another dimension, or a cramped destination, it ties the animal to a fence and goes alone. It refuses only when it can't do that. A boat or minecart goes into its inventory.
 - Lodestone compasses stop working when their lodestone is broken. `/bot compass list <bot>` shows which ones still work.
 
 ## Picking which lodestone

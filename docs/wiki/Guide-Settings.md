@@ -28,7 +28,7 @@ Who can command a bot on a shared world.
 
 Wolf-style catch-up teleport during follow mode.
 
-- When enabled, the bot teleports near you if it falls more than 15 blocks behind, gets stuck for 3 seconds, or loses vertical contact (10+ block Y gap).
+- When enabled, the bot teleports near you when it is 15 or more blocks away and can't see you, when it is stuck for about 1.5 seconds at least 7 blocks away, when you are out of sight 10 or more blocks above or below it, or when it is 20 or more blocks away and stuck for a second.
 - This only affects follow mode. It does not enable teleport during skills, sweeps, or other behaviors.
 - The bot finds a safe spot behind you, so it won't teleport into lava or off cliffs.
 - Toggle in Bot Controls &gt; Behavior &gt; Follow Teleport.
