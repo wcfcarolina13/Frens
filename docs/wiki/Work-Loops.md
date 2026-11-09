@@ -17,7 +17,7 @@ The short version is on the Guide card [Daily Work Loops](Guide-Gathering.md#dai
 2. Bind a compass to it and put the compass in the fren's inventory. If you use several compasses, rename them on an anvil ("Forest", "Shore") so you can tell them apart in `/bot compass list Jake` and in the Base Manager.
 3. Give the fren an axe or two, food, and somewhere to put the logs (it stores to chests when its pack fills).
 4. Start the job **without a count**: `/bot skill woodcut Jake`, or the Woodcut button left at "Until sunset".
-5. That's it. At sunset it stops and heads home. At sunrise it fast-travels to the lodestone and starts cutting again.
+5. That's it. At sunset it stops and heads home. Because it carries a lodestone compass, it fast-travels there when home is 16 or more blocks away. At sunrise it fast-travels to the lodestone and starts cutting again.
 
 A fishing loop is set up the same way, with the lodestone on a shoreline and `/bot skill fish Jake`. Fishing also remembers its exact stand, so it can go back to that spot. If the spot turns out bad, use [Forget Fishing Spot](Guide-Gathering.md#forget-fishing-spot).
 

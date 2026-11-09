@@ -4465,7 +4465,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 "Forget Fishing Spot",
                 "Clears the bot's saved fishing stand and sunrise-resume record.",
                 "Use this if the bot keeps fast-travelling back to a bad spot each morning.",
-                "Lodestone compasses are untouched. The next /bot fish starts where the bot is standing."
+                "Lodestone compasses are untouched. The next /bot fish picks a spot near the bot."
             );
             case SKILL_WOODCUT_CLEANUP -> java.util.List.of(
                 "Woodcut Cleanup",
