@@ -31,18 +31,25 @@ class TreeStuckDropPolicyTest {
     @Test
     void aBotOnTheLipOfItsHoleEdgesOntoIt() {
         // Sandbox 2026-11-09 run C: onGround over air, a leaf one block down, commander 7 below.
-        assertTrue(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 1, 125, 118, 0));
-        assertTrue(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 3, 125, null, 40), "no commander, last tick allowed");
+        assertTrue(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 1, 125, 118, 0, 3));
+        assertTrue(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 3, 125, null, 40, 3), "no commander, last tick allowed");
     }
 
     @Test
     void itStaysPutWhenTheHoleIsNotASafeWayDown() {
-        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(false, true, true, 1, 125, 118, 0), "in the air");
-        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, false, true, 1, 125, 118, 0), "nothing open below");
-        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, false, 1, 125, 118, 0), "resting on something other than a leaf");
-        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 4, 125, 118, 0), "4-block drop costs health");
-        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 1, 125, 125, 0), "commander on the canopy too");
-        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 1, 125, 118, 41), "this hole had its time");
+        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(false, true, true, 1, 125, 118, 0, 3), "in the air");
+        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, false, true, 1, 125, 118, 0, 3), "nothing open below");
+        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, false, 1, 125, 118, 0, 3), "resting on something other than a leaf");
+        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 4, 125, 118, 0, 3), "4-block drop costs health");
+        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 1, 125, 125, 0, 3), "commander on the canopy too");
+        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 1, 125, 118, 41, 3), "this hole had its time");
+    }
+
+    @Test
+    void aLastResortHoleMayBeDeeperButNotUnbounded() {
+        assertTrue(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 6, 125, 118, 0, 8));
+        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, 9, 125, 118, 0, 8));
+        assertFalse(TreeStuckDropPolicy.shouldEdgeIntoHole(true, true, true, Integer.MAX_VALUE, 125, 118, 0, 8), "unsafe landing");
     }
 
     @Test
@@ -59,9 +66,9 @@ class TreeStuckDropPolicyTest {
         int sameTree = src.indexOf("if (commanderOnSameTree) {");
         int strategy1 = src.indexOf("Strategy 1: Find a safe drop edge");
         assertTrue(sameTree > 0 && sameTree < strategy1, "a bot with its commander on the canopy runs no strategy");
-        assertTrue(src.contains("isIn(BlockTags.LEAVES) && (belowIsSafe || lastResort)"),
+        assertTrue(src.contains("isIn(BlockTags.LEAVES) && (belowIsSafe || lastResortBreak)"),
                 "the leaf under the bot goes only over a safe fall, or after 10 s stuck");
-        assertTrue(src.contains("findLeafTowardTrunk(world, bot.getBlockPos(), trunk, belowIsSafe || lastResort)"),
+        assertTrue(src.contains("findLeafTowardTrunk(world, bot.getBlockPos(), trunk, belowIsSafe)"),
                 "the trunk strategy obeys the same rule for the leaf below");
         assertTrue(src.indexOf("dropCanopyWaypoints(bot);") < src.indexOf("Strategy 1: Find a safe drop edge"),
                 "the canopy path is dropped when the bot gets down");

@@ -45,14 +45,15 @@ public final class TreeStuckDropPolicy {
      *
      * @param holeDrop open cells below the feet before the first block it would land on
      * @param commanderFeetY the commander's block Y, or {@code null} when there is none
+     * @param maxDrop {@link #SAFE_DROP_HEIGHT}, or deeper for a hole broken as the last resort
      */
     public static boolean shouldEdgeIntoHole(boolean onGround, boolean belowOpen, boolean supportIsLeaf,
                                              int holeDrop, int botFeetY, Integer commanderFeetY,
-                                             long ticksOnThisHole) {
+                                             long ticksOnThisHole, int maxDrop) {
         if (!onGround || !belowOpen || !supportIsLeaf) {
             return false;
         }
-        if (holeDrop < 1 || !isSafeDrop(holeDrop)) {
+        if (holeDrop < 1 || holeDrop > maxDrop) {
             return false;
         }
         if (commanderFeetY != null && commanderFeetY >= botFeetY) {

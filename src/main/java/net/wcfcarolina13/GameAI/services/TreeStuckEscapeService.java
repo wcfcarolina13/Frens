@@ -63,6 +63,17 @@ public final class TreeStuckEscapeService {
     private static final long LAST_RESORT_TICKS = 200L;
     /** Bots whose last evaluation found no safe way down yet: follow runs between evaluations. */
     private static final Set<UUID> WAITING_FOR_SAFE_WAY = ConcurrentHashMap.newKeySet();
+    /** The leaf broken as a last resort: the nudge may edge the bot onto that hole over a deeper drop. */
+    private static final ConcurrentHashMap<UUID, BlockPos> LAST_RESORT_HOLE = new ConcurrentHashMap<>();
+    /** Feet Y when the bot first stood on leaves this time: the canopy level. */
+    private static final ConcurrentHashMap<UUID, Integer> CANOPY_FEET_Y = new ConcurrentHashMap<>();
+    /** Grounded ticks off leaves at canopy level (on a log, on a lip) since it last stood on leaves. */
+    private static final ConcurrentHashMap<UUID, Integer> OFF_LEAF_TICKS = new ConcurrentHashMap<>();
+    /**
+     * Grounded ticks off leaves at canopy level that keep the stuck clock: a tick on a log or on a lip
+     * while follow runs used to restart it, so the 10 s last resort was never reached.
+     */
+    private static final int OFF_LEAF_GRACE_TICKS = 20;
     /** Maximum ticks to steer toward a safe drop before escalating. */
     private static final long ESCAPE_TARGET_STALE_TICKS = 120L;
     /** Dialogue cooldown (ms). */
@@ -174,6 +185,15 @@ public final class TreeStuckEscapeService {
             if (tryEdgeIntoHole(bot, world, server, belowFeet, now)) {
                 return true;
             }
+            Integer canopyY = CANOPY_FEET_Y.get(botId);
+            if (TREE_STUCK_SINCE_TICK.containsKey(botId) && canopyY != null && bot.getBlockY() >= canopyY
+                    && OFF_LEAF_TICKS.merge(botId, 1, Integer::sum) <= OFF_LEAF_GRACE_TICKS) {
+                return false; // still up at the canopy level: keep the stuck clock
+            }
+            BlockPos lastResortHole = LAST_RESORT_HOLE.get(botId);
+            if (lastResortHole != null && bot.getBlockY() <= lastResortHole.getY()) {
+                LAST_RESORT_HOLE.remove(botId);
+            }
             HoleNudge spent = HOLE_NUDGE.get(botId);
             if (LAST_TREE_ESCAPE_ATTEMPT_TICK.containsKey(botId)
                     || (spent != null && !spent.column().equals(bot.getBlockPos()))) {
@@ -187,9 +207,12 @@ public final class TreeStuckEscapeService {
             return false;
         }
         HOLE_NUDGE.remove(botId);
+        OFF_LEAF_TICKS.remove(botId);
 
         // Track how long we've been on leaves.
-        TREE_STUCK_SINCE_TICK.putIfAbsent(botId, now);
+        if (TREE_STUCK_SINCE_TICK.putIfAbsent(botId, now) == null) {
+            CANOPY_FEET_Y.put(botId, bot.getBlockY());
+        }
         long stuckDuration = now - TREE_STUCK_SINCE_TICK.get(botId);
         if (stuckDuration < STUCK_THRESHOLD_TICKS) {
             return false; // Not stuck yet — just traversing leaves briefly.
@@ -254,9 +277,17 @@ public final class TreeStuckEscapeService {
         // ── Strategy 3: Break leaves below to fall through ──
         // Simplest and most reliable: just break the leaf under the bot's feet.
         BlockPos leafBelow = bot.getBlockPos().down();
-        int fallThroughLeaf = fallThroughLeaf(world, leafBelow);
+        int fallThroughLeaf = fallThroughLeaf(world, leafBelow, SAFE_DROP_HEIGHT);
         boolean belowIsSafe = TreeStuckDropPolicy.isSafeDrop(fallThroughLeaf);
-        if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES) && (belowIsSafe || lastResort)) {
+        if (!belowIsSafe && lastResort) {
+            // A fall that costs a few hearts, never lava, fire or a deadly drop.
+            fallThroughLeaf = fallThroughLeaf(world, leafBelow, SURVIVABLE_DROP_HEIGHT);
+        }
+        boolean lastResortBreak = !belowIsSafe && lastResort && fallThroughLeaf <= SURVIVABLE_DROP_HEIGHT;
+        if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES) && (belowIsSafe || lastResortBreak)) {
+            if (lastResortBreak) {
+                LAST_RESORT_HOLE.put(botId, leafBelow);
+            }
             showDialogue(bot, LEAF_BREAK_LINE);
             LOGGER.info("TreeStuck: {} breaking leaf below at {} (fall {})", bot.getName().getString(),
                     leafBelow.toShortString(), fallThroughLeaf);
@@ -267,7 +298,7 @@ public final class TreeStuckEscapeService {
         // ── Strategy 4: Break leaves toward trunk ──
         BlockPos trunk = findNearbyTrunk(world, bot.getBlockPos());
         if (trunk != null) {
-            BlockPos leafToBreak = findLeafTowardTrunk(world, bot.getBlockPos(), trunk, belowIsSafe || lastResort);
+            BlockPos leafToBreak = findLeafTowardTrunk(world, bot.getBlockPos(), trunk, belowIsSafe);
             if (leafToBreak != null) {
                 showDialogue(bot, LEAF_BREAK_LINE);
                 LOGGER.info("TreeStuck: {} breaking leaf at {} toward trunk at {}",
@@ -320,9 +351,11 @@ public final class TreeStuckEscapeService {
         BlockPos support = bot.supportingBlockPos.orElse(null);
         boolean supportIsLeaf = support != null && !support.equals(belowFeet)
                 && world.getBlockState(support).isIn(BlockTags.LEAVES);
+        // A hole broken as the last resort may be deeper than a safe drop: that is why it was broken.
+        int maxDrop = belowFeet.equals(LAST_RESORT_HOLE.get(botId)) ? SURVIVABLE_DROP_HEIGHT : SAFE_DROP_HEIGHT;
         int holeDrop = 0;
         BlockPos probe = belowFeet;
-        while (holeDrop <= SAFE_DROP_HEIGHT && world.getBlockState(probe).isAir()) {
+        while (holeDrop <= maxDrop && world.getBlockState(probe).isAir()) {
             holeDrop++;
             probe = probe.down();
         }
@@ -338,7 +371,7 @@ public final class TreeStuckEscapeService {
             nudge = new HoleNudge(column, now);
         }
         if (!TreeStuckDropPolicy.shouldEdgeIntoHole(bot.isOnGround(), belowOpen, supportIsLeaf, holeDrop,
-                column.getY(), commanderY, now - nudge.since())) {
+                column.getY(), commanderY, now - nudge.since(), maxDrop)) {
             return false;
         }
         if (nudge.since() == now) {
@@ -357,13 +390,13 @@ public final class TreeStuckEscapeService {
     /**
      * How far the bot falls if the leaf at {@code leafPos} under it goes: that cell plus the air
      * below, onto a landing that does no harm; {@link Integer#MAX_VALUE} when the landing is unsafe or
-     * deeper than a safe drop. The leaf break used to open columns over a terrace 4-6 blocks down
+     * deeper than {@code maxFall}. The leaf break used to open columns over a terrace 4-6 blocks down
      * (sandbox 2026-11-09: 1-3 HP lost in 3 of 6 runs).
      */
-    private static int fallThroughLeaf(ServerWorld world, BlockPos leafPos) {
+    private static int fallThroughLeaf(ServerWorld world, BlockPos leafPos, int maxFall) {
         int fall = 1;
         BlockPos probe = leafPos.down();
-        while (fall <= SAFE_DROP_HEIGHT && world.getBlockState(probe).isAir()) {
+        while (fall <= maxFall && world.getBlockState(probe).isAir()) {
             fall++;
             probe = probe.down();
         }
@@ -410,6 +443,8 @@ public final class TreeStuckEscapeService {
         SAFE_DROP_EXHAUSTED.remove(botId);
         HOLE_NUDGE.remove(botId);
         WAITING_FOR_SAFE_WAY.remove(botId);
+        CANOPY_FEET_Y.remove(botId);
+        OFF_LEAF_TICKS.remove(botId);
         // Don't clear dialogue cooldown — let it expire naturally.
         LEAF_MINE_INFLIGHT.remove(botId);
     }
