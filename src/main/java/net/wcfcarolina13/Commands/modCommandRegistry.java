@@ -58,6 +58,7 @@ import net.wcfcarolina13.GameAI.services.BotCommandStateService;
 import net.wcfcarolina13.GameAI.services.CompanionContextReactionService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.BotIdleHobbiesService;
+import net.wcfcarolina13.GameAI.services.CookFuelFallbackPolicy;
 import net.wcfcarolina13.GameAI.services.BotInventoryFullDialogueService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import java.nio.file.Path;
@@ -2794,7 +2795,30 @@ public class modCommandRegistry {
         if (bot == null) {
             return 0;
         }
-        boolean started = SmeltingService.startBatchCook(bot, context.getSource(), itemFilter, fuelSpec);
+        ServerCommandSource source = context.getSource();
+        // No fuel on the bot for a fuel-loading cook: one leaf-litter run first, then the same
+        // cook as before, which checks fuel again and goes on without it as today (backlog 1238).
+        if (bot.getEntityWorld() instanceof ServerWorld world
+                && CookFuelFallbackPolicy.shouldGatherForCookCommand(
+                        fuelSpec,
+                        SmeltingService.hasCookablesForCommand(bot, world, itemFilter),
+                        SmeltingService.hasFuelForAutoCook(bot, world),
+                        () -> BotIdleHobbiesService.hasLeafLitterForFuelRun(bot))) {
+            MinecraftServer server = source.getServer();
+            java.util.UUID botUuid = bot.getUuid();
+            boolean submitted = BotIdleHobbiesService.startLeafLitterFuelRun(bot, mayContinue -> {
+                ServerPlayerEntity live = server.getPlayerManager().getPlayer(botUuid);
+                if (!mayContinue || live == null) {
+                    return;
+                }
+                SmeltingService.startBatchCook(live, source, itemFilter, fuelSpec);
+            });
+            if (submitted) {
+                ChatUtils.sendSystemMessage(source, "No fuel on me. Gathering some leaf litter first.");
+                return 1;
+            }
+        }
+        boolean started = SmeltingService.startBatchCook(bot, source, itemFilter, fuelSpec);
         return started ? 1 : 0;
     }
 
