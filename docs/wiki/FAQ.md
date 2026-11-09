@@ -42,7 +42,7 @@ Yes, with a lodestone compass at the work spot. See [Work loops](Work-Loops.md).
 
 ## It won't cut the trees near my house
 
-That's deliberate. Frens don't cut trees inside your base, the spawn area, a protected zone or a mapped village. If those are the only trees nearby, the fren walks out to find others. See [Woodcut](Guide-Gathering.md#woodcut).
+That's deliberate. Frens don't cut trees inside any base (yours included), the spawn area, a protected zone, a mapped village, near a wall or by a bee nest. If those are the only trees nearby, the fren walks out to find others. See [Protected zones](Protected-Zones.md).
 
 ## How do I make frens quieter?
 
