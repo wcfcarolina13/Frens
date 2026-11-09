@@ -49,6 +49,6 @@ class FallClutchPolicyTest {
         assertFalse(src.contains("useOnBlock("), "a bucket never overrides useOnBlock");
         assertTrue(src.contains("bot.interactionManager.interactItem(bot, world, stack, Hand.MAIN_HAND)"));
         assertTrue(src.contains("FallClutchPolicy.projectedLethal(bot.fallDistance, landing.heightDelta(), effectiveHealth)"));
-        assertTrue(src.contains("FallClutchPolicy.inPlaceWindow(landing.heightDelta(), bot.getStandingEyeHeight(), bot.getBlockInteractionRange())"));
+        assertTrue(src.contains("FallClutchPolicy.inPlaceWindow(landing.heightDelta(), bot.getEyeY() - bot.getBoundingBox().minY, bot.getBlockInteractionRange())"));
     }
 }

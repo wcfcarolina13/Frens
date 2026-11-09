@@ -72,6 +72,9 @@ public final class BotFallSafetyService {
         if (ElytraFlightService.isInFlight(bot.getUuid())) {
             return;
         }
+        if (bot.getAbilities().allowFlying) {
+            return; // creative or flying: vanilla applies no fall damage, so a bucket would be wasted
+        }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
@@ -107,7 +110,7 @@ public final class BotFallSafetyService {
             return;
         }
 
-        if (!FallClutchPolicy.inPlaceWindow(landing.heightDelta(), bot.getStandingEyeHeight(), bot.getBlockInteractionRange())) {
+        if (!FallClutchPolicy.inPlaceWindow(landing.heightDelta(), bot.getEyeY() - bot.getBoundingBox().minY, bot.getBlockInteractionRange())) {
             NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + RETRY_INTERVAL_TICKS);
             return;
         }
