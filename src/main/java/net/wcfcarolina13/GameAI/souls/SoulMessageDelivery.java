@@ -107,6 +107,14 @@ public final class SoulMessageDelivery implements SoulConversationService.Delive
                         // the voice subscriber can speak it (voice-only mode).
                         if (textEnabled.getAsBoolean()) {
                             player.sendMessage(Text.literal(turn.botDisplayName() + ": " + safeText), false);
+                            // A how-to question: the matching Guide card, one click away from
+                            // whatever the model said. A system line, so voice never speaks it.
+                            try {
+                                net.wcfcarolina13.GameAI.services.GuideChatAnswerService
+                                        .sendLinkAfterSoulReply(bot, player, turn.playerMessage(), safeText);
+                            } catch (RuntimeException linkFailure) {
+                                LOGGER.warn("[souls] guide link failed: {}", linkFailure.toString());
+                            }
                         }
                         delivered = true;
                     }
