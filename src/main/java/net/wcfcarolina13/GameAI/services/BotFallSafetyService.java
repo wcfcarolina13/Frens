@@ -2,7 +2,6 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.ItemUsageContext;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.MinecraftServer;
@@ -13,11 +12,9 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import net.minecraft.world.attribute.EnvironmentAttributes;
-import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 
@@ -31,10 +28,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class BotFallSafetyService {
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("bot-fall-safety");
 
-    private static final float MIN_LETHAL_FALL_DISTANCE = 7.5F;
+    /** A fall shorter than this so far is a step or a hop, not worth a landing scan. */
+    private static final float MIN_ARM_FALL_DISTANCE = 2.0F;
     private static final double MIN_DESCENT_SPEED = -0.65D;
-    private static final double MAX_PLACE_HEIGHT_DELTA = 4.2D;
-    private static final long RETRY_INTERVAL_TICKS = 2L;
+    /** How far below the feet the landing scan looks. */
+    private static final double LANDING_SCAN_DEPTH = 64.0D;
+    private static final long RETRY_INTERVAL_TICKS = 1L;
     private static final long SUCCESS_COOLDOWN_TICKS = 20L;
 
     private static final Map<UUID, Long> NEXT_ATTEMPT_TICK = new ConcurrentHashMap<>();
@@ -82,14 +81,23 @@ public final class BotFallSafetyService {
         if (bot.getVelocity().y > MIN_DESCENT_SPEED) {
             return;
         }
-        if (bot.fallDistance < MIN_LETHAL_FALL_DISTANCE) {
-            return;
-        }
-        if (!isLikelyLethal(bot)) {
+        if (bot.fallDistance < MIN_ARM_FALL_DISTANCE) {
             return;
         }
         long next = NEXT_ATTEMPT_TICK.getOrDefault(bot.getUuid(), 0L);
         if (nowTick < next) {
+            return;
+        }
+        LandingTarget landing = predictLanding(world, bot);
+        if (landing == null) {
+            NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + RETRY_INTERVAL_TICKS);
+            return;
+        }
+        // Judge the whole fall (fallen so far plus still to go), so the clutch is armed and
+        // waiting when the landing comes into reach instead of arming two ticks before impact.
+        double effectiveHealth = bot.getHealth() + bot.getAbsorptionAmount();
+        if (!FallClutchPolicy.projectedLethal(bot.fallDistance, landing.heightDelta(), effectiveHealth)) {
+            NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + RETRY_INTERVAL_TICKS);
             return;
         }
         if (waterEvaporatesAt(world, bot.getBlockPos())) {
@@ -99,12 +107,7 @@ public final class BotFallSafetyService {
             return;
         }
 
-        LandingTarget landing = predictLanding(world, bot);
-        if (landing == null) {
-            NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + RETRY_INTERVAL_TICKS);
-            return;
-        }
-        if (landing.heightDelta() > MAX_PLACE_HEIGHT_DELTA || landing.heightDelta() < 0.2D) {
+        if (!FallClutchPolicy.inPlaceWindow(landing.heightDelta(), bot.getStandingEyeHeight(), bot.getBlockInteractionRange())) {
             NEXT_ATTEMPT_TICK.put(bot.getUuid(), nowTick + RETRY_INTERVAL_TICKS);
             return;
         }
@@ -135,12 +138,6 @@ public final class BotFallSafetyService {
         }
     }
 
-    private static boolean isLikelyLethal(ServerPlayerEntity bot) {
-        double effectiveHealth = bot.getHealth() + bot.getAbsorptionAmount();
-        double projectedDamage = Math.max(0.0D, bot.fallDistance - 3.0D);
-        return projectedDamage >= Math.max(4.0D, effectiveHealth - 0.5D);
-    }
-
     /**
      * True where placed water evaporates (the Nether in vanilla), so a clutch there would only
      * empty the bucket. 1.21.11 moved this from {@code DimensionType} to the environment attribute
@@ -163,7 +160,7 @@ public final class BotFallSafetyService {
             return null;
         }
         Vec3d from = new Vec3d(bot.getX(), bot.getBoundingBox().minY, bot.getZ());
-        Vec3d to = from.add(0.0D, -24.0D, 0.0D);
+        Vec3d to = from.add(0.0D, -LANDING_SCAN_DEPTH, 0.0D);
         BlockHitResult hit = world.raycast(new RaycastContext(
                 from,
                 to,
@@ -219,17 +216,13 @@ public final class BotFallSafetyService {
         if (stack.isEmpty() || !stack.isOf(Items.WATER_BUCKET)) {
             return false;
         }
-        LookController.faceBlock(bot, supportPos);
-        BlockHitResult hit = new BlockHitResult(
-                Vec3d.ofCenter(supportPos).add(0.0D, 0.5D, 0.0D),
-                Direction.UP,
-                supportPos,
-                false
-        );
-        ActionResult result = stack.useOnBlock(new ItemUsageContext(bot, Hand.MAIN_HAND, hit));
+        // A bucket places through Item.use (a raycast from the eyes), not useOnBlock, which a
+        // bucket never overrides: the old useOnBlock call always passed and never placed water.
+        // Look straight down and use it as a player would, within the player's block reach.
+        bot.setPitch(90.0F);
+        ActionResult result = bot.interactionManager.interactItem(bot, world, stack, Hand.MAIN_HAND);
         if (result.isAccepted()) {
             bot.swingHand(Hand.MAIN_HAND, true);
-            return true;
         }
         return bot.getMainHandStack().isOf(Items.BUCKET);
     }
