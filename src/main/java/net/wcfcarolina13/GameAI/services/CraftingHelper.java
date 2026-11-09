@@ -5035,7 +5035,8 @@ public final class CraftingHelper {
             Item plankItem = mapLogToPlank(stack.getItem());
             if (plankItem != null && plankItem != Items.AIR
                     && !hasRecipePermission(CRAFT_COMMANDER.get(), serverOf(bot), plankItem)) {
-                continue; // limitedCrafting: these planks are locked for the commander; the craft reports its plank shortfall
+                RECIPE_REFUSAL_LINE.remove(); // the craft reports its plank shortfall, not this line
+                continue; // limitedCrafting: these planks are locked for the commander
             }
             CraftCommitPolicy.Outcome outcome = commitLogsToPlanks(bot, i, stack.getItem(), stack.getCount(), convert, plankItem);
             if (!CraftCommitPolicy.continueScan(outcome)) {
