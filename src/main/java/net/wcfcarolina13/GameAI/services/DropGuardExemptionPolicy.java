@@ -57,6 +57,21 @@ public final class DropGuardExemptionPolicy {
                 && referenceY - standLevelAhead >= GUARD_MIN_DEPTH;
     }
 
+    /**
+     * Whether an {@link #exempt} drop stays exempt once the straight line toward the target has
+     * been read by {@link BlindWalkGuardPolicy}. {@link #exempt} looks only at where the target
+     * stands, never at the drop itself: a commander on the far rim of a ravine is grounded and level
+     * with the bot, so a come walked the bot straight off the edge (sandbox 2026-11-09). A line the
+     * blind-walk guard refuses (within its refuse horizon: a fall of more than
+     * {@link BlindWalkGuardPolicy#MAX_SAFE_DROP} that does not end in water, lava, a deadly floor,
+     * or deep water) is not exempt, so the drop guard sidesteps or stops at the edge as it does for
+     * any other drop. A 1-3 block step down and a drop into shallow water stay exempt. A null
+     * verdict (nothing sampled) keeps the old answer.
+     */
+    public static boolean exemptAfterBlindLine(boolean exempt, BlindWalkGuardPolicy.Verdict lineVerdict) {
+        return exempt && lineVerdict != BlindWalkGuardPolicy.Verdict.REFUSE;
+    }
+
     /** The lowest stand level a guard's bypass step may land on: one below the reference at most. */
     public static int minBypassStandY(int referenceY) {
         return referenceY - GUARD_MIN_DEPTH + 1;
