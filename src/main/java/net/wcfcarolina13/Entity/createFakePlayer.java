@@ -379,10 +379,12 @@ public class createFakePlayer extends ServerPlayerEntity {
 
     /**
      * Fall damage for the bot (see {@link FakePlayerFallPolicy}): vanilla only tracks a player's
-     * falls from its movement packets, which a bot never sends, so fall distance stayed 0 and bots
-     * took no fall damage. Called once per tick with where the bot stood before its movement tick.
-     * Landing is read from the collision under the feet, not {@code isOnGround()}, which the
-     * server never updates from a player's own move.
+     * falls from its movement packets ({@code ServerPlayNetworkHandler.onPlayerMove}), which a bot
+     * never sends, so fall distance stayed 0 and bots took no fall damage. Called once per tick
+     * with where the bot stood before its movement tick, and does what the network handler does:
+     * {@code handleFall} with the move and the ground flag ({@code Entity.move} keeps it current
+     * for a bot), then a reset after any upward move, so a bot knocked up mid-fall lands as a
+     * player would.
      */
     private void trackFall(double startX, double startY, double startZ) {
         if (this.isRemoved()) {
@@ -396,12 +398,10 @@ public class createFakePlayer extends ServerPlayerEntity {
             }
             case TELEPORT -> this.onLanding();
             case MOVE -> {
-                net.minecraft.util.math.Box box = this.getBoundingBox();
-                net.minecraft.util.math.Box underFeet = new net.minecraft.util.math.Box(
-                        box.minX + 1.0E-3D, box.minY - 0.05D, box.minZ + 1.0E-3D,
-                        box.maxX - 1.0E-3D, box.minY, box.maxZ - 1.0E-3D);
-                boolean landed = dy <= 0.0D && !this.getEntityWorld().isSpaceEmpty(this, underFeet);
-                handleFall(0.0D, dy, 0.0D, landed);
+                handleFall(dx, dy, dz, this.isOnGround());
+                if (dy > 0.0D) {
+                    this.onLanding();
+                }
             }
         }
     }

@@ -54,7 +54,9 @@ class FakePlayerFallPolicyTest {
         int track = src.indexOf("trackFall(", tick);
         int playerTick = src.indexOf("this.playerTick();", tick);
         assertTrue(tick >= 0 && playerTick > tick && track > playerTick, "trackFall runs after the movement tick");
-        assertTrue(src.contains("handleFall(0.0D, dy, 0.0D, landed)"), "feeds handleFall like the network handler");
+        assertTrue(src.contains("handleFall(dx, dy, dz, this.isOnGround())"), "feeds handleFall like the network handler");
+        int up = src.indexOf("if (dy > 0.0D) {", src.indexOf("handleFall(dx, dy, dz"));
+        assertTrue(up > 0 && src.indexOf("this.onLanding();", up) > up, "an upward move resets the fall, as the network handler does");
         assertTrue(src.contains("FakePlayerFallPolicy.classify("), "uses the policy");
     }
 }
