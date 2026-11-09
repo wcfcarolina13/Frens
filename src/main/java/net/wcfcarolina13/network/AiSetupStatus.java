@@ -16,13 +16,20 @@ import java.util.List;
  * the redacted view a regular player gets: {@link #ollama()} is null, and the runtime's model,
  * validation error and provider health, and the voice engine details, are left at their
  * "unknown" defaults and omitted from the JSON (they describe the server machine).
+ *
+ * <p>{@code personas} (every registered soul profile) goes to everyone; {@code voicePresets}
+ * (what the active voice engine offers on the server machine) and each bot's assigned
+ * {@link Bot#voice()} only in a full record. Servers older than the pickers send neither, and
+ * the checklist then offers no "Pick…" button.
  */
 public record AiSetupStatus(boolean full,
                             Ollama ollama,
                             Runtime runtime,
                             List<Bot> bots,
                             Voice voice,
-                            Viewer viewer) {
+                            Viewer viewer,
+                            List<Persona> personas,
+                            List<String> voicePresets) {
 
     /** Caps that keep the JSON far below the payload's string limit. */
     public static final int MAX_TAGS = 64;
@@ -69,11 +76,22 @@ public record AiSetupStatus(boolean full,
      * with this bot, i.e. it delivered a soul reply to them in the last 30 s.
      */
     public record Bot(String name, String uuid, String profileId, boolean active,
-                      boolean ownedByViewer, boolean inReach, boolean repliedRecently) {
+                      boolean ownedByViewer, boolean inReach, boolean repliedRecently, String voice) {
         public Bot {
             name = name == null ? "" : name;
             uuid = uuid == null ? "" : uuid;
             profileId = profileId == null ? "" : profileId;
+            voice = voice == null ? "" : voice;
+        }
+
+        /** Without a voice assignment (none, or not visible to this viewer). */
+        public Bot(String name, String uuid, String profileId, boolean active,
+                   boolean ownedByViewer, boolean inReach, boolean repliedRecently) {
+            this(name, uuid, profileId, active, ownedByViewer, inReach, repliedRecently, "");
+        }
+
+        Bot withoutVoice() {
+            return new Bot(name, uuid, profileId, active, ownedByViewer, inReach, repliedRecently, "");
         }
 
         /** Bound to a persona and active — what {@code /bot soul enable} leaves behind. */
@@ -97,7 +115,22 @@ public record AiSetupStatus(boolean full,
     public record Viewer(boolean canEditServer, boolean isIntegratedHost, boolean canSetNewBotSoul) {
     }
 
+    /** One registered soul profile the persona picker offers: its id and display name. */
+    public record Persona(String id, String name) {
+        public Persona {
+            id = id == null ? "" : id;
+            name = name == null || name.isBlank() ? id : name;
+        }
+    }
+
+    /** Without the picker lists (servers older than the pickers). */
+    public AiSetupStatus(boolean full, Ollama ollama, Runtime runtime, List<Bot> bots, Voice voice, Viewer viewer) {
+        this(full, ollama, runtime, bots, voice, viewer, List.of(), List.of());
+    }
+
     public AiSetupStatus {
+        personas = personas == null ? List.of() : List.copyOf(personas);
+        voicePresets = voicePresets == null ? List.of() : List.copyOf(voicePresets);
         bots = bots == null ? List.of() : List.copyOf(bots);
         runtime = runtime == null ? new Runtime(false, false, false, "", "", null) : runtime;
         voice = voice == null ? new Voice(false, false, "", false, false) : voice;
@@ -112,14 +145,30 @@ public record AiSetupStatus(boolean full,
         List<Bot> own = new ArrayList<>();
         for (Bot bot : bots) {
             if (bot.ownedByViewer()) {
-                own.add(bot);
+                own.add(bot.withoutVoice());
             }
         }
         return new AiSetupStatus(false, null,
                 new Runtime(runtime.running(), runtime.soulsEnabled(), runtime.ready(), "", "", null),
                 own,
                 new Voice(voice.enabled(), false, "", false, false),
-                new Viewer(viewer.canEditServer(), viewer.isIntegratedHost(), false));
+                new Viewer(viewer.canEditServer(), viewer.isIntegratedHost(), false),
+                personas, List.of());
+    }
+
+    /** Whether the server offers the persona / voice pickers (it sent the persona list). */
+    public boolean offersPickers() {
+        return !personas.isEmpty();
+    }
+
+    /** The listed bot with this UUID text, or null. */
+    public Bot bot(String uuid) {
+        for (Bot bot : bots) {
+            if (bot.uuid().equals(uuid)) {
+                return bot;
+            }
+        }
+        return null;
     }
 
     // ── JSON ────────────────────────────────────────────────────────────────
@@ -166,6 +215,25 @@ public record AiSetupStatus(boolean full,
             node.put("ownedByViewer", bot.ownedByViewer());
             node.put("inReach", bot.inReach());
             node.put("repliedRecently", bot.repliedRecently());
+            if (full && !bot.voice().isEmpty()) {
+                node.put("voice", bot.voice());
+            }
+        }
+        ArrayNode p = root.putArray("personas");
+        int pn = 0;
+        for (Persona persona : personas) {
+            if (pn++ >= BotSoulPickerPolicy.MAX_PERSONAS) break;
+            ObjectNode node = p.addObject();
+            node.put("id", persona.id());
+            node.put("name", persona.name());
+        }
+        if (full) {
+            ArrayNode vp = root.putArray("voicePresets");
+            int vn = 0;
+            for (String preset : voicePresets) {
+                if (vn++ >= BotSoulPickerPolicy.MAX_PRESETS) break;
+                vp.add(preset);
+            }
         }
         ObjectNode v = root.putObject("voice");
         v.put("enabled", voice.enabled());
@@ -219,7 +287,26 @@ public record AiSetupStatus(boolean full,
                 bots.add(new Bot(node.path("name").asText(""), node.path("uuid").asText(""),
                         node.path("profileId").asText(""), node.path("active").asBoolean(false),
                         node.path("ownedByViewer").asBoolean(false), node.path("inReach").asBoolean(false),
-                        node.path("repliedRecently").asBoolean(false)));
+                        node.path("repliedRecently").asBoolean(false),
+                        full ? node.path("voice").asText("") : ""));
+            }
+            List<Persona> personas = new ArrayList<>();
+            for (JsonNode node : root.path("personas")) {
+                if (personas.size() >= BotSoulPickerPolicy.MAX_PERSONAS) break;
+                String id = node.path("id").asText("");
+                if (!id.isEmpty()) {
+                    personas.add(new Persona(id, node.path("name").asText("")));
+                }
+            }
+            List<String> presets = new ArrayList<>();
+            if (full) {
+                for (JsonNode node : root.path("voicePresets")) {
+                    if (presets.size() >= BotSoulPickerPolicy.MAX_PRESETS) break;
+                    String preset = node.asText("");
+                    if (!preset.isEmpty()) {
+                        presets.add(preset);
+                    }
+                }
             }
             JsonNode v = root.path("voice");
             boolean detail = v.has("engine");
@@ -229,7 +316,7 @@ public record AiSetupStatus(boolean full,
             Viewer viewer = new Viewer(w.path("canEditServer").asBoolean(false),
                     w.path("isIntegratedHost").asBoolean(false),
                     w.path("canSetNewBotSoul").asBoolean(false));
-            return new AiSetupStatus(full, ollama, runtime, bots, voice, viewer);
+            return new AiSetupStatus(full, ollama, runtime, bots, voice, viewer, personas, presets);
         } catch (Exception malformed) {
             return null;
         }

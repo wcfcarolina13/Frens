@@ -25,7 +25,9 @@ import net.wcfcarolina13.GameAI.souls.OllamaModelInstaller;
 import net.wcfcarolina13.GameAI.souls.SoulProfileRegistry;
 import net.wcfcarolina13.GameAI.souls.SoulRuntime;
 import net.wcfcarolina13.GameAI.souls.SoulTypes;
+import net.wcfcarolina13.GameAI.souls.voice.PiperInstaller;
 import net.wcfcarolina13.GameAI.souls.voice.SoulVoiceSettings;
+import net.wcfcarolina13.GameAI.souls.voice.VoiceCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,7 +96,8 @@ public final class AiSetupNetworkManager {
     /**
      * Client → server: one setup action. {@code action} is an {@link AiSetupActionPolicy.Action}
      * name; {@code arg} is the bot UUID (ENABLE_BOT), model tag (SELECT_MODEL), engine id
-     * (SELECT_VOICE_ENGINE) or "".
+     * (SELECT_VOICE_ENGINE), {@code <botUuid>|<value>} (SET_BOT_PERSONA, SET_BOT_VOICE; see
+     * {@link BotSoulPickerPolicy}) or "".
      */
     public record AiSetupActionPayload(String action, String arg) implements CustomPayload {
         public static final Id<AiSetupActionPayload> ID = new Id<>(Identifier.of("frens", "ai_setup_action"));
@@ -293,7 +296,7 @@ public final class AiSetupNetworkManager {
         return new AiSetupStatus(true, ollama,
                 new AiSetupStatus.Runtime(r.running(), r.soulsEnabled(), r.ready(), r.model(),
                         r.validationError(), healthy, r.newBotSoulDefault()),
-                base.bots(), base.voice(), base.viewer());
+                base.bots(), base.voice(), base.viewer(), base.personas(), base.voicePresets());
     }
 
     /** Server thread only: live runtime flags, registered bots and viewer permissions. */
@@ -321,10 +324,12 @@ public final class AiSetupNetworkManager {
             Optional<SoulTypes.SoulState> state = runtime != null ? runtime.cachedState(botId) : Optional.empty();
             boolean inReach = CompanionCommunicationPolicy.classifySoulReachability(bot, viewer)
                     != SoulTypes.Reachability.UNREACHABLE;
-            bots.add(new AiSetupStatus.Bot(bot.getName().getString(), botId.toString(),
+            String botName = bot.getName().getString();
+            bots.add(new AiSetupStatus.Bot(botName, botId.toString(),
                     state.map(SoulTypes.SoulState::profileId).orElse(""),
                     state.map(SoulTypes.SoulState::active).orElse(false),
-                    owned, inReach, botId.equals(repliedBot)));
+                    owned, inReach, botId.equals(repliedBot),
+                    canEdit ? assignedPreset(config, botName) : ""));
         }
 
         AiSetupStatus.Voice voice;
@@ -337,7 +342,44 @@ public final class AiSetupNetworkManager {
                     config != null ? config.getSoulVoiceEngine() : "", false, false);
         }
         AiSetupStatus.Viewer viewerState = new AiSetupStatus.Viewer(canEdit, isIntegratedHost(server, viewer), canEdit);
-        return new AiSetupStatus(canEdit, null, runtimeState, bots, voice, viewerState);
+        return new AiSetupStatus(canEdit, null, runtimeState, bots, voice, viewerState,
+                personaList(), canEdit ? voicePresets(config) : List.of());
+    }
+
+    // ── Persona / voice picker data ─────────────────────────────────────────
+
+    /** Every registered soul profile with its display name, for the persona picker. */
+    private static List<AiSetupStatus.Persona> personaList() {
+        List<AiSetupStatus.Persona> out = new ArrayList<>();
+        for (String id : SoulProfileRegistry.registeredIds()) {
+            if (out.size() >= BotSoulPickerPolicy.MAX_PERSONAS) break;
+            String name;
+            try {
+                name = SoulProfileRegistry.require(id).displayName();
+            } catch (RuntimeException ex) {
+                name = id;
+            }
+            out.add(new AiSetupStatus.Persona(id, name));
+        }
+        return out;
+    }
+
+    /**
+     * Presets the active engine offers on this machine: the same set {@code /bot soul voice
+     * assign} accepts (every Pocket preset; the installed Piper voices; none for Dreamsleeve).
+     */
+    private static List<String> voicePresets(ManualConfig config) {
+        String engine = config != null ? config.getSoulVoiceEngine() : "";
+        List<String> installedPiper = SoulVoiceSettings.ENGINE_PIPER.equals(engine)
+                ? PiperInstaller.installedVoiceNames(PiperInstaller.voicesDir())
+                : List.of();
+        return BotSoulPickerPolicy.presetsFor(engine, VoiceCatalog.POCKET_VOICES, installedPiper);
+    }
+
+    /** The preset assigned to this bot by name ("" when none, or only a clone clip). */
+    private static String assignedPreset(ManualConfig config, String botName) {
+        ManualConfig.SoulVoiceAssignment assigned = SoulRuntime.assignmentFor(config, botName);
+        return assigned == null || assigned.getVoice() == null ? "" : assigned.getVoice();
     }
 
     /**
@@ -399,8 +441,8 @@ public final class AiSetupNetworkManager {
         ServerPlayerEntity bot = null;
         boolean botRegistered = false;
         boolean botAccess = false;
-        if (action == AiSetupActionPolicy.Action.ENABLE_BOT) {
-            UUID botId = parseUuid(arg);
+        if (action.isBotScoped()) {
+            UUID botId = parseUuid(BotSoulPickerPolicy.botUuidOf(action, arg));
             bot = botId == null ? null : server.getPlayerManager().getPlayer(botId);
             BotAccessPolicy.Decision decision = BotAccessGate.decide(player, bot);
             botRegistered = decision != BotAccessPolicy.Decision.DENY_NOT_BOT;
@@ -410,7 +452,7 @@ public final class AiSetupNetworkManager {
                 botRegistered, botAccess);
         if (verdict != AiSetupActionPolicy.Verdict.ALLOW) {
             LOGGER.debug("[ai-setup] {} from {} denied: {}", action, name, verdict);
-            reply(server, playerId, AiSetupActionPolicy.denialMessage(verdict));
+            reply(server, playerId, AiSetupActionPolicy.denialMessage(action, verdict));
             return;
         }
 
@@ -467,6 +509,8 @@ public final class AiSetupNetworkManager {
                 pushStatusTo(server, playerId);
             }
             case ENABLE_BOT -> enableBot(server, ticket, bot);
+            case SET_BOT_PERSONA -> setBotPersona(server, ticket, bot);
+            case SET_BOT_VOICE -> setBotVoice(server, ticket, bot);
         }
     }
 
@@ -501,6 +545,8 @@ public final class AiSetupNetworkManager {
                 case SELECT_VOICE_ENGINE -> "VOICE_ENGINE";
                 case SET_NEW_BOT_SOUL -> "NEW_BOT_SOUL";
                 case ENABLE_BOT -> "ENABLE_BOT:" + (arg == null ? "" : arg.trim().toLowerCase(java.util.Locale.ROOT));
+                case SET_BOT_PERSONA, SET_BOT_VOICE -> action.name() + ":"
+                        + BotSoulPickerPolicy.botUuidOf(action, arg).toLowerCase(java.util.Locale.ROOT);
             };
         }
 
@@ -530,8 +576,8 @@ public final class AiSetupNetworkManager {
         }
         boolean botRegistered = false;
         boolean botAccess = false;
-        if (ticket.action() == AiSetupActionPolicy.Action.ENABLE_BOT) {
-            UUID botId = parseUuid(ticket.arg());
+        if (ticket.action().isBotScoped()) {
+            UUID botId = parseUuid(BotSoulPickerPolicy.botUuidOf(ticket.action(), ticket.arg()));
             ServerPlayerEntity bot = botId == null ? null : server.getPlayerManager().getPlayer(botId);
             BotAccessPolicy.Decision decision = BotAccessGate.decide(player, bot);
             botRegistered = decision != BotAccessPolicy.Decision.DENY_NOT_BOT;
@@ -704,6 +750,80 @@ public final class AiSetupNetworkManager {
     }
 
     /**
+     * SET_BOT_PERSONA (gate passed: owner, op or host; bot online and registered). Rebinds an
+     * already-bound bot to another registered profile; the active flag and every memory file stay
+     * (soul state is keyed by the bot's UUID, not its persona). Re-checks the ticket before replying.
+     */
+    private static void setBotPersona(MinecraftServer server, Ticket ticket, ServerPlayerEntity bot) {
+        UUID playerId = ticket.playerId();
+        SoulRuntime runtime = SoulRuntime.current().orElse(null);
+        Optional<BotSoulPickerPolicy.BotChoice> choice = BotSoulPickerPolicy.parseArg(ticket.arg());
+        if (runtime == null || bot == null || choice.isEmpty()) {
+            reply(server, playerId, "The soul runtime is not running right now.");
+            return;
+        }
+        UUID botId = bot.getUuid();
+        String botName = bot.getName().getString();
+        String profileId = choice.get().value();
+        String current = runtime.cachedState(botId).map(SoulTypes.SoulState::profileId).orElse("");
+        BotSoulPickerPolicy.PersonaCheck check = BotSoulPickerPolicy.checkPersona(profileId,
+                SoulProfileRegistry.registeredIds(), current);
+        if (check != BotSoulPickerPolicy.PersonaCheck.OK) {
+            LOGGER.debug("[ai-setup] persona '{}' for {} rejected: {}", BotAccessPolicy.logSafe(profileId), botName, check);
+            reply(server, playerId, BotSoulPickerPolicy.personaProblem(check, botName));
+            return;
+        }
+        String persona = SoulProfileRegistry.require(profileId).displayName();
+        runtime.bindProfile(botId, profileId).whenComplete((bound, err) -> server.execute(() -> {
+            if (err != null) {
+                LOGGER.warn("[ai-setup] persona change failed for bot {}: {}", botId, err.toString());
+                reply(server, playerId, "Failed to change " + botName + "'s persona.");
+                pushStatusTo(server, playerId);
+                return;
+            }
+            LOGGER.info("[ai-setup] {} set persona of {} to {} (was {})", nameOf(server, playerId), botName, profileId, current);
+            if (stillValid(server, ticket)) {
+                reply(server, playerId, BotSoulPickerPolicy.personaMessage(botName,
+                        persona == null || persona.isBlank() ? profileId : persona));
+            }
+            pushStatusTo(server, playerId);
+        }));
+    }
+
+    /**
+     * SET_BOT_VOICE (gate passed: op or host; bot online and registered). Does what
+     * {@code /bot soul voice assign <bot> <preset>} / {@code … default} does: writes the
+     * bot-name-keyed assignment and saves the config. No runtime reload; the next line uses it.
+     */
+    private static void setBotVoice(MinecraftServer server, Ticket ticket, ServerPlayerEntity bot) {
+        UUID playerId = ticket.playerId();
+        ManualConfig config = Frens.CONFIG;
+        Optional<BotSoulPickerPolicy.BotChoice> choice = BotSoulPickerPolicy.parseArg(ticket.arg());
+        if (config == null || bot == null || choice.isEmpty()) {
+            return;
+        }
+        String botName = bot.getName().getString();
+        BotSoulPickerPolicy.VoiceDecision decision = BotSoulPickerPolicy.checkVoice(choice.get().value(),
+                voicePresets(config));
+        switch (decision.check()) {
+            case CLEAR -> config.setSoulProfileVoice(botName, null);
+            case OK -> config.setSoulProfileVoice(botName,
+                    new ManualConfig.SoulVoiceAssignment(decision.preset(), -1, "", ""));
+            default -> {
+                LOGGER.debug("[ai-setup] voice '{}' for {} rejected: {}",
+                        BotAccessPolicy.logSafe(choice.get().value()), botName, decision.check());
+                reply(server, playerId, BotSoulPickerPolicy.voiceProblem(decision.check()));
+                return;
+            }
+        }
+        config.save();
+        LOGGER.info("[ai-setup] {} set voice of {} to {}", nameOf(server, playerId), botName,
+                decision.check() == BotSoulPickerPolicy.VoiceCheck.CLEAR ? "default" : decision.preset());
+        reply(server, playerId, BotSoulPickerPolicy.voiceMessage(botName, decision));
+        pushStatusTo(server, playerId);
+    }
+
+    /**
      * Server thread, from {@code ServerPlayConnectionEvents.JOIN} for a Frens bot: applies the
      * checklist's new-bot soul default. No network probe here. The bot gets the same persona as
      * ENABLE_BOT (name-matched, else Jake), and only when it has no soul state yet, so a bot
@@ -734,6 +854,11 @@ public final class AiSetupNetworkManager {
                 LOGGER.info("[ai-setup] new bot {} got a soul as {} (new-bot default)", botName, profileId);
             }
         }));
+    }
+
+    private static String nameOf(MinecraftServer server, UUID playerId) {
+        ServerPlayerEntity player = server.getPlayerManager().getPlayer(playerId);
+        return player != null ? player.getName().getString() : String.valueOf(playerId);
     }
 
     private static UUID parseUuid(String raw) {
@@ -848,6 +973,18 @@ public final class AiSetupNetworkManager {
         public static boolean setNewBotSoul(boolean soul) {
             return sendAction(AiSetupActionPolicy.Action.SET_NEW_BOT_SOUL,
                     AiSetupActionPolicy.newBotSoulArg(soul));
+        }
+
+        /** SET_BOT_PERSONA: owner, op or host; the bot must already be enabled once. */
+        public static boolean setBotPersona(String botUuid, String profileId) {
+            return sendAction(AiSetupActionPolicy.Action.SET_BOT_PERSONA,
+                    BotSoulPickerPolicy.encodeArg(botUuid, profileId));
+        }
+
+        /** SET_BOT_VOICE: op or host; a preset the server listed, or {@link BotSoulPickerPolicy#DEFAULT_VOICE}. */
+        public static boolean setBotVoice(String botUuid, String preset) {
+            return sendAction(AiSetupActionPolicy.Action.SET_BOT_VOICE,
+                    BotSoulPickerPolicy.encodeArg(botUuid, preset));
         }
 
         /** Last status received on this connection, or null. */

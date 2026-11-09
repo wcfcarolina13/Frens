@@ -21,7 +21,11 @@ public final class AiSetupActionPolicy {
     public enum Action {
         SOULS_ON, SOULS_OFF, ENABLE_BOT, SELECT_MODEL, SELECT_VOICE_ENGINE,
         /** The new-bot soul default; arg {@link #NEW_BOT_SOUL_YES} or {@link #NEW_BOT_SOUL_NO}. */
-        SET_NEW_BOT_SOUL;
+        SET_NEW_BOT_SOUL,
+        /** One bot's persona; arg {@code <botUuid>|<profileId>} ({@link BotSoulPickerPolicy}). */
+        SET_BOT_PERSONA,
+        /** One bot's voice preset; arg {@code <botUuid>|<preset or "default">} ({@link BotSoulPickerPolicy}). */
+        SET_BOT_VOICE;
 
         public static Optional<Action> parse(String raw) {
             if (raw == null) {
@@ -35,9 +39,18 @@ public final class AiSetupActionPolicy {
             return Optional.empty();
         }
 
-        /** Every action except ENABLE_BOT changes server-wide config: op or host only. */
+        /**
+         * Op or host only. ENABLE_BOT and SET_BOT_PERSONA change one bot's soul state, so its
+         * owner may do them too. SET_BOT_VOICE writes the server-wide voice map, as
+         * {@code /bot soul voice assign} does, so it stays op or host.
+         */
         public boolean changesServerSettings() {
-            return this != ENABLE_BOT;
+            return this != ENABLE_BOT && this != SET_BOT_PERSONA;
+        }
+
+        /** Acts on one online, registered bot named in the arg. */
+        public boolean isBotScoped() {
+            return this == ENABLE_BOT || this == SET_BOT_PERSONA || this == SET_BOT_VOICE;
         }
     }
 
@@ -45,20 +58,27 @@ public final class AiSetupActionPolicy {
 
     /**
      * Who may do {@code action}. Server-wide actions need {@code canEditServer} (operator or
-     * integrated host). ENABLE_BOT needs a registered, online fake bot ({@code botIsRegistered})
-     * that the sender owns or may administer ({@code botAccessAllowed}: owner, op or host, as
-     * {@code BotAccessGate.decide} computes it).
+     * integrated host). Bot-scoped actions need a registered, online fake bot
+     * ({@code botIsRegistered}); ENABLE_BOT and SET_BOT_PERSONA also need the sender to own or
+     * administer it ({@code botAccessAllowed}: owner, op or host, as {@code BotAccessGate.decide}
+     * computes it). SET_BOT_VOICE needs both {@code canEditServer} and the bot.
      */
     public static Verdict gate(Action action, boolean canEditServer, boolean botIsRegistered,
                                boolean botAccessAllowed) {
         if (action == null) {
             return Verdict.DENY_NOT_OPERATOR;
         }
-        if (action.changesServerSettings()) {
-            return canEditServer ? Verdict.ALLOW : Verdict.DENY_NOT_OPERATOR;
+        if (action.changesServerSettings() && !canEditServer) {
+            return Verdict.DENY_NOT_OPERATOR;
+        }
+        if (!action.isBotScoped()) {
+            return Verdict.ALLOW;
         }
         if (!botIsRegistered) {
             return Verdict.DENY_NO_SUCH_BOT;
+        }
+        if (action.changesServerSettings()) {
+            return Verdict.ALLOW;
         }
         return botAccessAllowed ? Verdict.ALLOW : Verdict.DENY_NOT_OWNER;
     }
@@ -71,6 +91,17 @@ public final class AiSetupActionPolicy {
             case DENY_NOT_OWNER -> "Only the bot's owner, an operator or the host can enable AI chat for it.";
             case ALLOW -> "";
         };
+    }
+
+    /** {@link #denialMessage(Verdict)}, worded for the action that was denied. */
+    public static String denialMessage(Action action, Verdict verdict) {
+        if (verdict == Verdict.DENY_NOT_OWNER && action == Action.SET_BOT_PERSONA) {
+            return "Only the bot's owner, an operator or the host can change its persona.";
+        }
+        if (verdict == Verdict.DENY_NOT_OPERATOR && action == Action.SET_BOT_VOICE) {
+            return "Only an operator or the host can assign voices.";
+        }
+        return denialMessage(verdict);
     }
 
     // ── New-bot soul default ────────────────────────────────────────────────
