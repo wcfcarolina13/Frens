@@ -347,10 +347,17 @@ public final class ChestRegistryNetworkManager {
             BlockPos chestPos = new BlockPos(x, y, z);
 
             // Check bot is not busy
-            if (net.wcfcarolina13.GameAI.services.TaskService.hasActiveTask(bot.getUuid())
-                    || net.wcfcarolina13.GameAI.services.BotCombatCalloutService.isInCombat(bot.getUuid())) {
+            if (net.wcfcarolina13.GameAI.services.TaskService.hasActiveTask(bot.getUuid())) {
                 net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
                         player.getCommandSource(), "\u00A7c" + botName + " is busy. Stop the current task first.\u00A7r");
+                return;
+            }
+            // In a fight: refuse, as before, but say why. The old shared message told the player to
+            // stop a task that wasn't running. (The worker's own combat wait below still covers a
+            // fight that starts during the walk.)
+            if (net.wcfcarolina13.GameAI.services.BotCombatCalloutService.isInCombat(bot.getUuid())) {
+                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                        player.getCommandSource(), "\u00A7e" + botName + " is in a fight. Try again once it's safe.\u00A7r");
                 return;
             }
 

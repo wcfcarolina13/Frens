@@ -66,4 +66,16 @@ class QuickTransferPolicyTest {
         assertEquals(2, waits.split("Thread.currentThread\\(\\).interrupt\\(\\);", -1).length - 1,
                 "both sleeps restore the interrupt flag");
     }
+
+    @Test
+    void aFightIsRefusedWithItsOwnMessageNotTheBusyOne() throws IOException {
+        String src = Files.readString(Path.of("src/main/java/net/wcfcarolina13/network/ChestRegistryNetworkManager.java"));
+        int handler = src.indexOf("private static void handleStoreTarget(");
+        int busy = src.indexOf("is busy. Stop the current task first.", handler);
+        int fight = src.indexOf("is in a fight. Try again once it's safe.", handler);
+        int ticket = src.indexOf("TaskService.beginSkill(", handler);
+        assertTrue(handler >= 0 && busy > handler && fight > busy && ticket > fight, "busy, then fight, then the ticket");
+        String busyCheck = src.substring(src.lastIndexOf("if (", busy), busy);
+        assertFalse(busyCheck.contains("isInCombat"), "combat no longer shares the busy message");
+    }
 }
