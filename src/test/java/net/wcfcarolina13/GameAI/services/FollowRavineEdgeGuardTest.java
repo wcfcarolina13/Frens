@@ -117,8 +117,28 @@ class FollowRavineEdgeGuardTest {
         int helperEnd = movement.indexOf("\n    }\n", helper);
         assertTrue(helper >= 0 && helperEnd > helper, "helper not found");
         String helperBody = movement.substring(helper, helperEnd);
-        assertTrue(helperBody.contains("sampleBlindLine(world, player, destination, startInWater, cells, facts);")
+        assertTrue(helperBody.contains("sampleBlindLine(world, player, destination, startInWater, cells, facts, FOLLOW_DROP_GUARD_SCAN);")
                         && helperBody.contains("BlindWalkGuardPolicy.decide(facts, startInWater)"),
-                "helper reuses the blind-walk sampler and policy");
+                "helper reuses the blind-walk sampler and policy, with the deep scan");
+    }
+
+    /**
+     * Sandbox 2026-11-09: a pool 6 below the rim was read as "drop of 5+" because the scan
+     * stopped at MAX_SAFE_DROP + 2 before reaching the water, so come refused a drop main jumped.
+     * The drop-guard check scans deep enough to find water below a tall drop; the blind walks of
+     * #29 keep their short scan.
+     */
+    @Test
+    void dropGuardScanReachesWaterBelowATallDrop() throws IOException {
+        String movement = Files.readString(Path.of(
+                "src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java"));
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("static final int FOLLOW_DROP_GUARD_SCAN = (\\d+);").matcher(movement);
+        assertTrue(m.find(), "deep scan constant");
+        assertTrue(Integer.parseInt(m.group(1)) >= 24, "scan reaches a pool well below a ravine rim");
+        assertTrue(movement.contains("while (drop < dropScan)") && movement.contains("if (drop > 0 && drop < dropScan)"),
+                "the sampler uses the caller's scan depth");
+        assertTrue(movement.contains("sampleBlindLine(world, player, destination, startInWater, cells, facts, BLIND_WALK_DROP_SCAN);"),
+                "blind walks keep the short scan");
     }
 }

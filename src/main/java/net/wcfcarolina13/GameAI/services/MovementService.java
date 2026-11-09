@@ -3128,6 +3128,12 @@ public final class MovementService {
     private static final int BLIND_WALK_SAMPLE_CELLS = 16;
     /** Air cells scanned under a line cell before giving up on finding a floor (> MAX_SAFE_DROP). */
     private static final int BLIND_WALK_DROP_SCAN = BlindWalkGuardPolicy.MAX_SAFE_DROP + 2;
+    /**
+     * Deeper scan for the follow drop guard's check: it only runs once a 3+ drop was already seen,
+     * and the drop it used to exempt can end in water further down than the blind-walk scan
+     * reaches (a pool 6 below a rim). Water at the bottom of any height negates fall damage.
+     */
+    static final int FOLLOW_DROP_GUARD_SCAN = 32;
 
     /**
      * One server-thread snapshot of the straight line from the bot toward {@code destination}
@@ -3170,7 +3176,7 @@ public final class MovementService {
             boolean startInWater = player.isTouchingWater();
             List<BlockPos> cells = new ArrayList<>();
             List<BlindWalkGuardPolicy.CellFact> facts = new ArrayList<>();
-            sampleBlindLine(world, player, destination, startInWater, cells, facts);
+            sampleBlindLine(world, player, destination, startInWater, cells, facts, BLIND_WALK_DROP_SCAN);
             return new BlindLineSnapshot(cells, startInWater, BlindWalkGuardPolicy.decide(facts, startInWater));
         }, 750L, null);
         if (snapshot == null) {
@@ -3209,7 +3215,7 @@ public final class MovementService {
         boolean startInWater = player.isTouchingWater();
         List<BlockPos> cells = new ArrayList<>();
         List<BlindWalkGuardPolicy.CellFact> facts = new ArrayList<>();
-        sampleBlindLine(world, player, destination, startInWater, cells, facts);
+        sampleBlindLine(world, player, destination, startInWater, cells, facts, FOLLOW_DROP_GUARD_SCAN);
         return BlindWalkGuardPolicy.decide(facts, startInWater);
     }
 
@@ -3231,7 +3237,8 @@ public final class MovementService {
                                         BlockPos destination,
                                         boolean startInWater,
                                         List<BlockPos> cells,
-                                        List<BlindWalkGuardPolicy.CellFact> facts) {
+                                        List<BlindWalkGuardPolicy.CellFact> facts,
+                                        int dropScan) {
         List<BlindLineSampler.Cell> line = BlindLineSampler.cells(player.getX(), player.getZ(),
                 destination.getX(), destination.getZ(), BLIND_WALK_SAMPLE_CELLS);
         int feetY = player.getBlockPos().getY();
@@ -3306,7 +3313,7 @@ public final class MovementService {
             if (feetState.getFluidState().isIn(FluidTags.WATER)) {
                 deepWater = world.getFluidState(below).isIn(FluidTags.WATER);
             } else {
-                while (drop < BLIND_WALK_DROP_SCAN) {
+                while (drop < dropScan) {
                     BlockState state = world.getBlockState(below);
                     FluidState fluid = state.getFluidState();
                     if (fluid.isIn(FluidTags.LAVA)) {
@@ -3329,7 +3336,7 @@ public final class MovementService {
                     drop++;
                     below = below.down();
                 }
-                if (drop > 0 && drop < BLIND_WALK_DROP_SCAN) {
+                if (drop > 0 && drop < dropScan) {
                     feetY -= drop;
                     feet = new BlockPos(x, feetY, z);
                 }
