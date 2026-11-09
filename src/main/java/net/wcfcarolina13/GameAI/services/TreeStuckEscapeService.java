@@ -310,13 +310,10 @@ public final class TreeStuckEscapeService {
             }
         }
 
-        // No safe way down yet: let follow run (its planner may find a way along the trunk) until the
-        // next evaluation, and until the last resort breaks the leaf below anyway.
-        if (!lastResort) {
-            WAITING_FOR_SAFE_WAY.add(botId);
-            return false;
-        }
-        return true;
+        // No safe way down: let follow run (its planner may find a way along the trunk) until the
+        // next evaluation, and keep doing so while nothing here can act.
+        WAITING_FOR_SAFE_WAY.add(botId);
+        return false;
     }
 
     /**
