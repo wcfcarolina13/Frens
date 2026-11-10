@@ -4,6 +4,23 @@
 
 [All Guide topics](Guide.md)
 
+## Hunting
+
+Hunts animals for food and leather, or zombies when well armed, then cooks the meat.
+
+- Tick one type per hunt. Ticking several hunts only one of them, and ticks also limit hunts that name no mob.
+- Count sets how many. Leave it empty to hunt until nightfall. A hunt with a count keeps going through the night.
+- Zone sets the search range: 48, 80 or 120 blocks.
+- Depop (on by default) only hunts a type with 3 or more around and stops once fewer than 3 are left.
+- Animals on a lead are not protected. Keep farm animals in a base, or name them.
+- Zombies need 8 hearts of health, some armour and a melee weapon.
+- When a hunt ends normally with at least one kill, it cooks the meat in a nearby furnace or smoker, then goes home.
+- Auto Hunt (Starving), under Actions, Automation, hunts on its own when the bot is hungry and low on food.
+
+**Command:** `/bot skill hunt <bot>`
+
+**Where:** Actions &gt; Utilities &gt; Hunting
+
 ## Storage
 
 View and manage supply chests your companions have placed in the world.

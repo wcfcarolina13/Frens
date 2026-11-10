@@ -6,22 +6,21 @@
 
 ## Fortify Village
 
-Builds a defensive wall with moat around a village using a convex hull of its structures.
+Builds a stone wall with corner towers and a gate around a village.
 
-- The bot computes a convex hull around village structures and builds along the edges.
-- Full cross-section: wall + slab top + inner cliff face + spider overhang + 3-wide moat + exterior clearance.
-- Moat is 3 blocks deep with cobblestone floor. Gatehouse has a walkable bridge across the moat.
-- Towers at each hull vertex, walls along edges, and a gatehouse on the longest edge.
-- Give the bot stone bricks, cobblestone, or slabs before starting.
-- Village structures are detected and excluded. Walls route around buildings automatically.
-- dry_run: preview layout with particles (orange=towers, blue=walls, gold=gate, dark blue=moat, purple=overhang, red=clear).
-- status &lt;name&gt;: per-edge completion stats + particles highlighting missing blocks in red.
-- resume / patch / drift / expand / merge / list / name: manage saved walls and schema updates.
-- Tip: Use the Base Manager screen for wall status, ownership, and nearby village mapping.
+- Finds villagers, beds and workstations within 64 blocks, draws an outline around them and builds 12 blocks outside it.
+- The wall is one block thick and about three and a half blocks high, with a tower at each corner and a gate on the longest side.
+- Builds only from its own inventory: stone bricks, cobblestone, stone, cobbled deepslate, andesite or dirt. Planks can't be used.
+- The moat is a separate step (Fortify Moat). It only digs the ditch at the moment, with no stone lining.
+- The finish report counts the moat plan, so it usually says Partial. Use Fortify Status or patch to check the wall.
+- Resume skips towers and partly built sides. Patch finishes them and fixes damage.
+- dry_run: preview the layout with particles. status: per-side progress, missing blocks shown in red.
+- drift / expand / merge / list / name: manage saved walls. Expand only grows a wall.
+- Tip: Use the Bases screen (Wall Manager) for a wall's buttons, ownership and access.
 
 **Command:** `/bot fortify <bot>`
 
-**Where:** Actions &gt; Construction &gt; Fortify Village
+**Where:** Actions &gt; Construction &gt; Stronghold &gt; Fortify Village
 
 ## Map Village
 

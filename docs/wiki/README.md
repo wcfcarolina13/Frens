@@ -15,6 +15,8 @@ Download: [Modrinth](https://modrinth.com/mod/mcfrens). Source and issues: [GitH
 - [Storage and chests](Storage.md): putting items in chests and taking them out, and when frens ask before taking your supplies.
 - [Guard and patrol](Guard-and-Patrol.md): guard, patrol and stay, what a fren fights, and how the orders end.
 - [Farming](Farming.md): building a farm, planting and harvesting, and where the crops go.
+- [Hunting and cooking](Hunting.md): starting a hunt, what frens won't hunt, loot, how a hunt ends and cooking.
+- [Fortifying a village](Fortify.md): the wall, towers, gate and moat, materials, and looking after a saved wall.
 - [In-game Guide](Guide.md): every card from the Guide screen (press ] in game), grouped by topic.
 - [Companion questing guide](https://github.com/wcfcarolina13/Frens/blob/main/COMPANION_QUESTING_GUIDE.md): how recruiting works in Questing mode.
 - [Crafting cheatsheet](https://github.com/wcfcarolina13/Frens/blob/main/CRAFTING_CHEATSHEET.md)
