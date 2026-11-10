@@ -72,6 +72,17 @@ public final class CompanionSafeZoneService {
         return isProtected(world, pos, botOwner, overridden, overridden ? baseOwner : null);
     }
 
+    /**
+     * What {@link #isProtectedForBot} would still refuse with Resume's zone override active: another
+     * player's base radius, a fortified wall and its buffer, a mapped village, a bee nest area. The
+     * hazard detector withholds "Press Resume to override" there, because Resume can't open them.
+     *
+     * @param baseOwner the bot's real owner, whose own bases the override opens (nullable)
+     */
+    public static boolean isProtectedDespiteZoneOverride(ServerWorld world, BlockPos pos, @Nullable UUID baseOwner) {
+        return isProtected(world, pos, null, true, baseOwner);
+    }
+
     private static boolean isProtected(ServerWorld world, BlockPos pos, @Nullable UUID botOwner,
                                        boolean explicitZonesOverridden, @Nullable UUID openOwnBasesOf) {
         if (world == null || pos == null) return false;

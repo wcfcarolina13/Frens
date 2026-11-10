@@ -231,6 +231,7 @@ public final class MiningHazardDetector {
             }
         }
         if (blocking != null) {
+            blocking = withResumeOffer(bot.getUuid(), world, blocking);
             // Suppress duplicate announcement for blocking hazards (e.g., 7x "I found coal!").
             // The hazard still blocks the skill, but the chat is silenced if recently sent.
             if (!isMessageFresh(bot.getUuid(), blocking.chatMessage())) {
@@ -260,11 +261,10 @@ public final class MiningHazardDetector {
         if (ProtectedZoneService.isProtectedForBot(botUuid, pos, world, null)) {
             ProtectedZoneService.ProtectedZone zone = ProtectedZoneService.getZoneAt(pos, world);
             String zoneName = zone != null ? zone.getLabel() : "protected area";
-            // Resume's override only lifts this check; MiningTool still refuses a zone the bot's owner
-            // has no rights in (BotTerritoryAuthorizationService), so promise it only where it works.
-            String failure = "Cannot break blocks in protected zone: " + zoneName + "."
-                    + (ownerMayMutate(botUuid, pos, world) ? RESUME_OVERRIDE_SUFFIX : "");
-            return hazard(pos, "This is a protected zone (" + zoneName + ").", true, failure);
+            // The Resume offer is added in detect() for the blocking hazard only (withResumeOffer):
+            // neighbours inspected here never show their failure text.
+            return hazard(pos, "This is a protected zone (" + zoneName + ").", true,
+                    "Cannot break blocks in protected zone: " + zoneName + ".");
         }
         
         // Check if this is a torch (protect torches from accidental breaking)
@@ -583,11 +583,28 @@ public final class MiningHazardDetector {
                 && hazard.failureMessage().endsWith(RESUME_OVERRIDE_SUFFIX);
     }
 
-    private static boolean ownerMayMutate(UUID botUuid, BlockPos pos, ServerWorld world) {
+    /**
+     * A protected-zone refusal says "Press Resume to override" only where Resume's override can open
+     * the cell: MiningTool still refuses a zone the bot's owner has no rights in
+     * (BotTerritoryAuthorizationService), and the digging jobs' own gate still refuses others' bases,
+     * forts, villages and bee nests. Checked once, for the blocking hazard, not for every neighbour.
+     */
+    private static Hazard withResumeOffer(UUID botUuid, ServerWorld world, Hazard hazard) {
+        if (hazard.location() == null || hazard.failureMessage() == null
+                || !hazard.failureMessage().startsWith("Cannot break blocks in protected zone:")
+                || !resumeCanOverride(botUuid, hazard.location(), world)) {
+            return hazard;
+        }
+        return new Hazard(hazard.chatMessage(), hazard.failureMessage() + RESUME_OVERRIDE_SUFFIX,
+                hazard.location(), hazard.blocking());
+    }
+
+    private static boolean resumeCanOverride(UUID botUuid, BlockPos pos, ServerWorld world) {
         MinecraftServer server = world.getServer();
         ServerPlayerEntity bot = server == null || botUuid == null ? null : server.getPlayerManager().getPlayer(botUuid);
         UUID owner = bot == null ? null : net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
-        return owner != null && !ProtectedZoneService.isProtected(pos, world, owner);
+        return owner != null && !ProtectedZoneService.isProtected(pos, world, owner)
+                && !net.wcfcarolina13.GameAI.services.CompanionSafeZoneService.isProtectedDespiteZoneOverride(world, pos, owner);
     }
 
     public static record Hazard(String chatMessage, String failureMessage, BlockPos location, boolean blocking) {
