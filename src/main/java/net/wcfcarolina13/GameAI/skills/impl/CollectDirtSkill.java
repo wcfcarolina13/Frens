@@ -1432,7 +1432,7 @@ public class CollectDirtSkill implements Skill {
             if (detection.blockingHazard().isPresent()) {
                 Hazard hazard = detection.blockingHazard().get();
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                SkillResumeService.flagManualResume(player);
+                SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
             }
@@ -1737,7 +1737,7 @@ public class CollectDirtSkill implements Skill {
             if (hazardCheck.blockingHazard().isPresent()) {
                 Hazard hazard = hazardCheck.blockingHazard().get();
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                SkillResumeService.flagManualResume(player);
+                SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(
                         net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
@@ -1966,7 +1966,8 @@ public class CollectDirtSkill implements Skill {
         // A usable tread needs a full cube top face at y=1.0. A fence or wall (top at 1.5), a bottom
         // slab (0.5) or an open trapdoor (thin plate) collides but cannot be stepped onto.
         boolean fullTop = shape.getMax(Direction.Axis.Y) <= 1.0D + 1.0E-6D && Block.isFaceFullSquare(shape, Direction.UP);
-        if (state.getHardness(world, pos) < 0.0F || CompanionSafeZoneService.isProtected(world, pos, null)) {
+        if (state.getHardness(world, pos) < 0.0F || CompanionSafeZoneService.isProtectedForBot(world, pos, null, player.getUuid(),
+                net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService.resolveBotOwnerUuid(player))) {
             return HandDigStairPolicy.Cell.unbreakable(fullTop);
         }
         int ticks = bestGroundBreakTicks(player, world, pos, state);
@@ -2064,7 +2065,7 @@ public class CollectDirtSkill implements Skill {
                         feet.toShortString(), hazard.failureMessage(),
                         hazard.location() == null ? "?" : hazard.location().toShortString());
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                SkillResumeService.flagManualResume(player);
+                SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(
                         net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
@@ -2183,7 +2184,8 @@ public class CollectDirtSkill implements Skill {
             return false;
         }
 
-        if (CompanionSafeZoneService.isProtected(world, blockPos, null)) {
+        if (CompanionSafeZoneService.isProtectedForBot(world, blockPos, null, player.getUuid(),
+                net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService.resolveBotOwnerUuid(player))) {
             LOGGER.warn("Pillar/mining refusing to break protected block at {}", blockPos.toShortString());
             return false;
         }

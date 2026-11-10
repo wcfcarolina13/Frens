@@ -707,6 +707,14 @@ Costs and limits:
 
 Tests: `ComeRecoveryRequestSourceWiringTest` (1).
 
+## First community feedback pass (2026-11-04)
+
+No mod code changed. Read the Frens Discord and the solace #diy-and-tech thread, added 8 items to `RALPH_TASK.md`, and started `docs/community/feedback-ledger.md`.
+
+- **Ruling, LAN guests (cost if wrong):** add an admin toggle, off by default, that lets LAN guests spawn and command bots. This uses the "only if an admin asks" condition of the 2026-10-23 ruling, since Jackster asked as a host. Cost: a new permission path, and a guest could spend the host's bots.
+- **Discord replies:** Bradley approved three replies, sent 2026-11-05. One corrects an earlier answer that said an admin setting already covered guests.
+- **Correction:** the husks recorded as "mod not identified yet" came from the maze runner mod, per AiwanChu25 on 2026-10-15, and not from Frens.
+
 ## Repository clean-up: public and private split (2026-11-04)
 
 No mod code changed. `CLAUDE.md` and `AGENTS.md` are now tracked so cloud sessions get the build, test and code rules; Mac-only steps moved to a local file. Sandbox tooling and field-test records moved to a private dev repo. Caches, old logs and stray local files are no longer tracked. Earlier versions remain in Git history; a key-format scan of history found nothing, so history was not rewritten.

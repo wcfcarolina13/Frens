@@ -370,8 +370,23 @@ public final class SkillResumeService {
     public static void flagZoneOverridePending(ServerPlayerEntity bot) {
         if (bot == null) return;
         UUID uuid = bot.getUuid();
-        if (uuid != null) {
+        // Only with a paused skill to resume: an unrecorded run (come-recovery, idle hobbies) would
+        // leave the flag for an older, unrelated record to pick up on the next Resume.
+        if (uuid != null && LAST_SKILL_BY_BOT.containsKey(uuid)) {
             ZONE_OVERRIDE_PENDING.add(uuid);
+        }
+    }
+
+    /**
+     * A skill paused by a blocking mining hazard: flag it for Resume, and when the hazard is a
+     * protected zone also flag the zone override, which is what the hazard's "Press Resume to
+     * override" message promises. Without it Resume re-ran the skill into the same zone (only
+     * Stripmine flagged it; issue #120).
+     */
+    public static void flagManualResumeForHazard(ServerPlayerEntity bot, boolean protectedZoneHazard) {
+        flagManualResume(bot);
+        if (protectedZoneHazard) {
+            flagZoneOverridePending(bot);
         }
     }
 

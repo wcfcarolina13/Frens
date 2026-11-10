@@ -84,7 +84,13 @@ public final class TreeStuckEscapeService {
      */
     private static final int SAFE_DROP_HEIGHT = TreeStuckDropPolicy.SAFE_DROP_HEIGHT;
     /** Max survivable fall height (takes damage but lives). */
-    private static final int SURVIVABLE_DROP_HEIGHT = 8;
+    private static final int SURVIVABLE_DROP_HEIGHT = TreeStuckDropPolicy.LAST_RESORT_MAX_FALL;
+    /** The leaf cell beside the bot it is stepping onto, before breaking that leaf (feet position). */
+    private static final ConcurrentHashMap<UUID, BlockPos> SIDE_STEP_TARGET = new ConcurrentHashMap<>();
+    /** Tick the side step started. */
+    private static final ConcurrentHashMap<UUID, Long> SIDE_STEP_SET_TICK = new ConcurrentHashMap<>();
+    /** Cells this bot already failed to step onto while stuck on this canopy. */
+    private static final ConcurrentHashMap<UUID, Set<BlockPos>> SIDE_STEP_TRIED = new ConcurrentHashMap<>();
     /** Horizontal scan radius for safe-drop search. */
     private static final int SAFE_DROP_SCAN_RADIUS = 3;
     /** Horizontal scan radius for trunk detection. */
@@ -167,6 +173,35 @@ public final class TreeStuckEscapeService {
                 // Hop only over a block in the way. The old timed hops near the edge (every 5
                 // ticks) added up to 1.25 blocks to the fall: a hop into a 3-deep column fell
                 // about 4 and cost health (review of the canopy fix, 2026-11-09).
+                BotActions.autoJumpIfNeeded(bot);
+                return true;
+            }
+        }
+
+        // Stepping onto a leaf beside it whose fall is shallower than the one below (see
+        // chooseSideStep). On arrival the evaluation below breaks that leaf as a safe fall.
+        BlockPos sideStep = SIDE_STEP_TARGET.get(botId);
+        if (sideStep != null) {
+            long stepAge = now - SIDE_STEP_SET_TICK.getOrDefault(botId, now);
+            boolean arrived = bot.isOnGround() && bot.getBlockPos().equals(sideStep);
+            boolean leftCanopy = bot.isOnGround() && bot.getBlockY() < sideStep.getY() - 1;
+            if (arrived || leftCanopy || stepAge > TreeStuckDropPolicy.SIDE_STEP_MAX_TICKS) {
+                SIDE_STEP_TARGET.remove(botId);
+                SIDE_STEP_SET_TICK.remove(botId);
+                if (arrived) {
+                    LOGGER.info("TreeStuck: {} stepped onto {}", bot.getName().getString(), sideStep.toShortString());
+                    LAST_TREE_ESCAPE_ATTEMPT_TICK.put(botId, 0L); // evaluate here at once
+                } else if (!leftCanopy) {
+                    LOGGER.info("TreeStuck: {} could not step onto {}, trying something else",
+                            bot.getName().getString(), sideStep.toShortString());
+                    SIDE_STEP_TRIED.computeIfAbsent(botId, k -> ConcurrentHashMap.newKeySet()).add(sideStep);
+                    LAST_TREE_ESCAPE_ATTEMPT_TICK.put(botId, 0L);
+                }
+                // Fall through to the normal handling.
+            } else {
+                LookController.faceBlock(bot, sideStep);
+                BotActions.sprint(bot, false);
+                BotActions.applyMovementInput(bot, Vec3d.ofBottomCenter(sideStep), 0.2D);
                 BotActions.autoJumpIfNeeded(bot);
                 return true;
             }
@@ -285,6 +320,38 @@ public final class TreeStuckEscapeService {
             // A fall that costs a few hearts, never lava, fire or a deadly drop.
             fallThroughLeaf = fallThroughLeaf(world, leafBelow, SURVIVABLE_DROP_HEIGHT);
         }
+        // The worst fall on the whole way down this column, leaf by leaf: a safe first leaf can sit on
+        // a lower leaf over the 6-block terrace drop.
+        int columnWorst = isLeaf(world, leafBelow) ? worstFallDown(world, leafBelow, SURVIVABLE_DROP_HEIGHT) : Integer.MAX_VALUE;
+        boolean betterColumnBeside = false;
+        if (!TreeStuckDropPolicy.isSafeDrop(columnWorst) && isLeaf(world, leafBelow)) {
+            // ── Strategy 3a: step onto a leaf beside it whose column goes down by safer falls ──
+            List<TreeStuckDropPolicy.SideStep> steps =
+                    sideSteps(world, bot.getBlockPos(), SIDE_STEP_TRIED.getOrDefault(botId, Set.of()));
+            TreeStuckDropPolicy.SideStep step = TreeStuckDropPolicy.chooseSideStep(steps, columnWorst, lastResort, bot.getHealth());
+            // A shallower but still costly column beside it waits for the last resort; the trunk
+            // strategy below would break that column's leaves first (sandbox 2026-11-09, 6-block fall).
+            betterColumnBeside = step == null && TreeStuckDropPolicy.chooseSideStep(steps, columnWorst, true, bot.getHealth()) != null;
+            if (step != null) {
+                BlockPos target = bot.getBlockPos().add(step.dx(), step.dy(), step.dz());
+                // Head first: from the bot's eyes the ray to the feet-level leaf passes through the
+                // head-level cell, so a leaf there blocks the line of sight.
+                BlockPos inTheWay = isLeaf(world, target.up()) ? target.up() : isLeaf(world, target) ? target : null;
+                if (inTheWay != null) {
+                    LOGGER.info("TreeStuck: {} clearing the leaf at {} to step onto {} (worst fall {}, here {})",
+                            bot.getName().getString(), inTheWay.toShortString(), target.toShortString(), step.fall(),
+                            columnWorst == Integer.MAX_VALUE ? "unsafe" : columnWorst);
+                    startLeafMine(bot, inTheWay, target);
+                    return true;
+                }
+                LOGGER.info("TreeStuck: {} stepping onto {} to break the leaf there (worst fall {}, here {})",
+                        bot.getName().getString(), target.toShortString(), step.fall(),
+                        columnWorst == Integer.MAX_VALUE ? "unsafe" : columnWorst);
+                SIDE_STEP_TARGET.put(botId, target);
+                SIDE_STEP_SET_TICK.put(botId, now);
+                return true;
+            }
+        }
         boolean lastResortBreak = !belowIsSafe && lastResort && fallThroughLeaf <= SURVIVABLE_DROP_HEIGHT;
         if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES) && (belowIsSafe || lastResortBreak)) {
             if (lastResortBreak) {
@@ -298,7 +365,7 @@ public final class TreeStuckEscapeService {
         }
 
         // ── Strategy 4: Break leaves toward trunk ──
-        BlockPos trunk = findNearbyTrunk(world, bot.getBlockPos());
+        BlockPos trunk = betterColumnBeside ? null : findNearbyTrunk(world, bot.getBlockPos());
         if (trunk != null) {
             BlockPos leafToBreak = findLeafTowardTrunk(world, bot.getBlockPos(), trunk, belowIsSafe);
             if (leafToBreak != null) {
@@ -387,6 +454,93 @@ public final class TreeStuckEscapeService {
     }
 
     /**
+     * The worst single fall on the way down from the leaf at {@code leafPos}: break it, fall onto the
+     * next leaf, break that, and so on to the ground. {@link Integer#MAX_VALUE} when a fall is deeper
+     * than {@code maxFall} or a landing is unsafe.
+     */
+    private static int worstFallDown(ServerWorld world, BlockPos leafPos, int maxFall) {
+        int worst = 0;
+        BlockPos leaf = leafPos;
+        for (int guard = 0; guard < 32; guard++) {
+            int fall = 1;
+            BlockPos probe = leaf.down();
+            while (fall <= maxFall && world.getBlockState(probe).isAir()) {
+                fall++;
+                probe = probe.down();
+            }
+            if (!isSafeLanding(world, probe)) {
+                return Integer.MAX_VALUE;
+            }
+            worst = Math.max(worst, fall);
+            if (!isLeaf(world, probe)) {
+                return worst;
+            }
+            leaf = probe;
+        }
+        return Integer.MAX_VALUE;
+    }
+
+    /**
+     * The cells beside the bot (8 around, a block up, level or down) where it could stand on a leaf,
+     * with the fall through that leaf (up to the last-resort cap). Skips cells it already failed to
+     * reach, and a diagonal with both straight cells blocked.
+     */
+    private static List<TreeStuckDropPolicy.SideStep> sideSteps(ServerWorld world, BlockPos botPos, Set<BlockPos> tried) {
+        List<TreeStuckDropPolicy.SideStep> out = new ArrayList<>();
+        boolean headroomToClimb = isOpenCell(world, botPos.up(2));
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                for (int dy = -1; dy <= 1; dy++) {
+                    if (dy == 1 && !headroomToClimb) continue;
+                    BlockPos feet = botPos.add(dx, dy, dz);
+                    if (tried.contains(feet) || !isLeaf(world, feet.down())) continue;
+                    int breaks = 0;
+                    if (!clearCell(world, feet)) {
+                        // Dug into the canopy, the bot has leaves on every side: a level, straight cell
+                        // may have them broken first (one or two), nothing else.
+                        if (dy != 0 || (dx != 0 && dz != 0) || !clearableCell(world, feet)) continue;
+                        breaks = (isLeaf(world, feet) ? 1 : 0) + (isLeaf(world, feet.up()) ? 1 : 0);
+                    }
+                    if (dy == -1 && !isOpenCell(world, feet.up(2))) {
+                        continue; // the head, still at the bot's level, can't enter a step down
+                    }
+                    if (dx != 0 && dz != 0
+                            && !clearCell(world, botPos.add(dx, Math.max(dy, 0), 0))
+                            && !clearCell(world, botPos.add(0, Math.max(dy, 0), dz))) {
+                        continue; // both straight cells blocked: the corner can't be cut
+                    }
+                    int fall = worstFallDown(world, feet.down(), SURVIVABLE_DROP_HEIGHT);
+                    if (fall != Integer.MAX_VALUE) {
+                        out.add(new TreeStuckDropPolicy.SideStep(dx, dy, dz, fall, breaks));
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Feet and head each open or a leaf. */
+    private static boolean clearableCell(ServerWorld world, BlockPos feet) {
+        return (isOpenCell(world, feet) || isLeaf(world, feet)) && (isOpenCell(world, feet.up()) || isLeaf(world, feet.up()));
+    }
+
+    private static boolean isLeaf(ServerWorld world, BlockPos pos) {
+        return world.getBlockState(pos).isIn(BlockTags.LEAVES);
+    }
+
+    /** Feet and head open. */
+    private static boolean clearCell(ServerWorld world, BlockPos feet) {
+        return isOpenCell(world, feet) && isOpenCell(world, feet.up());
+    }
+
+    private static boolean isOpenCell(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        return state.getFluidState().isEmpty() && !state.isIn(BlockTags.LEAVES)
+                && state.getCollisionShape(world, pos).isEmpty();
+    }
+
+    /**
      * Forget the follow path planned from the canopy. Once the bot is down, its next waypoint can sit
      * six blocks over its head and follow keeps it ("waypoints preserved") while the bot stands at the
      * trunk (sandbox 2026-11-09, 2 of 6 runs).
@@ -426,6 +580,9 @@ public final class TreeStuckEscapeService {
         SAFE_DROP_EXHAUSTED.remove(botId);
         HOLE_NUDGE.remove(botId);
         WAITING_FOR_SAFE_WAY.remove(botId);
+        SIDE_STEP_TARGET.remove(botId);
+        SIDE_STEP_SET_TICK.remove(botId);
+        SIDE_STEP_TRIED.remove(botId);
         CANOPY_FEET_Y.remove(botId);
         OFF_LEAF_TICKS.remove(botId);
         // Don't clear dialogue cooldown — let it expire naturally.
@@ -553,6 +710,11 @@ public final class TreeStuckEscapeService {
     }
 
     private static void startLeafMine(ServerPlayerEntity bot, BlockPos leafPos) {
+        startLeafMine(bot, leafPos, null);
+    }
+
+    /** @param sideStepFeet the cell this break clears the way to; a refused break gives that cell up */
+    private static void startLeafMine(ServerPlayerEntity bot, BlockPos leafPos, BlockPos sideStepFeet) {
         UUID botId = bot.getUuid();
         // Tree-stuck escape is autonomous bot self-recovery, not a user skill. If a stale
         // ABORT_LATCH is present (e.g. from a misfired teleport detector or a prior /bot stop),
@@ -564,6 +726,15 @@ public final class TreeStuckEscapeService {
         LEAF_MINE_INFLIGHT.put(botId, future);
         future.whenComplete((result, error) -> {
             LEAF_MINE_INFLIGHT.remove(botId, future);
+            if (error != null || (result != null && result.startsWith("\u26a0"))) {
+                // A refused break used to be silent: the trunk strategy repeated the same diagonal
+                // leaf four times while the 10 s clock ran out (sandbox 2026-11-09).
+                LOGGER.info("TreeStuck: {} leaf at {} not broken: {}", bot.getName().getString(),
+                        leafPos.toShortString(), error != null ? error.toString() : result);
+                if (sideStepFeet != null) {
+                    SIDE_STEP_TRIED.computeIfAbsent(botId, k -> ConcurrentHashMap.newKeySet()).add(sideStepFeet);
+                }
+            }
         });
     }
 
