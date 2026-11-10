@@ -12,6 +12,7 @@ Download: [Modrinth](https://modrinth.com/mod/mcfrens). Source and issues: [GitH
 - [Fast travel](Fast-Travel.md): what lets a fren skip the walk, how long it takes and what it costs.
 - [Bases and home](Bases-and-Home.md): bases, beds and the preferred home, and where a fren goes at sunset.
 - [Protected zones](Protected-Zones.md): where frens won't break blocks or gather, and why.
+- [Storage and chests](Storage.md): putting items in chests and taking them out, and when frens ask before taking your supplies.
 - [In-game Guide](Guide.md): every card from the Guide screen (press ] in game), grouped by topic.
 - [Companion questing guide](https://github.com/wcfcarolina13/Frens/blob/main/COMPANION_QUESTING_GUIDE.md): how recruiting works in Questing mode.
 - [Crafting cheatsheet](https://github.com/wcfcarolina13/Frens/blob/main/CRAFTING_CHEATSHEET.md)

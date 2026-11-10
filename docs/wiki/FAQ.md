@@ -24,6 +24,10 @@ Look at it and press `\`, or run `/bot stop <name>`. To keep it following you wh
 
 Open its inventory with `/bot open <name>` and move items in, the same way you would with a chest.
 
+## My fren's pack is full. How do I empty it?
+
+Use Quick Store: open its inventory, then Actions, Core Actions, Quick Store, and click a chest. It keeps its tools and food unless you shift-click. During a job it puts its haul in a nearby chest by itself, and some jobs place a chest when there isn't one. See [Storage and chests](Storage.md).
+
 ## My fren is stuck or lost. How do I get it back?
 
 Use Regroup (`/bot regroup <name>`) to call it back with the safer recovery behaviour. If you turn on [Follow Teleport](Guide-Settings.md#follow-teleport), a following fren teleports to you when it falls far behind or gets stuck.
