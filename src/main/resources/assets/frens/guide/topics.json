@@ -577,7 +577,7 @@
         "The wall is one block thick and about three and a half blocks high, with a tower at each corner and a gate on the longest side.",
         "Builds only from its own inventory: stone bricks, cobblestone, stone, cobbled deepslate, andesite or dirt. Planks can't be used.",
         "The moat is a separate step (Fortify Moat). It digs the ditch, then lines it with a cobblestone floor, stone brick lining and a spider ledge once the whole ditch is dug.",
-        "The finish report counts the wall, towers and gatehouse only. Below 85% it says Partial; run patch to fill the gaps.",
+        "The finish report counts the wall, towers and gatehouse only. Below 85% it says Partial, and patch fills the gaps.",
         "Resume skips towers and partly built sides. Patch finishes them and fixes damage.",
         "dry_run: preview the layout with particles. status: per-side progress, missing blocks shown in red.",
         "drift / expand / merge / list / name: manage saved walls. Expand only grows a wall.",
