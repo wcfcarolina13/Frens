@@ -94,7 +94,7 @@ The moat is not part of the normal build. Run **Fortify Moat** or `/bot fortify 
 
 It digs a ditch starting three blocks out from the wall, leaving two blocks of ground between them. The ditch is two blocks wide: 3 deep on the inner side and 2 deep on the outer side. It also clears anything up to 4 blocks above the outer side, such as trees and leaves. The moat stays dry.
 
-Once the ditch is fully dug, it lines it: a cobblestone floor, a stone brick lining on the wall side and a ledge against spiders. It works one side at a time, nearest side first. If any of the ditch is still undug, it leaves the lining for the next run. It needs building blocks for this; if it runs out, it says how many it still needs.
+The moat plan also has a cobblestone floor, a stone brick lining and a ledge against spiders. Those cells sit in ground the dig leaves in place, so the fren doesn't replace dirt or stone there. Once the whole ditch is dug, it fills any of them that are open (a dip, a cave, an earlier dig), one side at a time, nearest side first. If gaps stay open, for example because it ran out of building blocks, the report says how many.
 
 The ditch isn't dug in front of the gate, so the ground there is the crossing. Move chests and anything else you want to keep off the moat line first.
 
@@ -168,7 +168,7 @@ Typed commands need an operator or the host. Anything else after `fortify` start
 | There is no moat | The moat is a separate step. Run Fortify Moat. |
 | The wall has gaps | Some blocks couldn't be reached or a side was skipped. Run patch. |
 | A tower is unfinished after resume | Resume skips towers. Run patch. |
-| The moat has no stone floor or lining | It lines the moat only once the whole ditch is dug, and only with building blocks in its inventory. Run Fortify Moat again. |
+| The moat has no stone floor or lining | It only fills open gaps in the lining. It doesn't replace natural ground with stone. |
 | "No village detected nearby." | Move the fren into the village, at the same height as the houses. |
 | It stopped and said it was out of blocks | Give it more and resume. |
 | It won't use my planks | Planks can't build the wall. Give it stone, cobblestone or dirt. |

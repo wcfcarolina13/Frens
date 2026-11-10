@@ -537,7 +537,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             if (b.type() == WallBlockType.MOAT_FLOOR
                     || b.type() == WallBlockType.MOAT_INNER_FACE
                     || b.type() == WallBlockType.MOAT_OVERHANG) {
-                if (!isPlannedBlockSatisfied(b, world.getBlockState(b.worldPos()))) {
+                // Only open cells: the lining sits in ground the dig never opens, and placing
+                // skips solid cells, so counting natural ground here only inflated "still needed".
+                BlockState now = world.getBlockState(b.worldPos());
+                if ((now.isAir() || now.isReplaceable()) && !isPlannedBlockSatisfied(b, now)) {
                     moatPlaceBlocks.add(b);
                 }
             }
@@ -595,13 +598,26 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             LOGGER.info("[Fortify] Moat placement phase complete: {} blocks placed", totalPlaced);
         }
 
+        // Lining cells still open after placement (ran out of blocks, unreachable). Cells holding
+        // natural ground are left as they are: the plan's lining sits in ground the dig never
+        // opens, so only gaps (dips, caves, earlier digging) get filled.
+        int liningGaps = 0;
+        for (ProceduralWallBlock b : moatPlaceBlocks) {
+            BlockState now = world.getBlockState(b.worldPos());
+            if ((now.isAir() || now.isReplaceable()) && !isPlannedBlockSatisfied(b, now)) {
+                liningGaps++;
+            }
+        }
         boolean moatComplete = remainingAfterDig == 0;
         FortificationPersistenceService.setMoatComplete(server, worldKey, effectiveWallName, moatComplete);
 
         String summary;
         if (moatComplete) {
-            summary = String.format("Moat complete for '%s'. %d blocks dug, %d blocks placed.",
-                effectiveWallName, totalDug, totalPlaced);
+            summary = liningGaps == 0
+                ? String.format("Moat complete for '%s'. %d blocks dug, %d blocks placed.",
+                    effectiveWallName, totalDug, totalPlaced)
+                : String.format("Moat dug for '%s'. %d blocks dug, %d blocks placed, %d lining gaps still open (run it again with building blocks).",
+                    effectiveWallName, totalDug, totalPlaced, liningGaps);
             ChatUtils.sendChatMessages(source, "§a[Fortify] " + summary);
             showOverhead(bot, "Moat done!");
         } else {
@@ -1909,6 +1925,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         int pct = (int) (overallRatio * 100);
 
         if (overallRatio >= FortificationPersistenceService.EDGE_COMPLETION_THRESHOLD) {
+            FortificationPersistenceService.updateProgress(server, worldKey, wallName, edgesCompleted, totalPlaced);
             FortificationPersistenceService.markComplete(server, worldKey, wallName);
             ChatUtils.sendChatMessages(source, "§a[Fortify] Fortification complete! "
                     + totalPlaced + " blocks placed (" + presentInWorld + "/" + totalPlanned
