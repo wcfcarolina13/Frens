@@ -71,3 +71,7 @@ In Bot Controls: open a fren's inventory and go to Admin, then Bot Controls, or 
 ## Something went wrong. Where do I report it?
 
 Open an issue on [GitHub](https://github.com/wcfcarolina13/Frens/issues) with your Frens version and what the fren was doing. The game log (`logs/latest.log`) helps a lot.
+
+## Why didn't my guard fren help me fight?
+
+A guarding fren fights mobs that are after it. With only a sword it leaves a mob alone until the mob turns on it, even one chasing you. Give it a bow or crossbow and arrows and it attacks hostile mobs it can see within about 10 blocks. See [Guard and patrol](Guard-and-Patrol.md).

@@ -61,7 +61,7 @@ So if you want a fren to always come back to one place, set a preferred home and
 
 ## Sunset options
 
-Each of these is per fren. Most are buttons in the fren's inventory screen, under Skills, then Automation. Operators can also type the command with `on`, `off` or `toggle` and the fren's name.
+Each of these is per fren. Most are buttons in the fren's inventory screen, under Actions, then Automation. Operators can also type the command with `on`, `off` or `toggle` and the fren's name.
 
 | Button | Command | What it does |
 |---|---|---|
