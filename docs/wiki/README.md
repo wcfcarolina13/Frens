@@ -13,6 +13,7 @@ Download: [Modrinth](https://modrinth.com/mod/mcfrens). Source and issues: [GitH
 - [Bases and home](Bases-and-Home.md): bases, beds and the preferred home, and where a fren goes at sunset.
 - [Protected zones](Protected-Zones.md): where frens won't break blocks or gather, and why.
 - [Storage and chests](Storage.md): putting items in chests and taking them out, and when frens ask before taking your supplies.
+- [Guard and patrol](Guard-and-Patrol.md): guard, patrol and stay, what a fren fights, and how the orders end.
 - [In-game Guide](Guide.md): every card from the Guide screen (press ] in game), grouped by topic.
 - [Companion questing guide](https://github.com/wcfcarolina13/Frens/blob/main/COMPANION_QUESTING_GUIDE.md): how recruiting works in Questing mode.
 - [Crafting cheatsheet](https://github.com/wcfcarolina13/Frens/blob/main/CRAFTING_CHEATSHEET.md)
