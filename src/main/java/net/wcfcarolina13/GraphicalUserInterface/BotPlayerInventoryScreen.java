@@ -4479,7 +4479,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             );
             case SKILL_FARM -> java.util.List.of(
                 "Farming",
-                "Runs the bot's general farm work routine for planting and harvesting."
+                "Shows a farm preview where you look. Builds a watered farm there and plants it."
             );
             case SKILL_HARVEST -> java.util.List.of(
                 "Harvest",

@@ -440,25 +440,30 @@
       "id": "farm",
       "category": "Farming",
       "title": "Build Farm",
-      "summary": "Builds and plants a small farm with irrigation.",
-      "answer": "Type /bot skill farm {bot} and I pick a spot, till rows, bring in water and plant. If the spot is unsafe, I move or tell you.",
+      "summary": "Builds a watered square farm and plants it.",
+      "answer": "Press Farming in the Actions menu and pick the spot, or type /bot skill farm {bot}. I need a hoe, seeds and a bucket. I build a square of farmland around a small pool and till one plot for each seed I carry.",
       "details": [
-        "Chooses a site, prepares tilled rows, and handles irrigation.",
-        "If a site is unsafe/invalid, it should relocate or fail clearly."
+        "Builds a 10 by 10 square of farmland around a 2 by 2 pool, so every plot stays watered.",
+        "Tills only as many plots as it has seeds. Give it more seeds for a bigger farm.",
+        "Needs a hoe, seeds and a bucket in its inventory. It fills buckets from water nearby and doesn't take tools or seeds from chests.",
+        "The Farming button shows a preview where you look. The lock key fixes it so the arrow keys can move it, and the Go To Look key starts the build.",
+        "With the command it looks for an existing walled 2 by 2 pool within 24 blocks, or picks a flat, open spot itself.",
+        "Clears trees and levels the ground. It adds no fences or torches, and runs once."
       ],
       "command": "bot skill farm {bot}",
-      "shortcuts": "No keybind by default",
+      "shortcuts": "Actions, Skills, Farming",
       "tags": "crop irrigation agriculture build"
     },
     {
       "id": "plant",
       "category": "Farming",
       "title": "Plant Seeds",
-      "summary": "Plants seeds on any empty tilled soil nearby.",
-      "answer": "Type /bot skill plant {bot} and I plant seeds in any empty farmland within 16 blocks. I can plant wheat, beetroot, melon, pumpkin, potato and carrot.",
+      "summary": "Plants seeds on empty farmland nearby.",
+      "answer": "Type /bot skill plant {bot} and I plant seeds in empty farmland within 16 blocks. I don't till, so the farmland has to be there. I can plant wheat, beetroot, melon, pumpkin, potato and carrot.",
       "details": [
-        "Scans a 16-block radius for empty farmland and plants available seeds.",
-        "Supports wheat, beetroot, melon, pumpkin, potato, and carrot."
+        "Plants empty farmland within 16 blocks. It doesn't till new ground.",
+        "Supports wheat, beetroot, melon, pumpkin, potato, and carrot, from its own inventory.",
+        "There is no button for it. Harvest Crops also plants empty farmland."
       ],
       "command": "bot skill plant {bot}",
       "shortcuts": "No keybind by default",
@@ -468,15 +473,18 @@
       "id": "harvest",
       "category": "Farming",
       "title": "Harvest Crops",
-      "summary": "Harvests fully mature crops, replants them, and keeps the field tidy.",
-      "answer": "Type /bot skill harvest {bot} and I harvest ripe crops within 16 blocks, replant them and pick up the drops. I sneak so I don't trample the farmland, and I use nearby chests if my pack fills up.",
+      "summary": "Harvests ripe wheat, beetroot, carrots and potatoes, and replants them.",
+      "answer": "Press Harvest in the Actions menu, or type /bot skill harvest {bot}. I harvest ripe wheat, beetroot, carrots and potatoes within 16 blocks, replant them and pick up the drops. If my pack fills, I put the crops in a chest.",
       "details": [
-        "Scans a 16-block radius for ripe crops on farmland and carefully breaks them.",
-        "Sneaks to avoid trampling tilled soil, replants matching crops, then runs a drop sweep.",
-        "If inventory space gets tight, it offloads into nearby chests and can pull more seeds from nearby chests to finish replanting."
+        "Harvests fully grown wheat, beetroot, carrots and potatoes within 16 blocks. Not melons, pumpkins or other crops.",
+        "Replants each plot, then plants any other empty farmland nearby.",
+        "Stands beside the crops, and sneaks when it has to stand on farmland, so it doesn't trample them.",
+        "Can ask to take seeds from a chest near it to finish replanting.",
+        "With fewer than 3 free slots it puts crops in a nearby chest, or places one.",
+        "Runs once. Run it again when the crops are ripe."
       ],
       "command": "bot skill harvest {bot}",
-      "shortcuts": "No keybind by default",
+      "shortcuts": "Actions, Skills, Harvest",
       "tags": "harvest reap crop gather farming mature"
     },
     {
