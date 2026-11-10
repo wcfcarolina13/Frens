@@ -1078,7 +1078,7 @@ public final class NavigationArtifactService {
                         // A paid trip is never queued: the retry would leave without charging.
                         notifyTravelRefusal(server, bot, ownerUuid, "cooldown", automatic,
                                 "\u00A7c" + botAlias + " is resting " + timeStr
-                                + " before the next trip. Nothing was spent.\u00A7r");
+                                + " before the next trip.\u00A7r");
                         return false;
                     }
                     String destLabel = destination.toShortString();
@@ -1218,10 +1218,6 @@ public final class NavigationArtifactService {
 
         String mountEntityTypeId = null;
         switch (mountResult.decision()) {
-            case REFUSE_FULL_INVENTORY, REFUSE_NO_ROOM_AT_DEST, REFUSE_CROSS_DIM_ANIMAL -> {
-                notifyOwner(server, ownerUuid, "\u00A7c" + mountResult.message() + "\u00A7r");
-                return false; // Abort travel
-            }
             case TETHERED_AT_SOURCE -> {
                 notifyOwner(server, ownerUuid, "\u00A7e" + mountResult.message() + "\u00A7r");
                 // Fall through — travel proceeds without animal

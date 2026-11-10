@@ -43,7 +43,9 @@ class RemoteGuidancePaymentWiringTest {
         int mountDiscard = src.indexOf("mount.discard();", pay);
         assertTrue(save > pay, "payment must come before the inventory is saved for the trip");
         assertTrue(mountDiscard > pay, "payment must come before the mount is removed");
-        assertFalse(src.substring(pay, save).contains("return false;\n            }\n\n            if (tier"),
+        int afterPayment = src.indexOf("String mountEntityTypeId = null;", pay);
+        assertTrue(afterPayment > pay && afterPayment < save);
+        assertFalse(src.substring(afterPayment, save).contains("return false"),
                 "no refusal may follow the payment");
     }
 }
