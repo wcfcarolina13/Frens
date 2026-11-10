@@ -812,7 +812,8 @@ public final class HuntSkill implements Skill {
         Set<Identifier> unlocked = HuntHistoryService.getWorldHistory(world);
         List<BlockPos> anchors = buildHuntAnchors(bot, world, zone.radius);
         return findCandidate(world, bot, anchors, unlocked, null, true,
-                config.depopulationEnabled, config.selectedTargets,
+                config.depopulationEnabled,
+                HuntSelectionPolicy.effectiveSelection(false, config.selectedTargets, null),
                 zone.radius, zone.ySpan) != null;
     }
 
