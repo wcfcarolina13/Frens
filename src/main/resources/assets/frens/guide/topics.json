@@ -474,13 +474,14 @@
       "category": "Farming",
       "title": "Harvest Crops",
       "summary": "Harvests ripe wheat, beetroot, carrots and potatoes, and replants them.",
-      "answer": "Press Harvest in the Actions menu, or type /bot skill harvest {bot}. I harvest ripe wheat, beetroot, carrots and potatoes within 16 blocks, replant them and pick up the drops. If my pack fills, I put the crops in a chest.",
+      "answer": "Press Harvest in the Actions menu, or type /bot skill harvest {bot}. I harvest ripe wheat, beetroot, carrots and potatoes within 16 blocks, replant them and pick up the drops. If my pack fills, I empty it into a chest.",
       "details": [
         "Harvests fully grown wheat, beetroot, carrots and potatoes within 16 blocks. Not melons, pumpkins or other crops.",
+        "Won't break crops inside a mapped village.",
         "Replants each plot, then plants any other empty farmland nearby.",
         "Stands beside the crops, and sneaks when it has to stand on farmland, so it doesn't trample them.",
         "Can ask to take seeds from a chest near it to finish replanting.",
-        "With fewer than 3 free slots it puts crops in a nearby chest, or places one.",
+        "With fewer than 3 free slots it empties its pack into a nearby chest, or places one. It keeps its seeds, carrots and potatoes for replanting.",
         "Runs once. Run it again when the crops are ripe."
       ],
       "command": "bot skill harvest {bot}",

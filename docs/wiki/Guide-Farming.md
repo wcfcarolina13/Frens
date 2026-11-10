@@ -36,10 +36,11 @@ Plants seeds on empty farmland nearby.
 Harvests ripe wheat, beetroot, carrots and potatoes, and replants them.
 
 - Harvests fully grown wheat, beetroot, carrots and potatoes within 16 blocks. Not melons, pumpkins or other crops.
+- Won't break crops inside a mapped village.
 - Replants each plot, then plants any other empty farmland nearby.
 - Stands beside the crops, and sneaks when it has to stand on farmland, so it doesn't trample them.
 - Can ask to take seeds from a chest near it to finish replanting.
-- With fewer than 3 free slots it puts crops in a nearby chest, or places one.
+- With fewer than 3 free slots it empties its pack into a nearby chest, or places one. It keeps its seeds, carrots and potatoes for replanting.
 - Runs once. Run it again when the crops are ripe.
 
 **Command:** `/bot skill harvest <bot>`
