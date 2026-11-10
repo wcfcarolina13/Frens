@@ -74,4 +74,4 @@ Open an issue on [GitHub](https://github.com/wcfcarolina13/Frens/issues) with yo
 
 ## Why didn't my guard fren help me fight?
 
-A guarding fren fights mobs that are after it. With only a sword it leaves a mob alone until the mob turns on it, even one chasing you. Give it a bow or crossbow and arrows and it shoots hostile mobs it can see. See [Guard and patrol](Guard-and-Patrol.md).
+A guarding fren fights mobs that are after it. With only a sword it leaves a mob alone until the mob turns on it, even one chasing you. Give it a bow or crossbow and arrows and it attacks hostile mobs it can see within about 10 blocks. See [Guard and patrol](Guard-and-Patrol.md).
