@@ -87,7 +87,9 @@ class ZoneResumeOverrideWiringTest {
     @Test
     void resumeIsPromisedOnlyWhereTheOverrideCanWork() throws IOException {
         String src = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/skills/support/MiningHazardDetector.java"));
-        assertTrue(src.contains("(resumeCanOverride(botUuid, pos, world) ? RESUME_OVERRIDE_SUFFIX : \"\")"));
+        assertTrue(src.contains("blocking = withResumeOffer(bot.getUuid(), world, blocking);"),
+                "the offer is decided once, for the blocking hazard");
+        assertTrue(src.contains("|| !resumeCanOverride(botUuid, hazard.location(), world)) {"));
         assertTrue(src.contains("&& !net.wcfcarolina13.GameAI.services.CompanionSafeZoneService.isProtectedDespiteZoneOverride(world, pos, owner)"),
                 "no promise where the digging jobs' gate still refuses with the override (others' bases, forts, villages, bee nests)");
         String safe = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/CompanionSafeZoneService.java"));
