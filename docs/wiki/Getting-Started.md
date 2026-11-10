@@ -68,7 +68,7 @@ At sunset, a fren that is idle (not following you) or on an until-sunset job hea
 
 ## 6. Optional: let frens talk back
 
-Frens speak scripted lines out of the box. If you want them to chat in their own words, the Guide's **AI setup** button walks you through installing [Ollama](https://ollama.com) and a model. Everything runs on your own machine. Voices are a separate, optional add-on. See [Set up AI companions](Guide-Basics.md#set-up-ai-companions).
+Frens speak scripted lines out of the box. If you want them to chat in their own words, the Guide's **AI setup** button walks you through installing [Ollama](https://ollama.com) and a model. It runs on the machine that hosts the world: your own computer in singleplayer, the server machine in multiplayer. Voices are a separate, optional add-on. See [Talking with frens (AI chat)](AI-Chat.md).
 
 ## Next
 

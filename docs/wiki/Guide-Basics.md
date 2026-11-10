@@ -9,7 +9,7 @@
 Optional: let companions talk back in their own words. Frens works fully without it.
 
 - Everything else in Frens (skills, following, building, scripted lines) works with no AI at all.
-- AI chat runs a local model through Ollama on the machine that runs the world (the server machine in multiplayer). Nothing is sent to an online service.
+- AI chat runs a local model through Ollama on the machine that runs the world (the server machine in multiplayer). Chats go only to that Ollama, not to an online service. Downloading a model fetches it from Ollama's registry.
 - Open the checklist with the AI setup button at the top right of this guide, or Setup… on the Soul Chat row in Bot Controls.
 - It walks you through: install Ollama, download a model (1B ≈4 GB RAM, 3B ≈6 GB, 8B ≈12 GB, plus Minecraft's own memory), turn Soul Chat on, enable each companion, then say hi in chat.
 - Soul Chat is the world-wide switch. Each companion also has to be enabled. The checklist shows both.
@@ -26,11 +26,11 @@ Start chat with Bots or All bots instead of naming each companion.
 
 - Type in normal chat, without a slash: Bots, what should we do next?
 - All bots, how is everyone doing? works too.
-- With Souls and Soul Party enabled, up to four nearby companions with active Soul profiles join the conversation, nearest first.
+- With Soul Chat on, up to four nearby companions with active Soul profiles join the conversation, nearest first.
 - They must be within 32 blocks in the same world. Normally only your owned bots qualify. Operators can also address other owners' bots.
 - If only one companion qualifies, they receive the message directly. A group conversation does not require every bot to reply.
 - Voice input works the same way if your dictation sends the words into normal Minecraft chat. Frens does not provide microphone transcription itself.
-- Use Bots or All bots explicitly: Everyone and Guys are not group-address shortcuts.
+- When you are the only player online, everyone, guys, y'all and you two work too.
 
 **Command:** Normal chat: Bots, what should we do next? (no slash)
 

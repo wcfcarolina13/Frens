@@ -85,7 +85,7 @@ Every card from the Guide screen in game (press ] by default). `<bot>` stands fo
 
 ## [Items](Guide-Items.md)
 
-- [Wizard's Tome](Guide-Items.md#wizards-tome): A rare magical item that unlocks companion spells and abilities.
+- [Wizard's Tome](Guide-Items.md#wizards-tome): A rare magical item that unlocks the companion movement spells from anywhere.
 - [Navigation Artifacts](Guide-Items.md#navigation-artifacts): Give your companion a Compass, Map, or Eye of Ender to unlock autonomous navigation.
 - [Spell Ingredients](Guide-Items.md#spell-ingredients): Quick reference for all spell-related items and what they unlock.
 

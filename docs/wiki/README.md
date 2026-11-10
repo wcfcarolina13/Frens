@@ -17,6 +17,9 @@ Download: [Modrinth](https://modrinth.com/mod/mcfrens). Source and issues: [GitH
 - [Farming](Farming.md): building a farm, planting and harvesting, and where the crops go.
 - [Hunting and cooking](Hunting.md): starting a hunt, what frens won't hunt, loot, how a hunt ends and cooking.
 - [Fortifying a village](Fortify.md): the wall, towers, gate and moat, materials, and looking after a saved wall.
+- [Talking with frens (AI chat)](AI-Chat.md): setting up Ollama and Soul Chat, talking to frens, memory and what to do when they don't answer.
+- [Multiplayer and ownership](Multiplayer.md): owners, operators and the host, sharing bases and walls, and dedicated servers.
+- [Spells](Spells.md): every spell, what unlocks it and what it costs, and the Wizard's Tome.
 - [In-game Guide](Guide.md): every card from the Guide screen (press ] in game), grouped by topic.
 - [Companion questing guide](https://github.com/wcfcarolina13/Frens/blob/main/COMPANION_QUESTING_GUIDE.md): how recruiting works in Questing mode.
 - [Crafting cheatsheet](https://github.com/wcfcarolina13/Frens/blob/main/CRAFTING_CHEATSHEET.md)
