@@ -64,4 +64,25 @@ class ZoneResumeOverrideWiringTest {
                 "Resume is flagged first, then the override for a zone");
         assertTrue(body.contains("flagZoneOverridePending(bot);"));
     }
+
+    @Test
+    void collectDirtsOwnZoneGateHonoursTheOverride() throws IOException {
+        String src = Files.readString(SKILLS.resolve("CollectDirtSkill.java"));
+        assertTrue(!src.contains("CompanionSafeZoneService.isProtected(world"),
+                "Collect Dirt's stair/hand-dig mining refused zone cells even after Resume (review of #121)");
+        assertEquals(2, src.split("CompanionSafeZoneService.isProtectedForBot\\(world, ", -1).length - 1);
+        String safe = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/CompanionSafeZoneService.java"));
+        assertTrue(safe.contains("if (!explicitZonesOverridden && isInExplicitProtectedZone(world, pos, botOwner))"),
+                "the override lifts only explicit zones, not beehives, bases, forts or villages");
+    }
+
+    @Test
+    void resumeIsPromisedOnlyWhereTheOverrideCanWork() throws IOException {
+        String src = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/skills/support/MiningHazardDetector.java"));
+        assertTrue(src.contains("(ownerMayMutate(botUuid, pos, world) ? RESUME_OVERRIDE_SUFFIX : \"\")"));
+        assertTrue(src.contains("hazard.failureMessage().endsWith(RESUME_OVERRIDE_SUFFIX)"));
+        String resume = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/SkillResumeService.java"));
+        assertTrue(resume.contains("if (uuid != null && LAST_SKILL_BY_BOT.containsKey(uuid)) {\n            ZONE_OVERRIDE_PENDING.add(uuid);"),
+                "no zone-override flag without a paused skill to resume");
+    }
 }

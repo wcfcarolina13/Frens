@@ -53,10 +53,23 @@ public final class CompanionSafeZoneService {
      * @return true if the position is protected and should not be disturbed
      */
     public static boolean isProtected(ServerWorld world, BlockPos pos, @Nullable UUID botOwner) {
+        return isProtected(world, pos, botOwner, false);
+    }
+
+    /**
+     * {@link #isProtected(ServerWorld, BlockPos, UUID)} for a bot: while the bot has the
+     * {@link ProtectedZoneOverrideService} grant that Resume gives after a protected-zone refusal,
+     * explicit zones don't count; beehives, bases, forts and villages still do (issue #120).
+     */
+    public static boolean isProtectedForBot(ServerWorld world, BlockPos pos, @Nullable UUID botOwner, @Nullable UUID botUuid) {
+        return isProtected(world, pos, botOwner, botUuid != null && ProtectedZoneOverrideService.hasActiveOverride(botUuid));
+    }
+
+    private static boolean isProtected(ServerWorld world, BlockPos pos, @Nullable UUID botOwner, boolean explicitZonesOverridden) {
         if (world == null || pos == null) return false;
 
         // 1. Admin protected zones
-        if (isInExplicitProtectedZone(world, pos, botOwner)) {
+        if (!explicitZonesOverridden && isInExplicitProtectedZone(world, pos, botOwner)) {
             return true;
         }
 

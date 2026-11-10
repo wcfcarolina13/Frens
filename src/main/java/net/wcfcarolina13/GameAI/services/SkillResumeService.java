@@ -370,7 +370,9 @@ public final class SkillResumeService {
     public static void flagZoneOverridePending(ServerPlayerEntity bot) {
         if (bot == null) return;
         UUID uuid = bot.getUuid();
-        if (uuid != null) {
+        // Only with a paused skill to resume: an unrecorded run (come-recovery, idle hobbies) would
+        // leave the flag for an older, unrelated record to pick up on the next Resume.
+        if (uuid != null && LAST_SKILL_BY_BOT.containsKey(uuid)) {
             ZONE_OVERRIDE_PENDING.add(uuid);
         }
     }
