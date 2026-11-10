@@ -53,19 +53,27 @@ public final class CompanionSafeZoneService {
      * @return true if the position is protected and should not be disturbed
      */
     public static boolean isProtected(ServerWorld world, BlockPos pos, @Nullable UUID botOwner) {
-        return isProtected(world, pos, botOwner, false);
+        return isProtected(world, pos, botOwner, false, null);
     }
 
     /**
      * {@link #isProtected(ServerWorld, BlockPos, UUID)} for a bot: while the bot has the
      * {@link ProtectedZoneOverrideService} grant that Resume gives after a protected-zone refusal,
-     * explicit zones don't count; beehives, bases, forts and villages still do (issue #120).
+     * explicit zones and the radius of the owner's own saved bases don't count (each base also has
+     * an auto-zone of the same radius, where the refusal and the Resume promise came from); others'
+     * bases, beehives, forts and villages still do (issue #120).
+     *
+     * @param botOwner     owner for the explicit-zone access check, as {@link #isProtected} takes it
+     * @param baseOwner    the bot's real owner, whose own bases the override opens (nullable)
      */
-    public static boolean isProtectedForBot(ServerWorld world, BlockPos pos, @Nullable UUID botOwner, @Nullable UUID botUuid) {
-        return isProtected(world, pos, botOwner, botUuid != null && ProtectedZoneOverrideService.hasActiveOverride(botUuid));
+    public static boolean isProtectedForBot(ServerWorld world, BlockPos pos, @Nullable UUID botOwner,
+                                            @Nullable UUID botUuid, @Nullable UUID baseOwner) {
+        boolean overridden = botUuid != null && ProtectedZoneOverrideService.hasActiveOverride(botUuid);
+        return isProtected(world, pos, botOwner, overridden, overridden ? baseOwner : null);
     }
 
-    private static boolean isProtected(ServerWorld world, BlockPos pos, @Nullable UUID botOwner, boolean explicitZonesOverridden) {
+    private static boolean isProtected(ServerWorld world, BlockPos pos, @Nullable UUID botOwner,
+                                       boolean explicitZonesOverridden, @Nullable UUID openOwnBasesOf) {
         if (world == null || pos == null) return false;
 
         // 1. Admin protected zones
@@ -79,7 +87,7 @@ public final class CompanionSafeZoneService {
         }
 
         // 3. Saved bases with per-base radius
-        if (isNearSavedBase(world, pos)) {
+        if (isNearSavedBase(world, pos, openOwnBasesOf)) {
             return true;
         }
 
@@ -107,11 +115,16 @@ public final class CompanionSafeZoneService {
     }
 
     public static boolean isNearSavedBase(ServerWorld world, BlockPos pos) {
+        return isNearSavedBase(world, pos, null);
+    }
+
+    private static boolean isNearSavedBase(ServerWorld world, BlockPos pos, @Nullable UUID exceptOwner) {
         MinecraftServer server = world.getServer();
         if (server == null) return false;
 
         for (BotHomeService.BaseEntry base : BotHomeService.listBases(server, world)) {
             if (base.pos() == null) continue;
+            if (exceptOwner != null && exceptOwner.toString().equals(base.ownerUuid())) continue;
             int radius = base.radius();
             double rSq = (double) radius * radius;
             if (base.pos().getSquaredDistance(pos) <= rSq) {

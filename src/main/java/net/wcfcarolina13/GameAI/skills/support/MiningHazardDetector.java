@@ -570,7 +570,8 @@ public final class MiningHazardDetector {
         return false;
     }
 
-    private static final String RESUME_OVERRIDE_SUFFIX = " Press Resume to override.";
+    /** Ends a zone refusal that Resume can override; callers with nothing to resume strip it. */
+    public static final String RESUME_OVERRIDE_SUFFIX = " Press Resume to override.";
 
     /**
      * True iff the hazard came from the protected-zone gate in a zone the bot's owner may build in,

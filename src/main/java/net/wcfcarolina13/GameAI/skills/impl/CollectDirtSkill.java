@@ -1966,7 +1966,8 @@ public class CollectDirtSkill implements Skill {
         // A usable tread needs a full cube top face at y=1.0. A fence or wall (top at 1.5), a bottom
         // slab (0.5) or an open trapdoor (thin plate) collides but cannot be stepped onto.
         boolean fullTop = shape.getMax(Direction.Axis.Y) <= 1.0D + 1.0E-6D && Block.isFaceFullSquare(shape, Direction.UP);
-        if (state.getHardness(world, pos) < 0.0F || CompanionSafeZoneService.isProtectedForBot(world, pos, null, player.getUuid())) {
+        if (state.getHardness(world, pos) < 0.0F || CompanionSafeZoneService.isProtectedForBot(world, pos, null, player.getUuid(),
+                net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService.resolveBotOwnerUuid(player))) {
             return HandDigStairPolicy.Cell.unbreakable(fullTop);
         }
         int ticks = bestGroundBreakTicks(player, world, pos, state);
@@ -2183,7 +2184,8 @@ public class CollectDirtSkill implements Skill {
             return false;
         }
 
-        if (CompanionSafeZoneService.isProtectedForBot(world, blockPos, null, player.getUuid())) {
+        if (CompanionSafeZoneService.isProtectedForBot(world, blockPos, null, player.getUuid(),
+                net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService.resolveBotOwnerUuid(player))) {
             LOGGER.warn("Pillar/mining refusing to break protected block at {}", blockPos.toShortString());
             return false;
         }

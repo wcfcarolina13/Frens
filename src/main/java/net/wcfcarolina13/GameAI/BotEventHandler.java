@@ -5820,9 +5820,14 @@ public class BotEventHandler {
                         }
                     });
                     SkillExecutionResult result = SkillManager.runSkill(finalSkillName, ctx);
-                    String resultMessage = (result != null && result.message() != null)
+                    String rawResult = (result != null && result.message() != null)
                             ? result.message()
                             : "Come recovery completed.";
+                    // Come recovery records no run to resume, so a zone refusal's Resume promise is false here.
+                    String resultMessage = rawResult.endsWith(net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.RESUME_OVERRIDE_SUFFIX)
+                            ? rawResult.substring(0, rawResult.length()
+                                    - net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.RESUME_OVERRIDE_SUFFIX.length())
+                            : rawResult;
                     LOGGER.info("[ComeRecovery] skill-result bot={} goal={} skill={} success={} msg='{}'",
                             bot.getName().getString(),
                             goal.toShortString(),

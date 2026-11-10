@@ -73,7 +73,15 @@ class ZoneResumeOverrideWiringTest {
         assertEquals(2, src.split("CompanionSafeZoneService.isProtectedForBot\\(world, ", -1).length - 1);
         String safe = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/CompanionSafeZoneService.java"));
         assertTrue(safe.contains("if (!explicitZonesOverridden && isInExplicitProtectedZone(world, pos, botOwner))"),
-                "the override lifts only explicit zones, not beehives, bases, forts or villages");
+                "the override lifts explicit zones");
+        assertTrue(safe.contains("if (exceptOwner != null && exceptOwner.toString().equals(base.ownerUuid())) continue;")
+                        && safe.contains("overridden ? baseOwner : null"),
+                "and only the owner's own bases (their auto-zone is where the promise came from), never others' bases");
+        assertEquals(2, src.split(java.util.regex.Pattern.quote("BotTerritoryAuthorizationService.resolveBotOwnerUuid(player))"), -1).length - 1,
+                "Collect Dirt passes the real owner for its own bases");
+        String come = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java"));
+        assertTrue(come.contains("rawResult.endsWith(net.wcfcarolina13.GameAI.skills.support.MiningHazardDetector.RESUME_OVERRIDE_SUFFIX)"),
+                "come recovery has nothing to resume, so it drops the promise");
     }
 
     @Test
