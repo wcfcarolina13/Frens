@@ -2,7 +2,7 @@
 
 ## Do I need an AI model or Ollama?
 
-No. Skills, following, building, fighting, storage and scripted dialogue all work without one. Ollama is only for the optional Soul Chat, where frens answer in their own words. See [Set up AI companions](Guide-Basics.md#set-up-ai-companions).
+No. Skills, following, building, fighting, storage and scripted dialogue all work without one. Ollama is only for the optional Soul Chat, where frens answer in their own words. See [Talking with frens (AI chat)](AI-Chat.md).
 
 ## Do I need Carpet?
 
@@ -54,7 +54,7 @@ Bot Controls has separate switches for scripted text, scripted voice, Soul Chat 
 
 ## Can a friend use my frens?
 
-A fren takes commands from its owner, an operator or the host. To let a friend command yours, make them an operator on the world. See [Let a Friend Use Bots](Guide-Settings.md#let-a-friend-use-bots).
+A fren takes commands from its owner, an operator or the host. To let a friend command yours, make them an operator on the world, or have an operator give them the fren with `/bot config owner`. See [Multiplayer and ownership](Multiplayer.md).
 
 ## Can I change how fast a fren walks?
 

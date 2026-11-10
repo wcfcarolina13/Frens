@@ -6,10 +6,10 @@
       "category": "Basics",
       "title": "Set up AI companions",
       "summary": "Optional: let companions talk back in their own words. Frens works fully without it.",
-      "answer": "Press the AI setup button at the top right of the Guide and follow the checklist: install Ollama, download a model, turn Soul Chat on, then enable each fren. It all runs on the machine that hosts the world, and nothing is sent online.",
+      "answer": "Press the AI setup button at the top right of the Guide and follow the checklist: install Ollama, download a model, turn Soul Chat on, then enable each fren. It all runs on the machine that hosts the world.",
       "details": [
         "Everything else in Frens (skills, following, building, scripted lines) works with no AI at all.",
-        "AI chat runs a local model through Ollama on the machine that runs the world (the server machine in multiplayer). Nothing is sent to an online service.",
+        "AI chat runs a local model through Ollama on the machine that runs the world (the server machine in multiplayer). Chats go only to that Ollama, not to an online service. Downloading a model fetches it from Ollama's registry.",
         "Open the checklist with the AI setup button at the top right of this guide, or Setup… on the Soul Chat row in Bot Controls.",
         "It walks you through: install Ollama, download a model (1B ≈4 GB RAM, 3B ≈6 GB, 8B ≈12 GB, plus Minecraft's own memory), turn Soul Chat on, enable each companion, then say hi in chat.",
         "Soul Chat is the world-wide switch. Each companion also has to be enabled. The checklist shows both.",
@@ -25,15 +25,15 @@
       "category": "Basics",
       "title": "Talk to Nearby Bots (Group Chat)",
       "summary": "Start chat with Bots or All bots instead of naming each companion.",
-      "answer": "Type in normal chat, without a slash, and start with Bots or All bots, like: Bots, what should we do next? Up to four of your frens within 32 blocks join in, nearest first, when Soul Chat and Soul Party are on.",
+      "answer": "Type in normal chat, without a slash, and start with Bots or All bots, like: Bots, what should we do next? Up to four of your frens within 32 blocks join in, nearest first, when Soul Chat is on.",
       "details": [
         "Type in normal chat, without a slash: Bots, what should we do next?",
         "All bots, how is everyone doing? works too.",
-        "With Souls and Soul Party enabled, up to four nearby companions with active Soul profiles join the conversation, nearest first.",
+        "With Soul Chat on, up to four nearby companions with active Soul profiles join the conversation, nearest first.",
         "They must be within 32 blocks in the same world. Normally only your owned bots qualify. Operators can also address other owners' bots.",
         "If only one companion qualifies, they receive the message directly. A group conversation does not require every bot to reply.",
         "Voice input works the same way if your dictation sends the words into normal Minecraft chat. Frens does not provide microphone transcription itself.",
-        "Use Bots or All bots explicitly: Everyone and Guys are not group-address shortcuts."
+        "When you are the only player online, everyone, guys, y'all and you two work too."
       ],
       "command": "Normal chat: Bots, what should we do next? (no slash)",
       "shortcuts": "Open Guide: {guideKey} | Search: group chat, earshot, or voice",
@@ -289,7 +289,7 @@
         "Preferred command: /bot regroup. Legacy alias: /bot come.",
         "Safe regroup avoids the more aggressive recovery behavior used by the older come wording."
       ],
-      "command": "bot companion regroup (legacy: bot companion come)",
+      "command": "bot regroup {bot} (legacy: bot come {bot})",
       "shortcuts": "No keybind by default",
       "tags": "regroup come stuck follow recovery"
     },
@@ -738,13 +738,13 @@
       "id": "items_wizard_tome",
       "category": "Items",
       "title": "Wizard's Tome",
-      "summary": "A rare magical item that unlocks companion spells and abilities.",
-      "answer": "Craft it in The End: hold an Eye of Ender, carry a book, a diamond, 3 redstone and 3 lapis, and sneak-right-click a fully powered enchanting table with 15 bookshelves. All of those items are used up. Open it to use all the companion spells.",
+      "summary": "A rare magical item that unlocks the companion movement spells from anywhere.",
+      "answer": "Craft it in The End: hold an Eye of Ender, carry a book, a diamond, 3 redstone and 3 lapis, and sneak-right-click a fully powered enchanting table with 15 bookshelves. All of those items are used up. Carry it, stand near me and press [ to open the spells.",
       "details": [
         "Crafted via ritual: sneak-right-click an Enchanting Table in The End.",
         "Requires a fully powered table (15 bookshelves).",
         "Hold an Eye of Ender and have in inventory: 1 Book, 1 Diamond, 3 Redstone, 3 Lapis Lazuli. All of them, the Eye included, are used up.",
-        "Once crafted, open it to access the companion spells menu.",
+        "Once crafted, carry it and press [ near the bot. It unlocks Regroup, Summon (also across dimensions), Home and Remote Inventory.",
         "Can also be obtained via /give @p frens:wizard_tome in creative."
       ],
       "command": "/give @p frens:wizard_tome (creative)",
@@ -798,12 +798,13 @@
       "category": "Spells",
       "title": "Remote Guidance",
       "summary": "Uses paired ender pearls to guide your companion across any distance.",
-      "answer": "We both need an Ender Pearl. Open the Spells tab with [, pick Remote Guidance and choose your location or a base. Both pearls are used up and I fast-travel there.",
+      "answer": "We both need an Ender Pearl. Open the Spells tab with [, pick Remote Guidance and choose your location, my home or a base. Both pearls are used up when you cast, and I fast-travel there, after my rest if I just travelled, unless I'm fighting.",
       "details": [
-        "Both you and your companion must hold at least one Ender Pearl.",
-        "Choose destination: guide to your location or to a known base.",
-        "Both pearls are consumed when travel begins.",
-        "Travel always uses fast travel. The bot disappears briefly and reappears at your location.",
+        "Both you and your companion need at least one Ender Pearl somewhere in your inventories.",
+        "Choose destination: your location, its home, or one of your bases.",
+        "Both pearls are used up when you cast, before the trip is checked.",
+        "It is a fast travel trip with no food needed. A fight cancels it and the pearls are lost. If it is resting from a trip, it leaves when the rest ends. It also needs a way to find the place. Carry a spare pearl each so the pearls still count as that way.",
+        "The trip takes about 1.5 seconds per chunk, more across dimensions.",
         "Open the Spells tab to cast this spell."
       ],
       "command": "UI-only action (Spells tab)",
@@ -817,10 +818,11 @@
       "summary": "Consumes paired ender pearls and chorus fruit for an instant teleport.",
       "answer": "We each need an Ender Pearl and a Chorus Fruit. Open the Spells tab with [ and pick Chorus Recall to teleport me to you or you to me, instantly and across dimensions. All four items are used up.",
       "details": [
-        "Both you and your companion must hold one Ender Pearl AND one Chorus Fruit.",
+        "Both you and your companion need one Ender Pearl and one Chorus Fruit somewhere in their inventories.",
         "Choose direction: teleport bot to you, or you to bot.",
         "Works across dimensions. Always instant, no delay.",
-        "All four items are consumed (one pearl + one chorus from each)."
+        "All four items are consumed (one pearl + one chorus from each).",
+        "A bot riding an animal may be refused, with nothing used up."
       ],
       "command": "UI-only action (Spells tab)",
       "shortcuts": "Shortcut: [ (key.frens.open_spells)",
@@ -865,14 +867,17 @@
       "category": "Items",
       "title": "Spell Ingredients",
       "summary": "Quick reference for all spell-related items and what they unlock.",
-      "answer": "A Wizard's Tome, or standing near an enchanting table, unlocks every spell. A goat horn gives regroup and an Eye of Ender gives summon. Paired Ender Pearls cast Remote Guidance, and pearls plus chorus fruit cast Chorus Recall.",
+      "answer": "A Wizard's Tome, or standing near an enchanting table, lets you Regroup, Summon, send me Home and open my inventory from anywhere. An Eye of Ender gives Regroup, Summon and Home. Paired Ender Pearls cast Remote Guidance, and pearls plus chorus fruit cast Chorus Recall.",
       "details": [
-        "Wizard's Tome: full access to all companion spells anywhere.",
-        "Enchanting Table (nearby): full access to all spells.",
-        "Goat Horn: regroup only (player holds).",
-        "Eye of Ender: summon only with 60s cooldown (player holds), enhanced navigation (either holds).",
-        "Ender Pearl (paired): Remote Guidance spell, both must hold, consumed.",
-        "Ender Pearl + Chorus Fruit (paired): Chorus Recall, instant teleport, consumed."
+        "Wizard's Tome (you or the bot carry it): Regroup, Summon (also across dimensions), Home and Remote Inventory.",
+        "Enchanting Table within 4 blocks: the same as the Tome. For Summon across dimensions it must be near you.",
+        "The Tome and table don't replace the pearls, chorus fruit, table or anvil the other spells need.",
+        "Eye of Ender (you or the bot): Regroup, Summon and Home. Not used up. Summon with your own Eye and no Tome or table has a 60s cooldown.",
+        "Goat Horn (you carry it): Regroup by typed command only. The Spells tab greys Regroup out with only a horn.",
+        "Ender Pearl (one each): Remote Guidance, used up.",
+        "Ender Pearl + Chorus Fruit (one each): Chorus Recall, instant teleport, used up.",
+        "Soul of Ender: the bot needs an Eye of Ender and a Chorus Fruit. The fruit is used up.",
+        "Enchant and Anvil need you within 4 blocks of the block."
       ],
       "command": "UI-only action (Spells tab)",
       "shortcuts": "Hold item or be near Enchanting Table to unlock spells",

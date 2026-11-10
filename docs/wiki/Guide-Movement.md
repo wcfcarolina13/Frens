@@ -23,7 +23,7 @@ Calls the companion back toward you using the safer regroup behavior.
 - Preferred command: /bot regroup. Legacy alias: /bot come.
 - Safe regroup avoids the more aggressive recovery behavior used by the older come wording.
 
-**Command:** `/bot companion regroup (legacy: bot companion come)`
+**Command:** `/bot regroup <bot> (legacy: bot come <bot>)`
 
 **Where:** No keybind by default
 
