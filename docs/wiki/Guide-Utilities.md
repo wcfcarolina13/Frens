@@ -15,7 +15,7 @@ View and manage supply chests your companions have placed in the world.
 - Dismiss: removes the chest from the registry (does not break the block).
 - Go and Collect use fast travel, so the bot needs a gate (see Fast-Travel Gates). A lodestone compass or an Eye of Ender gives full speed. A Map and Compass that show the chest is slower.
 - Hover a chest row to see a tooltip of its last-known contents.
-- Note: Only chests this bot placed appear here (during a job or for /bot store deposit). Chests it only used, and Quick Store/Fetch chests, are not tracked.
+- Note: Only chests this bot placed appear here (during a job or for /bot store deposit), in its current dimension. Chests it places while fishing, building a shelter or smelting are not listed. Chests it only used, and Quick Store/Fetch chests, are not tracked.
 
 **Command:** UI-only action (Actions → Utilities → Storage)
 
