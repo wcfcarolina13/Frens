@@ -73,4 +73,71 @@ class TreeStuckDropPolicyTest {
         assertTrue(src.indexOf("dropCanopyWaypoints(bot);") < src.indexOf("Strategy 1: Find a safe drop edge"),
                 "the canopy path is dropped when the bot gets down");
     }
+
+    private static TreeStuckDropPolicy.SideStep step(int dx, int dy, int dz, int fall) {
+        return new TreeStuckDropPolicy.SideStep(dx, dy, dz, fall, 0);
+    }
+
+    @Test
+    void onTheOverhangOfATerraceEdgeTreeItStepsTowardTheHighSide() {
+        // Sandbox 2026-11-09: leaf under the bot over the low terrace (fall 6), the leaf a block
+        // toward the trunk over the high terrace (fall 3).
+        var steps = java.util.List.of(step(-1, 0, 0, 3), step(0, 0, 1, 7), step(-1, 0, 1, 3));
+        assertEquals(step(-1, 0, 0, 3), TreeStuckDropPolicy.chooseSideStep(steps, Integer.MAX_VALUE, false, 20F),
+                "shallow, straight before diagonal");
+        assertEquals(step(-1, 0, 0, 3), TreeStuckDropPolicy.chooseSideStep(steps, 6, true, 20F),
+                "also at the last resort");
+    }
+
+    @Test
+    void aSideStepIsTakenOnlyWhenItBeatsBreakingStraightDown() {
+        assertEquals(null, TreeStuckDropPolicy.chooseSideStep(java.util.List.of(step(1, 0, 0, 1)), 2, false, 20F),
+                "the leaf below is already safe");
+        assertEquals(null, TreeStuckDropPolicy.chooseSideStep(java.util.List.of(step(1, 0, 0, 5)), Integer.MAX_VALUE, false, 20F),
+                "an unsafe step waits for the last resort");
+        assertEquals(step(1, 0, 0, 5), TreeStuckDropPolicy.chooseSideStep(java.util.List.of(step(1, 0, 0, 5)), 6, true, 20F),
+                "last resort: 5 beats 6");
+        assertEquals(null, TreeStuckDropPolicy.chooseSideStep(java.util.List.of(step(1, 0, 0, 6)), 6, true, 20F),
+                "no better than straight down");
+        assertEquals(step(1, 0, 0, 8), TreeStuckDropPolicy.chooseSideStep(java.util.List.of(step(1, 0, 0, 8)), Integer.MAX_VALUE, true, 20F),
+                "unsafe landing below, a survivable fall beside");
+        assertEquals(null, TreeStuckDropPolicy.chooseSideStep(java.util.List.of(step(1, 0, 0, 9)), Integer.MAX_VALUE, true, 20F),
+                "never past the last-resort cap");
+        assertEquals(null, TreeStuckDropPolicy.chooseSideStep(java.util.List.of(), Integer.MAX_VALUE, true, 20F));
+    }
+
+    @Test
+    void aCostlyStepLeavesAtLeastAHeart() {
+        var steps = java.util.List.of(step(1, 0, 0, 7));
+        assertEquals(step(1, 0, 0, 7), TreeStuckDropPolicy.chooseSideStep(steps, Integer.MAX_VALUE, true, 6F), "6 HP - 4 = 2");
+        assertEquals(null, TreeStuckDropPolicy.chooseSideStep(steps, Integer.MAX_VALUE, true, 5F), "would leave half a heart");
+        assertEquals(step(-1, 0, 0, 2), TreeStuckDropPolicy.chooseSideStep(java.util.List.of(step(-1, 0, 0, 2)), Integer.MAX_VALUE, false, 1F),
+                "a safe step costs nothing");
+    }
+
+    @Test
+    void tiesGoToALevelStraightStep() {
+        var steps = java.util.List.of(step(1, 1, 1, 2), step(1, 1, 0, 2), step(0, 0, -1, 2), step(1, 0, 1, 2));
+        assertEquals(step(0, 0, -1, 2), TreeStuckDropPolicy.chooseSideStep(steps, Integer.MAX_VALUE, false, 20F));
+    }
+
+    @Test
+    void fewerLeavesToBreakWinsAtTheSameFall() {
+        var dug = new TreeStuckDropPolicy.SideStep(-1, 0, 0, 3, 2);
+        var open = new TreeStuckDropPolicy.SideStep(0, 0, 1, 3, 0);
+        assertEquals(open, TreeStuckDropPolicy.chooseSideStep(java.util.List.of(dug, open), Integer.MAX_VALUE, false, 20F));
+        assertEquals(dug, TreeStuckDropPolicy.chooseSideStep(java.util.List.of(dug), Integer.MAX_VALUE, false, 20F),
+                "in a pocket it digs sideways toward the shallow fall");
+    }
+
+    @Test
+    void theEscapeTriesASideStepBeforeTheLastResortBreak() throws Exception {
+        String src = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/TreeStuckEscapeService.java"));
+        int sideStep = src.indexOf("Strategy 3a: step onto a leaf beside it");
+        int lastResortBreak = src.indexOf("boolean lastResortBreak =");
+        assertTrue(sideStep > 0 && sideStep < lastResortBreak, "side step is weighed before the deep break");
+        assertTrue(src.indexOf("BlockPos sideStep = SIDE_STEP_TARGET.get(botId);")
+                        < src.indexOf("// If not on ground and no active target, just wait to land."),
+                "the step is steered before the airborne wait and the off-leaf handling");
+    }
 }
