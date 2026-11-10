@@ -34,6 +34,7 @@ Every card from the Guide screen in game (press ] by default). `<bot>` stands fo
 - [Follow](Guide-Movement.md#follow): Keeps the bot near you while you travel.
 - [Regroup](Guide-Movement.md#regroup): Calls the companion back toward you using the safer regroup behavior.
 - [Return Home](Guide-Movement.md#return-home): Sends the bot back to its saved home/base anchor.
+- [Guard &amp; Patrol](Guide-Movement.md#guard--patrol): Keeps the bot at a spot, guarding it, patrolling around it or staying put.
 
 ## [Settings](Guide-Settings.md)
 
@@ -69,7 +70,7 @@ Every card from the Guide screen in game (press ] by default). `<bot>` stands fo
 
 ## [Construction](Guide-Construction.md)
 
-- [Fortify Village](Guide-Construction.md#fortify-village): Builds a defensive wall with moat around a village using a convex hull of its structures.
+- [Fortify Village](Guide-Construction.md#fortify-village): Builds a stone wall with corner towers and a gate around a village.
 - [Map Village](Guide-Construction.md#map-village): Saves the nearby settlement as a shared remembered no-go zone without building a wall.
 
 ## [Modes](Guide-Modes.md)
@@ -103,6 +104,7 @@ Every card from the Guide screen in game (press ] by default). `<bot>` stands fo
 
 ## [Utilities](Guide-Utilities.md)
 
+- [Hunting](Guide-Utilities.md#hunting): Hunts animals for food and leather, or zombies when well armed, then cooks the meat.
 - [Storage](Guide-Utilities.md#storage): View and manage supply chests your companions have placed in the world.
 - [Protected Zones](Guide-Utilities.md#protected-zones): Mark areas where bots cannot break blocks.
 
