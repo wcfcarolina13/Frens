@@ -11,9 +11,9 @@ Point at a nearby chest and click to deposit or take items.
 - Quick Store: Actions → Core Actions → Quick Store. Bot walks to the chest and deposits.
 - Quick Fetch: Actions → Core Actions → Quick Fetch. Bot walks to the chest and takes items into its inventory.
 - Point at any container (chest, barrel, shulker box) and left-click to confirm.
-- Quick Store, plain click: deposits loose items, keeps the bot's equipped armor, mainhand tool, food, and bundles.
-- Quick Store, shift+click: dumps everything (including armor, tools, and food). Use when swapping loadouts.
-- The bot physically walks to the chest before interacting. It must be within 32 blocks.
+- Quick Store, plain click: deposits loose items, keeps tools, weapons and armor, bundles, torches, arrows, leads, compasses, clocks, and cooked food, bread and stews.
+- Quick Store, shift+click: dumps everything (including armor, tools, and food). Use when swapping loadouts. Both stop putting in building blocks once the bot holds 32 or fewer, so it can usually still climb out of holes.
+- The bot physically walks to the chest before interacting. It must be within 32 blocks, not busy with a task and not in a fight.
 - If the chest fills up (store) or the bot’s inventory fills up (fetch), remaining items stay put.
 - The bot does NOT remember chests used this way. Only automated-task chests appear in Storage.
 - Right-click to cancel targeting mode.

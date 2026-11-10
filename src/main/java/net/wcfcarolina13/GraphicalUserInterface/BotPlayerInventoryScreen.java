@@ -4438,7 +4438,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case QUICK_STORE -> java.util.List.of(
                 "Quick Store",
                 "Point at a nearby chest and click to deposit items.",
-                "Click: deposit loose items, keep equipped gear, mainhand tool, food, and bundles.",
+                "Click: deposit loose items, keep tools, armor, torches, cooked food, and bundles.",
                 "Shift+click: dump everything (including armor and tools).",
                 "The bot walks to the chest and deposits. It will not remember this chest."
             );

@@ -474,8 +474,8 @@ public class BotStorageScreen extends Screen {
     private static final String[] POPUP_OPTIONS = { "Stay at Chest", "Return to Player", "Return to Home" };
     private static final String[] POPUP_TOOLTIPS = {
             "Bot travels to chest, collects items, and stays there.",
-            "Bot collects items and fast-travels back to you.\nRequires Map + Compass (Tier 1) or higher.",
-            "Bot collects items and fast-travels to home base.\nRequires Map (Tier 1) or higher."
+            "Bot collects items and fast-travels back to you.\nThe trip back needs no gate.",
+            "Bot collects items and fast-travels to the base named home.\nWithout one, it returns to where it started."
     };
 
     private void renderCollectPopup(DrawContext context, int mouseX, int mouseY) {
