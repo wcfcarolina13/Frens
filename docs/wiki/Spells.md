@@ -39,13 +39,13 @@ In Questing mode, the **Home** button works without an item within 16 blocks of 
 
 ### Travel
 
-**Remote Guidance** sends the fren on a [fast travel](Fast-Travel.md) trip: to you, to its home, or to one of your bases in the dimension you are in. You and the fren each need an Ender Pearl somewhere in your inventories, and **both are used up** when you cast. The trip takes about 1.5 seconds per chunk (30 seconds more across dimensions), between 7 seconds and 5 minutes. It can take two or three times as long if the fren only has weaker travel items.
+**Remote Guidance** sends the fren on a [fast travel](Fast-Travel.md) trip: to you, to its home, or to one of your bases in the dimension you are in. You and the fren each need an Ender Pearl somewhere in your inventories, and **both are used up** when the fren leaves. A cast that is refused costs nothing. The trip takes about 1.5 seconds per chunk (30 seconds more across dimensions), between 7 seconds and 5 minutes. It can take two or three times as long if the fren only has weaker travel items.
 
 The fren doesn't need food for this trip, but the other fast travel rules still apply:
 
-- If it is resting from its last trip, it leaves when the rest ends.
-- If it is in a fight, the trip is cancelled and the pearls are lost.
-- It needs a way to find the place. The pearls count as that way, but they are used up first, so with one pearl each the trip can be cancelled unless the fren also has a Map and Compass, a lodestone compass or the like. Carry a spare pearl each.
+- If it is resting from its last trip, the cast is refused and the message says how long the rest has left. Cast again after that.
+- If it is in a fight, the cast is refused.
+- It needs a way to find the place. The pearls count as that way, so one pearl each is enough.
 
 **Chorus Recall** teleports at once, even across dimensions: either the fren to you, or you to the fren. You and the fren each need an Ender Pearl and a Chorus Fruit, and all four are used up. It has no cooldown and works during a fight. A fren riding an animal may be refused, with nothing used up. It says "Chorus Recall complete."
 
@@ -93,6 +93,5 @@ Remote Guidance and Chorus Recall have no command.
 | **[** says the fren is too far away | On a server, players who aren't operators have to be within 8 blocks to open its screen. |
 | "can't be summoned across dimensions" | Across dimensions you need a Tome, or an Enchanting Table near you. |
 | "Eye of Ender spell is on cooldown" | Summon with your own Eye of Ender waits 60 seconds between casts. |
-| Remote Guidance took my pearls and the fren didn't go | It was fighting, or had no other way to find the place once the pearls were gone. If it was resting, it leaves when the rest ends. |
-| The message mentions an Ender Pearl for Summon or Home | That message is wrong. Pearls don't unlock those spells. |
+| Remote Guidance didn't start | The message says why: a fight, the rest after its last trip, or a mount problem. No pearls were used. |
 | Enchant does nothing | You need to be within 4 blocks of an Enchanting Table, and the fren within 64 blocks. |

@@ -5019,9 +5019,9 @@ public class modCommandRegistry {
         ServerPlayerEntity existingBot = server.getPlayerManager().getPlayer(alias);
         if (!canUseCompanionSummon(server, commander, existingBot, st)) {
             if (recruitmentMode) {
-                ChatUtils.sendSystemMessage(source, "To summon your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Ender Pearl)." );
+                ChatUtils.sendSystemMessage(source, "To summon your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome / Eye of Ender)." );
             } else {
-                ChatUtils.sendSystemMessage(source, "To summon the bot, cast at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Ender Pearl).");
+                ChatUtils.sendSystemMessage(source, "To summon the bot, cast at an Enchanting Table (or use your Wizard's Tome / Eye of Ender).");
             }
             return 0;
         }
@@ -5236,10 +5236,10 @@ public class modCommandRegistry {
             }
         }
 
-        // Access gate: same as Summon (full access, Eye of Ender, or Ender Pearl).
+        // Access gate: same as Summon (Enchanting Table, Wizard's Tome, Eye of Ender, or the anchor).
         ServerPlayerEntity existingBot = server.getPlayerManager().getPlayer(alias);
         if (!canUseCompanionSummon(server, commander, existingBot, st)) {
-            ChatUtils.sendSystemMessage(source, "To cast Soul of Ender, use an Enchanting Table, Wizard's Tome, Eye of Ender, or Ender Pearl.");
+            ChatUtils.sendSystemMessage(source, "To cast Soul of Ender, use an Enchanting Table, Wizard's Tome, or Eye of Ender.");
             return 0;
         }
 
@@ -5328,9 +5328,9 @@ public class modCommandRegistry {
         ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
         if (!canUseCompanionHome(server, commander, bot, st)) {
             if (recruitmentMode) {
-                ChatUtils.sendSystemMessage(source, "To send your companion home, cast the spell at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Ender Pearl)." );
+                ChatUtils.sendSystemMessage(source, "To send your companion home, cast the spell at an Enchanting Table (or use your Wizard's Tome / Eye of Ender)." );
             } else {
-                ChatUtils.sendSystemMessage(source, "To send the bot home, cast at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Ender Pearl).");
+                ChatUtils.sendSystemMessage(source, "To send the bot home, cast at an Enchanting Table (or use your Wizard's Tome / Eye of Ender).");
             }
             return 0;
         }
