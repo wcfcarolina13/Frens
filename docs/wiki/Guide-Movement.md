@@ -46,9 +46,9 @@ Keeps the bot at a spot, guarding it, patrolling around it or staying put.
 - The + and - buttons set the radius, 3 to 32 blocks. Changing it resets the centre to where the bot stands.
 - It notices hostile mobs it can see within about 10 blocks, whatever the radius.
 - With only melee weapons it fights mobs that are after it. With a bow, crossbow or trident it also attacks other hostile mobs, and defends your pets and village villagers.
-- It chases what it fights and walks back afterwards. It doesn't run from fights, so give it armour, a shield and food.
+- It chases what it fights and walks back afterwards. It doesn't retreat when hurt, so give it armour, a shield and food. It does back away from creepers.
 - The order isn't saved. After a restart or a death, give it again.
-- It stays out through the night unless Sunset Return in Guard/Patrol is on (Actions, Automation).
+- It stays out through the night unless both Auto Home @ Sunset and Sunset Return in Guard/Patrol are on (Actions, Automation).
 
 **Command:** `/bot guard <bot>`
 

@@ -75,7 +75,7 @@ With no blocks at all it won't start: "No building blocks in inventory. Give me 
 
 When it can't find a place to stand to reach a block, it builds a scaffold pillar up to 8 high and removes it afterwards. With **Force Place** on (`/bot config forceplace on`, or the toggle in the control screen) it places a block it can't otherwise reach. Force place only uses the planned block, cobblestone or stone.
 
-When it breaks through to reach a spot, it won't break doors, beds, lecterns, fences, gates, walls, glass panes, trapdoors, chests and other blocks with contents, or blocks that look like part of a village building. Blocks it breaks to get through its own wall are put back later. Digging the moat is different: it breaks anything on the moat line except bedrock and lecterns, chests included.
+When it breaks through to reach a spot, it won't break doors, beds, lecterns, fences, gates, walls, glass panes, trapdoors, chests and other blocks with contents, or blocks that look like part of a village building. Blocks it breaks to get through its own wall are put back later. Digging the moat follows the same rules with one difference: it does break chests and other containers on the moat line. It leaves doors, beds, fences, gates, walls, glass panes, trapdoors, lecterns and blocks that look like part of a village building, so the ditch can have gaps there.
 
 ## The order of work
 

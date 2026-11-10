@@ -105,6 +105,8 @@ See [Storage and chests](Storage.md).
 | Nothing to hunt, with no mob named | It may go fishing instead ("Switched to fishing."), or says "No huntable mobs found nearby." | No |
 | A threat or `/bot stop` | "Hunt paused by another task." | No |
 
+The "Yes" rows need at least one kill. With no kills it says "No kills completed." and stays where it is.
+
 When it gives up or runs out of prey, it stays where it is with the meat. It cooks it later, when it is idle and hungry.
 
 A hunt **with a count** keeps going through the night until it reaches the count. A hunt with no count stops at nightfall, but only if it started during the day.
