@@ -87,7 +87,12 @@ class ZoneResumeOverrideWiringTest {
     @Test
     void resumeIsPromisedOnlyWhereTheOverrideCanWork() throws IOException {
         String src = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/skills/support/MiningHazardDetector.java"));
-        assertTrue(src.contains("(ownerMayMutate(botUuid, pos, world) ? RESUME_OVERRIDE_SUFFIX : \"\")"));
+        assertTrue(src.contains("(resumeCanOverride(botUuid, pos, world) ? RESUME_OVERRIDE_SUFFIX : \"\")"));
+        assertTrue(src.contains("&& !net.wcfcarolina13.GameAI.services.CompanionSafeZoneService.isProtectedDespiteZoneOverride(world, pos, owner)"),
+                "no promise where the digging jobs' gate still refuses with the override (others' bases, forts, villages, bee nests)");
+        String safe = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/CompanionSafeZoneService.java"));
+        assertTrue(safe.contains("return isProtected(world, pos, null, true, baseOwner);"),
+                "the promise check uses the same gate as isProtectedForBot with the override active");
         assertTrue(src.contains("hazard.failureMessage().endsWith(RESUME_OVERRIDE_SUFFIX)"));
         String resume = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/SkillResumeService.java"));
         assertTrue(resume.contains("if (uuid != null && LAST_SKILL_BY_BOT.containsKey(uuid)) {\n            ZONE_OVERRIDE_PENDING.add(uuid);"),

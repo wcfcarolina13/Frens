@@ -260,10 +260,11 @@ public final class MiningHazardDetector {
         if (ProtectedZoneService.isProtectedForBot(botUuid, pos, world, null)) {
             ProtectedZoneService.ProtectedZone zone = ProtectedZoneService.getZoneAt(pos, world);
             String zoneName = zone != null ? zone.getLabel() : "protected area";
-            // Resume's override only lifts this check; MiningTool still refuses a zone the bot's owner
-            // has no rights in (BotTerritoryAuthorizationService), so promise it only where it works.
+            // Resume's override only lifts this check, so promise it only where it works: MiningTool
+            // still refuses a zone the bot's owner has no rights in (BotTerritoryAuthorizationService),
+            // and the digging jobs' own gate still refuses others' bases, forts, villages and bee nests.
             String failure = "Cannot break blocks in protected zone: " + zoneName + "."
-                    + (ownerMayMutate(botUuid, pos, world) ? RESUME_OVERRIDE_SUFFIX : "");
+                    + (resumeCanOverride(botUuid, pos, world) ? RESUME_OVERRIDE_SUFFIX : "");
             return hazard(pos, "This is a protected zone (" + zoneName + ").", true, failure);
         }
         
@@ -583,11 +584,12 @@ public final class MiningHazardDetector {
                 && hazard.failureMessage().endsWith(RESUME_OVERRIDE_SUFFIX);
     }
 
-    private static boolean ownerMayMutate(UUID botUuid, BlockPos pos, ServerWorld world) {
+    private static boolean resumeCanOverride(UUID botUuid, BlockPos pos, ServerWorld world) {
         MinecraftServer server = world.getServer();
         ServerPlayerEntity bot = server == null || botUuid == null ? null : server.getPlayerManager().getPlayer(botUuid);
         UUID owner = bot == null ? null : net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
-        return owner != null && !ProtectedZoneService.isProtected(pos, world, owner);
+        return owner != null && !ProtectedZoneService.isProtected(pos, world, owner)
+                && !net.wcfcarolina13.GameAI.services.CompanionSafeZoneService.isProtectedDespiteZoneOverride(world, pos, owner);
     }
 
     public static record Hazard(String chatMessage, String failureMessage, BlockPos location, boolean blocking) {
