@@ -74,7 +74,7 @@ class ZoneResumeOverrideWiringTest {
         String safe = Files.readString(Paths.get("src/main/java/net/wcfcarolina13/GameAI/services/CompanionSafeZoneService.java"));
         assertTrue(safe.contains("if (!explicitZonesOverridden && isInExplicitProtectedZone(world, pos, botOwner))"),
                 "the override lifts explicit zones");
-        assertTrue(safe.contains("if (exceptOwner != null && exceptOwner.toString().equals(base.ownerUuid())) continue;")
+        assertTrue(safe.contains("if (exceptOwner != null && exceptOwner.toString().equalsIgnoreCase(base.ownerUuid())) continue;")
                         && safe.contains("overridden ? baseOwner : null"),
                 "and only the owner's own bases (their auto-zone is where the promise came from), never others' bases");
         assertEquals(2, src.split(java.util.regex.Pattern.quote("BotTerritoryAuthorizationService.resolveBotOwnerUuid(player))"), -1).length - 1,

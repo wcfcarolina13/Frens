@@ -124,7 +124,7 @@ public final class CompanionSafeZoneService {
 
         for (BotHomeService.BaseEntry base : BotHomeService.listBases(server, world)) {
             if (base.pos() == null) continue;
-            if (exceptOwner != null && exceptOwner.toString().equals(base.ownerUuid())) continue;
+            if (exceptOwner != null && exceptOwner.toString().equalsIgnoreCase(base.ownerUuid())) continue;
             int radius = base.radius();
             double rSq = (double) radius * radius;
             if (base.pos().getSquaredDistance(pos) <= rSq) {
