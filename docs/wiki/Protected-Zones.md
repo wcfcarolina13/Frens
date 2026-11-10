@@ -22,7 +22,7 @@ A zone belongs to whoever made it (for a base, the base's owner). What it stops 
 
 | Job | Inside a zone |
 |---|---|
-| Stripmine, Collect Dirt, Ascent, Descent | Stop at **every** zone except public ones, including your own, and say why. In your own zones and zones you are permitted in, the message ends "Press Resume to override": press Resume to let the job carry on through it for 60 seconds. In anyone else's zone there is no override. |
+| Stripmine, Collect Dirt, Ascent, Descent | Stop at **every** zone except public ones, including your own, and say why. In your own zones and zones you are permitted in, the message ends "Press Resume to override": press Resume to let the job carry on through it for 60 seconds. In anyone else's zone there is no override. Ascent and Descent still won't dig inside another player's base, a fortified wall, a mapped village or a bee nest area, even after Resume. |
 | Build Farm | Digs in your own zones and in zones you are permitted in. Refused in everyone else's. |
 | Placing blocks and digging out of a hole | Allowed in your own zones and in zones you are permitted in. Refused in everyone else's. |
 | Breaking a block to clear a path | Refused in every zone except public ones, including your own. |
@@ -56,6 +56,6 @@ Woodcutting treats the **Spawn** base specially: an operator can let frens cut t
 | What you see | Why |
 |---|---|
 | My fren won't mine or dig under my own base | Digging jobs stop at every zone, yours too. Press Resume when it asks, and it carries on for 60 seconds. |
-| It stopped at a zone and didn't offer Resume | The zone belongs to someone else and you aren't permitted in it. Ask its owner to permit you, or dig elsewhere. |
+| Resume didn't get it past a zone | The zone belongs to someone else and you aren't permitted in it, so the message doesn't say "Press Resume to override". Ask its owner to permit you, or dig elsewhere. |
 | It won't cut the trees around my house | Bases are no-go areas for gathering, even for your own frens. |
 | It walked far away to find trees | Every nearby tree was in a base, a zone, a village, near a wall or by a bee nest. |
