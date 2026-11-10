@@ -30,7 +30,7 @@ Mark areas where bots cannot break blocks.
 - Right-click a block to set Corner 1, right-click again for Corner 2.
 - Cyan particles appear showing the zone boundary.
 - Press [=] to confirm and name the zone.
-- Stripmine, Collect Dirt, Ascent and Descent stop at every zone, your own included. In your own zones, or zones you are permitted in, the message offers Resume, which lets the job continue for 60 seconds. It isn't offered inside another player's base, a fortified wall, a mapped village or a bee nest area. Other players' bots won't break blocks in your zones.
+- Stripmine, Collect Dirt, Ascent and Descent stop at every zone, your own included. In your own zones, or zones you are permitted in, the message offers Resume, which lets the job continue for 60 seconds. It isn't offered inside a base that isn't yours (the Spawn base included), inside a fortified wall or its margin, in a mapped village or in a bee nest area, even your own fort or village. Other players' bots won't break blocks in your zones.
 - Any player can view zone boundaries via Base Manager &gt; Show.
 - Admins can rename or delete zones in the Base Manager.
 - Zones persist across server restarts.
