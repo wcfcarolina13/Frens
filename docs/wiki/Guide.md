@@ -56,9 +56,9 @@ Every card from the Guide screen in game (press ] by default). `<bot>` stands fo
 
 ## [Farming](Guide-Farming.md)
 
-- [Build Farm](Guide-Farming.md#build-farm): Builds and plants a small farm with irrigation.
-- [Plant Seeds](Guide-Farming.md#plant-seeds): Plants seeds on any empty tilled soil nearby.
-- [Harvest Crops](Guide-Farming.md#harvest-crops): Harvests fully mature crops, replants them, and keeps the field tidy.
+- [Build Farm](Guide-Farming.md#build-farm): Builds a watered square farm and plants it.
+- [Plant Seeds](Guide-Farming.md#plant-seeds): Plants seeds on empty farmland nearby.
+- [Harvest Crops](Guide-Farming.md#harvest-crops): Harvests ripe wheat, beetroot, carrots and potatoes, and replants them.
 
 ## [Mining](Guide-Mining.md)
 
