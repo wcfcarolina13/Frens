@@ -165,7 +165,7 @@ public final class DirtShovelSkill implements Skill {
                     if (isLavaHazard(hazard)) {
                         LavaHazardService.respondToLava(player, source, hazard.location());
                     }
-                    SkillResumeService.flagManualResume(player);
+                    SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));
                     ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                     return failure(context, hazard.failureMessage());
                 }
@@ -274,7 +274,7 @@ public final class DirtShovelSkill implements Skill {
                             if (isLavaHazard(hazard)) {
                                 LavaHazardService.respondToLava(player, source, hazard.location());
                             }
-                            SkillResumeService.flagManualResume(player);
+                            SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));
                             ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), hazard.chatMessage());
                             return failure(context, hazard.failureMessage());
                         }

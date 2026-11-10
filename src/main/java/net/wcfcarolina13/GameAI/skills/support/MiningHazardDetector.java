@@ -260,8 +260,11 @@ public final class MiningHazardDetector {
         if (ProtectedZoneService.isProtectedForBot(botUuid, pos, world, null)) {
             ProtectedZoneService.ProtectedZone zone = ProtectedZoneService.getZoneAt(pos, world);
             String zoneName = zone != null ? zone.getLabel() : "protected area";
-            return hazard(pos, "This is a protected zone (" + zoneName + ").", true,
-                    "Cannot break blocks in protected zone: " + zoneName + ". Press Resume to override.");
+            // Resume's override only lifts this check; MiningTool still refuses a zone the bot's owner
+            // has no rights in (BotTerritoryAuthorizationService), so promise it only where it works.
+            String failure = "Cannot break blocks in protected zone: " + zoneName + "."
+                    + (ownerMayMutate(botUuid, pos, world) ? RESUME_OVERRIDE_SUFFIX : "");
+            return hazard(pos, "This is a protected zone (" + zoneName + ").", true, failure);
         }
         
         // Check if this is a torch (protect torches from accidental breaking)
@@ -567,10 +570,24 @@ public final class MiningHazardDetector {
         return false;
     }
 
-    /** True iff the hazard came from the protected-zone gate (eligible for /bot resume override). */
+    /** Ends a zone refusal that Resume can override; callers with nothing to resume strip it. */
+    public static final String RESUME_OVERRIDE_SUFFIX = " Press Resume to override.";
+
+    /**
+     * True iff the hazard came from the protected-zone gate in a zone the bot's owner may build in,
+     * the only case Resume's override can open (eligible for /bot resume override).
+     */
     public static boolean isProtectedZoneHazard(Hazard hazard) {
         return hazard != null && hazard.failureMessage() != null
-                && hazard.failureMessage().startsWith("Cannot break blocks in protected zone:");
+                && hazard.failureMessage().startsWith("Cannot break blocks in protected zone:")
+                && hazard.failureMessage().endsWith(RESUME_OVERRIDE_SUFFIX);
+    }
+
+    private static boolean ownerMayMutate(UUID botUuid, BlockPos pos, ServerWorld world) {
+        MinecraftServer server = world.getServer();
+        ServerPlayerEntity bot = server == null || botUuid == null ? null : server.getPlayerManager().getPlayer(botUuid);
+        UUID owner = bot == null ? null : net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+        return owner != null && !ProtectedZoneService.isProtected(pos, world, owner);
     }
 
     public static record Hazard(String chatMessage, String failureMessage, BlockPos location, boolean blocking) {

@@ -47,7 +47,7 @@ class HandDigStairWiringTest {
         String hazardBranch = body.substring(body.indexOf("if (hazardCheck.blockingHazard().isPresent())"),
                 body.indexOf("handDigSteps[0]++;"));
         assertTrue(hazardBranch.contains("WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());"));
-        assertTrue(hazardBranch.contains("SkillResumeService.flagManualResume(player);"));
+        assertTrue(hazardBranch.contains("SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));"));
         assertTrue(hazardBranch.contains("hazard.chatMessage()"));
         assertTrue(hazardBranch.contains("return SkillExecutionResult.failure(hazard.failureMessage());"));
         assertTrue(body.contains("hazardCheck.adjacentWarnings().forEach("));
@@ -55,7 +55,7 @@ class HandDigStairWiringTest {
         String pillar = block(source(), "private SkillExecutionResult executeUpwardStep(");
         for (String line : new String[]{
                 "WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());",
-                "SkillResumeService.flagManualResume(player);",
+                "SkillResumeService.flagManualResumeForHazard(player, MiningHazardDetector.isProtectedZoneHazard(hazard));",
                 "return SkillExecutionResult.failure(hazard.failureMessage());"}) {
             assertTrue(pillar.contains(line), line);
         }
