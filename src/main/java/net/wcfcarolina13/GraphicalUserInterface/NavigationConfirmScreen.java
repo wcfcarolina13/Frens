@@ -89,10 +89,14 @@ public class NavigationConfirmScreen extends Screen {
             selectedOption = 0;
         }
         scrollOffset = GuidanceListLayout.clampOffset(scrollOffset, selectedOption, destinations.size(),
-                GuidanceListLayout.visibleRows(50, this.height - 84, 22));
+                visibleListRows());
 
         buildGuidanceButtons();
     }
+
+    private static final int LIST_TOP_Y = 50;
+    private static final int LIST_BOTTOM_MARGIN = 84;
+    private static final int LIST_ROW_STEP = 22;
 
     private void buildGuidanceButtons() {
         this.clearChildren();
@@ -101,10 +105,10 @@ public class NavigationConfirmScreen extends Screen {
         int w = 200;
         int h = 20;
         int gap = 2;
-        int topY = 50;
+        int topY = LIST_TOP_Y;
         int bottomY = this.height - 60;
         // Rows stop above the warning line (height - 80) so they never cover Confirm or Cancel.
-        int visible = GuidanceListLayout.visibleRows(topY, this.height - 84, h + gap);
+        int visible = visibleListRows();
         // Only keep the window in range here; scrolling may leave the selection off screen.
         scrollOffset = GuidanceListLayout.clampOffset(scrollOffset, -1, destinations.size(), visible);
 
@@ -130,7 +134,8 @@ public class NavigationConfirmScreen extends Screen {
                     .dimensions(cx + w / 2 + 4, topY, 20, h).build());
             up.active = scrollOffset > 0;
             ButtonWidget down = this.addDrawableChild(ButtonWidget.builder(Text.literal("\u25BC"), b -> scroll(1))
-                    .dimensions(cx + w / 2 + 4, topY + (visible - 1) * (h + gap), 20, h).build());
+                    .dimensions(visible > 1 ? cx + w / 2 + 4 : cx + w / 2 + 26,
+                            topY + (visible - 1) * (h + gap), 20, h).build());
             down.active = scrollOffset + visible < destinations.size();
         }
 
@@ -141,8 +146,13 @@ public class NavigationConfirmScreen extends Screen {
                 .dimensions(cx - w / 2 + 104, bottomY, 96, h).build());
     }
 
+    /** Rows that fit between the list top (50) and the warning line (height - 80), 22 px apart. */
+    private int visibleListRows() {
+        return GuidanceListLayout.visibleRows(LIST_TOP_Y, this.height - LIST_BOTTOM_MARGIN, LIST_ROW_STEP);
+    }
+
     private void scroll(int rows) {
-        int visible = GuidanceListLayout.visibleRows(50, this.height - 84, 22);
+        int visible = visibleListRows();
         int max = Math.max(0, destinations.size() - visible);
         scrollOffset = Math.max(0, Math.min(max, scrollOffset + rows));
         buildGuidanceButtons();

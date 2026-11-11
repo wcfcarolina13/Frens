@@ -9,13 +9,15 @@ class GuidanceListLayoutTest {
 
     @Test
     void rowsStopAboveTheWarningLineAndConfirm() {
-        int height = 240;
         int topY = 50;
         int step = 22;
-        int visible = GuidanceListLayout.visibleRows(topY, height - 84, step);
-        int lastRowBottom = topY + (visible - 1) * step + 20;
-        assertTrue(lastRowBottom <= height - 80, "last row must end above the warning line");
-        assertTrue(lastRowBottom < height - 60, "last row must end above Confirm");
+        // 240 is the smallest scaled height automatic GUI scale gives. Check every height up to 1080.
+        for (int height = 240; height <= 1080; height++) {
+            int visible = GuidanceListLayout.visibleRows(topY, height - 84, step);
+            int lastRowBottom = topY + (visible - 1) * step + 20;
+            assertTrue(lastRowBottom <= height - 80, "last row must end above the warning line at height " + height);
+            assertTrue(lastRowBottom < height - 60, "last row must end above Confirm at height " + height);
+        }
     }
 
     @Test
