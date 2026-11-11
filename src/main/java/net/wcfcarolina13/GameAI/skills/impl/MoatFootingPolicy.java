@@ -11,12 +11,21 @@ final class MoatFootingPolicy {
     }
 
     /**
-     * True when the cell at (x, y, z) lies under the fren's feet: its column overlaps the fren's
-     * horizontal box (min inclusive, max exclusive, in block coordinates) and it is below feetY.
+     * True when the cell at (x, y, z) holds the fren up. A cell below its feet in its own column
+     * always counts. A cell in a neighbouring column its box overlaps counts only when the cell
+     * under its own column is open, because then that neighbour is what it stands on.
+     * Box bounds are block coordinates, min inclusive and max exclusive.
      */
-    static boolean isUnderFeet(double boxMinX, double boxMaxX, double boxMinZ, double boxMaxZ,
-                               int feetY, int x, int y, int z) {
+    static boolean isUnderFeet(int feetX, int feetZ, int feetY, boolean centreSupported,
+                               double boxMinX, double boxMaxX, double boxMinZ, double boxMaxZ,
+                               int x, int y, int z) {
         if (y >= feetY) {
+            return false;
+        }
+        if (x == feetX && z == feetZ) {
+            return true;
+        }
+        if (centreSupported) {
             return false;
         }
         boolean xOverlap = x < boxMaxX && x + 1 > boxMinX;

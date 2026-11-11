@@ -2001,14 +2001,15 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
         int startIdx = nearestPathIndex(bot, perimeterPath);
         for (int offset = 0; offset < perimeterPath.size(); offset++) {
+            requeueRefilledMoatCells(world, allDigBlocks, remaining);
             if (SkillManager.shouldAbortSkill(bot) || remaining.isEmpty()) {
                 break;
             }
 
             if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
                 ensureOnSurface(bot, world, referenceSurfaceY);
+                requeueRefilledMoatCells(world, allDigBlocks, remaining);
             }
-            requeueRefilledMoatCells(world, allDigBlocks, remaining);
 
             int pathIdx = (startIdx + offset) % perimeterPath.size();
             BlockPos walkPos = perimeterPath.get(pathIdx);
@@ -2037,6 +2038,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             }
         }
 
+        requeueRefilledMoatCells(world, allDigBlocks, remaining);
         if (!remaining.isEmpty() && !SkillManager.shouldAbortSkill(bot)) {
             LOGGER.info("[Moat] cleanup-pass start: {} remaining after perimeter walk", remaining.size());
             Map<BlockPos, Integer> failCounts = new HashMap<>();
@@ -2447,7 +2449,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         List<BlockPos> candidates = new ArrayList<>();
         List<BlockPos> staleAir = new ArrayList<>();
         net.minecraft.util.math.Box footBox = bot.getBoundingBox();
-        int feetY = bot.getBlockPos().getY();
+        BlockPos feetPos = bot.getBlockPos();
+        int feetY = feetPos.getY();
+        BlockPos centreSupport = feetPos.down();
+        boolean centreSupported = !world.getBlockState(centreSupport).getCollisionShape(world, centreSupport).isEmpty();
         for (BlockPos pos : remaining) {
             if (world.getBlockState(pos).isAir()) {
                 staleAir.add(pos);
@@ -2455,8 +2460,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             }
             // Never dig the ground under the fren: it falls into the ditch, and the escape
             // pillar then refills cells that were already dug. Another stop reaches the cell.
-            if (MoatFootingPolicy.isUnderFeet(footBox.minX, footBox.maxX, footBox.minZ, footBox.maxZ,
-                    feetY, pos.getX(), pos.getY(), pos.getZ())) {
+            if (MoatFootingPolicy.isUnderFeet(feetPos.getX(), feetPos.getZ(), feetY, centreSupported,
+                    footBox.minX, footBox.maxX, footBox.minZ, footBox.maxZ,
+                    pos.getX(), pos.getY(), pos.getZ())) {
                 continue;
             }
             if (isWithinMiningReach(bot, pos) && hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
@@ -2962,8 +2968,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private BlockPos chooseDigApproachPosition(ServerPlayerEntity bot, ServerWorld world,
                                                BlockPos digTarget, SurfaceProfile surfaceProfile) {
         BlockPos botPos = bot.getBlockPos();
+        // Not the target's own column: standing on top of the cell means never digging it
+        // (moat digging leaves the ground under the fren's feet alone).
         int[][] offsets = {
-                {0, 0},
                 {1, 0}, {-1, 0}, {0, 1}, {0, -1},
                 {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
         };
@@ -4025,18 +4032,43 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     @Override
     public int naturalTerrainY(ServerWorld world, int x, int z) {
         int top = VillageFortificationLayoutService.terrainY(world, x, z);
-        Set<BlockPos> layout = fortificationProtectedPositions;
-        if (world == null || layout == null || layout.isEmpty()) {
+        Map<BlockPos, ProceduralWallBlock> built = plannedStructureByPos();
+        if (world == null || built.isEmpty()) {
             return top;
         }
+        // Skip only wall, tower and gate blocks that are in place as planned (and open cells under
+        // them). Natural ground sitting at a layout position still counts as ground.
         return NaturalSurfacePolicy.surfaceY(top, y -> {
             BlockPos pos = new BlockPos(x, y, z);
-            if (layout.contains(pos)) {
+            BlockState state = world.getBlockState(pos);
+            ProceduralWallBlock planned = built.get(pos);
+            if (planned != null && isPlannedBlockSatisfied(planned, state)) {
                 return true;
             }
-            BlockState state = world.getBlockState(pos);
-            return state.isAir() || state.isReplaceable();
+            return y < top && (state.isAir() || state.isReplaceable());
         }, NaturalSurfacePolicy.MAX_SKIP);
+    }
+
+    private FortificationLayout plannedStructureLayout = null;
+    private Map<BlockPos, ProceduralWallBlock> plannedStructureByPos = Map.of();
+
+    /** Active (wall, tower, gate) layout blocks by position, rebuilt when the layout changes. */
+    private Map<BlockPos, ProceduralWallBlock> plannedStructureByPos() {
+        FortificationLayout layout = currentLayout;
+        if (layout == null) {
+            return Map.of();
+        }
+        if (layout != plannedStructureLayout) {
+            Map<BlockPos, ProceduralWallBlock> map = new HashMap<>();
+            for (ProceduralWallBlock b : layout.allBlocks()) {
+                if (isActiveFortifyBlock(b)) {
+                    map.put(b.worldPos(), b);
+                }
+            }
+            plannedStructureByPos = map;
+            plannedStructureLayout = layout;
+        }
+        return plannedStructureByPos;
     }
 
     @Override

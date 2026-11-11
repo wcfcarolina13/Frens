@@ -1495,7 +1495,7 @@ final class FortifyTowerHelper {
                 if (world.getBlockState(feet.down()).isAir()) {
                     continue;
                 }
-                if (!canClearForRingBreakout(world, feet) || !canClearForRingBreakout(world, head)) {
+                if (!canClearForRingBreakout(world, vertex, feet) || !canClearForRingBreakout(world, vertex, head)) {
                     continue;
                 }
                 LOGGER.info("[FortifyTower] ring-breakout tower=({}, {}) from={} dir={} feet={} head={}",
@@ -1516,10 +1516,17 @@ final class FortifyTowerHelper {
         }
     }
 
-    private boolean canClearForRingBreakout(ServerWorld world, BlockPos pos) {
+    /**
+     * Open cells always pass. A solid cell may be broken only inside this tower's own 3x3 columns,
+     * so the breakout never opens an adjoining wall, a gate or the player's own blocks.
+     */
+    private boolean canClearForRingBreakout(ServerWorld world, WallPoint vertex, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.isReplaceable() || state.getCollisionShape(world, pos).isEmpty()) {
             return true;
+        }
+        if (!isInsideTowerFootprint(pos, vertex)) {
+            return false;
         }
         return ops.evaluateBreakForNavigation(world, pos, true).allowed();
     }
