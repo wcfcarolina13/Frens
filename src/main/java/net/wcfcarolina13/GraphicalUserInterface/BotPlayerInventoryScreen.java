@@ -5493,8 +5493,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (client == null || client.player == null) {
             return false;
         }
-        // Preferred token: the dedicated quest item Wizard's Tome.
-        // Back-compat: older builds used a renamed book token containing "spellbook".
+        // The token is the dedicated quest item Wizard's Tome only.
         var inv = client.player.getInventory();
         int n = inv.size();
         for (int i = 0; i < n; i++) {
@@ -5503,17 +5502,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 continue;
             }
             if (stack.isOf(ModItems.WIZARD_TOME)) {
-                return true;
-            }
-            if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
-                continue;
-            }
-            String name = stack.getName() != null ? stack.getName().getString() : "";
-            String lower = name != null ? name.toLowerCase(Locale.ROOT) : "";
-            if (lower.contains("spellbook")) {
-                return true;
-            }
-            if (lower.contains("wizard") && lower.contains("tome")) {
                 return true;
             }
         }
