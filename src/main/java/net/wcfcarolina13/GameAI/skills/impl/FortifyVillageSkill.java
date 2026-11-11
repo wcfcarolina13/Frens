@@ -2999,6 +2999,11 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
                 boolean canMine = isWithinMiningReachFrom(candidate, digTarget);
                 double score = canMine ? 1_000 : 0;
+                // Prefer the bank to the ditch floor: a fren in the ditch has to climb out, and a
+                // pillar escape puts blocks back into dug cells.
+                if (candidate.getY() < safeSurfaceY(surfaceProfile, world, x, z)) {
+                    score -= 600.0;
+                }
                 score += exits * 120.0;
                 score -= botPos.getSquaredDistance(candidate) * 5.0;
                 score -= Math.abs(candidate.getY() - digTarget.getY()) * 12.0;

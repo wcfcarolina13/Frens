@@ -459,6 +459,21 @@ final class FortifyTowerHelper {
                     towerNavState != null ? towerNavState.sameStuckPosCount : 0);
         }
 
+        // Leave the tower before the next one starts. The fren often finishes standing on one of
+        // this tower's own ring cells, walled in, and the next tower's approach then spent most of
+        // its time budget breaking out.
+        if (!SkillManager.shouldAbortSkill(bot)) {
+            int presentBeforeExit = ctx.countPresentBlocks(world, vertexBlocks);
+            forceExitTowerFootprint(source, bot, world, vertex, surfaceProfile, 0);
+            // A ring breakout here opens up to four tower cells that no later attempt re-places, so
+            // take them off the count: the tower then reads as incomplete and patch fills it.
+            int opened = Math.max(0, presentBeforeExit - ctx.countPresentBlocks(world, vertexBlocks));
+            if (opened > 0) {
+                LOGGER.info("[FortifyTower] tower ({}, {}) left with {} ring cells opened on exit",
+                        vertex.x(), vertex.z(), opened);
+                newlyPlaced = Math.max(0, newlyPlaced - opened);
+            }
+        }
         return newlyPlaced;
     }
 
