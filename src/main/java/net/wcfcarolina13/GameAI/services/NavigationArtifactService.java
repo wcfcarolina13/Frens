@@ -829,7 +829,22 @@ public final class NavigationArtifactService {
                                            String botAlias, BlockPos destination,
                                            RegistryKey<World> dimension, int delayTicks,
                                            UUID ownerUuid) {
-        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false, false, true);
+        return beginMagicTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, null);
+    }
+
+    /**
+     * Magic travel whose reagent cost is paid only once every gate has passed and just before the
+     * bot leaves. {@code payOnDeparture} runs on the server thread before the bot's inventory is
+     * saved for the trip; returning false (reagents gone) cancels the trip. With a payment, a bot
+     * still resting from its last trip is refused outright instead of being queued for a retry,
+     * because a retry would travel later without charging.
+     */
+    public static boolean beginMagicTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                           String botAlias, BlockPos destination,
+                                           RegistryKey<World> dimension, int delayTicks,
+                                           UUID ownerUuid, java.util.function.BooleanSupplier payOnDeparture) {
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid,
+                false, false, false, true, false, payOnDeparture);
     }
 
     /**
@@ -1021,6 +1036,17 @@ public final class NavigationArtifactService {
                                               UUID ownerUuid, boolean skipGates, boolean suppressOwnerNotify,
                                               boolean skipArtifactGate, boolean magicTravel,
                                               boolean automatic) {
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid,
+                skipGates, suppressOwnerNotify, skipArtifactGate, magicTravel, automatic, null);
+    }
+
+    private static boolean beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                              String botAlias, BlockPos destination,
+                                              RegistryKey<World> dimension, int delayTicks,
+                                              UUID ownerUuid, boolean skipGates, boolean suppressOwnerNotify,
+                                              boolean skipArtifactGate, boolean magicTravel,
+                                              boolean automatic,
+                                              java.util.function.BooleanSupplier payOnDeparture) {
         if (server == null || bot == null || botAlias == null || destination == null || dimension == null) {
             LOGGER.warn("beginDelayedTravel called with null arguments; ignoring.");
             return false;
@@ -1048,6 +1074,13 @@ public final class NavigationArtifactService {
                 if (elapsed < TRAVEL_COOLDOWN_TICKS) {
                     long remainingTicks = TRAVEL_COOLDOWN_TICKS - elapsed;
                     String timeStr = TravelWaitService.formatWait(remainingTicks);
+                    if (payOnDeparture != null) {
+                        // A paid trip is never queued: the retry would leave without charging.
+                        notifyTravelRefusal(server, bot, ownerUuid, "cooldown", automatic,
+                                "\u00A7c" + botAlias + " is resting " + timeStr
+                                + " before the next trip.\u00A7r");
+                        return false;
+                    }
                     String destLabel = destination.toShortString();
                     notifyTravelRefusal(server, bot, ownerUuid, "cooldown", automatic,
                             "\u00A7c" + botAlias + " is resting " + timeStr + " before traveling to "
@@ -1167,12 +1200,24 @@ public final class NavigationArtifactService {
         TravelMountHandler.MountTravelResult mountResult =
                 TravelMountHandler.evaluateTravel(bot, destination, dimension, destWorld);
 
-        String mountEntityTypeId = null;
         switch (mountResult.decision()) {
             case REFUSE_FULL_INVENTORY, REFUSE_NO_ROOM_AT_DEST, REFUSE_CROSS_DIM_ANIMAL -> {
                 notifyOwner(server, ownerUuid, "\u00A7c" + mountResult.message() + "\u00A7r");
-                return false; // Abort travel
+                return false; // Abort travel before any reagent is paid or the mount is touched
             }
+            default -> {}
+        }
+
+        // ── Payment ──────────────────────────────────────────────────────
+        // Every refusal is above this line. Pay before the inventory is saved for the trip.
+        if (payOnDeparture != null && !payOnDeparture.getAsBoolean()) {
+            notifyOwner(server, ownerUuid, "\u00A7c" + botAlias
+                    + " couldn't leave: the reagents are no longer there.\u00A7r");
+            return false;
+        }
+
+        String mountEntityTypeId = null;
+        switch (mountResult.decision()) {
             case TETHERED_AT_SOURCE -> {
                 notifyOwner(server, ownerUuid, "\u00A7e" + mountResult.message() + "\u00A7r");
                 // Fall through — travel proceeds without animal
