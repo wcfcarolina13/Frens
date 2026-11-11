@@ -447,7 +447,7 @@ final class FortifyTowerHelper {
         }
 
         if (newlyPlaced == 0 && !isTowerComplete(ctx.countPresentBlocks(world, vertexBlocks), plannedCount)) {
-            int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+            int terrainY = ops.naturalTerrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
             int depth = terrainY - bot.getBlockPos().getY();
             LOGGER.info("[FortifyTower] zero-progress tower vertex={}/{} pos=({}, {}) botPos={} trapLike={} depth={} noProgressAttempts={} sameStuckPosCount={}",
                     vertexOrdinal + 1, totalVertices,
@@ -601,7 +601,7 @@ final class FortifyTowerHelper {
             TowerScaffoldSideOutcome sideOutcome = TowerScaffoldSideOutcome.NO_PROGRESS_HARD;
             boolean recoverableScaffoldFailure = false;
 
-            int localTerrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+            int localTerrainY = ops.naturalTerrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
             if (bot.getBlockPos().getY() < localTerrainY - 1) {
                 LOGGER.info("[FortifyTower] scaffold-base launch-precheck below-surface pos={} terrainY={} tower=({}, {})",
                         bot.getBlockPos().toShortString(), localTerrainY, vertex.x(), vertex.z());
@@ -612,7 +612,7 @@ final class FortifyTowerHelper {
                 recoverableScaffoldFailure = true;
             }
             BlockPos launchPrecheckPos = bot.getBlockPos().toImmutable();
-            localTerrainY = VillageFortificationLayoutService.terrainY(world, launchPrecheckPos.getX(), launchPrecheckPos.getZ());
+            localTerrainY = ops.naturalTerrainY(world, launchPrecheckPos.getX(), launchPrecheckPos.getZ());
             int launchDepth = Math.max(0, localTerrainY - launchPrecheckPos.getY());
             boolean launchBelowSurface = launchPrecheckPos.getY() < localTerrainY - 1;
 
@@ -1467,7 +1467,70 @@ final class FortifyTowerHelper {
             if (isInsideTowerFootprint(bot.getBlockPos(), vertex)) {
                 tryTowerHardResetPosition(source, bot, world, vertex, surfaceProfile, attemptOffset + 7);
             }
+            if (isInsideTowerFootprint(bot.getBlockPos(), vertex)) {
+                breakOutOfTowerRing(bot, world, vertex, escape);
+            }
         }
+    }
+
+    /**
+     * Last resort when the fren is walled in by its own tower ring: break the ring cells at feet
+     * and head height on one side and step out. They are planned tower blocks, so a later attempt
+     * places them again from outside. Without this the fren spent the tower's whole time budget
+     * trying to pillar out under the tower post.
+     */
+    private void breakOutOfTowerRing(ServerPlayerEntity bot, ServerWorld world, WallPoint vertex, BlockPos escape) {
+        for (int step = 0; step < 2 && isInsideTowerFootprint(bot.getBlockPos(), vertex); step++) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
+            BlockPos botPos = bot.getBlockPos();
+            Direction preferred = FortifyEscapeHelper.dominantHorizontalDirection(botPos, escape);
+            List<Direction> dirs = new ArrayList<>(List.of(preferred, preferred.rotateYClockwise(),
+                    preferred.rotateYCounterclockwise(), preferred.getOpposite()));
+            boolean moved = false;
+            for (Direction dir : dirs) {
+                BlockPos feet = botPos.offset(dir);
+                BlockPos head = feet.up();
+                if (world.getBlockState(feet.down()).isAir()) {
+                    continue;
+                }
+                if (!canClearForRingBreakout(world, feet) || !canClearForRingBreakout(world, head)) {
+                    continue;
+                }
+                LOGGER.info("[FortifyTower] ring-breakout tower=({}, {}) from={} dir={} feet={} head={}",
+                        vertex.x(), vertex.z(), botPos.toShortString(), dir,
+                        world.getBlockState(feet).getBlock().getName().getString(),
+                        world.getBlockState(head).getBlock().getName().getString());
+                clearForRingBreakout(bot, world, head);
+                clearForRingBreakout(bot, world, feet);
+                ops.walkTowardBlock(bot, feet.offset(dir), 1_000L);
+                moved = !bot.getBlockPos().equals(botPos);
+                break;
+            }
+            if (!moved) {
+                LOGGER.info("[FortifyTower] ring-breakout found no side to open tower=({}, {}) pos={}",
+                        vertex.x(), vertex.z(), botPos.toShortString());
+                return;
+            }
+        }
+    }
+
+    private boolean canClearForRingBreakout(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable() || state.getCollisionShape(world, pos).isEmpty()) {
+            return true;
+        }
+        return ops.evaluateBreakForNavigation(world, pos, true).allowed();
+    }
+
+    private void clearForRingBreakout(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable() || state.getCollisionShape(world, pos).isEmpty()) {
+            return;
+        }
+        ops.digBlockForNavigation(bot, world, pos);
+        ops.sleepQuiet(80);
     }
 
     private boolean isInsideTowerFootprint(BlockPos botPos, WallPoint vertex) {
