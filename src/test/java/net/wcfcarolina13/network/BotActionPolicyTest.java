@@ -226,6 +226,7 @@ class BotActionPolicyTest {
         assertEquals("skill hunt mod:deer Bob", ok(SKILL_HUNT, "Bob", "0", "mod:deer"));
         assertEquals("skill hunt 1000 cow Bob", ok(SKILL_HUNT, "Bob", "1000", "cow"));
         assertEquals("skill hunt 99999 Bob", ok(SKILL_HUNT, "Bob", "99999", ""));
+        assertEquals("skill hunt 3 ticked Bob", ok(SKILL_HUNT, "Bob", "3", "ticked"));
         bad(SKILL_HUNT, "Bob", "100000", "cow");
         bad(SKILL_HUNT, "Bob", "-1", "cow");
         bad(SKILL_HUNT, "Bob", "1", "all");

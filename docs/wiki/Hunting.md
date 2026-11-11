@@ -18,9 +18,9 @@ Open the fren's inventory, then Actions, Utilities, **Hunting**. The screen list
 
 The buttons work for the fren's owner, operators and the host.
 
-**Ticking more than one row:** pressing Hunt then hunts only one of the ticked types, chosen at random. To hunt several types, untick them all, or run one hunt per type. The same applies after All Edible.
+**Ticking more than one row:** pressing Hunt hunts all the ticked types, going for the nearest one each time.
 
-The ticks are remembered for that fren. They also limit every hunt that doesn't name a mob: typed hunts, [Auto Hunt](#hunting-on-its-own) and the hunt hobby. Untick everything to let those hunt freely again.
+The ticks are remembered for that fren, but they only steer the hunt the Hunt button starts (and that hunt's resume the next morning). Typed hunts without a mob name, [Auto Hunt](#hunting-on-its-own) and the hunt hobby hunt anything edible, so a hungry fren never waits for one kind of animal.
 
 ### Picking one animal
 
@@ -43,7 +43,7 @@ Operators and the host can type:
 ```
 
 - `/bot skill hunt 5 cow` hunts five cows. `/bot skill hunt cow` hunts cows until nightfall.
-- `/bot skill hunt` hunts the ticked types, or anything it can if none are ticked. That includes zombies when it is geared for them.
+- `/bot skill hunt` hunts anything it can, whatever is ticked on the Hunting screen. That includes zombies when it is geared for them.
 - `/bot skill hunt list` lists the mobs it knows.
 - With several frens and a count, the count is shared between them. Add `each` to give each fren the full count.
 
@@ -176,8 +176,6 @@ While raw meat is its only food, it holds on to it for the furnace instead of ea
 | It took my leashed cows | Leads don't protect animals. Keep them in a base, or name them. |
 | It ignores cows in my base | Animals inside any base are protected. |
 | "I haven't discovered Cow yet." | Kill one yourself first. |
-| I ticked two animals and it only hunted one | Ticking several rows hunts only one of them. Untick all, or hunt one type at a time. |
-| A typed hunt only goes for one kind of animal | Rows ticked on the Hunting screen limit every hunt that doesn't name a mob. Untick them. |
 | It hunted through the night | A hunt with a count keeps going until it reaches the count. |
 | It stopped and didn't cook or go home | It gave up or ran out of prey. It cooks later, when it is idle and hungry. |
 | Its pack is full of raw meat | Cooking needs a furnace and fuel. Give it coal, or turn on the leaf litter hobby. |

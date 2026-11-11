@@ -170,7 +170,8 @@ public final class HuntSkill implements Skill {
             }
         }
 
-        String targetLabel = explicitTarget != null ? explicitTarget.label() : "food mobs";
+        String targetLabel = explicitTarget != null ? explicitTarget.label()
+                : request.useTicks() ? "the ticked animals" : "food mobs";
         String countLabel = request.targetCount == Integer.MAX_VALUE ? "until sunset" : Integer.toString(request.targetCount);
         if (request.hobby()) {
             ChatUtils.sendSystemMessage(source, "Going for a hunt.");
@@ -214,7 +215,11 @@ public final class HuntSkill implements Skill {
         int huntRadius = huntZone.radius;
         int huntYSpan = huntZone.ySpan;
         boolean depopulationEnabled = huntConfig.depopulationEnabled;
-        List<String> selectedTargets = huntConfig.selectedTargets;
+        // The Hunting screen's ticks steer only the hunt its Hunt button starts (and that hunt's
+        // sunrise resume). A typed hunt, Auto Hunt and the hunt hobby hunt anything edible.
+        List<String> selectedTargets = HuntSelectionPolicy.effectiveSelection(
+                request.useTicks(), huntConfig.selectedTargets,
+                resumedSession != null ? resumedSession.targetIds() : null);
 
         // Pre-hunt inventory check: if nearly full, announce and place a chest
         ensureHuntingSupplies(bot, world, source, commander);
@@ -577,6 +582,7 @@ public final class HuntSkill implements Skill {
         boolean untilSunset = false;
         boolean autoStopOnHunger = false;
         boolean hobby = false;
+        boolean useTicks = false;
 
         Object optionsObj = params != null ? params.get("options") : null;
         if (optionsObj instanceof List<?> list) {
@@ -601,6 +607,10 @@ public final class HuntSkill implements Skill {
                     hobby = true;
                     continue;
                 }
+                if (opt.equals(TICKED_OPTION)) {
+                    useTicks = true;
+                    continue;
+                }
                 if (target == null) {
                     target = opt;
                 }
@@ -618,7 +628,8 @@ public final class HuntSkill implements Skill {
         if (hobby) {
             autoStopOnHunger = false;
         }
-        return new HuntRequest(target, targetCount, checkSunset, listOnly, autoStopOnHunger, hobby);
+        return new HuntRequest(target, targetCount, checkSunset, listOnly, autoStopOnHunger, hobby,
+                useTicks && target == null);
     }
 
     private static int getIntParameter(Map<String, Object> params, String key, int def) {
@@ -801,7 +812,8 @@ public final class HuntSkill implements Skill {
         Set<Identifier> unlocked = HuntHistoryService.getWorldHistory(world);
         List<BlockPos> anchors = buildHuntAnchors(bot, world, zone.radius);
         return findCandidate(world, bot, anchors, unlocked, null, true,
-                config.depopulationEnabled, config.selectedTargets,
+                config.depopulationEnabled,
+                HuntSelectionPolicy.effectiveSelection(false, config.selectedTargets, null),
                 zone.radius, zone.ySpan) != null;
     }
 
@@ -1722,6 +1734,9 @@ public final class HuntSkill implements Skill {
         }
     }
 
+    /** Option the Hunting screen's Hunt button sends: hunt every animal ticked on that screen. */
+    public static final String TICKED_OPTION = HuntSelectionPolicy.TICKED_OPTION;
+
     private record HuntCandidate(HuntCatalog.HuntTarget target, LivingEntity entity) {}
 
     private record SearchRelocationResult(HuntCandidate candidate, int nextSegmentIndex) {}
@@ -1731,7 +1746,8 @@ public final class HuntSkill implements Skill {
                                boolean checkSunset,
                                boolean listOnly,
                                boolean autoStopOnHunger,
-                               boolean hobby) {}
+                               boolean hobby,
+                               boolean useTicks) {}
 
     private record FoodCandidate(int slot,
                                  ItemStack stack,
