@@ -69,7 +69,7 @@ When it hunts as an idle hobby, it also leaves alone animals that look penned in
 With **Depop** on, a fren:
 
 - only hunts a type when at least 3 of it are in the zone, counting only adults that aren't named, tamed or protected. If you named the type, it says "Population too low (2 Cow). Depopulation protection is active." Otherwise it skips that type.
-- moves on to another type when a kill leaves fewer than 3 of this one and another type it may hunt is still plentiful ("Not many Cow left. Moving on to other animals."). If none is, or you named the type, it stops: "Population getting thin. Heading back. (4 kills)"
+- moves on to another type when a kill leaves fewer than 3 of this one and another type it may hunt is still plentiful ("Not many Cow left. Moving on to Pig."). If none is, or you named the type, it stops: "Population getting thin. Heading back. (4 kills)"
 - doesn't count zombie kills towards the count you asked for.
 
 Turn Depop off on the Hunting screen to hunt freely. Frens don't breed animals.
