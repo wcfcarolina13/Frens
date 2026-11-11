@@ -537,7 +537,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             if (b.type() == WallBlockType.MOAT_FLOOR
                     || b.type() == WallBlockType.MOAT_INNER_FACE
                     || b.type() == WallBlockType.MOAT_OVERHANG) {
-                if (!isPlannedBlockSatisfied(b, world.getBlockState(b.worldPos()))) {
+                // Only open cells: the lining sits in ground the dig never opens, and placing
+                // skips solid cells, so counting natural ground here only inflated "still needed".
+                BlockState now = world.getBlockState(b.worldPos());
+                if ((now.isAir() || now.isReplaceable()) && !isPlannedBlockSatisfied(b, now)) {
                     moatPlaceBlocks.add(b);
                 }
             }
@@ -556,20 +559,65 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             }
 
             showOverhead(bot, "Placing moat structures (" + moatPlaceBlocks.size() + " blocks)...");
-            // Sort by placement priority then distance
-            moatPlaceBlocks.sort(Comparator.comparingInt((ProceduralWallBlock b) -> placePriority(b.type()))
-                    .thenComparingDouble(b -> bot.squaredDistanceTo(Vec3d.ofCenter(b.worldPos()))));
-            totalPlaced = buildBlockList(source, bot, world, moatPlaceBlocks);
+            // One edge at a time, nearest edge first: walk to the start of the edge's moat run, then
+            // work along it. buildBlockList only reaches blocks within 20 blocks of the bot, so a
+            // single pass over the whole perimeter placed only the stretch the bot stood next to.
+            Map<Integer, List<ProceduralWallBlock>> moatByEdge = new HashMap<>();
+            for (ProceduralWallBlock b : moatPlaceBlocks) {
+                moatByEdge.computeIfAbsent(b.edgeIndex(), k -> new ArrayList<>()).add(b);
+            }
+            Set<Integer> moatEdgesDone = new HashSet<>();
+            for (int ei = 0; ei < layout.edges().size(); ei++) {
+                if (!moatByEdge.containsKey(ei)) {
+                    moatEdgesDone.add(ei);
+                }
+            }
+            int moatEdge;
+            while ((moatEdge = layoutHelper.pickNearestRemainingEdge(bot, layout, moatEdgesDone)) >= 0) {
+                moatEdgesDone.add(moatEdge);
+                if (SkillManager.shouldAbortSkill(bot) || countBuildingBlocks(bot) == 0) {
+                    break;
+                }
+                List<ProceduralWallBlock> edgeMoat = moatByEdge.get(moatEdge);
+                WallEdge edge = layout.edges().get(moatEdge);
+                edgeMoat.sort(Comparator.comparingDouble(b -> alongEdge(edge, b.worldPos())));
+                navigateToEdgeApproach(source, bot, world, edge, surfaceProfile, edgeMoat.get(0).worldPos());
+                totalPlaced += buildBlockList(source, bot, world, edgeMoat);
+            }
+            // Moat blocks with no edge (towers, gatehouse bridge) last, nearest first.
+            List<ProceduralWallBlock> unassigned = new ArrayList<>();
+            for (Map.Entry<Integer, List<ProceduralWallBlock>> e : moatByEdge.entrySet()) {
+                if (e.getKey() < 0 || e.getKey() >= layout.edges().size()) {
+                    unassigned.addAll(e.getValue());
+                }
+            }
+            if (!unassigned.isEmpty() && !SkillManager.shouldAbortSkill(bot) && countBuildingBlocks(bot) > 0) {
+                unassigned.sort(Comparator.comparingDouble(b -> bot.squaredDistanceTo(Vec3d.ofCenter(b.worldPos()))));
+                totalPlaced += buildBlockList(source, bot, world, unassigned);
+            }
             LOGGER.info("[Fortify] Moat placement phase complete: {} blocks placed", totalPlaced);
         }
 
+        // Lining cells still open after placement (ran out of blocks, unreachable). Cells holding
+        // natural ground are left as they are: the plan's lining sits in ground the dig never
+        // opens, so only gaps (dips, caves, earlier digging) get filled.
+        int liningGaps = 0;
+        for (ProceduralWallBlock b : moatPlaceBlocks) {
+            BlockState now = world.getBlockState(b.worldPos());
+            if ((now.isAir() || now.isReplaceable()) && !isPlannedBlockSatisfied(b, now)) {
+                liningGaps++;
+            }
+        }
         boolean moatComplete = remainingAfterDig == 0;
         FortificationPersistenceService.setMoatComplete(server, worldKey, effectiveWallName, moatComplete);
 
         String summary;
         if (moatComplete) {
-            summary = String.format("Moat complete for '%s'. %d blocks dug, %d blocks placed.",
-                effectiveWallName, totalDug, totalPlaced);
+            summary = liningGaps == 0
+                ? String.format("Moat complete for '%s'. %d blocks dug, %d blocks placed.",
+                    effectiveWallName, totalDug, totalPlaced)
+                : String.format("Moat dug for '%s'. %d blocks dug, %d blocks placed, %d lining gaps still open (run it again with building blocks).",
+                    effectiveWallName, totalDug, totalPlaced, liningGaps);
             ChatUtils.sendChatMessages(source, "§a[Fortify] " + summary);
             showOverhead(bot, "Moat done!");
         } else {
@@ -1867,13 +1915,17 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             showOverhead(bot, "Cleaned up " + tornDown + " scaffolds.");
         }
 
-        // Final report — verify with world scan before marking complete
-        int totalPlanned = layout.allBlocks().size();
+        // Final report — verify with world scan before marking complete. Count only the blocks
+        // this build places: moat and clearance cells belong to the moat skill and never count as
+        // present here, so including them capped the ratio near 25% and the report always said
+        // "Partial".
+        int totalPlanned = layoutHelper.countActiveBlocks(layout.allBlocks());
         int presentInWorld = countPresentBlocks(world, layout.allBlocks());
         double overallRatio = totalPlanned > 0 ? (double) presentInWorld / totalPlanned : 0;
         int pct = (int) (overallRatio * 100);
 
         if (overallRatio >= FortificationPersistenceService.EDGE_COMPLETION_THRESHOLD) {
+            FortificationPersistenceService.updateProgress(server, worldKey, wallName, edgesCompleted, totalPlaced);
             FortificationPersistenceService.markComplete(server, worldKey, wallName);
             ChatUtils.sendChatMessages(source, "§a[Fortify] Fortification complete! "
                     + totalPlaced + " blocks placed (" + presentInWorld + "/" + totalPlanned
@@ -2959,7 +3011,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                                  int referenceSurfaceY,
                                  SurfaceProfile surfaceProfile,
                                  ExecutionPolicy executionPolicy) {
-        // Collision check: only count ABOVE-GROUND wall-type blocks for overlap detection.
+        // Collision check: count wall-type cells taken by something the plan doesn't want there
+        // (a house, a foreign build). A cell that already holds the planned block (or an accepted
+        // substitute) is this wall, usually from an earlier run, and never counts: counting it made
+        // Resume skip every side that was already more than 40% built.
         int wallBlockCount = 0;
         int occupiedCount = 0;
         for (ProceduralWallBlock block : placeBlocks) {
@@ -2970,12 +3025,13 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                     || t == WallBlockType.GATEHOUSE_CAP) {
                 wallBlockCount++;
                 BlockState existing = world.getBlockState(block.worldPos());
-                if (!existing.isAir() && !existing.isReplaceable()) {
+                if (FortifyOverlapPolicy.countsAsOverlap(existing.isAir() || existing.isReplaceable(),
+                        isPlannedBlockSatisfied(block, existing))) {
                     occupiedCount++;
                 }
             }
         }
-        if (wallBlockCount > 0 && occupiedCount > wallBlockCount * 0.4) {
+        if (FortifyOverlapPolicy.shouldSkipEdge(wallBlockCount, occupiedCount)) {
             LOGGER.warn("Edge {} has {}% overlap with existing structures, skipping",
                     edge.index(), (occupiedCount * 100) / wallBlockCount);
             showOverhead(bot, "Skipping edge #" + edge.index() + " (structure overlap)");
@@ -3577,15 +3633,55 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      * Skips blocks that are too far away to avoid wasting time on unreachable blocks.
      * Uses fast bail movement — we've already navigated to the area before calling this.
      */
+    private static final int MOAT_RUN_LENGTH = 6;
+
+    /** Distance of {@code pos} along {@code edge} from its start, for ordering a run of blocks. */
+    private static double alongEdge(WallEdge edge, BlockPos pos) {
+        double dx = edge.end().x() - edge.start().x();
+        double dz = edge.end().z() - edge.start().z();
+        double len = Math.sqrt(dx * dx + dz * dz);
+        if (len < 0.001) {
+            return 0.0;
+        }
+        return ((pos.getX() - edge.start().x()) * dx + (pos.getZ() - edge.start().z()) * dz) / len;
+    }
+
+    /**
+     * Keeps the given order in runs of {@link #MOAT_RUN_LENGTH} distinct columns and sorts each
+     * run by Y, then placement priority.
+     */
+    private List<ProceduralWallBlock> orderInRuns(List<ProceduralWallBlock> ordered) {
+        List<ProceduralWallBlock> out = new ArrayList<>(ordered.size());
+        List<ProceduralWallBlock> run = new ArrayList<>();
+        Set<Long> runColumns = new HashSet<>();
+        Comparator<ProceduralWallBlock> layer = Comparator
+                .comparingInt((ProceduralWallBlock b) -> b.worldPos().getY())
+                .thenComparingInt(b -> placePriority(b.type()));
+        for (ProceduralWallBlock b : ordered) {
+            long column = packXZ(b.worldPos().getX(), b.worldPos().getZ());
+            if (!runColumns.contains(column) && runColumns.size() >= MOAT_RUN_LENGTH) {
+                run.sort(layer);
+                out.addAll(run);
+                run.clear();
+                runColumns.clear();
+            }
+            runColumns.add(column);
+            run.add(b);
+        }
+        run.sort(layer);
+        out.addAll(run);
+        return out;
+    }
+
     private int buildBlockList(ServerCommandSource source, ServerPlayerEntity bot,
                                 ServerWorld world, List<ProceduralWallBlock> blocks) {
         // Separate dig vs place
         List<ProceduralWallBlock> digBlocks = new ArrayList<>();
         List<ProceduralWallBlock> placeBlocks = new ArrayList<>();
+        // No isActiveFortifyBlock filter here: that filter drops every moat type (the wall build
+        // leaves the moat to the moat skill), and the moat skill is this method's only caller, so
+        // the filter made it place nothing.
         for (ProceduralWallBlock b : blocks) {
-            if (!isActiveFortifyBlock(b)) {
-                continue;
-            }
             if (b.type() == WallBlockType.MOAT_DIG || b.type() == WallBlockType.EXTERIOR_CLEAR) {
                 digBlocks.add(b);
             } else {
@@ -3610,9 +3706,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             sleepQuiet(BLOCK_PLACE_DELAY_MS);
         }
 
-        // Place phase (layer-by-layer: Y ascending, then priority)
-        placeBlocks.sort(Comparator.comparingInt((ProceduralWallBlock b) -> b.worldPos().getY())
-                .thenComparingInt(b -> placePriority(b.type())));
+        // Place phase: keep the caller's order (along the edge), and within each short run of
+        // MOAT_RUN_LENGTH blocks go layer by layer (Y ascending, then priority), so the floor goes
+        // in before the lining above it without sending the bot back and forth along the edge.
+        placeBlocks = orderInRuns(placeBlocks);
 
         int consecutiveFails = 0;
         BlockPos lastBlockListPos = bot.getBlockPos();
@@ -3627,17 +3724,19 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             double distSq = bot.squaredDistanceTo(Vec3d.ofCenter(block.worldPos()));
             if (distSq > 400) continue;
 
-            // Stuck detection — bail fast if bot hasn't moved
-            BlockPos curPos = bot.getBlockPos();
-            if (curPos.equals(lastBlockListPos)) {
-                blockListStuck++;
-                if (blockListStuck >= 4) break; // stop wasting time
-            } else {
-                blockListStuck = 0;
-                lastBlockListPos = curPos;
+            // Stuck detection — bail fast if the bot keeps failing to walk to its next block.
+            // Several blocks of one column are placed from one spot, so only a needed walk counts.
+            if (distSq > 25) {
+                walkTowardBlock(bot, block.worldPos(), 1500L);
+                BlockPos curPos = bot.getBlockPos();
+                if (curPos.equals(lastBlockListPos)) {
+                    blockListStuck++;
+                    if (blockListStuck >= 4) break; // stop wasting time
+                } else {
+                    blockListStuck = 0;
+                    lastBlockListPos = curPos;
+                }
             }
-
-            if (distSq > 25) walkTowardBlock(bot, block.worldPos(), 1500L);
 
             int terrainY = VillageFortificationLayoutService.terrainY(world, block.worldPos().getX(), block.worldPos().getZ());
             int height = block.worldPos().getY() - terrainY;
