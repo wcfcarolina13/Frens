@@ -276,6 +276,11 @@ final class FortifyEscapeHelper {
             return false;
         }
 
+        if (!ops.canPillarFortifyAt(bot.getBlockPos())) {
+            LOGGER.info("[FortifyTower] scaffold launch refused inside footprint pos={} context={}",
+                    bot.getBlockPos().toShortString(), contextTag);
+            return false;
+        }
         int shaftBlockersBefore = countEscapeShaftBlockers(bot, world, remaining + 1);
         int cleared = clearEscapeShaftHeadroom(bot, world, remaining + 1, contextTag);
         boolean pillared = ScaffoldService.pillarUp(bot, remaining + 1, true);
@@ -294,7 +299,7 @@ final class FortifyEscapeHelper {
             int forceGained = 0;
             for (int step = 0; step < forcePillarSteps; step++) {
                 BlockPos feetPos = bot.getBlockPos();
-                if (feetPos.getY() >= referenceSurfaceY) break;
+                if (feetPos.getY() >= referenceSurfaceY || !ops.canPillarFortifyAt(feetPos)) break;
                 if (SkillManager.shouldAbortSkill(bot)) break;
                 // Jump first, then place at the feet position while airborne
                 BotActions.jump(bot);
@@ -390,7 +395,8 @@ final class FortifyEscapeHelper {
                 navOps.walkTowardBlock(bot, target, 800L);
                 ops.sleepQuiet(100);
                 int newRemaining = Math.max(1, referenceSurfaceY - bot.getBlockPos().getY());
-                if (newRemaining > 0 && newRemaining <= MAX_SCAFFOLD_HEIGHT) {
+                if (newRemaining > 0 && newRemaining <= MAX_SCAFFOLD_HEIGHT
+                        && ops.canPillarFortifyAt(bot.getBlockPos())) {
                     clearEscapeShaftHeadroom(bot, world, newRemaining + 1, contextTag);
                     boolean retryPillared = ScaffoldService.pillarUp(bot, newRemaining + 1, true);
                     boolean retryProgress = bot.getBlockPos().getY() > startPos.getY();

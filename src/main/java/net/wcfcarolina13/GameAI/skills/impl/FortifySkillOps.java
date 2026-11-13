@@ -54,13 +54,22 @@ final class FortifySkillOps {
         /** Mine a single block for navigation break-through. */
         boolean digBlockForNavigation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos);
 
+        /** Temporary pillars must stay outside every planned tower footprint. */
+        boolean canPillarFortifyAt(BlockPos pos);
+
+        /** Refuse and log a satisfied layout block before mining or scaffold cleanup. */
+        boolean refusePlannedMining(ServerWorld world, BlockPos pos, String context);
+
+        /** Only the bounded tower-ring exit may deliberately open a satisfied layout cell. */
+        boolean digBlockForTowerRingBreakout(ServerPlayerEntity bot, ServerWorld world, BlockPos pos);
+
         /** Eye-based reach check (4.5-block squared distance). */
         boolean isWithinReach(ServerPlayerEntity bot, BlockPos pos);
 
         /** Feet-based mining reach check (matches MiningTool gate). */
         boolean isWithinMiningReach(ServerPlayerEntity bot, BlockPos pos);
 
-        /** Raycast line-of-sight from eye to target block centre. */
+        /** Raycast line-of-sight from eye to sampled target faces. */
         boolean hasLineOfSight(ServerWorld world, ServerPlayerEntity bot, Vec3d eye, BlockPos target);
 
         /** Check skill abort flag; stops the bot if aborting. Returns true → caller should bail. */
