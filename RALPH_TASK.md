@@ -4,7 +4,20 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-11-08 (1.1.300) — next session starts here
+## Session Handoff 2026-11-13 (1.1.301) — next session starts here
+
+**State:** 1.1.301 = main 21bd2b1c (61 PRs merged since 1.1.300, list in changelog.md "Release wave ... 1.1.301") plus one release fix, 33c53875 (auto-cook keeps its raw meat through its own leaf-litter run). Tests 4647 on the Mac, 0 failures. Sandbox smoke and cook re-test done (driver `tools/sandbox/fix301.py` in frens-dev, replays `frens_1_1_301_*`). frens-stream `./smoke.sh` passes. Not on Modrinth: the last upload is 1.1.297, so the 1.1.301 notes (`.superpowers/releases/Frens 1.1.301 Modrinth notes DRAFT.md`, Mac only) cover 1.1.298-1.1.301. Bradley approves and uploads with `.superpowers/sdd/modrinth/publish-1.1.301.sh`. Not deployed to Nirn (needs his yes). PR #139 was left out (untested).
+
+**Fix next (found by the 1.1.301 smoke, new backlog lines below):**
+- Quit-time bot save race: on a singleplayer quit vanilla can remove the bots before the host-disconnect save, so items from a bot's last 30 s are lost. Fix idea: save fake players in a `PlayerManager.remove` HEAD mixin with a "caller already saved" guard; log the pre-shutdown count even when it is 0.
+- Auto-cook collection: collects cooked food only when the bot is hungry, leaving the rest of a batch in the furnace; `/bot cook beef auto` cooked 4 and collected none.
+- A following bot stops at the top of an 8-block drop with stairs beside it (stage B, 0 of 4 plus a no-tree control). Not A/B'd against 1.1.300.
+
+**Known gaps (in the notes):** Fortify towers end well short (21-49 of 54 on open ground), no final report within 12 minutes on a 13-edge village; moat lining placement unproven. Not field-checked on Nirn: everything since 1.1.298. #91 merged on review only; #114 step 6 and #97's combat stop never run.
+
+**Open PRs carried:** #139 (needs a game run), plus the ones in the 1.1.300 handoff below that are still open (check `gh pr list`).
+
+## Session Handoff 2026-11-08 (1.1.300) — superseded by 1.1.301 above
 
 **State:** 1.1.300 = 1.1.299 plus 16 PRs (#13, #18, #19, #22, #25, #26, #57, #67, #69, #73–#79) and one review fix (a cook stopped before its first load leaves the furnace alone), merged through one release PR on Bradley's "review and merge all open PRs on your own that you can". List in changelog.md, "Release wave … 1.1.300". Tests 4282 (cloud; only the root-container `SoulStoreTest.persistCursorFailure…` fails). Not on Modrinth; 1.1.299 isn't either. Mac steps not done for either release: sandbox smoke of the jar, field-checklist phase in frens-dev, frens-stream `./smoke.sh`. No Nirn deploy without Bradley's yes.
 
@@ -879,6 +892,10 @@ Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/a
   `docs/handoffs/ARCHIVE_2026.md` (history only, grep it).
 
 ## Recovered deferrals (2026-10-17)
+
+- [ ] **P1 (M)** Quit-time bot save race: items a bot got in its last 30 s before a singleplayer quit are lost (vanilla removes bots before the host-disconnect save). Fix: save in a `PlayerManager.remove` HEAD mixin. (1.1.301 smoke, 2026-11-13)
+- [ ] **P2 (S)** Auto-cook leaves most of a batch in the furnace (collects only when hungry); `/bot cook beef auto` never collects. (1.1.301 re-test, 2026-11-13)
+- [ ] **P2 (M)** Following bot stops at the top of an 8-block drop with stairs beside it; A/B against 1.1.300 first. (1.1.301 smoke stage B, 2026-11-13)
 Triaged 2026-10-23 (`.superpowers/deferral-triage/triage.md`, Bradley's 7 card rulings): 47 kept, 17 closed.
 
 Deferrals that lived only in superseded handoffs (Ralph retirement audit, `.superpowers/ralph-retirement/audit.md` section 2
@@ -992,8 +1009,8 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [x] "The Pocket installer's pre-wait EOF read, which can hang." (1.1.223 handoff, 2026-09-25) — ✅ 1.1.279 911b1243 (unit-tested; not run in the sandbox)
 - [x] **P2 (S)** "HEARD records (the owner's own replies) are never marked private." (1.1.224 changelog deferral, 2026-09-25) ✅ 1.1.296
 - [ ] **P3 (M)** "remote model pulls and voice installs on the server host" (1.1.225 handoff, 2026-09-26)
-- [ ] **P3 (S)** "a voice-preset picker" (1.1.225 handoff, 2026-09-26)
-- [ ] **P3 (S)** "a persona picker" (1.1.225 handoff, 2026-09-26)
+- [x] **P3 (S)** "a voice-preset picker" (1.1.225 handoff, 2026-09-26) ✅ 1.1.301 (#101)
+- [x] **P3 (S)** "a persona picker" (1.1.225 handoff, 2026-09-26) ✅ 1.1.301 (#101)
 - [x] **P2 (S)** Ruled 2026-10-23 (Bradley): ask once in the AI setup checklist ("Give new companions a soul when Ollama is ready?"), and the answer becomes the default for new bots. Was: "auto-enable on spawn" (souls; 1.1.225 handoff, 2026-09-26) ✅ 1.1.296
 - [ ] **P3 (S)** "dry-run generation" (1.1.225 handoff, 2026-09-26)
 - [ ] **P3 (M)** "Addressee deferrals: mid-sentence third-person mentions, \"you and Bob\" clauses, human nicknames." (1.1.219 handoff; repeated 1.1.220-1.1.222, 2026-09-25)
@@ -1005,7 +1022,7 @@ open. "Needs Bradley" items are decisions, not code. The source handoffs are in 
 - [ ] **P3 (M)** "TEASE peer rule once `SoulSpeechAct` rides on `GroupSceneTurn`" (1.1.212-1.1.214 deferral; 1.1.216 and earlier handoffs, 2026-09-06/07)
 - [x] "`SoulBanterDirector.relationsEnabled()` static read → supplier" (1.1.216 and earlier handoffs, 2026-09-06/07) — Source-complete in the unreleased 2026-10-21 diff: live supplier injected by SoulRuntime; focused 98/98 and full direct JUnit 3471/3471. Not committed, released or field-checked.
 - [x] ✅ Ruled 2026-10-23 (Bradley): won't do, no field symptom. Reopen only if one appears (triage 2026-10-23, Bradley ruling). Was: "`MIN_TRIGRAMS` 3→4" ("if the field session shows quoted-idiom drops"; 1.1.216 and earlier handoffs, 2026-09-06/07)
-- [ ] **P3 (S)** "OWNER_DAMAGE-peer rule deferred (event carries only `ownerId`)." (1.1.212 handoff, 2026-09-06 evening)
+- [x] **P3 (S)** "OWNER_DAMAGE-peer rule deferred (event carries only `ownerId`)." (1.1.212 handoff, 2026-09-06 evening) ✅ 1.1.301 (#89)
 - [x] ✅ Ruled 2026-10-23 (Bradley): won't do, no field symptom. Reopen only if one appears (triage 2026-10-23, Bradley ruling). Was: "ring idle eviction only if a leak shows" (1.1.211 handoff, 2026-09-06)
 - [x] "Deferred minors from the 1.1.203 branch: mask receiver unthrottled; wire cap 64 vs 9 ids" (voice mute masks; 2026-09-04 evening handoff) — ✅ 1.1.284 c982f8b6 (cap only; throttle dropped: it lost the last toggle)
 - [x] ✅ Ruled 2026-10-23 (Bradley): skip voice cloning, presets only (triage 2026-10-23, Bradley ruling). Was: "Pocket voice cloning (HF-gated)" (never built, "Not in this cut" in 1.1.198; Backlog Lineup 2026-09-03 Lane 3)
@@ -1221,7 +1238,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [x] Protected build zones (no-grief areas) — implemented as [ProtectedZoneService](src/main/java/net/wcfcarolina13/GameAI/services/ProtectedZoneService.java) with AABB zones, persisted per-world; consulted by FeedAnimalsSkill, MiningHazardDetector, and others.
 - [x] Fight with teammates — ✅ BotThreatService.augmentHostiles (BEH:1175, BotThreatService:60-80), since e7a047e7
 - [ ] In-game check: stand near passive endermen and confirm bot does not face/aggro them; then provoke one and confirm bot can still target it once hostile
-- [ ] In-game check: drop bot from lethal height with/without a water bucket (Overworld), verify clutch attempts near impact and no attempts in ultrawarm dimensions — **code shipped** in [BotFallSafetyService](src/main/java/net/wcfcarolina13/GameAI/services/BotFallSafetyService.java) ("Attempts a last-second water-bucket clutch when a lethal fall is detected"); just unverified in-game.
+- [x] In-game check: drop bot from lethal height with/without a water bucket (Overworld), verify clutch attempts near impact and no attempts in ultrawarm dimensions — **code shipped** in [BotFallSafetyService](src/main/java/net/wcfcarolina13/GameAI/services/BotFallSafetyService.java) ("Attempts a last-second water-bucket clutch when a lethal fall is detected"); just unverified in-game. ✅ 1.1.301 (#96, sandbox incl. Nether)
 - [ ] Ride sync verification: mount/dismount mirroring across entities — **code shipped** in [RideSyncService](src/main/java/net/wcfcarolina13/GameAI/services/RideSyncService.java); just unverified in-game.
 - [ ] Ride sync leashed persistence: tethered after disconnect/rejoin — **code shipped** in [Frens.java:803-809](src/main/java/net/wcfcarolina13/Frens.java#L803-L809) (`trySecureMountBeforeDismount` + `secureLeashedMountOnDisconnect`); just unverified in-game.
 
@@ -1234,7 +1251,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [ ] Build walls (specified materials, dimensions)
 - [ ] Simple 2-person house
 - [x] Block placement primitives — ✅ BotActions:961-989 PlaceResult
-- [ ] Recipe awareness: refuse and explain if commander lacks recipe
+- [x] Recipe awareness: refuse and explain if commander lacks recipe ✅ 1.1.301 (#102)
 
 ### Farming & Survival
 
@@ -1248,7 +1265,7 @@ User-flagged batch from in-game observation against deployed 1.1.93 (latest.log:
 - [ ] Hobby verification: flower picking, feed-animals, hobby hunt behavior
 - [x] **HealingService cooked food preference**: ✅ Auto-eat now prefers cooked over raw via two-pass search in [HealingService.findCheapestSafeFood](src/main/java/net/wcfcarolina13/GameAI/services/HealingService.java). Raw meats (`BEEF`, `PORKCHOP`, `MUTTON`, `CHICKEN`, `RABBIT`, `COD`, `SALMON`) are skipped on the first pass and admitted on a second pass only if no cooked food is available. Closes the raw-chicken food-poisoning hole and stops the bot from gnawing raw beef next to a stack of cooked beef. Same `cheapest-within-tier` ordering preserved otherwise. See changelog 2026-05-08.
 - [x] **Smoker preference for food cooking** — ✅ shipped 1.1.102. New `FurnacePreference { FOOD, ORE, ANY }` enum threaded through `resolveFurnaceTarget`. FOOD prefers SMOKER (rejects BLAST_FURNACE), ORE prefers BLAST_FURNACE (rejects SMOKER), ANY accepts all. Two-pass selection at every step (commander look-at, shared registry, nearest scan, inventory placement). `cookAllFoodSync` always passes FOOD; `startBatchCookInternal` passes FOOD when `foodOnly`. Smoker crafting (logs + cobblestone non-grid recipe) still out of scope — generic furnace remains the crafting fallback.
-- [ ] **Fuel acquisition fallback**: If no fuel in inventory, attempt mini leaf-litter collection before giving up on cooking
+- [x] **Fuel acquisition fallback**: If no fuel in inventory, attempt mini leaf-litter collection before giving up on cooking ✅ 1.1.301 (#99 + release fix 33c53875)
 
 ### Hunting — Multi-Day Self-Sufficiency (Future Phase)
 

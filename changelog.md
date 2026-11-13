@@ -2,6 +2,87 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Release wave: 61 PRs merged since 1.1.300; 1.1.301 (2026-11-13)
+
+Bradley asked on 2026-11-13 to check that main makes a clean release and then release it. 1.1.301 is main 21bd2b1c plus one release fix (below). Every PR listed was merged to main between 1.1.300 and today with its own review, and most behaviour PRs have a sandbox result on GitHub (not always on the merged head).
+
+- **Included (merged since 1.1.300):** #4, #10, #14, #29, #32, #55, #62, #71, #81-#87, #89-#114, #116, #117, #118, #119, #121-#127, #129-#133, #135-#138, #140, plus the direct commits 2a315114 (terrace-edge tree climb-down), f5039a39 and ae751b1d (community feedback docs).
+- **Left out:** #139 (small fixes: Enchant/Anvil messages, Open Spells permission and others), not yet tested in the game.
+- **Release checks (Mac, 2026-11-13):** `./gradlew clean build` passes: 4641 tests before the release fix, 4647 after, 0 failures. Diff hygiene: no debug output, local paths or stray files in the 1.1.300..1.1.301 diff (the one `System.out` is the wiki exporter's command-line `main`). frens-stream `./smoke.sh` passes, and none of the log lines its director matches changed in this range. Release smoke run on the 1.1.301 jar in the sandbox: boot, two bots, follow, woodcut, stop, come and a rejoin with no Frens errors; tree canopy climb-down 4 of 4 (the #117 head stuck 5 of 7); fall damage (10 blocks, 7 HP) and the water-bucket clutch at 30 blocks; hunt moves from pigs to cows (#137); #81 worker wait; #118 says the return line once. Auto-cook (#99/#105) failed: the bot ate its raw beef during its own leaf-litter run and never cooked, fixed below. Fortify on open ground: towers 21-49 of 54 and no final report within 12 minutes (known gap). Not rerun: Remote Guidance and the Hunt ticks (custom screens; each passed on its merged head). Driver `fix301.py` (frens-dev), replays `frens_1_1_301_smoke_*`.
+- **Modrinth:** the last upload is 1.1.297 (2026-10-24). 1.1.298 to 1.1.300 were never uploaded, so the 1.1.301 notes cover 1.1.298 to 1.1.301. Bradley approves the notes and uploads.
+- **Known gaps (stated in the notes):** Fortify towers still end short of full height (21-45 of 54 in the #135 run). #117's own sandbox run had the bot stay on a tree canopy in 5 of 7 runs. The creeper knock-back (#90) and the other fixes since 1.1.298 are not field-checked on Nirn. #91 merged on review without a game run (Bradley's ruling). #114 step 6 and the #135 finish report were not reached in their runs.
+- **Release fix (33c53875, found by the smoke run):** a bot keeps its raw meat through auto-cook's own leaf-litter fuel run. The raw-meat hold (#105) switched off while any task held the bot's slot, including that fuel run, so the bot ate the meat it was fetching fuel for, its food rose above the cook level and nothing was cooked. New `CookSoonEligibilityPolicy` (6 tests) forgives only the busy signals the fuel run causes, the cook-soon cache no longer serves an answer across a run's start or end, and the post-run log names the real reason instead of "still has no fuel". Cost: if the player switches the bot to follow mid-run, the hold lasts until the run ends (the 3-minute, food and health limits still apply). The hold still ends on the walk to the furnace once the cook task starts (pre-existing). Sandbox: 2 of 2 runs keep all 4 raw beef through the leaf-litter run, then `Auto-cook: started batch cook for Cookz after gathering leaf litter` (replay `frens_1_1_301_retest_cook.zip`).
+- **Entries for PRs that left the changelog to the release wave:**
+  - #4: Bot respawn no longer sleeps on the server thread; a timed-out tool swap retries once.
+  - #10: A skill that throws while starting no longer locks the bot's task slot.
+  - #14: Design doc: container fetch and organize options (docs only).
+  - #29: Blind straight-line walks now check the floor first.
+  - #32: Quick Store / Quick Fetch: follow no longer steers the bot, `/bot stop` interrupts the walk.
+  - #55: CI runs the JUnit suite on every push and PR (its changelog entry is below this one).
+  - #62: Guide: two new Settings cards.
+  - #71: You and <bot>" after a leading name addresses both bots.
+  - #81: After /bot stop, a new command waits up to 2 s for the stopped task to finish unwinding, so a bot never runs two tasks at once.
+  - #82: The legacy registry preview says to import before any bot activity, since the first bot record starts the save's own registry.
+  - #83: After a hunt far from base, the bot says the base is too far to walk and stays, instead of starting a hopeless walk; with teleport during skills on it goes back.
+  - #84: A bot with no blocks digging its way out keeps climbing until it reaches the surface (time budget from the climb), instead of timing out after three steps.
+  - #85: Stopping a bot mid-cook gives back only the food and fuel the bot itself put in; the owner's own same-kind food and fuel stay in the furnace.
+  - #86: After a settings reset, bots keep their identity (UUID from their saved inventory) and only the bots active in the world's last session auto-spawn; despawned bots stay away.
+  - #87: The classic (bidirectional) pathfinder is removed; a saved classic choice loads as unified, and Baritone stays as the opt-in fallback.
+  - #89: Souls: when a mob or player hurts you and two of your soul bots see it, those two trust each other a little more (at most once a day per pair; falls, lava and other environmental damage don't count).
+  - #90: A cornered bot with a sword and no shield hits a creeper to knock it back, then backs off, instead of standing in the blast.
+  - #91: Surface recovery (stale-shelter break-free and other escapes to the surface) now suspends a plain player follow while it walks the bot up, and resumes it silently afterwards, but never after an abort. Return-to-base and force-walk follow keep their old behaviour, because the resume can't restore them yet. Replaces #41.
+  - #92: Souls: a teasing banter scene now nudges the two bots who spoke a little exasperated with each other (+1), at most once per pair per Minecraft day, sharing the friction guard. A banter seed with no subject carries no speech act. Fired banter scenes log their act. Replaces #40.
+  - #93: A guarding bot no longer falls back into the pit it just dug out of; holes are judged from the guard point, also mid-jump, and its sidestep no longer hops down a stair.
+  - #94: A bot now adds its food to the owner's same-kind food already in a furnace instead of giving up, and only loses the items that actually went in.
+  - #95: A bot cooking alongside the owner's food in a furnace takes only as much cooked food as it put in raw; the rest stays for the owner.
+  - #96: Fall clutch skips the water bucket where water evaporates.
+  - #97: Tool-switch retry keeps the tool; Quick Store stops cleanly during the combat wait.
+  - #98: Come no longer walks off a ravine toward a player on the far rim.
+  - #99: Cook fuel fallback: gather leaf litter when out of fuel.
+  - #100: Bots craft iron, golden and diamond armour.
+  - #101: Per-bot persona and voice-preset pickers in AI setup.
+  - #102: Bots respect limitedCrafting on every craft.
+  - #103: Bots take fall damage.
+  - #104: `/bot cook <item> <bot>` cooks with that bot.
+  - #105: Hungry bots hold raw meat for the furnace instead of eating it raw, when a furnace or smoker is near and they have fuel, so auto-cook gets to cook it. They still eat raw meat when food drops to 6, below half health, when hurt above food 10, when busy (except during auto-cook's own fuel run, 1.1.301 release fix), or after waiting 3 minutes at food 10 for a cook that doesn't happen.
+  - #106: Guide data file and wiki.
+  - #107: Auto-cook no longer feeds the bot's fuel to a furnace that's busy with someone else's non-food smelting.
+  - #108: Compass wording for fishing and work loops.
+  - #109: `/bot cook <bot>` and `/bot cook <fuel word>` with a single word now pick that bot or that fuel setting; before, the word was read as an item name, so `/bot cook none` looked for an item called "none" instead of cooking without fuel.
+  - #110: bots choosing their own furnace fuel now burn only plain fuel (leaf litter, leaves, saplings, sticks, logs, planks, coal, charcoal, dried kelp); before, they burned carpets, wool, wooden tools and chests before coal. `/bot cook <item>` without a fuel word now loads the bot's plain fuel (use `none` to skip fuel). The "fuel available" cook hint now names the bot's fuel and the right command.
+  - #111: Quick Store / Quick Fetch on a bot that is fighting now says "is in a fight. Try again once it's safe." instead of telling you to stop a task.
+  - #112: Wiki site.
+  - #113: Guide topics now carry short spoken answers that frens can use when asked how a feature works. The Storage and Navigation Artifacts cards now describe fast-travel speed correctly. New wiki page: Fast travel.
+  - #114: Frens answer how-to questions. Ask a fren in chat ("Jake, how do I fast travel?") and it answers from the Guide with a link that opens the right card; with AI chat on, the fren answers in its own words from the same Guide text. Guests on a server are told when a /bot command needs an operator.
+  - #116: New wiki page: Bases and home. Getting started notes that typed /bot commands need an operator or the world host.
+  - #117: bots following you off a tree canopy no longer hop off the edge or get stuck up there: the follow drop guard also checks in the air, the canopy escape walks off only drops of 3 or less, digs down only over safe falls (after 10 s it accepts a fall of up to 8 onto safe ground, never lava), steps into the hole it digs, and leaves the bot alone when you are on the canopy with it.
+  - #119: New wiki page: Protected zones and no-go areas. The Protected Zones Guide card now explains that digging jobs stop at every zone and that Resume overrides it.
+  - #121: Press Resume to override" at a protected zone now works for Collect Dirt (ascent, descent, stairs) and Dirt Shovel as well as Stripmine, including inside your own base; the message only offers Resume where your bot is allowed to build.
+  - #122: Wiki: new Storage and chests page (Quick Store/Fetch, Storage screen, offloading, supply requests, /bot store). Corrected the Quick Store and Storage Guide cards and the Quick Store and Collect tooltips.
+  - #123: Wiki and Guide: Resume now overrides a protected zone for every digging job, in zones you may build in.
+  - #124: the "Press Resume to override" offer at a protected zone no longer appears where Resume can't help: another player's base, a fortified wall, a mapped village or a bee nest area.
+  - #125: Wiki and Guide: Resume at a protected zone is offered only where it can override.
+  - #126: Wiki: new Guard and patrol page.
+  - #127: Wiki adds a Farming page. The Build Farm, Plant Seeds and Harvest Crops Guide cards and the Farming button tooltip now describe what the jobs actually do.
+  - #129: Wiki adds Hunting and Fortify pages. The Guide gains Guard & Patrol and Hunting cards, and the Fortify Village card now matches what the build does.
+  - #130: Wiki adds AI chat, Multiplayer and Spells pages. Several spell and chat Guide cards now match the code (Regroup command, Wizard's Tome use, spell items, Remote Guidance costs, group chat words).
+  - #131: Remote Guidance spends its pearls only when the fren actually leaves; a cast refused for a fight, the travel rest, a mount or a missing travel item costs nothing. Summon, Home and Soul of Ender no longer suggest an Ender Pearl in their refusal messages.
+  - #132: Spell access checks accept only the Wizard's Tome item. Old renamed-book tokens from early builds no longer count; craft a Tome or use an Enchanting Table.
+  - #133: The Hunting screen's Hunt button hunts every ticked animal, nearest first, instead of one at random. The ticks no longer limit typed hunts, Auto Hunt or the hunt hobby.
+  - #135: Fortify's finish report counts only the wall, towers and gatehouse, so a finished wall is reported complete instead of "Partial". Resume no longer skips sides it had partly built. The moat fills open gaps in its planned lining and reports any left.
+  - #136: Remote Guidance: the destination list scrolls instead of covering the Confirm button when many bases are saved.
+  - #137: Hunting: when one ticked animal runs low, the hunt moves on to the other ticked animals instead of ending.
+  - #138: Fortify: a fren standing inside a tower no longer takes the tower's own post for the ground and burns the tower's time trying to climb out, and it breaks out if its own ring walls it in. The moat dig no longer digs out the ground under the fren, and cells an escape pillar filled back in get dug again.
+  - #140: Fortify: towers no longer tear down their own blocks while building, and the moat dig can reach the last cells at the bottom of the ditch, so the moat lining gets placed.
+- **Rulings (Bradley 2026-11-13: "go with your recommended fixes"; cost if wrong):**
+  - Fix the auto-cook hold before shipping instead of listing it as a gap. Cost: none beyond the delay.
+  - Ship with the quit-time save race as a known limit. On a singleplayer quit, vanilla can remove the bots before the host-disconnect save runs, so the final save finds none and items a bot got in its last 30 s are lost (2 of 3 sandbox quits today; the pre-shutdown capture also missed a bot in the third). The save path is unchanged since 1.1.300, so this is not new in 1.1.301. Fix idea: save fake players in a `PlayerManager.remove` HEAD mixin. Cost if wrong: players lose up to 30 s of bot inventory changes on quit until the fix ships.
+  - Ship with a following bot stopping at the top of an 8-block drop (smoke stage B, 0 of 4 plus a no-tree control), not A/B'd against 1.1.300. Cost: it may be a regression we shipped.
+- **Leads from the re-test, not fixed:** auto-cook collects cooked food once (when the bot is hungry) and leaves the rest in the furnace until the bot is hungry again, so a 4-beef batch left 3 in the furnace for over 3 minutes. `/bot cook beef auto` cooked all 4 and never collected them. A bot walking to collect output ate raw beef on the way (the hold ends once a cook task holds the slot, pre-existing).
+- **Fable review:** SHIP AFTER FIXES. The fixes were the cook re-test, the quit-save check, this entry, and the notes (cut the untested guest line and the unproven moat-lining and finish-report claims, correct `limited_crafting`, give an honest tower limit, add the drop and quit-save limits, and replace "every change was tested").
+- **Tests:** 4641 → 4647.
+- **Field checks:** Phase for 1.1.301 in the field checklist (frens-dev). No Nirn deploy without Bradley's yes.
+
 ## CI runs the test suite (2026-11-05, unreleased)
 
 CI ran `./gradlew build -x test`, so the JUnit suite (about 3900 tests: pure policy, wiring and
