@@ -6,7 +6,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 ## Session Handoff 2026-11-13 (1.1.301) — next session starts here
 
-**State:** 1.1.301 = main 21bd2b1c (61 PRs merged since 1.1.300, list in changelog.md "Release wave ... 1.1.301") plus one release fix, 33c53875 (auto-cook keeps its raw meat through its own leaf-litter run). Tests 4647 on the Mac, 0 failures. Sandbox smoke and cook re-test done (driver `tools/sandbox/fix301.py` in frens-dev, replays `frens_1_1_301_*`). frens-stream `./smoke.sh` passes. On Modrinth since 2026-11-13 (version ywJ7G7Ud, notes cover 1.1.298-1.1.301; 1.1.298-1.1.300 were never uploaded on their own). Not deployed to Nirn (needs his yes). PR #139 was left out (untested).
+**State:** 1.1.301 = main 21bd2b1c (61 PRs merged since 1.1.300, list in changelog.md "Release wave ... 1.1.301") plus one release fix, 33c53875 (auto-cook keeps its raw meat through its own leaf-litter run). Tests 4647 on the Mac, 0 failures. Sandbox smoke and cook re-test done (driver `tools/sandbox/fix301.py` in frens-dev, replays `frens_1_1_301_*`). frens-stream `./smoke.sh` passes. On Modrinth since 2026-11-13 (version ywJ7G7Ud, notes cover 1.1.298-1.1.301; 1.1.298-1.1.300 were never uploaded on their own). Deployed to Nirn 2026-11-13 after a backup (field Phase 6ch). PR #139 was left out (untested).
 
 **Fix next (found by the 1.1.301 smoke, new backlog lines below):**
 - Quit-time bot save race: on a singleplayer quit vanilla can remove the bots before the host-disconnect save, so items from a bot's last 30 s are lost. Fix idea: save fake players in a `PlayerManager.remove` HEAD mixin with a "caller already saved" guard; log the pre-shutdown count even when it is 0.
