@@ -287,6 +287,13 @@ public class FrensClient implements ClientModInitializer {
     /** Set when the roster is opened. The next time a known companion shows up, a one-shot
      *  notice explains that [-] now means go-to-look and where the roster lives. */
     private static boolean rosterOpenedAwaitingBot = false;
+    /**
+     * On a remote server: the loading roster waiting for the server's list, its parent, and the
+     * last list the server sent (this world, present companions included). Client thread only.
+     */
+    private static BotRestoreScreen pendingRemoteRoster = null;
+    private static Screen pendingRemoteRosterParent = null;
+    private static java.util.List<String> remoteRosterAliases = java.util.List.of();
     private static boolean botsPresentHintShown = false;
     private static long botsPresentHintUntilMs = 0L;
     private static final long BOTS_PRESENT_HINT_DURATION_MS = 10_000L;
@@ -911,6 +918,9 @@ public class FrensClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.OpenRosterPayload.ID, (payload, context) ->
                 context.client().execute(() -> autoAdminRosterPending = true));
 
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.RosterListPayload.ID, (payload, context) ->
+                context.client().execute(() -> onRemoteRoster(context.client(), payload)));
+
         ClientPlayNetworking.registerGlobalReceiver(RecruitmentStatePayload.ID, (payload, context) -> {
             context.client().execute(() -> {
                 survivalRecruitmentEnabled = payload.enabled();
@@ -1150,6 +1160,9 @@ public class FrensClient implements ClientModInitializer {
             // set: that notice is once per game launch.
             rosterOpenedAwaitingBot = false;
             botsPresentHintUntilMs = 0L;
+            pendingRemoteRoster = null;
+            pendingRemoteRosterParent = null;
+            remoteRosterAliases = java.util.List.of();
         });
         // Push this client's personal voice-category mute mask on join so the server can skip
         // muted categories per recipient instead of muting them for everyone.
@@ -1370,46 +1383,26 @@ public class FrensClient implements ClientModInitializer {
      */
     private static java.util.Set<String> savedBotAliasesLower() {
         java.util.Set<String> out = new java.util.HashSet<>();
-        if (Frens.CONFIG == null) {
-            return out;
-        }
-        java.util.List<String> all = new java.util.ArrayList<>();
-        all.addAll(Frens.CONFIG.getBotGameProfile().keySet());
-        all.addAll(Frens.CONFIG.getBotOwnership().keySet());
-        all.addAll(Frens.CONFIG.getAllBotAliases());
-        all.addAll(Frens.CONFIG.getBotQuestMemory().keySet());
-        for (String alias : all) {
-            if (alias != null && !alias.isBlank()) {
-                out.add(net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.normalize(alias));
-            }
+        for (String alias : net.wcfcarolina13.GameAI.services.RosterMembershipService.savedAliases(Frens.CONFIG)) {
+            out.add(net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.normalize(alias));
         }
         return out;
     }
 
     public static java.util.List<String> getKnownRestorableBotAliases() {
-        java.util.LinkedHashSet<String> aliasSet = new java.util.LinkedHashSet<>();
-        if (Frens.CONFIG != null) {
-            aliasSet.addAll(Frens.CONFIG.getBotGameProfile().keySet());
-            aliasSet.addAll(Frens.CONFIG.getBotOwnership().keySet());
-            aliasSet.addAll(Frens.CONFIG.getAllBotAliases());
-            aliasSet.addAll(Frens.CONFIG.getBotQuestMemory().keySet());
-        }
+        java.util.List<String> aliases = new java.util.ArrayList<>(
+                net.wcfcarolina13.GameAI.services.RosterMembershipService.savedAliases(Frens.CONFIG));
         if (recruitmentBotAlias != null && !recruitmentBotAlias.isBlank()) {
-            aliasSet.add(recruitmentBotAlias.trim());
-        }
-
-        java.util.ArrayList<String> aliases = new java.util.ArrayList<>();
-        for (String alias : aliasSet) {
-            if (alias == null) {
-                continue;
+            String recruit = recruitmentBotAlias.trim();
+            boolean listed = "default".equalsIgnoreCase(recruit);
+            for (String alias : aliases) {
+                listed |= alias.equalsIgnoreCase(recruit);
             }
-            String trimmed = alias.trim();
-            if (trimmed.isEmpty() || "default".equalsIgnoreCase(trimmed)) {
-                continue;
+            if (!listed) {
+                aliases.add(recruit);
+                aliases.sort(String.CASE_INSENSITIVE_ORDER);
             }
-            aliases.add(trimmed);
         }
-        aliases.sort(String.CASE_INSENSITIVE_ORDER);
         return aliases;
     }
 
@@ -1457,7 +1450,7 @@ public class FrensClient implements ClientModInitializer {
         if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
             return false;
         }
-        java.util.List<String> knownAliases = getKnownRestorableBotAliases();
+        java.util.List<String> knownAliases = hintRosterAliases(client);
         if (knownAliases.isEmpty()) {
             return false;
         }
@@ -1502,6 +1495,10 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
         rosterOpenedAwaitingBot = true;
+        if (client.getServer() == null) {
+            openRemoteRosterScreen(client, parent);
+            return;
+        }
         java.util.concurrent.CompletableFuture<RosterWorldMembership> pending = submitRosterWorldMembership(client);
         RosterWorldMembership membership = null;
         boolean late = false;
@@ -1526,6 +1523,62 @@ public class FrensClient implements ClientModInitializer {
                 }
             }));
         }
+    }
+
+    /**
+     * The aliases the roster hints judge by: this client's own config in singleplayer or when
+     * hosting, and on a remote server the last list that server sent (empty until the roster has
+     * opened once). The local config names nothing on a remote server.
+     */
+    private static java.util.List<String> hintRosterAliases(MinecraftClient client) {
+        if (client != null && client.getServer() == null) {
+            return remoteRosterAliases;
+        }
+        return getKnownRestorableBotAliases();
+    }
+
+    /**
+     * On a server this client is not hosting, the roster comes from the server: ask, show a
+     * loading screen, and swap in the answer ({@link #onRemoteRoster}). A server without the
+     * request (older Frens) gets a screen with no list, since the local names are not its own.
+     */
+    private static void openRemoteRosterScreen(MinecraftClient client, Screen parent) {
+        if (!ClientPlayNetworking.canSend(net.wcfcarolina13.network.RosterRequestPayload.ID)) {
+            pendingRemoteRoster = null;
+            pendingRemoteRosterParent = null;
+            client.setScreen(BotRestoreScreen.unsupported(parent));
+            return;
+        }
+        BotRestoreScreen loading = BotRestoreScreen.loading(parent);
+        pendingRemoteRoster = loading;
+        pendingRemoteRosterParent = parent;
+        client.setScreen(loading);
+        ClientPlayNetworking.send(net.wcfcarolina13.network.RosterRequestPayload.INSTANCE);
+    }
+
+    private static void onRemoteRoster(MinecraftClient client, net.wcfcarolina13.network.RosterListPayload payload) {
+        if (client == null || payload == null) {
+            return;
+        }
+        remoteRosterAliases = java.util.List.copyOf(payload.thisWorld());
+        BotRestoreScreen waiting = pendingRemoteRoster;
+        Screen parent = pendingRemoteRosterParent;
+        pendingRemoteRoster = null;
+        pendingRemoteRosterParent = null;
+        if (waiting == null || client.currentScreen != waiting) {
+            return;
+        }
+        java.util.Set<String> present = presentPlayerNamesLower(client);
+        java.util.Set<String> presentOrEmpty = present == null ? java.util.Set.of() : present;
+        java.util.List<String> restorable = net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
+                payload.thisWorld(), presentOrEmpty);
+        java.util.List<String> otherWorlds = net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.restorable(
+                payload.otherWorlds(), presentOrEmpty);
+        boolean allSavedPresent = !payload.thisWorld().isEmpty() && restorable.isEmpty();
+        // Every name the server sends has a saved record there.
+        client.setScreen(new BotRestoreScreen(parent, restorable, otherWorlds, allSavedPresent,
+                payload.thisWorld().size(),
+                payload.canManage() ? BotRestoreScreen.Mode.MANAGE : BotRestoreScreen.Mode.VIEW_ONLY));
     }
 
     /** The roster screen for a membership read, or the unscoped (every world) list when it is null. */
@@ -1570,40 +1623,9 @@ public class FrensClient implements ClientModInitializer {
         }
         try {
             return server.submit(() -> {
-                String fingerprint = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
-                String levelName = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentLevelName(server);
-                java.util.Set<String> here = new java.util.HashSet<>();
-                java.util.Set<String> any = new java.util.HashSet<>();
-                java.util.Map<String, java.util.Set<String>> keysByAlias = new java.util.HashMap<>();
-                if (Frens.CONFIG != null) {
-                    for (java.util.Map.Entry<String, java.util.Map<String, net.wcfcarolina13.FilingSystem.ManualConfig.BotSpawn>> e
-                            : Frens.CONFIG.getBotSpawnPointsByWorld().entrySet()) {
-                        if (e.getKey() != null && e.getValue() != null) {
-                            keysByAlias.computeIfAbsent(
-                                    net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.normalize(e.getKey()),
-                                    k -> new java.util.HashSet<>()).addAll(e.getValue().keySet());
-                        }
-                    }
-                }
-                for (java.util.Map.Entry<String, java.util.Set<String>> e
-                        : net.wcfcarolina13.GameAI.services.BotWorldStateService.worldKeysByAlias().entrySet()) {
-                    keysByAlias.computeIfAbsent(
-                            net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.normalize(e.getKey()),
-                            k -> new java.util.HashSet<>()).addAll(e.getValue());
-                }
-                for (java.util.Map.Entry<String, java.util.Set<String>> e : keysByAlias.entrySet()) {
-                    for (String key : e.getValue()) {
-                        if (net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.isUnscopedKey(key)) {
-                            continue;
-                        }
-                        any.add(e.getKey());
-                        if (net.wcfcarolina13.GraphicalUserInterface.RosterScopePolicy.isCurrentWorldKey(
-                                key, fingerprint, levelName)) {
-                            here.add(e.getKey());
-                        }
-                    }
-                }
-                return new RosterWorldMembership(here, any);
+                net.wcfcarolina13.GameAI.services.RosterMembershipService.Membership m =
+                        net.wcfcarolina13.GameAI.services.RosterMembershipService.membership(server, Frens.CONFIG);
+                return new RosterWorldMembership(m.inThisWorld(), m.withAnyWorld());
             });
         } catch (Throwable t) {
             Frens.LOGGER.info("roster world scope unavailable, showing every world: {}", String.valueOf(t));
@@ -1622,7 +1644,7 @@ public class FrensClient implements ClientModInitializer {
         if (present == null) {
             return;
         }
-        if (net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.anyPresent(getKnownRestorableBotAliases(), present)) {
+        if (net.wcfcarolina13.GraphicalUserInterface.RosterPresencePolicy.anyPresent(hintRosterAliases(client), present)) {
             rosterOpenedAwaitingBot = false;
             botsPresentHintShown = true;
             botsPresentHintUntilMs = System.currentTimeMillis() + BOTS_PRESENT_HINT_DURATION_MS;
@@ -1633,7 +1655,7 @@ public class FrensClient implements ClientModInitializer {
         if (client == null) {
             return;
         }
-        if (getKnownRestorableBotAliases().isEmpty()) {
+        if (hintRosterAliases(client).isEmpty()) {
             return;
         }
         openRosterScreen(null);
