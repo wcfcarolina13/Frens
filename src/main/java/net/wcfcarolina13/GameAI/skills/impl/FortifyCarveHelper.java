@@ -363,9 +363,9 @@ final class FortifyCarveHelper {
                 boolean overheadMined = false;
                 boolean headMined = true;
                 if (preferHeadFirstEscapeOrder && headBlocking) {
-                    headMined = ops.digBlockForNavigation(bot, world, headPos);
+                    headMined = ops.digBlockForNavigation(bot, world, headPos, FortifyMiningPolicy.Context.CARVE_RECOVERY);
                 } else if (!preferHeadFirstEscapeOrder && mineOverhead) {
-                    if (!ops.digBlockForNavigation(bot, world, overheadPos)) {
+                    if (!ops.digBlockForNavigation(bot, world, overheadPos, FortifyMiningPolicy.Context.CARVE_RECOVERY)) {
                         // Soft-skip: overhead failure doesn't reject this candidate
                         mineOverhead = false;
                         overheadOriginal = null;
@@ -388,7 +388,7 @@ final class FortifyCarveHelper {
                     continue;
                 }
                 if (preferHeadFirstEscapeOrder && mineOverhead) {
-                    if (!ops.digBlockForNavigation(bot, world, overheadPos)) {
+                    if (!ops.digBlockForNavigation(bot, world, overheadPos, FortifyMiningPolicy.Context.CARVE_RECOVERY)) {
                         mineOverhead = false;
                         overheadOriginal = null;
                     } else {
@@ -396,7 +396,7 @@ final class FortifyCarveHelper {
                     }
                 }
                 if (!preferHeadFirstEscapeOrder && headBlocking) {
-                    headMined = ops.digBlockForNavigation(bot, world, headPos);
+                    headMined = ops.digBlockForNavigation(bot, world, headPos, FortifyMiningPolicy.Context.CARVE_RECOVERY);
                     if (!headMined && overheadOriginal != null && overheadMined) {
                         ReplaceBlockResult rollback = cleanupProcessor.tryReplaceMinedBlock(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
                         if (!rollback.success()) {
@@ -415,7 +415,7 @@ final class FortifyCarveHelper {
 
                 boolean feetMined = true;
                 if (feetBlocking) {
-                    feetMined = ops.digBlockForNavigation(bot, world, feetPos);
+                    feetMined = ops.digBlockForNavigation(bot, world, feetPos, FortifyMiningPolicy.Context.CARVE_RECOVERY);
                     if (!feetMined && headOriginal != null && headMined) {
                         ReplaceBlockResult rollback = cleanupProcessor.tryReplaceMinedBlock(bot, world, headPos, headOriginal, headMandatory, replaceContext);
                         if (!rollback.success()) {

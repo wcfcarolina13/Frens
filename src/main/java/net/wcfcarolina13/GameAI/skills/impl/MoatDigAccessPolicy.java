@@ -4,8 +4,9 @@ package net.wcfcarolina13.GameAI.skills.impl;
 final class MoatDigAccessPolicy {
     private MoatDigAccessPolicy() {}
 
-    static boolean dropCoveredClear(boolean exteriorClear, boolean solidAbove, boolean abovePlannedForDig) {
-        return exteriorClear && solidAbove && !abovePlannedForDig;
+    static boolean dropCoveredClear(boolean exteriorClear, boolean solidAbove, boolean abovePlannedForDig,
+                                    boolean aboveTrackedScaffold) {
+        return exteriorClear && solidAbove && !abovePlannedForDig && !aboveTrackedScaffold;
     }
 
     static int compareHeight(int leftY, int rightY) { return Integer.compare(rightY, leftY); }

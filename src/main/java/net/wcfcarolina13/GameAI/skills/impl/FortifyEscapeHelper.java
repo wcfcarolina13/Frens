@@ -238,7 +238,7 @@ final class FortifyEscapeHelper {
             if (fortifyCtx && ops.isWithinMiningReach(bot, pos)) {
                 NavBreakCandidateEval eval = ops.evaluateBreakForNavigation(world, pos, true);
                 if (eval.allowed()) {
-                    dug = ops.digBlockForNavigation(bot, world, pos);
+                    dug = ops.digBlockForNavigation(bot, world, pos, FortifyMiningPolicy.Context.ESCAPE_HEADROOM);
                 } else if (dy <= 3) {
                     // Immediate headroom (1-2 blocks above head): the bot MUST clear these
                     // to escape entombment. By-pass nav-break rejection and use navigation
@@ -246,11 +246,11 @@ final class FortifyEscapeHelper {
                     // prevent clearing the bot's own fortification blocks near villages.
                     LOGGER.info("[FortifyNav] escape-shaft forcing dig at {} dy={} (nav-break rejected)",
                             pos.toShortString(), dy);
-                    dug = ops.digBlockForNavigation(bot, world, pos);
+                    dug = ops.digBlockForNavigation(bot, world, pos, FortifyMiningPolicy.Context.ESCAPE_HEADROOM);
                 }
             }
             if (!dug) {
-                dug = ops.digBlock(bot, world, pos);
+                dug = ops.digBlock(bot, world, pos, FortifyMiningPolicy.Context.ESCAPE_HEADROOM);
             }
             if (dug) {
                 cleared++;
@@ -384,12 +384,12 @@ final class FortifyEscapeHelper {
                         bestDir, startPos.toShortString(), target.toShortString(), shaftBlockersAfter, bestBlockers);
                 BlockState tFeet = world.getBlockState(target);
                 if (!tFeet.isAir() && tFeet.getHardness(world, target) >= 0) {
-                    ops.digBlock(bot, world, target);
+                    ops.digBlock(bot, world, target, FortifyMiningPolicy.Context.ESCAPE_HEADROOM);
                     ops.sleepQuiet(80);
                 }
                 BlockState tHead = world.getBlockState(target.up());
                 if (!tHead.isAir() && tHead.getHardness(world, target.up()) >= 0) {
-                    ops.digBlock(bot, world, target.up());
+                    ops.digBlock(bot, world, target.up(), FortifyMiningPolicy.Context.ESCAPE_HEADROOM);
                     ops.sleepQuiet(80);
                 }
                 navOps.walkTowardBlock(bot, target, 800L);
@@ -463,7 +463,7 @@ final class FortifyEscapeHelper {
             BlockPos headBlock = botPos.up(2);
             BlockState headState = world.getBlockState(headBlock);
             if (!headState.isAir() && headState.getHardness(world, headBlock) >= 0) {
-                ops.digBlock(bot, world, headBlock);
+                ops.digBlock(bot, world, headBlock, FortifyMiningPolicy.Context.ESCAPE_HEADROOM);
                 ops.sleepQuiet(100);
             }
             BotActions.jump(bot);

@@ -51,8 +51,13 @@ final class FortifySkillOps {
         /** Mine a single block; returns true if removed or already air. */
         boolean digBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos);
 
-        /** Mine a single block for navigation break-through. */
-        boolean digBlockForNavigation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos);
+        /** Mine a single block with an explicit recovery or routine-clearing reason. */
+        boolean digBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                         FortifyMiningPolicy.Context context);
+
+        /** Mine a single block for navigation break-through with an explicit recovery reason. */
+        boolean digBlockForNavigation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                                      FortifyMiningPolicy.Context context);
 
         /** Temporary pillars must stay outside every planned tower footprint. */
         boolean canPillarFortifyAt(BlockPos pos);
@@ -60,7 +65,7 @@ final class FortifySkillOps {
         /** Refuse and log a satisfied layout block before mining or scaffold cleanup. */
         boolean refusePlannedMining(ServerWorld world, BlockPos pos, String context);
 
-        /** Only the bounded tower-ring exit may deliberately open a satisfied layout cell. */
+        /** Bounded tower-ring exit with mandatory layout repairs. */
         boolean digBlockForTowerRingBreakout(ServerPlayerEntity bot, ServerWorld world, BlockPos pos);
 
         /** Eye-based reach check (4.5-block squared distance). */
