@@ -230,6 +230,13 @@ public final class BotActionNetworkManager {
                     : "You can only do that for your own bot.");
             return false;
         }
+        if (SpellPermissionPolicy.isSpellAction(action)
+                && !net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.isAdminPermissionAllowed(
+                        player, SpellPermissionPolicy.PERMISSION_KEY)) {
+            BotAccessGate.warnDenied(player, targetName, action.name(), "SPELLS_OFF");
+            tell(player, SpellPermissionPolicy.REFUSAL);
+            return false;
+        }
         Set<String> known = knownBotNamesLower(server);
         String botName = bot == null ? null : bot.getGameProfile().name();
         Optional<String> command = BotActionPolicy.build(action, args, botName, known);

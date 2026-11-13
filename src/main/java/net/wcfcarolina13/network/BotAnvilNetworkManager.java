@@ -12,6 +12,7 @@ import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Commands.modCommandRegistry;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.EntityUtil;
+import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.ui.BotAnvilScreenHandler;
 
 /** Handles the C2S request to open a bot's anvil screen. */
@@ -58,13 +59,23 @@ public final class BotAnvilNetworkManager {
             return;
         }
 
-        if (player.getEntityWorld() != bot.getEntityWorld()
-                || player.squaredDistanceTo(bot) > 64.0 * 64.0) {
+        if (!SurvivalRecruitmentService.isAdminPermissionAllowed(player, SpellPermissionPolicy.PERMISSION_KEY)) {
+            player.sendMessage(Text.literal(SpellPermissionPolicy.REFUSAL), false);
             return;
         }
 
-        BlockPos anvilPos = modCommandRegistry.findNearestAnvil(player, 4);
+        boolean sameWorld = player.getEntityWorld() == bot.getEntityWorld();
+        double distanceSq = sameWorld ? player.squaredDistanceTo(bot) : 0.0;
+        String botName = EntityUtil.safeDisplayName(bot.getName().getString());
+        String tooFar = WorkstationReachPolicy.refusal(botName, sameWorld, distanceSq, true, "an anvil");
+        if (tooFar != null) {
+            player.sendMessage(Text.literal(tooFar), false);
+            return;
+        }
+
+        BlockPos anvilPos = modCommandRegistry.findNearestAnvil(player, WorkstationReachPolicy.WORKSTATION_RADIUS);
         if (anvilPos == null) {
+            player.sendMessage(Text.literal(WorkstationReachPolicy.refusal(botName, true, distanceSq, false, "an anvil")), false);
             return;
         }
 

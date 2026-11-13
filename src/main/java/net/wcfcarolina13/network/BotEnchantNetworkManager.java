@@ -11,6 +11,7 @@ import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.Commands.modCommandRegistry;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.EntityUtil;
+import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.ui.BotEnchantmentScreenHandler;
 
 /** Handles the C2S request to open a bot's enchanting screen. */
@@ -58,14 +59,24 @@ public final class BotEnchantNetworkManager {
         }
 
         // Validate same world and reasonable distance (64 blocks, matching inventory access).
-        if (player.getEntityWorld() != bot.getEntityWorld()
-                || player.squaredDistanceTo(bot) > 64.0 * 64.0) {
+        if (!SurvivalRecruitmentService.isAdminPermissionAllowed(player, SpellPermissionPolicy.PERMISSION_KEY)) {
+            player.sendMessage(Text.literal(SpellPermissionPolicy.REFUSAL), false);
+            return;
+        }
+
+        boolean sameWorld = player.getEntityWorld() == bot.getEntityWorld();
+        double distanceSq = sameWorld ? player.squaredDistanceTo(bot) : 0.0;
+        String botName = EntityUtil.safeDisplayName(bot.getName().getString());
+        String tooFar = WorkstationReachPolicy.refusal(botName, sameWorld, distanceSq, true, "an Enchanting Table");
+        if (tooFar != null) {
+            player.sendMessage(Text.literal(tooFar), false);
             return;
         }
 
         // Find the nearest enchanting table.
-        BlockPos tablePos = modCommandRegistry.findNearestEnchantingTable(player, 4);
+        BlockPos tablePos = modCommandRegistry.findNearestEnchantingTable(player, WorkstationReachPolicy.WORKSTATION_RADIUS);
         if (tablePos == null) {
+            player.sendMessage(Text.literal(WorkstationReachPolicy.refusal(botName, true, distanceSq, false, "an Enchanting Table")), false);
             return;
         }
 

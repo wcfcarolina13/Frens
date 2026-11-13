@@ -112,6 +112,11 @@ public final class SpellNavigationNetworkManager {
             sendFeedback(commander, "Only " + bot.getName().getString() + "'s owner can cast that.");
             return;
         }
+        if (!net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.isAdminPermissionAllowed(
+                commander, SpellPermissionPolicy.PERMISSION_KEY)) {
+            sendFeedback(commander, SpellPermissionPolicy.REFUSAL);
+            return;
+        }
 
         switch (spellType) {
             case "guidance" -> handleRemoteGuidance(server, commander, bot, destination);
