@@ -15,7 +15,7 @@ There is no fast-travel setting. A fren fast-travels on these occasions, and wal
 | Lodestone travel | You run `/bot compass travel <bot>` or `/bot compass travel <bot> <compass name>`. |
 | Storage Go and Collect | You press Go or Collect on a chest in the Storage screen. |
 | Retrieve Drops | You send it to fetch the items from a death. |
-| Remote Guidance spell | You cast it from the Spells tab. Both pearls are used up. |
+| Remote Guidance spell | You cast it from the Spells tab. Both pearls are used up when the fren leaves; a refused cast costs nothing. |
 
 Chorus Recall is different: it is an instant teleport with no delay, paid for with pearls and chorus fruit.
 

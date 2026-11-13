@@ -147,15 +147,6 @@ public final class SpellNavigationNetworkManager {
             goal = baseOpt.get();
         }
 
-        // Consume pearls from both
-        NavigationArtifactService.consumeItem(commander, Items.ENDER_PEARL);
-        NavigationArtifactService.consumeItem(bot, Items.ENDER_PEARL);
-
-        // Play acceptance sound at commander
-        ServerWorld commanderWorld = (ServerWorld) commander.getEntityWorld();
-        commanderWorld.playSound(null, commander.getX(), commander.getY(), commander.getZ(),
-                SoundEvents.ENTITY_ENDER_EYE_LAUNCH, SoundCategory.PLAYERS, 0.7f, 1.2f);
-
         // Fast travel: bot disappears and reappears at destination after a delay (~1s/chunk).
         ServerWorld targetWorld = (ServerWorld) commander.getEntityWorld();
         RegistryKey<World> targetDim = targetWorld.getRegistryKey();
@@ -163,8 +154,26 @@ public final class SpellNavigationNetworkManager {
         boolean crossDim = !((ServerWorld) bot.getEntityWorld()).getRegistryKey().equals(targetDim);
         int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim);
 
-        NavigationArtifactService.beginMagicTravel(
-                server, bot, bot.getName().getString(), goal, targetDim, delayTicks, commander.getUuid());
+        // The pearls are paid only after every travel check has passed (combat, rest, artifacts,
+        // mount); a refused cast costs nothing.
+        boolean started = NavigationArtifactService.beginMagicTravel(
+                server, bot, bot.getName().getString(), goal, targetDim, delayTicks, commander.getUuid(),
+                () -> {
+                    if (!NavigationArtifactService.bothHaveEnderPearl(commander, bot)) {
+                        return false;
+                    }
+                    NavigationArtifactService.consumeItem(commander, Items.ENDER_PEARL);
+                    NavigationArtifactService.consumeItem(bot, Items.ENDER_PEARL);
+                    ServerWorld commanderWorld = (ServerWorld) commander.getEntityWorld();
+                    commanderWorld.playSound(null, commander.getX(), commander.getY(), commander.getZ(),
+                            SoundEvents.ENTITY_ENDER_EYE_LAUNCH, SoundCategory.PLAYERS, 0.7f, 1.2f);
+                    return true;
+                });
+        if (!started) {
+            // The travel service already told the commander why; say the pearls are safe.
+            sendFeedback(commander, "Remote Guidance didn't start. No pearls were used.");
+            return;
+        }
 
         int sec = Math.max(1, delayTicks / 20);
         sendFeedback(commander, "Remote Guidance cast. " + bot.getName().getString()

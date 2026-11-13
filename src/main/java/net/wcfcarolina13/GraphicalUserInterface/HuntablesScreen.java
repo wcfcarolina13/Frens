@@ -18,6 +18,7 @@ import net.wcfcarolina13.network.BotActionClientSender;
 import net.wcfcarolina13.network.BotActionPolicy;
 import net.wcfcarolina13.network.RequestHuntablesPayload;
 import net.wcfcarolina13.network.SaveHuntConfigPayload;
+import net.wcfcarolina13.GameAI.skills.impl.HuntSelectionPolicy;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -375,16 +376,12 @@ public class HuntablesScreen extends Screen {
         }
         String targetArg = "";
 
-        // If specific targets selected, pick the first as the explicit target for the command.
-        // The config service stores the full multi-select list, so the skill will respect it.
+        // Ticked animals: the skill hunts every one of them, nearest first, from the saved
+        // selection. Save it first so the hunt reads this screen's ticks.
         if (!selectedTargets.isEmpty()) {
-            String firstTarget = selectedTargets.iterator().next();
-            Identifier id = Identifier.tryParse(firstTarget);
-            if (id != null && "minecraft".equals(id.getNamespace())) {
-                firstTarget = id.getPath();
-            }
-            command.append(firstTarget);
-            targetArg = firstTarget;
+            saveConfig();
+            command.append(HuntSelectionPolicy.TICKED_OPTION);
+            targetArg = HuntSelectionPolicy.TICKED_OPTION;
         }
 
         if (botTarget != null && !botTarget.isBlank()) {

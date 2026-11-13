@@ -143,6 +143,17 @@ final class FortifyLayoutHelper {
     }
 
     /** Count how many planned blocks are satisfied by desired/fallback material state. */
+    /** How many of {@code allBlocks} the wall build places (the denominator of its finish report). */
+    int countActiveBlocks(List<ProceduralWallBlock> allBlocks) {
+        int count = 0;
+        for (ProceduralWallBlock block : allBlocks) {
+            if (isActiveFortifyBlock(block)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     int countPresentBlocks(ServerWorld world, List<ProceduralWallBlock> allBlocks) {
         int count = 0;
         for (ProceduralWallBlock block : allBlocks) {

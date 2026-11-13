@@ -8,7 +8,7 @@
 
 Hunts animals for food and leather, or zombies when well armed, then cooks the meat.
 
-- Tick one type per hunt. Ticking several hunts only one of them, and ticks also limit hunts that name no mob.
+- Tick every type you want: the Hunt button hunts all of them, nearest first. The ticks only steer the Hunt button, not typed hunts, Auto Hunt or the hunt hobby.
 - Count sets how many. Leave it empty to hunt until nightfall. A hunt with a count keeps going through the night.
 - Zone sets the search range: 48, 80 or 120 blocks.
 - Depop (on by default) only hunts a type with 3 or more around and stops once fewer than 3 are left.

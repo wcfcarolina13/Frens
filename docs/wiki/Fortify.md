@@ -45,7 +45,7 @@ One gate, in the middle of the longest side. The opening is about 2 blocks wide 
 The wall runs 12 blocks outside the village, so it rarely meets a building. It can still end up with gaps:
 
 - blocks it couldn't reach in the time it gives each stretch
-- a whole side skipped because more than 40% of it was already solid when it got there (see [Looking after a wall](#looking-after-a-wall))
+- a whole side skipped because more than 40% of it was taken by something other than the wall, such as a building (see [Looking after a wall](#looking-after-a-wall)). Wall blocks it placed earlier don't count.
 - on a wall that was expanded or resumed, a column within 2 blocks of a village building, which it leaves empty rather than bending the wall
 
 Run patch to fill them.
@@ -84,7 +84,7 @@ When it breaks through to reach a spot, it won't break doors, beds, lecterns, fe
 3. It takes its scaffolding down.
 4. It checks the whole wall and reports.
 
-The report almost always says "Partial completion" with a low percentage, even when the wall looks finished. The figure counts the moat's planned cells, which the normal build doesn't touch. Use Fortify Status and read the wall, tower and gatehouse lines, or run patch to see what is really missing. The wall stage stops after 30 minutes and saves ("Time budget reached. Progress saved as").
+The report counts the wall, tower and gatehouse blocks this stage places, not the moat. At 85% or more it says "Fortification complete" and marks the wall complete; below that it says "Partial completion" and suggests patch. The wall stage stops after 30 minutes and saves ("Time budget reached. Progress saved as").
 
 The wall is saved as soon as building starts, under a name like `wall_120_-30`.
 
@@ -94,7 +94,7 @@ The moat is not part of the normal build. Run **Fortify Moat** or `/bot fortify 
 
 It digs a ditch starting three blocks out from the wall, leaving two blocks of ground between them. The ditch is two blocks wide: 3 deep on the inner side and 2 deep on the outer side. It also clears anything up to 4 blocks above the outer side, such as trees and leaves. The moat stays dry.
 
-The moat plan also has a cobblestone floor, a stone brick lining and a ledge against spiders, but at the moment the fren doesn't place them. It only digs.
+The moat plan also has a cobblestone floor, a stone brick lining and a ledge against spiders. Those cells sit in ground the dig leaves in place, so the fren doesn't replace dirt or stone there. Once the whole ditch is dug, it fills any of them that are open (a dip, a cave, an earlier dig), one side at a time, nearest side first. If gaps stay open, for example because it ran out of building blocks, the report says how many.
 
 The ditch isn't dug in front of the gate, so the ground there is the crossing. Move chests and anything else you want to keep off the moat line first.
 
@@ -102,7 +102,7 @@ The ditch isn't dug in front of the gate, so the ground there is the crossing. M
 
 | Button / command | What it does |
 |---|---|
-| **Resume Wall**, `resume [name]` | Carries on building. It skips the towers and any side that is already more than about a quarter built, so patch afterwards to finish those. |
+| **Resume Wall**, `resume [name]` | Carries on building, including sides it had partly built. It skips the towers, so patch afterwards to finish those. |
 | **Fortify Patch**, `patch [name]` | Checks every side and puts back missing blocks. It also removes stray scaffold. This is the reliable way to finish a wall. |
 | `patch <name> auto`, or Auto Patch in the Bases screen | Patches again and again until nothing is missing or a pass repairs nothing. The wall name is needed when typing it. |
 | **Fortify Status**, `status [name]` | Shows what is built by part and by side, and marks missing blocks in red. The overall percentage mixes in moat cells, so read the wall, tower and gatehouse lines. |
@@ -167,9 +167,8 @@ Typed commands need an operator or the host. Anything else after `fortify` start
 |---|---|
 | There is no moat | The moat is a separate step. Run Fortify Moat. |
 | The wall has gaps | Some blocks couldn't be reached or a side was skipped. Run patch. |
-| A tower or side is unfinished after resume | Resume skips towers and partly built sides. Run patch. |
-| "Partial completion" on a finished wall | The percentage counts the moat plan. Check with Fortify Status or patch. |
-| The moat has no stone floor or lining | The fren only digs the moat at the moment. |
+| A tower is unfinished after resume | Resume skips towers. Run patch. |
+| The moat has no stone floor or lining | It only fills open gaps in the lining. It doesn't replace natural ground with stone. |
 | "No village detected nearby." | Move the fren into the village, at the same height as the houses. |
 | It stopped and said it was out of blocks | Give it more and resume. |
 | It won't use my planks | Planks can't build the wall. Give it stone, cobblestone or dirt. |

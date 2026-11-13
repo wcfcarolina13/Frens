@@ -10,8 +10,8 @@ Uses paired ender pearls to guide your companion across any distance.
 
 - Both you and your companion need at least one Ender Pearl somewhere in your inventories.
 - Choose destination: your location, its home, or one of your bases.
-- Both pearls are used up when you cast, before the trip is checked.
-- It is a fast travel trip with no food needed. A fight cancels it and the pearls are lost. If it is resting from a trip, it leaves when the rest ends. It also needs a way to find the place. Carry a spare pearl each so the pearls still count as that way.
+- Both pearls are used up only when the fren actually leaves. A refused cast costs nothing.
+- It is a fast travel trip with no food needed. The cast is refused during a fight or while the fren rests from its last trip, and the message says how long the rest has left. The pearls also count as its way to find the place.
 - The trip takes about 1.5 seconds per chunk, more across dimensions.
 - Open the Spells tab to cast this spell.
 

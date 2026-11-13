@@ -576,9 +576,9 @@
         "Finds villagers, beds and workstations within 64 blocks, draws an outline around them and builds 12 blocks outside it.",
         "The wall is one block thick and about three and a half blocks high, with a tower at each corner and a gate on the longest side.",
         "Builds only from its own inventory: stone bricks, cobblestone, stone, cobbled deepslate, andesite or dirt. Planks can't be used.",
-        "The moat is a separate step (Fortify Moat). It only digs the ditch at the moment, with no stone lining.",
-        "The finish report counts the moat plan, so it usually says Partial. Use Fortify Status or patch to check the wall.",
-        "Resume skips towers and partly built sides. Patch finishes them and fixes damage.",
+        "The moat is a separate step (Fortify Moat). It digs the ditch and fills open gaps in the planned lining. It does not replace dirt or stone with a stone lining.",
+        "The finish report counts the wall, towers and gatehouse only. Below 85% it says Partial, and patch fills the gaps.",
+        "Resume skips towers. Patch finishes them and fixes damage.",
         "dry_run: preview the layout with particles. status: per-side progress, missing blocks shown in red.",
         "drift / expand / merge / list / name: manage saved walls. Expand only grows a wall.",
         "Tip: Use the Bases screen (Wall Manager) for a wall's buttons, ownership and access."
@@ -798,12 +798,12 @@
       "category": "Spells",
       "title": "Remote Guidance",
       "summary": "Uses paired ender pearls to guide your companion across any distance.",
-      "answer": "We both need an Ender Pearl. Open the Spells tab with [, pick Remote Guidance and choose your location, my home or a base. Both pearls are used up when you cast, and I fast-travel there, after my rest if I just travelled, unless I'm fighting.",
+      "answer": "We both need an Ender Pearl. Open the Spells tab with [, pick Remote Guidance and choose your location, my home or a base. Both pearls are used up only when I actually leave, so if I'm fighting or still resting from my last trip, nothing is spent.",
       "details": [
         "Both you and your companion need at least one Ender Pearl somewhere in your inventories.",
         "Choose destination: your location, its home, or one of your bases.",
-        "Both pearls are used up when you cast, before the trip is checked.",
-        "It is a fast travel trip with no food needed. A fight cancels it and the pearls are lost. If it is resting from a trip, it leaves when the rest ends. It also needs a way to find the place. Carry a spare pearl each so the pearls still count as that way.",
+        "Both pearls are used up only when the fren actually leaves. A refused cast costs nothing.",
+        "It is a fast travel trip with no food needed. The cast is refused during a fight or while the fren rests from its last trip, and the message says how long the rest has left. The pearls also count as its way to find the place.",
         "The trip takes about 1.5 seconds per chunk, more across dimensions.",
         "Open the Spells tab to cast this spell."
       ],
@@ -912,7 +912,7 @@
       "summary": "Hunts animals for food and leather, or zombies when well armed, then cooks the meat.",
       "answer": "Open Actions, Utilities, Hunting, pick an animal and press Hunt, or type /bot skill hunt 5 cow {bot}. You have to kill one of a kind yourself before I can hunt it. I leave babies, pets, named animals and animals inside bases alone.",
       "details": [
-        "Tick one type per hunt. Ticking several hunts only one of them, and ticks also limit hunts that name no mob.",
+        "Tick every type you want: the Hunt button hunts all of them, nearest first. The ticks only steer the Hunt button, not typed hunts, Auto Hunt or the hunt hobby.",
         "Count sets how many. Leave it empty to hunt until nightfall. A hunt with a count keeps going through the night.",
         "Zone sets the search range: 48, 80 or 120 blocks.",
         "Depop (on by default) only hunts a type with 3 or more around and stops once fewer than 3 are left.",

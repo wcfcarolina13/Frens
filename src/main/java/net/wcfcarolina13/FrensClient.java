@@ -2181,11 +2181,6 @@ public class FrensClient implements ClientModInitializer {
         if (main.isOf(ModItems.WIZARD_TOME) || main.isOf(Items.GOAT_HORN) || main.isOf(Items.ENDER_EYE)) {
             return true;
         }
-        if (main.isOf(Items.WRITTEN_BOOK) || main.isOf(Items.ENCHANTED_BOOK)) {
-            String name = main.getName() != null ? main.getName().getString() : "";
-            String lower = name != null ? name.toLowerCase(java.util.Locale.ROOT) : "";
-            return lower.contains("spellbook") || (lower.contains("wizard") && lower.contains("tome"));
-        }
         return false;
     }
 
@@ -2225,24 +2220,8 @@ public class FrensClient implements ClientModInitializer {
             if (stack == null || stack.isEmpty()) {
                 continue;
             }
-            // Preferred: real quest item (not enchantable).
+            // The token is the real quest item only.
             if (stack.isOf(ModItems.WIZARD_TOME)) {
-                return true;
-            }
-            if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
-                continue;
-            }
-            String name = stack.getName() != null ? stack.getName().getString() : "";
-            if (name == null) {
-                continue;
-            }
-            String lower = name.toLowerCase(java.util.Locale.ROOT);
-            // Back-compat: older builds used a renamed book token containing "spellbook".
-            if (lower.contains("spellbook")) {
-                return true;
-            }
-            // New: allow renamed-book variants containing "wizard" + "tome".
-            if (lower.contains("wizard") && lower.contains("tome")) {
                 return true;
             }
         }
@@ -2261,14 +2240,6 @@ public class FrensClient implements ClientModInitializer {
                 continue;
             }
             if (stack.isOf(ModItems.WIZARD_TOME)) {
-                return true;
-            }
-            if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
-                continue;
-            }
-            String name = stack.getName() != null ? stack.getName().getString() : "";
-            String lower = name != null ? name.toLowerCase(java.util.Locale.ROOT) : "";
-            if (lower.contains("wizard") && lower.contains("tome")) {
                 return true;
             }
         }
