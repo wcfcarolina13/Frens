@@ -515,9 +515,27 @@ public final class HuntSkill implements Skill {
                 int remaining = countTargets(world, bot, anchors, candidate.target, request.hobby,
                         huntRadius, huntYSpan);
                 if (remaining < MIN_PEACEFUL_COUNT) {
-                    ChatUtils.sendSystemMessage(source,
-                            "Population getting thin. Heading back. (" + kills + " kills)");
-                    break;
+                    // A named hunt ends here. A hunt over several kinds (ticked animals, or
+                    // anything edible) moves on when another kind is still plentiful: the candidate
+                    // search already skips a kind that is running low.
+                    HuntCandidate nextKind = null;
+                    if (HuntDepopPolicy.mayLookForAnotherKind(explicitTarget != null, kills, request.targetCount)) {
+                        nextKind = findCandidate(world, bot, anchors, discoveredTargets, null, request.hobby(),
+                                depopulationEnabled, selectedTargets, huntRadius, huntYSpan);
+                        if (nextKind != null && (nextKind.entity == null
+                                || blacklistedTargets.contains(nextKind.entity.getUuid()))) {
+                            nextKind = null;
+                        }
+                    }
+                    if (nextKind == null) {
+                        ChatUtils.sendSystemMessage(source,
+                                "Population getting thin. Heading back. (" + kills + " kills)");
+                        break;
+                    }
+                    // Reuse the probe as the next pass's candidate instead of searching again.
+                    prefoundCandidate = nextKind;
+                    ChatUtils.sendSystemMessage(source, "Not many " + candidate.target.label()
+                            + " left. Moving on to " + nextKind.target.label() + ".");
                 }
             }
         }
