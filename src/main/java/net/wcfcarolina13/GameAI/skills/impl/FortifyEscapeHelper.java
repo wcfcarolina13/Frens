@@ -411,7 +411,7 @@ final class FortifyEscapeHelper {
      */
     void escapeIfInHole(FortifySkillOps.FortifyNavOps navOps,
                         ServerPlayerEntity bot, ServerWorld world) {
-        int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+        int terrainY = ops.naturalTerrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
         escapeIfInHole(navOps, bot, world, terrainY);
     }
 
@@ -511,7 +511,7 @@ final class FortifyEscapeHelper {
 
     void ensureOnSurface(FortifySkillOps.FortifyNavOps navOps,
                          ServerPlayerEntity bot, ServerWorld world) {
-        int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+        int terrainY = ops.naturalTerrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
         ensureOnSurface(navOps, bot, world, terrainY);
     }
 }

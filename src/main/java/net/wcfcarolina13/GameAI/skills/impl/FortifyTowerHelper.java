@@ -447,7 +447,7 @@ final class FortifyTowerHelper {
         }
 
         if (newlyPlaced == 0 && !isTowerComplete(ctx.countPresentBlocks(world, vertexBlocks), plannedCount)) {
-            int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+            int terrainY = ops.naturalTerrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
             int depth = terrainY - bot.getBlockPos().getY();
             LOGGER.info("[FortifyTower] zero-progress tower vertex={}/{} pos=({}, {}) botPos={} trapLike={} depth={} noProgressAttempts={} sameStuckPosCount={}",
                     vertexOrdinal + 1, totalVertices,
@@ -459,6 +459,21 @@ final class FortifyTowerHelper {
                     towerNavState != null ? towerNavState.sameStuckPosCount : 0);
         }
 
+        // Leave the tower before the next one starts. The fren often finishes standing on one of
+        // this tower's own ring cells, walled in, and the next tower's approach then spent most of
+        // its time budget breaking out.
+        if (!SkillManager.shouldAbortSkill(bot)) {
+            int presentBeforeExit = ctx.countPresentBlocks(world, vertexBlocks);
+            forceExitTowerFootprint(source, bot, world, vertex, surfaceProfile, 0);
+            // A ring breakout here opens up to four tower cells that no later attempt re-places, so
+            // take them off the count: the tower then reads as incomplete and patch fills it.
+            int opened = Math.max(0, presentBeforeExit - ctx.countPresentBlocks(world, vertexBlocks));
+            if (opened > 0) {
+                LOGGER.info("[FortifyTower] tower ({}, {}) left with {} ring cells opened on exit",
+                        vertex.x(), vertex.z(), opened);
+                newlyPlaced = Math.max(0, newlyPlaced - opened);
+            }
+        }
         return newlyPlaced;
     }
 
@@ -601,7 +616,7 @@ final class FortifyTowerHelper {
             TowerScaffoldSideOutcome sideOutcome = TowerScaffoldSideOutcome.NO_PROGRESS_HARD;
             boolean recoverableScaffoldFailure = false;
 
-            int localTerrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+            int localTerrainY = ops.naturalTerrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
             if (bot.getBlockPos().getY() < localTerrainY - 1) {
                 LOGGER.info("[FortifyTower] scaffold-base launch-precheck below-surface pos={} terrainY={} tower=({}, {})",
                         bot.getBlockPos().toShortString(), localTerrainY, vertex.x(), vertex.z());
@@ -612,7 +627,7 @@ final class FortifyTowerHelper {
                 recoverableScaffoldFailure = true;
             }
             BlockPos launchPrecheckPos = bot.getBlockPos().toImmutable();
-            localTerrainY = VillageFortificationLayoutService.terrainY(world, launchPrecheckPos.getX(), launchPrecheckPos.getZ());
+            localTerrainY = ops.naturalTerrainY(world, launchPrecheckPos.getX(), launchPrecheckPos.getZ());
             int launchDepth = Math.max(0, localTerrainY - launchPrecheckPos.getY());
             boolean launchBelowSurface = launchPrecheckPos.getY() < localTerrainY - 1;
 
@@ -1467,7 +1482,77 @@ final class FortifyTowerHelper {
             if (isInsideTowerFootprint(bot.getBlockPos(), vertex)) {
                 tryTowerHardResetPosition(source, bot, world, vertex, surfaceProfile, attemptOffset + 7);
             }
+            if (isInsideTowerFootprint(bot.getBlockPos(), vertex)) {
+                breakOutOfTowerRing(bot, world, vertex, escape);
+            }
         }
+    }
+
+    /**
+     * Last resort when the fren is walled in by its own tower ring: break the ring cells at feet
+     * and head height on one side and step out. They are planned tower blocks, so a later attempt
+     * places them again from outside. Without this the fren spent the tower's whole time budget
+     * trying to pillar out under the tower post.
+     */
+    private void breakOutOfTowerRing(ServerPlayerEntity bot, ServerWorld world, WallPoint vertex, BlockPos escape) {
+        for (int step = 0; step < 2 && isInsideTowerFootprint(bot.getBlockPos(), vertex); step++) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
+            BlockPos botPos = bot.getBlockPos();
+            Direction preferred = FortifyEscapeHelper.dominantHorizontalDirection(botPos, escape);
+            List<Direction> dirs = new ArrayList<>(List.of(preferred, preferred.rotateYClockwise(),
+                    preferred.rotateYCounterclockwise(), preferred.getOpposite()));
+            boolean moved = false;
+            for (Direction dir : dirs) {
+                BlockPos feet = botPos.offset(dir);
+                BlockPos head = feet.up();
+                if (world.getBlockState(feet.down()).isAir()) {
+                    continue;
+                }
+                if (!canClearForRingBreakout(world, vertex, feet) || !canClearForRingBreakout(world, vertex, head)) {
+                    continue;
+                }
+                LOGGER.info("[FortifyTower] ring-breakout tower=({}, {}) from={} dir={} feet={} head={}",
+                        vertex.x(), vertex.z(), botPos.toShortString(), dir,
+                        world.getBlockState(feet).getBlock().getName().getString(),
+                        world.getBlockState(head).getBlock().getName().getString());
+                clearForRingBreakout(bot, world, head);
+                clearForRingBreakout(bot, world, feet);
+                ops.walkTowardBlock(bot, feet.offset(dir), 1_000L);
+                moved = !bot.getBlockPos().equals(botPos);
+                break;
+            }
+            if (!moved) {
+                LOGGER.info("[FortifyTower] ring-breakout found no side to open tower=({}, {}) pos={}",
+                        vertex.x(), vertex.z(), botPos.toShortString());
+                return;
+            }
+        }
+    }
+
+    /**
+     * Open cells always pass. A solid cell may be broken only inside this tower's own 3x3 columns,
+     * so the breakout never opens an adjoining wall, a gate or the player's own blocks.
+     */
+    private boolean canClearForRingBreakout(ServerWorld world, WallPoint vertex, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable() || state.getCollisionShape(world, pos).isEmpty()) {
+            return true;
+        }
+        if (!isInsideTowerFootprint(pos, vertex)) {
+            return false;
+        }
+        return ops.evaluateBreakForNavigation(world, pos, true).allowed();
+    }
+
+    private void clearForRingBreakout(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable() || state.getCollisionShape(world, pos).isEmpty()) {
+            return;
+        }
+        ops.digBlockForNavigation(bot, world, pos);
+        ops.sleepQuiet(80);
     }
 
     private boolean isInsideTowerFootprint(BlockPos botPos, WallPoint vertex) {

@@ -77,6 +77,13 @@ final class FortifySkillOps {
 
         /** Evaluate whether a block may be broken for navigation purposes. */
         NavBreakCandidateEval evaluateBreakForNavigation(ServerWorld world, BlockPos pos, boolean allowLayout);
+
+        /**
+         * Ground level at (x, z) not counting the current fortification's own blocks: the heightmap
+         * Y with layout blocks (and the open cells under them) skipped. Same as the heightmap when
+         * no layout is loaded.
+         */
+        int naturalTerrainY(ServerWorld world, int x, int z);
     }
 
     // ── Tier 2: Navigation primitives (extends Tier 1) ─────────

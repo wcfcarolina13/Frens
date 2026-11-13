@@ -91,7 +91,8 @@ final class FortifyCarveHelper {
 
         // Guardrail: if the bot is already below the local terrain surface, bail to surface
         // recovery instead of tunneling horizontally underground.
-        int terrainY = VillageFortificationLayoutService.terrainY(world, botPos.getX(), botPos.getZ());
+        // Natural ground, so the fren's own tower or wall over its head doesn't count as surface.
+        int terrainY = ops.naturalTerrainY(world, botPos.getX(), botPos.getZ());
         if (botPos.getY() < terrainY - 1) {
             int depth = terrainY - botPos.getY();
             String effectiveCauseContext = causeContext != null ? causeContext : (scope != null ? scope.context : null);
