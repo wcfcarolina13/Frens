@@ -139,7 +139,7 @@ A new wall that overlaps a saved one by more than 30% is refused, with a hint to
 
 ## Inside the wall
 
-Once a wall is saved, the area inside it and 8 blocks around it are protected: frens won't dig, cut trees, hunt or gather there. `/bot config fort_buffer <0-64>` changes the 8 blocks. A value of 0 goes back to 8 after a restart. See [Protected zones](Protected-Zones.md).
+Once a wall is saved, the area inside it and 8 blocks around it are protected: frens won't dig, cut trees, hunt or gather there. `/bot config fort_buffer <0-64>` changes the 8 blocks. A value of 0 turns the buffer off. See [Protected zones](Protected-Zones.md).
 
 ## Commands
 

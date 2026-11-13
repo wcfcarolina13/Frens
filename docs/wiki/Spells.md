@@ -59,7 +59,7 @@ The fren doesn't need food for this trip, but the other fast travel rules still 
 | **Enchant** | Opens an Enchanting Table using the fren's items, levels and lapis | You within 4 blocks of an Enchanting Table, and the fren in the same dimension within 64 blocks |
 | **Anvil** | Opens an anvil using the fren's items and levels | You within 4 blocks of an anvil, and the fren in the same dimension within 64 blocks |
 
-Enchant and Anvil give no message when the fren is too far away or there is no table or anvil near you.
+If Enchant or Anvil can't open, the message says why: the fren is in another dimension, more than 64 blocks away, or there is no table or anvil within 4 blocks of you.
 
 ## The Wizard's Tome
 
@@ -94,4 +94,4 @@ Remote Guidance and Chorus Recall have no command.
 | "can't be summoned across dimensions" | Across dimensions you need a Tome, or an Enchanting Table near you. |
 | "Eye of Ender spell is on cooldown" | Summon with your own Eye of Ender waits 60 seconds between casts. |
 | Remote Guidance didn't start | The message says why: a fight, the rest after its last trip, or a mount problem. No pearls were used. |
-| Enchant does nothing | You need to be within 4 blocks of an Enchanting Table, and the fren within 64 blocks. |
+| "An operator has turned off spells for you." | An operator turned off Open Spells for you in Player Permissions. |
