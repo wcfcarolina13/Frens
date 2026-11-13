@@ -92,6 +92,12 @@ public final class ScaffoldService {
             return Collections.unmodifiableSet(tracked);
         }
 
+        /** A scaffold position adopted by the finished layout is no longer temporary. */
+        public void forget(BlockPos pos) {
+            tracked.remove(pos);
+            getScaffoldMemory(bot).remove(pos);
+        }
+
         public void track(BlockPos pos) {
             if (pos != null) {
                 BlockPos key = pos.toImmutable();
@@ -239,6 +245,12 @@ public final class ScaffoldService {
      * Pillar the bot up until it reaches (or exceeds) {@code targetY}.
      */
     public static boolean pillarToY(ScaffoldSession session, int targetY) {
+        return pillarToY(session, targetY, pos -> true);
+    }
+
+    /** The caller may protect permanent layout blocks from pillar headroom mining. */
+    public static boolean pillarToY(ScaffoldSession session, int targetY,
+                                     java.util.function.Predicate<BlockPos> mayMine) {
         if (session == null || targetY <= Integer.MIN_VALUE / 2) {
             return false;
         }
@@ -251,7 +263,7 @@ public final class ScaffoldService {
         int cappedSteps = Math.min(stepsNeeded, MAX_SCAFFOLD_HEIGHT);
         LOGGER.debug("pillarToY: botY={} targetY={} stepsNeeded={} capped={}",
                 botY, targetY, stepsNeeded, cappedSteps);
-        List<BlockPos> placed = pillarUpWithPositions(bot, cappedSteps);
+        List<BlockPos> placed = pillarUpDetailed(bot, cappedSteps, false, mayMine).placed();
         for (BlockPos pos : placed) {
             session.track(pos);
         }
@@ -311,6 +323,11 @@ public final class ScaffoldService {
 
     /** {@link #pillarUpDetailed(ServerPlayerEntity, int)} with the own-scaffold flag (WoodcutSkill only). */
     public static PillarResult pillarUpDetailed(ServerPlayerEntity bot, int steps, boolean ownScaffold) {
+        return pillarUpDetailed(bot, steps, ownScaffold, pos -> true);
+    }
+
+    private static PillarResult pillarUpDetailed(ServerPlayerEntity bot, int steps, boolean ownScaffold,
+                                                 java.util.function.Predicate<BlockPos> mayMine) {
         List<BlockPos> positions = new ArrayList<>();
         String breakReason = "";
 
@@ -354,6 +371,10 @@ public final class ScaffoldService {
                 Block feetBlock = feetState.getBlock();
                 if (feetBlock == Blocks.TORCH || feetBlock == Blocks.WALL_TORCH
                         || feetBlock == Blocks.SOUL_TORCH || feetBlock == Blocks.SOUL_WALL_TORCH) {
+                    if (!mayMine.test(targetPos)) {
+                        breakReason = "protected-layout";
+                        break;
+                    }
                     LOGGER.info("pillarUp step {}/{}: clearing torch at {} for scaffold",
                             i, steps, targetPos.toShortString());
                     try {
@@ -409,6 +430,10 @@ public final class ScaffoldService {
                     }
                     LOGGER.info("pillarUp step {}/{}: overhead {} at {} is in the Spawn base; own-scaffold pillar may clear it",
                             i, steps, overhead.getBlock().getName().getString(), headSpace.toShortString());
+                }
+                if (!mayMine.test(headSpace)) {
+                    breakReason = "protected-layout";
+                    break;
                 }
                 // Try mining the overhead block instead of giving up — works bare-handed
                 // for soft blocks (dirt, sand, gravel, leaves) and with tools for harder blocks
@@ -490,14 +515,18 @@ public final class ScaffoldService {
      * @return Number of blocks removed
      */
     public static int teardownTrackedScaffolds(ServerPlayerEntity bot) {
+        return teardownTrackedScaffolds(bot, Collections.emptySet());
+    }
+
+    public static int teardownTrackedScaffolds(ServerPlayerEntity bot, Set<BlockPos> keepBlocks) {
         Set<BlockPos> memory = scaffoldMemory.get(bot.getUuid());
         if (memory == null || memory.isEmpty()) {
             return 0;
         }
 
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
-        TeardownResult result = teardownScaffoldsDetailed(bot, world, new ArrayList<>(memory), Collections.emptySet());
-        memory.removeAll(ScaffoldTeardownPolicy.toForget(memory, result.gone(), Collections.emptySet()));
+        TeardownResult result = teardownScaffoldsDetailed(bot, world, new ArrayList<>(memory), keepBlocks);
+        memory.removeAll(ScaffoldTeardownPolicy.toForget(memory, result.gone(), keepBlocks));
         return result.removed();
     }
 

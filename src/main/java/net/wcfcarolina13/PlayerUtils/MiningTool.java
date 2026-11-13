@@ -108,6 +108,19 @@ public class MiningTool {
                                                       boolean preserveSelectedHotbarItem,
                                                       boolean enforceVillageProtection,
                                                       boolean ownScaffoldTeardown) {
+        return mineBlock(bot, targetBlockPos, preserveSelectedHotbarItem, enforceVillageProtection,
+                ownScaffoldTeardown, false);
+    }
+
+    /** Fortify uses the same face visibility for stance scoring and the actual mining gate. */
+    public static CompletableFuture<String> mineBlockVisibleFaces(ServerPlayerEntity bot, BlockPos target) {
+        return mineBlock(bot, target, false, true, false, true);
+    }
+
+    private static CompletableFuture<String> mineBlock(ServerPlayerEntity bot, BlockPos targetBlockPos,
+                                                       boolean preserveSelectedHotbarItem,
+                                                       boolean enforceVillageProtection,
+                                                       boolean ownScaffoldTeardown, boolean visibleFaces) {
         CompletableFuture<String> miningResult = new CompletableFuture<>();
         if (bot == null || targetBlockPos == null) {
             miningResult.complete("⚠️ Cannot mine: invalid target.");
@@ -147,7 +160,8 @@ public class MiningTool {
                     eyePos, blockCenter,
                     RaycastContext.ShapeType.COLLIDER,
                     RaycastContext.FluidHandling.NONE, bot));
-            if (hit.getType() == HitResult.Type.BLOCK && !hit.getBlockPos().equals(targetBlockPos)) {
+            if (hit.getType() == HitResult.Type.BLOCK && !hit.getBlockPos().equals(targetBlockPos)
+                    && (!visibleFaces || MiningFaceVisibility.blockingPos(losWorld, bot, eyePos, targetBlockPos) != null)) {
                 miningResult.complete("⚠️ Cannot mine: no line of sight (blocked by " + hit.getBlockPos().toShortString() + ").");
                 return miningResult;
             }

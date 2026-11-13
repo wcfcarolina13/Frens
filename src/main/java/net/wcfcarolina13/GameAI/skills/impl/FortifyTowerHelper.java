@@ -666,6 +666,11 @@ final class FortifyTowerHelper {
                 }
             }
 
+            if (!ops.canPillarFortifyAt(bot.getBlockPos())) {
+                LOGGER.info("[FortifyTower] scaffold launch refused inside footprint pos={} tower=({}, {})",
+                        bot.getBlockPos().toShortString(), vertex.x(), vertex.z());
+                continue;
+            }
             // Pillar up
             int startBotY = bot.getBlockPos().getY();
             int stepsNeeded = Math.max(0, optimalY - startBotY);
@@ -677,7 +682,8 @@ final class FortifyTowerHelper {
             BotActions.sneak(bot, true);
 
             ScaffoldService.ScaffoldSession session = ScaffoldService.beginSession(bot);
-            boolean pillared = ScaffoldService.pillarToY(session, optimalY);
+            boolean pillared = ScaffoldService.pillarToY(session, optimalY,
+                    pos -> !ops.refusePlannedMining(world, pos, "tower-pillar-headroom"));
             int postPillarY = bot.getBlockPos().getY();
             TowerPillarOutcome pillarOutcome = pillared
                     ? TowerPillarOutcome.OK
@@ -815,9 +821,8 @@ final class FortifyTowerHelper {
 
     /**
      * Pick a scaffold position near a tower vertex. Tries cardinal directions at
-     * distances 1, 2, 3, 4 blocks out, then diagonals. Distance 1 is preferred
-     * because it places the scaffold adjacent to the tower structure, enabling
-     * step-onto-structure placement for far-side blocks.
+     * distances 2, 3, 4 blocks out, then diagonals. Keep the pillar outside the
+     * tower's 3x3 footprint so temporary supports never occupy planned ring columns.
      */
     private BlockPos chooseTowerScaffoldPos(ServerWorld world, WallPoint vertex,
                                             SurfaceProfile surfaceProfile,
@@ -827,8 +832,8 @@ final class FortifyTowerHelper {
                 {1, 0}, {-1, 0}, {0, 1}, {0, -1},  // cardinal (indices 0-3)
                 {1, 1}, {1, -1}, {-1, 1}, {-1, -1}  // diagonal (indices 4-7)
         };
-        // Try increasing distances: 1, 2, 3, 4 blocks out (prefer closest)
-        for (int dist = 1; dist <= 4; dist++) {
+        // Try increasing distances outside the footprint (prefer closest)
+        for (int dist = 2; dist <= 4; dist++) {
             for (int i = 0; i < directions.length; i++) {
                 // Encode side as (direction_index * 10 + dist) for uniqueness
                 int sideKey = i * 10 + dist;
@@ -1403,6 +1408,11 @@ final class FortifyTowerHelper {
                 memory.remove(pos);
                 continue;
             }
+            if (ops.refusePlannedMining(world, pos, "tower-scaffold-teardown")) {
+                if (session != null) session.forget(pos);
+                memory.remove(pos);
+                continue;
+            }
             if (!ScaffoldService.SCAFFOLD_BLOCKS.contains(state.getBlock().asItem())) {
                 memory.remove(pos);
                 continue;
@@ -1551,7 +1561,7 @@ final class FortifyTowerHelper {
         if (state.isAir() || state.isReplaceable() || state.getCollisionShape(world, pos).isEmpty()) {
             return;
         }
-        ops.digBlockForNavigation(bot, world, pos);
+        ops.digBlockForTowerRingBreakout(bot, world, pos);
         ops.sleepQuiet(80);
     }
 
