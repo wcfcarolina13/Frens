@@ -22,6 +22,8 @@ public class NavigationConfirmScreen extends Screen {
     // For guidance mode: dynamic destination list built from bases.
     private final List<DestinationEntry> destinations = new ArrayList<>();
     private boolean basesRequested = false;
+    // First destination row shown; the list scrolls when it doesn't fit above the warning line.
+    private int scrollOffset = 0;
 
     private record DestinationEntry(String label, String destination, boolean enabled) {}
 
@@ -82,13 +84,19 @@ public class NavigationConfirmScreen extends Screen {
             destinations.add(new DestinationEntry(b.label(), b.label(), true));
         }
 
-        // Clamp selection.
+        // Clamp selection, and open the list where the selection is.
         if (selectedOption >= destinations.size()) {
             selectedOption = 0;
         }
+        scrollOffset = GuidanceListLayout.clampOffset(scrollOffset, selectedOption, destinations.size(),
+                visibleListRows());
 
         buildGuidanceButtons();
     }
+
+    private static final int LIST_TOP_Y = 50;
+    private static final int LIST_BOTTOM_MARGIN = 84;
+    private static final int LIST_ROW_STEP = 22;
 
     private void buildGuidanceButtons() {
         this.clearChildren();
@@ -97,10 +105,16 @@ public class NavigationConfirmScreen extends Screen {
         int w = 200;
         int h = 20;
         int gap = 2;
-        int topY = 50;
+        int topY = LIST_TOP_Y;
+        int bottomY = this.height - 60;
+        // Rows stop above the warning line (height - 80) so they never cover Confirm or Cancel.
+        int visible = visibleListRows();
+        // Only keep the window in range here; scrolling may leave the selection off screen.
+        scrollOffset = GuidanceListLayout.clampOffset(scrollOffset, -1, destinations.size(), visible);
 
-        // Destination entries as radio buttons.
-        for (int i = 0; i < destinations.size(); i++) {
+        // Destination entries as radio buttons, the visible window only.
+        int end = Math.min(destinations.size(), scrollOffset + visible);
+        for (int i = scrollOffset; i < end; i++) {
             DestinationEntry entry = destinations.get(i);
             String prefix = (i == selectedOption) ? "> " : "  ";
             String label = prefix + entry.label();
@@ -110,16 +124,47 @@ public class NavigationConfirmScreen extends Screen {
                     selectedOption = idx;
                     buildGuidanceButtons();
                 }
-            }).dimensions(cx - w / 2, topY + i * (h + gap), w, h).build());
+            }).dimensions(cx - w / 2, topY + (i - scrollOffset) * (h + gap), w, h).build());
             btn.active = entry.enabled();
         }
 
+        // Scroll buttons beside the list when it doesn't all fit (the mouse wheel also scrolls).
+        if (destinations.size() > visible) {
+            ButtonWidget up = this.addDrawableChild(ButtonWidget.builder(Text.literal("\u25B2"), b -> scroll(-1))
+                    .dimensions(cx + w / 2 + 4, topY, 20, h).build());
+            up.active = scrollOffset > 0;
+            ButtonWidget down = this.addDrawableChild(ButtonWidget.builder(Text.literal("\u25BC"), b -> scroll(1))
+                    .dimensions(visible > 1 ? cx + w / 2 + 4 : cx + w / 2 + 26,
+                            topY + (visible - 1) * (h + gap), 20, h).build());
+            down.active = scrollOffset + visible < destinations.size();
+        }
+
         // Confirm / Cancel at bottom.
-        int bottomY = this.height - 60;
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Confirm"), btn -> confirm())
                 .dimensions(cx - w / 2, bottomY, 96, h).build());
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Cancel"), btn -> close())
                 .dimensions(cx - w / 2 + 104, bottomY, 96, h).build());
+    }
+
+    /** Rows that fit between the list top (50) and the warning line (height - 80), 22 px apart. */
+    private int visibleListRows() {
+        return GuidanceListLayout.visibleRows(LIST_TOP_Y, this.height - LIST_BOTTOM_MARGIN, LIST_ROW_STEP);
+    }
+
+    private void scroll(int rows) {
+        int visible = visibleListRows();
+        int max = Math.max(0, destinations.size() - visible);
+        scrollOffset = Math.max(0, Math.min(max, scrollOffset + rows));
+        buildGuidanceButtons();
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (spellType.equals("guidance") && verticalAmount != 0) {
+            scroll(verticalAmount > 0 ? -1 : 1);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
     // ── Recall mode: 2 radio options (unchanged) ─────────────────────────
@@ -203,7 +248,7 @@ public class NavigationConfirmScreen extends Screen {
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 20, 0xFFFFFFFF);
 
         String warning = spellType.equals("guidance")
-                ? "Both ender pearls will be consumed."
+                ? "Both ender pearls are used when the fren leaves."
                 : "Ender pearl and chorus fruit will be consumed from both.";
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(warning), cx, this.height - 80, 0xFFFF8888);
     }
