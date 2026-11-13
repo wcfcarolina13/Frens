@@ -34,7 +34,11 @@ public final class BotAutoCookingService {
     // which gate held auto-cook back.
     private static final long DIAGNOSTIC_LOG_TICKS = 20L * 60L;
     private static final Map<UUID, Long> NEXT_DIAGNOSTIC_TICK = new ConcurrentHashMap<>();
-    /** Cached answer of {@link #canCookRawMeatSoon}: {tick, 1 or 0}. The check scans for furnaces. */
+    /**
+     * Cached answer of {@link #canCookRawMeatSoon}: {tick, 1 or 0, fuel run in flight 1 or 0}. The
+     * check scans for furnaces. An entry is used only while the bot's fuel-run state still matches,
+     * so a false cached just before or after a run is not served across it.
+     */
     private static final long COOK_SOON_CACHE_TICKS = 100L;
     private static final Map<UUID, long[]> COOK_SOON_CACHE = new ConcurrentHashMap<>();
 
@@ -147,17 +151,21 @@ public final class BotAutoCookingService {
                 return;
             }
             boolean hasFuelNow = SmeltingService.hasFuelForAutoCook(live, liveWorld);
+            int foodNow = live.getHungerManager().getFoodLevel();
+            boolean cookableNow = SmeltingService.hasCookableFoodInventoryItems(live, liveWorld);
             if (CookFuelFallbackPolicy.shouldCookAfterGather(mayContinue, hasFuelNow)
                     && isEligible(live)
-                    && shouldStartEmergencyAutoCook(live.getHungerManager().getFoodLevel(),
-                            SmeltingService.hasCookableFoodInventoryItems(live, liveWorld), hasFuelNow)
+                    && shouldStartEmergencyAutoCook(foodNow, cookableNow, hasFuelNow)
                     && SmeltingService.startBatchCookFoodOnly(live, live.getCommandSource().withSilent(), "auto")) {
                 NEXT_DECISION_TICK.put(botUuid, now + START_COOLDOWN_TICKS + RNG.nextInt(60));
                 LOGGER.info("Auto-cook: started batch cook for {} after gathering leaf litter", live.getName().getString());
                 return;
             }
-            LOGGER.info("Auto-cook: {} still has no fuel to cook with after the leaf-litter run (fuel={}, continued={})",
-                    live.getName().getString(), hasFuelNow, mayContinue);
+            LOGGER.info("Auto-cook: no cook for {} after the leaf-litter run: {} (fuel={}, continued={}, food={})",
+                    live.getName().getString(),
+                    CookSoonEligibilityPolicy.noCookAfterRunReason(mayContinue, hasFuelNow, ineligibleReason(live),
+                            foodNow, COOK_HUNGER_THRESHOLD, cookableNow),
+                    hasFuelNow, mayContinue, foodNow);
             NEXT_DECISION_TICK.put(botUuid, now + 120L + RNG.nextInt(80));
         });
         if (!submitted) {
@@ -196,26 +204,31 @@ public final class BotAutoCookingService {
             return false;
         }
         long nowTick = server.getTicks();
+        long inFlight = FUEL_GATHER_IN_FLIGHT.contains(bot.getUuid()) ? 1L : 0L;
         long[] cached = COOK_SOON_CACHE.get(bot.getUuid());
-        if (cached != null && nowTick - cached[0] >= 0 && nowTick - cached[0] < COOK_SOON_CACHE_TICKS) {
+        if (cached != null && cached.length > 2 && cached[2] == inFlight
+                && nowTick - cached[0] >= 0 && nowTick - cached[0] < COOK_SOON_CACHE_TICKS) {
             return cached[1] == 1L;
         }
         if (!server.isOnThread()) {
             return false;
         }
         boolean result = computeCanCookRawMeatSoon(bot, nowTick);
-        COOK_SOON_CACHE.put(bot.getUuid(), new long[] {nowTick, result ? 1L : 0L});
+        COOK_SOON_CACHE.put(bot.getUuid(), new long[] {nowTick, result ? 1L : 0L, inFlight});
         return result;
     }
 
     private static boolean computeCanCookRawMeatSoon(ServerPlayerEntity bot, long nowTick) {
-        if (ineligibleReason(bot) != null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+        UUID id = bot.getUuid();
+        // Auto-cook's own leaf-litter run makes the bot look busy ("task running"); the hold must
+        // last through it, or the bot eats the meat it is fetching fuel to cook.
+        if (!CookSoonEligibilityPolicy.allows(ineligibleReason(bot), FUEL_GATHER_IN_FLIGHT.contains(id))
+                || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
         if (!SmeltingService.hasCookableFoodInventoryItems(bot, world)) {
             return false;
         }
-        UUID id = bot.getUuid();
         boolean fuel = SmeltingService.hasFuelForAutoCook(bot, world)
                 || (BotHomeService.isHobbyEnabled(bot, "leaf_litter")
                         && (FUEL_GATHER_IN_FLIGHT.contains(id)
@@ -251,11 +264,11 @@ public final class BotAutoCookingService {
             return "not in the Overworld";
         }
         if (TaskService.hasActiveTask(bot.getUuid())) {
-            return "task running";
+            return CookSoonEligibilityPolicy.TASK_RUNNING;
         }
         BotEventHandler.Mode mode = BotEventHandler.getCurrentMode(bot);
         if (mode != BotEventHandler.Mode.IDLE) {
-            return "mode " + mode;
+            return CookSoonEligibilityPolicy.MODE_PREFIX + mode;
         }
         if (BotFleeService.isBreakingFree(bot.getUuid()) || BotFleeService.isInShelter(bot.getUuid())) {
             return "fleeing or sheltering";
