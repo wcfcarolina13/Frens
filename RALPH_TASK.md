@@ -4,7 +4,18 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-11-13 (1.1.301) — next session starts here
+## Session Handoff 2026-11-14 (1.1.302) — next session starts here
+
+**State:** 1.1.302 = 1.1.301 plus the quit-save fix, pending-cook collection, their review fixes and PR #139 (changelog.md "1.1.302"). Tests 4688 after the #139 merge, 0 failures (clean build on the Mac). Sandbox-proven: quit save 4 of 4, both cook paths, #139's host steps. Not on Modrinth: Bradley uploads (notes in `.superpowers/releases/`). Not deployed to Nirn: needs Bradley's yes.
+
+**Fix next:**
+- A following bot stops at the top of an 8-block drop with stairs beside it, also on 1.1.300 (pre-existing). Repro: `fix302.py canopy <bot> <run> stairs [notree]` in frens-dev. In the no-tree control the bot stands 1 block from the edge with the commander 8 east and 8 below, and doesn't move for 40 s.
+- #139 guest steps are still to run with a second player: the Open Spells refusal, and the Enchant/Anvil range messages.
+- Pending-cook collection: unit-tested only for the owner swapping food, `/bot stop` mid-collect, and the three-trip drop.
+
+**Sandbox notes:** `fix302.py cook` needs a fresh z (`COOKZ=<z>`) per run. A furnace already registered from an earlier run is chosen over the near one, even 40 blocks away, and then "Couldn't get close enough" (seen once, setup only). The sandbox world is at 7/8 players, so auto-spawn skips one bot and you need `/bot spawn <bot> admin`.
+
+## Session Handoff 2026-11-13 (1.1.301) — superseded by 1.1.302 above
 
 **State:** 1.1.301 = main 21bd2b1c (61 PRs merged since 1.1.300, list in changelog.md "Release wave ... 1.1.301") plus one release fix, 33c53875 (auto-cook keeps its raw meat through its own leaf-litter run). Tests 4647 on the Mac, 0 failures. Sandbox smoke and cook re-test done (driver `tools/sandbox/fix301.py` in frens-dev, replays `frens_1_1_301_*`). frens-stream `./smoke.sh` passes. On Modrinth since 2026-11-13 (version ywJ7G7Ud, notes cover 1.1.298-1.1.301; 1.1.298-1.1.300 were never uploaded on their own). Deployed to Nirn 2026-11-13 after a backup (field Phase 6ch). PR #139 was left out (untested).
 
@@ -893,9 +904,9 @@ Handoff phase updates only `/Users/roti/AI-Player-checkpoint/.claude/worktrees/a
 
 ## Recovered deferrals (2026-10-17)
 
-- [ ] **P1 (M)** Quit-time bot save race: items a bot got in its last 30 s before a singleplayer quit are lost (vanilla removes bots before the host-disconnect save). Fix: save in a `PlayerManager.remove` HEAD mixin. (1.1.301 smoke, 2026-11-13)
-- [ ] **P2 (S)** Auto-cook leaves most of a batch in the furnace (collects only when hungry); `/bot cook beef auto` never collects. (1.1.301 re-test, 2026-11-13)
-- [ ] **P2 (M)** Following bot stops at the top of an 8-block drop with stairs beside it; A/B against 1.1.300 first. (1.1.301 smoke stage B, 2026-11-13)
+- [x] **P1 (M)** Quit-time bot save race: items a bot got in its last 30 s before a singleplayer quit are lost (vanilla removes bots before the host-disconnect save). Fix: save in a `PlayerManager.remove` HEAD mixin. (1.1.301 smoke, 2026-11-13)
+- [x] **P2 (S)** Auto-cook leaves most of a batch in the furnace (collects only when hungry); `/bot cook beef auto` never collects. (1.1.301 re-test, 2026-11-13)
+- [ ] **P2 (M)** Following bot stops at the top of an 8-block drop with stairs beside it; A/B done 2026-11-14: 1.1.300 fails the same (0 of 2 plus a no-tree control), so pre-existing, not a regression. (1.1.301 smoke stage B, 2026-11-13)
 Triaged 2026-10-23 (`.superpowers/deferral-triage/triage.md`, Bradley's 7 card rulings): 47 kept, 17 closed.
 
 Deferrals that lived only in superseded handoffs (Ralph retirement audit, `.superpowers/ralph-retirement/audit.md` section 2

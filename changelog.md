@@ -2,6 +2,27 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## 1.1.302 (2026-11-14): quit save, cook collection, PR #139
+
+Bradley asked on 2026-11-13 for the next pile of bugs and tests after 1.1.301. Commits ed95e384, 91396a7a, 0437770e (review fixes) and the #139 merge 845ce889.
+
+- **Fix (P1): a bot keeps what it got in its last 30 s before a singleplayer quit.** Cause, checked in the 1.21.11 bytecode: `IntegratedServer.stop` removes every non-host player through `PlayerManager.remove` before Fabric's SERVER_STOPPING runs, and that path writes only the vanilla .dat, while a bot's items live only in the Frens snapshot. So the shutdown save found no bots ("persisted 0") and only the last 30 s autosave survived. New `PlayerManagerRemoveMixin` saves each bot (inventory, world state, mount) at the head of `remove`. It skips Frens' own removals (the caller saved already, or the entity is a stale duplicate whose save would overwrite the good one), entities that are not the player manager's current entry, and dead bots. The racy host-disconnect save on a Netty thread is removed. Log: `Vanilla removal save for fakeplayer '<bot>': inventory=<bool>`.
+- **Fix: a bot goes back for the food it left cooking, whether it is hungry or not.** `/bot cook` and auto-cook loaded the furnace and left. The output was picked up only when the bot was hungry, so a 4-beef batch sat in the furnace, and `/bot cook beef auto` never collected at all. New `PendingCookLedger` records each load. An idle bot goes back once the batch is done and takes at most what it put in. Output the owner takes, or swaps for their own food, comes off what the bot is owed. `/bot stop` clears the bot's pending batches, and three empty trips drop one. New `PendingCookCollectPolicy`, 33 tests across the ledger, policy and wiring. Logs: `Auto-cook: pending batch recorded for ...`, `collecting pending batch for ...`, `collected <k> <item> for <bot>, <n> still owed`.
+- **Merged #139 (small fixes found while writing the wiki):** Enchant and Anvil say why they didn't open; the Open Spells player permission is enforced on the server; `/bot wizard_tome` works for the cheats-off host; `fort_buffer 0` survives a restart; Frens celebrate after `fortify_village`, `fish` and `collect_dirt` again.
+- **Release checks:** `./gradlew clean build` passes with 4688 tests and 0 failures (4647 at 1.1.301).
+- **Review:** Fable review of both fixes, no critical findings. One fix wave handled all five findings it raised: the Netty-thread save race, stale duplicates, the owner's swapped food, stop not clearing a batch, and endless retries.
+- **Sandbox (Mac, 2026-11-14, a 1.1.302 build with #139 merged, save "Wall Test"):**
+  - Quit within seconds of giving items: 4 of 4 bots kept them across two quits, and every bot logged its removal save. 1.1.301 lost them in 2 of 3 quits.
+  - `/bot cook beef auto` at food 20: all 4 steak back in the bot's inventory in one trip, about 40 s after loading.
+  - Auto-cook: started at food 10, the bot was then refilled to food 20, and it still came back for all 4.
+  - #139 host steps: `/bot wizard_tome` gave the tome, and `fort_buffer 0` read back 0 after a restart.
+  - No ERROR or Exception lines in either launch. Driver: `fix302.py` in frens-dev.
+- **A/B, the 8-block drop:** 1.1.300 also stops at the top of the drop with stairs beside it. That was 0 of 2 canopy runs, plus a no-tree control where the bot stood still on the upper terrace for 40 s. So it is not a 1.1.301 regression. The backlog line stays open as a pre-existing follow gap.
+- **Rulings (made in this wave, recommended option):**
+  - Merge #139 with only its host-side steps game-checked. The non-op guest steps (the Open Spells refusal, and the Enchant range messages as a guest) and the Emotecraft dance were not run. Cost if wrong: a guest gets a wrong or missing refusal message. Ops and the host always pass the permission check, and it defaults to on.
+  - Auto-cook collects from a furnace only while the bot is idle (not following or on a task). Cost: a following bot's batch waits until it is idle.
+- **Not checked in the game:** the owner swapping in their own food, `/bot stop` mid-collect, the three-trip drop, and a mounted bot at quit. Each is covered by unit tests only.
+
 ## Release wave: 61 PRs merged since 1.1.300; 1.1.301 (2026-11-13)
 
 Bradley asked on 2026-11-13 to check that main makes a clean release and then release it. 1.1.301 is main 21bd2b1c plus one release fix (below). Every PR listed was merged to main between 1.1.300 and today with its own review, and most behaviour PRs have a sandbox result on GitHub (not always on the merged head).
