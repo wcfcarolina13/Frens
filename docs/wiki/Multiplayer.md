@@ -104,7 +104,7 @@ A permitted player can resume, patch and dig the moat. Only the owner, an operat
 
 Operators and the host can set server-wide options:
 
-- **Player Permissions** (Admin tab): defaults for every player, plus overrides for single players. They cover screens such as Bot Controls and the skin chooser, gameplay tips, the Wizard's Tome, and recruitment management.
+- **Player Permissions** (Admin tab): defaults for every player, plus overrides for single players. They cover screens such as Bot Controls and the skin chooser, casting spells (Open Spells), gameplay tips, the Wizard's Tome, and recruitment management.
 - `/bot recruit mode_access allow <player>` lets a player who isn't an operator choose the world's mode. `revoke`, `clear` and `status` manage the list.
 - `/bot config globalTeleport on|off|clear` sets teleport during skills for every fren.
 

@@ -5581,8 +5581,8 @@ public class modCommandRegistry {
         if (source == null) {
             return 0;
         }
-        if (!net.wcfcarolina13.Frens.isOperator(source)) {
-            ChatUtils.sendSystemMessage(source, "Operator-only command.");
+        if (!net.wcfcarolina13.Frens.isServerAdmin(source)) {
+            ChatUtils.sendSystemMessage(source, "Only an operator or the host can do that.");
             return 0;
         }
 

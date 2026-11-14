@@ -339,8 +339,9 @@ public final class SkillManager {
     /** Skills whose successful completion warrants a celebratory dance. Trivial / utility
      *  skills are excluded so the bot doesn't kazotsky-kick after every drop pickup. */
     private static final java.util.Set<String> CELEBRATORY_SKILLS = java.util.Set.of(
-            "woodcut", "farm", "fortify", "mining", "hunt", "fishing", "shelter", "wool",
-            "harvest", "collectdirt"
+            // Registered skill names (Skill.name()): "fortify", "fishing" and "collectdirt" never matched.
+            "woodcut", "farm", "fortify_village", "mining", "hunt", "fish", "shelter", "wool",
+            "harvest", "collect_dirt"
     );
 
     public static boolean shouldAbortSkill(ServerPlayerEntity botPlayer) {

@@ -883,7 +883,8 @@ public class ManualConfig {
     public Boolean getGlobalTeleportDuringSkills() { return globalTeleportDuringSkills; }
     public void setGlobalTeleportDuringSkills(Boolean v) { this.globalTeleportDuringSkills = v; }
 
-    public int getFortBufferRadius() { return fortBufferRadius > 0 ? fortBufferRadius : 8; }
+    // 0 is a real setting (/bot config fort_buffer 0 turns the buffer off), so only a negative value falls back.
+    public int getFortBufferRadius() { return fortBufferRadius >= 0 ? fortBufferRadius : 8; }
     public void setFortBufferRadius(int r) { this.fortBufferRadius = r; }
 
     public int getUndergroundLingerMinutes() { return undergroundLingerMinutes > 0 ? undergroundLingerMinutes : 3; }
