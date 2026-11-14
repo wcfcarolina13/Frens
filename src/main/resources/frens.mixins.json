@@ -6,7 +6,8 @@
 		"CraftingResultSlotMixin",
 		"LivingEntityAccessor",
 		"ServerPlayNetworkHandlerAccessor",
-		"PlayerManagerRespawnMixin"
+		"PlayerManagerRespawnMixin",
+		"PlayerManagerRemoveMixin"
 	],
 	"client": [
 		"AbstractClientPlayerEntitySkinMixin",

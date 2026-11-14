@@ -28,4 +28,15 @@ public final class BotRemovalPolicy {
     public static boolean shouldCallVanillaRemove(boolean mapHoldsThisBot, boolean listHoldsThisBot) {
         return isStillRegistered(mapHoldsThisBot, listHoldsThisBot);
     }
+
+    /**
+     * Whether a vanilla {@code PlayerManager.remove} of this player should first write the Frens
+     * snapshot (fake-player items live only there). Skipped for real players, for Frens' own
+     * removals (their callers saved already, or are dropping a stale duplicate whose save would
+     * overwrite the good snapshot), and for a dead bot (the death path owns its inventory).
+     */
+    public static boolean shouldSaveOnVanillaRemove(boolean isFakePlayer, boolean frensRemovalInProgress,
+                                                    boolean isDead) {
+        return isFakePlayer && !frensRemovalInProgress && !isDead;
+    }
 }

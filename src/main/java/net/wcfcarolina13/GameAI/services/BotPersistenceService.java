@@ -55,6 +55,12 @@ public final class BotPersistenceService {
     private static final Method SAVE_PLAYER_DATA = resolveManagerHook("savePlayerData", "savePlayerData", "method_14577");
     private static final Constructor<?> PLAYER_CONFIG_ENTRY_CONSTRUCTOR = resolvePlayerConfigEntryConstructor();
 
+    /**
+     * Set while Frens itself calls vanilla {@code PlayerManager.remove}: those callers either
+     * saved already (zzz logoff, travel departure) or are dropping a stale duplicate entity whose
+     * save would overwrite the good snapshot, so {@link #onVanillaRemove} must not save.
+     */
+    private static final ThreadLocal<Boolean> FRENS_REMOVAL_IN_PROGRESS = ThreadLocal.withInitial(() -> Boolean.FALSE);
     private static final ConcurrentMap<UUID, Integer> LAST_SAVE_TICK = new ConcurrentHashMap<>();
     private static final ConcurrentMap<UUID, Long> RESTORE_SEQUENCE = new ConcurrentHashMap<>();
     private static final ConcurrentMap<UUID, Long> LAST_APPLIED_RESTORE_SEQUENCE = new ConcurrentHashMap<>();
@@ -229,33 +235,7 @@ public final class BotPersistenceService {
         if (!(bot instanceof createFakePlayer) || server == null) {
             return;
         }
-        if (bot.hasVehicle()) {
-            Entity vehicle = bot.getVehicle();
-            // IMPORTANT: always dismount before save. The previous design kept
-            // the bot mounted on CANNOT_SECURE, relying on vanilla's
-            // RootVehicle NBT tag to restore the mount relationship. That tag
-            // is NOT written for fake players by vanilla's savePlayerData —
-            // verified by scanning the saved .dat file: no RootVehicle key is
-            // present even when the bot is still mounted at save time.
-            // Result: the horse falls through both save paths (chunk data
-            // skips entities with player passengers; player NBT doesn't write
-            // the vehicle) and DISAPPEARS on reload.
-            //
-            // Correct approach: mark the mount persistent so chunks keep it,
-            // dismount the bot so the horse becomes a normal world entity
-            // saved to chunk data, and record wasMounted=true when we
-            // couldn't secure so MountPersistenceService.tryRemountAfterRejoin
-            // puts the bot back on the horse on next join.
-            if (vehicle instanceof net.minecraft.entity.mob.MobEntity mob) {
-                mob.setPersistent();
-            }
-            RideSyncService.SecureResult secureResult = RideSyncService.trySecureMountBeforeDismount(bot, vehicle);
-            boolean shouldRemountOnRejoin = (secureResult == RideSyncService.SecureResult.CANNOT_SECURE);
-            bot.stopRiding();
-            MountPersistenceService.recordMount(bot, vehicle, shouldRemountOnRejoin);
-        } else {
-            RideSyncService.secureLeashedMountOnDisconnect(bot);
-        }
+        dismountForSave(bot);
         if (persistViaPlayerManager(server, bot, "disconnect")) {
             BotInventoryStorageService.save(bot);
         }
@@ -427,6 +407,9 @@ public final class BotPersistenceService {
         }
         List<ServerPlayerEntity> players = server.getPlayerManager().getPlayerList();
         if (players == null || players.isEmpty()) {
+            // Usually the singleplayer quit: IntegratedServer.stop has already removed every
+            // non-host player (bots saved then by onVanillaRemove), so nothing is left here.
+            LOGGER.info("Pre-shutdown bot save found an empty player list; captured 0 fakeplayer(s).");
             return;
         }
         long count = 0;
@@ -434,28 +417,67 @@ public final class BotPersistenceService {
             if (!(player instanceof createFakePlayer)) {
                 continue;
             }
-            if (player.hasVehicle()) {
-                Entity vehicle = player.getVehicle();
-                // See onBotDisconnect for rationale — always dismount, mark
-                // persistent, record wasMounted for rejoin remount.
-                if (vehicle instanceof net.minecraft.entity.mob.MobEntity mob) {
-                    mob.setPersistent();
-                }
-                RideSyncService.SecureResult secureResult = RideSyncService.trySecureMountBeforeDismount(player, vehicle);
-                boolean shouldRemountOnRejoin = (secureResult == RideSyncService.SecureResult.CANNOT_SECURE);
-                player.stopRiding();
-                MountPersistenceService.recordMount(player, vehicle, shouldRemountOnRejoin);
-            } else {
-                RideSyncService.secureLeashedMountOnDisconnect(player);
-            }
+            dismountForSave(player);
             if (persistViaPlayerManager(server, player, "pre-shutdown")) {
                 BotInventoryStorageService.save(player);
                 BotWorldStateService.saveState(player);
                 count++;
             }
         }
-        if (count > 0) {
-            LOGGER.info("Pre-shutdown bot save captured {} fakeplayer(s).", count);
+        LOGGER.info("Pre-shutdown bot save captured {} fakeplayer(s).", count);
+    }
+
+    /**
+     * Called from {@code PlayerManagerRemoveMixin} at the HEAD of vanilla
+     * {@code PlayerManager.remove}, before vanilla writes the .dat. Fake-player items live only
+     * in the Frens snapshot, so any vanilla removal Frens did not start (the singleplayer quit:
+     * {@code IntegratedServer.stop} removes every non-host player before SERVER_STOPPING fires,
+     * so {@link #saveAll} later finds no bots) must snapshot here or the last autosave wins.
+     *
+     * <p>Runs on the server thread in that case ({@code IntegratedServer.stop} uses
+     * submitAndJoin); no thread check is made. Does not call persistViaPlayerManager: vanilla
+     * remove calls savePlayerData itself right after this inject. The mount is dismounted first
+     * because vanilla remove would otherwise take a mount with a player passenger with it.
+     */
+    public static void onVanillaRemove(ServerPlayerEntity bot) {
+        if (!BotRemovalPolicy.shouldSaveOnVanillaRemove(bot instanceof createFakePlayer,
+                Boolean.TRUE.equals(FRENS_REMOVAL_IN_PROGRESS.get()), bot.isDead())) {
+            return;
+        }
+        dismountForSave(bot);
+        boolean inventorySaved = BotInventoryStorageService.save(bot);
+        BotWorldStateService.saveState(bot);
+        LAST_SAVE_TICK.remove(bot.getUuid());
+        LOGGER.info("Vanilla removal save for fakeplayer '{}': inventory={}", bot.getName().getString(), inventorySaved);
+    }
+
+    private static void dismountForSave(ServerPlayerEntity bot) {
+        if (bot.hasVehicle()) {
+            Entity vehicle = bot.getVehicle();
+            // IMPORTANT: always dismount before save. The previous design kept
+            // the bot mounted on CANNOT_SECURE, relying on vanilla's
+            // RootVehicle NBT tag to restore the mount relationship. That tag
+            // is NOT written for fake players by vanilla's savePlayerData —
+            // verified by scanning the saved .dat file: no RootVehicle key is
+            // present even when the bot is still mounted at save time.
+            // Result: the horse falls through both save paths (chunk data
+            // skips entities with player passengers; player NBT doesn't write
+            // the vehicle) and DISAPPEARS on reload.
+            //
+            // Correct approach: mark the mount persistent so chunks keep it,
+            // dismount the bot so the horse becomes a normal world entity
+            // saved to chunk data, and record wasMounted=true when we
+            // couldn't secure so MountPersistenceService.tryRemountAfterRejoin
+            // puts the bot back on the horse on next join.
+            if (vehicle instanceof net.minecraft.entity.mob.MobEntity mob) {
+                mob.setPersistent();
+            }
+            RideSyncService.SecureResult secureResult = RideSyncService.trySecureMountBeforeDismount(bot, vehicle);
+            boolean shouldRemountOnRejoin = (secureResult == RideSyncService.SecureResult.CANNOT_SECURE);
+            bot.stopRiding();
+            MountPersistenceService.recordMount(bot, vehicle, shouldRemountOnRejoin);
+        } else {
+            RideSyncService.secureLeashedMountOnDisconnect(bot);
         }
     }
 
@@ -736,10 +758,14 @@ public final class BotPersistenceService {
         net.minecraft.server.PlayerManager manager = server.getPlayerManager();
         if (BotRemovalPolicy.shouldCallVanillaRemove(manager.getPlayer(bot.getUuid()) == bot,
                 manager.getPlayerList().contains(bot))) {
+            boolean outer = Boolean.TRUE.equals(FRENS_REMOVAL_IN_PROGRESS.get());
+            FRENS_REMOVAL_IN_PROGRESS.set(Boolean.TRUE);
             try {
                 manager.remove(bot);
             } catch (Exception e) {
                 LOGGER.warn("Failed to remove fakeplayer '{}' from PlayerManager: {}", bot.getName().getString(), e.getMessage());
+            } finally {
+                FRENS_REMOVAL_IN_PROGRESS.set(outer);
             }
         }
 

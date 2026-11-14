@@ -32,4 +32,27 @@ class BotRemovalPolicyTest {
         assertFalse(BotRemovalPolicy.isStillRegistered(false, false));
         assertFalse(BotRemovalPolicy.shouldCallVanillaRemove(false, false));
     }
+
+    @Test
+    void vanillaRemoveOfLiveBotOutsideFrensRemovalSaves() {
+        // Singleplayer quit: IntegratedServer.stop removes the bot before SERVER_STOPPING.
+        assertTrue(BotRemovalPolicy.shouldSaveOnVanillaRemove(true, false, false));
+    }
+
+    @Test
+    void frensOwnRemovalDoesNotSave() {
+        // zzz logoff / travel already saved; a stale duplicate must not overwrite the snapshot.
+        assertFalse(BotRemovalPolicy.shouldSaveOnVanillaRemove(true, true, false));
+    }
+
+    @Test
+    void deadBotDoesNotSave() {
+        assertFalse(BotRemovalPolicy.shouldSaveOnVanillaRemove(true, false, true));
+    }
+
+    @Test
+    void realPlayerNeverSaves() {
+        assertFalse(BotRemovalPolicy.shouldSaveOnVanillaRemove(false, false, false));
+        assertFalse(BotRemovalPolicy.shouldSaveOnVanillaRemove(false, true, true));
+    }
 }
