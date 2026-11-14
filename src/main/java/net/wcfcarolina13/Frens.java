@@ -1078,13 +1078,11 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.LockableBlockService.clearLockMode(player.getUuid());
             net.wcfcarolina13.ChatUtils.VoiceLineMuteService.clearPlayerMask(player.getUuid());
             net.wcfcarolina13.GameAI.services.TravelWaitService.cancel(player.getUuid());
-            if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer) && !server.isDedicated()) {
-                // On a singleplayer quit THIS is the bot save that lands (SERVER_STOPPING's saveAll
-                // has been observed to find no bots). This handler runs on a Netty IO thread, so do
-                // NOT call BotTorchHoldService.yieldAll here (it re-selects hotbar slots, racing the
-                // torch tick): the snapshot already persists the pre-torch slot via slotToPersist.
-                BotPersistenceService.saveBotsBeforeShutdown(server);
-            }
+            // No bot save here for the host leaving a singleplayer/LAN world: this runs on a Netty
+            // IO thread, and the host leaving always stops the integrated server, whose
+            // IntegratedServer.stop removes every bot on the server thread through
+            // PlayerManager.remove, where PlayerManagerRemoveMixin saves each one
+            // (BotPersistenceService.onVanillaRemove).
         });
 
         // Register damage event to handle suffocation immediately

@@ -16,7 +16,14 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class PendingCookLedger {
 
-    public record Entry(String dimension, long pos, String rawItem, String cookedItem, int owed, long recordedTick) {
+    /**
+     * @param lastSeenOutput the owed cooked item's output count at the last furnace observation, or -1
+     *                       when unknown (just recorded); lowered by the bot's own takes so a later
+     *                       observation never counts them as someone else's
+     * @param failedTrips    collection trips in a row that took nothing
+     */
+    public record Entry(String dimension, long pos, String rawItem, String cookedItem, int owed, long recordedTick,
+                        int lastSeenOutput, int failedTrips) {
     }
 
     private static final Map<UUID, Map<String, Entry>> ENTRIES = new ConcurrentHashMap<>();
@@ -43,7 +50,8 @@ public final class PendingCookLedger {
         Map<String, Entry> forBot = ENTRIES.computeIfAbsent(bot, id -> new ConcurrentHashMap<>());
         Entry merged = forBot.compute(key(dimension, pos), (k, old) -> {
             int owed = old != null && old.cookedItem().equals(cookedItem) ? old.owed() + count : count;
-            return new Entry(dimension, pos, rawItem, cookedItem, owed, nowTick);
+            // A fresh load: baseline unknown until the next observation, trip count restarts.
+            return new Entry(dimension, pos, rawItem, cookedItem, owed, nowTick, -1, 0);
         });
         return merged.owed();
     }
@@ -81,7 +89,11 @@ public final class PendingCookLedger {
                 return old;
             }
             int owed = old.owed() - taken;
-            return owed <= 0 ? null : new Entry(old.dimension(), old.pos(), old.rawItem(), old.cookedItem(), owed, old.recordedTick());
+            // The bot's own take lowers the baseline by all it took, so the next observation does
+            // not read the drop as someone else's.
+            int seen = old.lastSeenOutput() < 0 ? -1 : Math.max(0, old.lastSeenOutput() - taken);
+            return owed <= 0 ? null : new Entry(old.dimension(), old.pos(), old.rawItem(), old.cookedItem(), owed,
+                    old.recordedTick(), seen, old.failedTrips());
         });
         if (forBot.isEmpty()) {
             ENTRIES.remove(bot, forBot);
@@ -101,6 +113,64 @@ public final class PendingCookLedger {
         if (forBot.isEmpty()) {
             ENTRIES.remove(bot, forBot);
         }
+    }
+
+    /**
+     * The furnace was looked at: {@code outputCooked} of the owed cooked item in the output and
+     * {@code inputRaw} of the raw item in the input. Applies {@link PendingCookCollectPolicy#reconcileOwed}
+     * and stores the new baseline. Removes the entry at 0.
+     *
+     * @return what is still owed there (0 when none or no entry)
+     */
+    public static int observe(UUID bot, String dimension, long pos, int outputCooked, int inputRaw) {
+        if (bot == null || dimension == null) {
+            return 0;
+        }
+        Map<String, Entry> forBot = ENTRIES.get(bot);
+        if (forBot == null) {
+            return 0;
+        }
+        Entry left = forBot.computeIfPresent(key(dimension, pos), (k, old) -> {
+            int owed = PendingCookCollectPolicy.reconcileOwed(old.owed(), old.lastSeenOutput(), outputCooked, inputRaw);
+            return owed <= 0 ? null : new Entry(old.dimension(), old.pos(), old.rawItem(), old.cookedItem(), owed,
+                    old.recordedTick(), Math.max(0, outputCooked), old.failedTrips());
+        });
+        if (forBot.isEmpty()) {
+            ENTRIES.remove(bot, forBot);
+        }
+        return left == null ? 0 : left.owed();
+    }
+
+    /**
+     * A collection trip for this entry ended having taken {@code taken} (0 or less: failed or empty).
+     * A take resets the count; a miss adds one. No-op when the entry is gone (a stop cleared it).
+     *
+     * @return failed trips in a row now, or 0 when there is no entry
+     */
+    public static int noteTrip(UUID bot, String dimension, long pos, int taken) {
+        if (bot == null || dimension == null) {
+            return 0;
+        }
+        Map<String, Entry> forBot = ENTRIES.get(bot);
+        if (forBot == null) {
+            return 0;
+        }
+        Entry updated = forBot.computeIfPresent(key(dimension, pos), (k, old) -> new Entry(old.dimension(), old.pos(),
+                old.rawItem(), old.cookedItem(), old.owed(), old.recordedTick(), old.lastSeenOutput(),
+                taken > 0 ? 0 : old.failedTrips() + 1));
+        return updated == null ? 0 : updated.failedTrips();
+    }
+
+    /** Forgets every entry of this bot ({@code /bot stop}). A trip in flight ends on its own and takes nothing. */
+    public static void clearBot(UUID bot) {
+        if (bot != null) {
+            ENTRIES.remove(bot);
+        }
+    }
+
+    public static boolean hasEntries(UUID bot) {
+        Map<String, Entry> forBot = bot == null ? null : ENTRIES.get(bot);
+        return forBot != null && !forBot.isEmpty();
     }
 
     /** A snapshot of this bot's entries. */

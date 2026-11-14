@@ -43,4 +43,28 @@ class PendingCookCollectWiringTest {
         assertTrue(src.substring(collect, collectEnd).contains("debitPendingFood(liveBot, liveWorld, targetPos, output.getItem(),"),
                 "hungry collect debits");
     }
+
+    @Test
+    void ownerTakesAreObservedForEveryBotBeforeTheEligibilityGate() throws IOException {
+        String src = read("GameAI/services/BotAutoCookingService.java");
+        int tick = src.indexOf("public static void onServerTick(");
+        int observe = src.indexOf("observePendingFurnaces(server, bot, nowTick);", tick);
+        int eligible = src.indexOf("ineligibleReason(bot)", tick);
+        assertTrue(observe > tick && eligible > observe, "the observation runs before the eligibility gate");
+        int reset = src.indexOf("public static void resetSession()");
+        assertTrue(src.indexOf("NEXT_PENDING_OBSERVE_TICK.clear();", reset) > reset, "resetSession clears the throttle");
+    }
+
+    @Test
+    void stopClearsTheLedgerAndTheHungryCollectWaitsForAPendingTrip() throws IOException {
+        String reg = read("Commands/modCommandRegistry.java");
+        int stop = reg.indexOf("private static int executeStop(");
+        int stopEnd = reg.indexOf("static int executeSkillTargets(", stop);
+        assertTrue(reg.substring(stop, stopEnd).contains("PendingCookLedger.clearBot(bot.getUuid());"), "/bot stop clears");
+        String smelt = read("GameAI/services/SmeltingService.java");
+        int collect = smelt.indexOf("public static boolean startCollectFinishedFood(");
+        int find = smelt.indexOf("findReadyFoodFurnace(bot, world);", collect);
+        int guard = smelt.indexOf("PendingCookLedger.tripInFlight(bot.getUuid())", collect);
+        assertTrue(guard > collect && guard < find, "hungry collect skips while a pending trip is in flight");
+    }
 }

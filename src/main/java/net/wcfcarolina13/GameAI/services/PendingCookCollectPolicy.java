@@ -13,6 +13,9 @@ public final class PendingCookCollectPolicy {
     /** An entry this old is dropped: the bot's food has long been taken by someone or it never cooked. */
     public static final long EXPIRY_TICKS = 20L * 60L * 20L;
 
+    /** After this many trips in a row that took nothing, the entry is dropped. */
+    public static final int MAX_FAILED_TRIPS = 3;
+
     public enum Decision {
         /** Leave it: still cooking. Other auto-cook rules (the hungry collect) still run. */
         WAIT,
@@ -72,5 +75,31 @@ public final class PendingCookCollectPolicy {
     public static boolean isExpired(long nowTick, long recordedTick) {
         long age = nowTick - recordedTick;
         return age < 0 || age > EXPIRY_TICKS;
+    }
+
+    /**
+     * What the bot is still owed after looking at the furnace. The owner can empty the bot's cooked
+     * output and load their own same food; without this the bot would later take the owner's food as
+     * owed. A drop in the output since the last look that the bot did not make itself (its own takes
+     * lower {@code lastSeenOutput} first) was someone else taking it, and comes off what is owed. And
+     * nothing more can be owed than is in the furnace now, cooked or still raw.
+     *
+     * @param owed           owed before this look
+     * @param lastSeenOutput the output count of the owed cooked item at the last look, or -1 when unknown
+     * @param outputCooked   the output count of the owed cooked item now (0 when empty or another item)
+     * @param inputRaw       the input count of the bot's raw item now (0 when empty or another item)
+     */
+    public static int reconcileOwed(int owed, int lastSeenOutput, int outputCooked, int inputRaw) {
+        int cur = Math.max(0, outputCooked);
+        int left = owed;
+        if (lastSeenOutput >= 0 && cur < lastSeenOutput) {
+            left -= lastSeenOutput - cur;
+        }
+        return Math.max(0, Math.min(left, cur + Math.max(0, inputRaw)));
+    }
+
+    /** Whether an entry with this many failed or empty trips in a row is given up. */
+    public static boolean tooManyFailedTrips(int failedTrips) {
+        return failedTrips >= MAX_FAILED_TRIPS;
     }
 }

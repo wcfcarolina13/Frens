@@ -6264,6 +6264,7 @@ public class modCommandRegistry {
         net.wcfcarolina13.GameAI.BotActions.sneak(bot, false);
         net.wcfcarolina13.GameAI.BotActions.stop(bot);
         net.wcfcarolina13.GameAI.services.BotAutoCookingService.snoozeFor(bot, 20L * 120L);
+        net.wcfcarolina13.GameAI.services.PendingCookLedger.clearBot(bot.getUuid());
         SkillResumeService.clearAndNotify(bot.getUuid());
         return 1;
     }

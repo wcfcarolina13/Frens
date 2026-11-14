@@ -33,10 +33,14 @@ public final class BotRemovalPolicy {
      * Whether a vanilla {@code PlayerManager.remove} of this player should first write the Frens
      * snapshot (fake-player items live only there). Skipped for real players, for Frens' own
      * removals (their callers saved already, or are dropping a stale duplicate whose save would
-     * overwrite the good snapshot), and for a dead bot (the death path owns its inventory).
+     * overwrite the good snapshot), for a dead bot (the death path owns its inventory), and
+     * when the player manager's entry for this UUID is not this exact entity (a stale duplicate
+     * must never be saved over the live bot's snapshot).
+     *
+     * @param managerHoldsThisBot {@code playerManager.getPlayer(uuid) == bot} (same instance)
      */
     public static boolean shouldSaveOnVanillaRemove(boolean isFakePlayer, boolean frensRemovalInProgress,
-                                                    boolean isDead) {
-        return isFakePlayer && !frensRemovalInProgress && !isDead;
+                                                    boolean isDead, boolean managerHoldsThisBot) {
+        return isFakePlayer && !frensRemovalInProgress && !isDead && managerHoldsThisBot;
     }
 }

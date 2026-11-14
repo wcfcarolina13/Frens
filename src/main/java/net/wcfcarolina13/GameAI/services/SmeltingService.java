@@ -898,6 +898,10 @@ public final class SmeltingService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
+        // A pending-batch trip is already on its way: one furnace trip at a time.
+        if (PendingCookLedger.tripInFlight(bot.getUuid())) {
+            return false;
+        }
         BlockPos furnacePos = findReadyFoodFurnace(bot, world);
         if (furnacePos == null) {
             return false;
@@ -1040,10 +1044,19 @@ public final class SmeltingService {
             return -1;
         }
         ItemStack output = furnace.getStack(FurnaceTakeBackPolicy.OUTPUT_SLOT);
-        if (output.isEmpty() || !itemId(output.getItem()).equals(cookedItemId)) {
+        boolean outputIsCooked = !output.isEmpty() && itemId(output.getItem()).equals(cookedItemId);
+        ItemStack inputNow = furnace.getStack(FurnaceTakeBackPolicy.INPUT_SLOT);
+        int inputRawNow = !inputNow.isEmpty() && itemId(inputNow.getItem()).equals(rawItemId) ? inputNow.getCount() : 0;
+        // Look again on arrival: the owner may have taken the bot's food during the walk.
+        int owed = PendingCookLedger.observe(botId, dimension, posKey, outputIsCooked ? output.getCount() : 0, inputRawNow);
+        if (owed <= 0) {
+            LOGGER.info("Auto-cook: pending batch for {} at {}: closed on arrival, none of the bot's {} is left",
+                    liveBot.getName().getString(), furnacePos.toShortString(), cookedItemId);
             return 0;
         }
-        int owed = PendingCookLedger.owed(botId, dimension, posKey, cookedItemId);
+        if (!outputIsCooked) {
+            return 0;
+        }
         int want = PendingCookCollectPolicy.take(owed, output.getCount());
         if (want <= 0) {
             return 0;

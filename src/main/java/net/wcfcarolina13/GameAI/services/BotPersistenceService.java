@@ -29,7 +29,6 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -401,32 +400,6 @@ public final class BotPersistenceService {
         LOGGER.info("saveAll invoked, persisted {} fakeplayer(s).", count);
     }
 
-    public static void saveBotsBeforeShutdown(MinecraftServer server) {
-        if (server == null) {
-            return;
-        }
-        List<ServerPlayerEntity> players = server.getPlayerManager().getPlayerList();
-        if (players == null || players.isEmpty()) {
-            // Usually the singleplayer quit: IntegratedServer.stop has already removed every
-            // non-host player (bots saved then by onVanillaRemove), so nothing is left here.
-            LOGGER.info("Pre-shutdown bot save found an empty player list; captured 0 fakeplayer(s).");
-            return;
-        }
-        long count = 0;
-        for (ServerPlayerEntity player : players) {
-            if (!(player instanceof createFakePlayer)) {
-                continue;
-            }
-            dismountForSave(player);
-            if (persistViaPlayerManager(server, player, "pre-shutdown")) {
-                BotInventoryStorageService.save(player);
-                BotWorldStateService.saveState(player);
-                count++;
-            }
-        }
-        LOGGER.info("Pre-shutdown bot save captured {} fakeplayer(s).", count);
-    }
-
     /**
      * Called from {@code PlayerManagerRemoveMixin} at the HEAD of vanilla
      * {@code PlayerManager.remove}, before vanilla writes the .dat. Fake-player items live only
@@ -438,10 +411,21 @@ public final class BotPersistenceService {
      * submitAndJoin); no thread check is made. Does not call persistViaPlayerManager: vanilla
      * remove calls savePlayerData itself right after this inject. The mount is dismounted first
      * because vanilla remove would otherwise take a mount with a player passenger with it.
+     *
+     * <p>Saves only when the player manager's entry for this UUID is this exact entity: a stale
+     * duplicate being removed must never overwrite the live bot's snapshot.
      */
     public static void onVanillaRemove(ServerPlayerEntity bot) {
+        MinecraftServer server = extractServer(bot);
+        boolean managerHoldsThisBot = server != null
+                && server.getPlayerManager().getPlayer(bot.getUuid()) == bot;
+        boolean frensRemoval = Boolean.TRUE.equals(FRENS_REMOVAL_IN_PROGRESS.get());
         if (!BotRemovalPolicy.shouldSaveOnVanillaRemove(bot instanceof createFakePlayer,
-                Boolean.TRUE.equals(FRENS_REMOVAL_IN_PROGRESS.get()), bot.isDead())) {
+                frensRemoval, bot.isDead(), managerHoldsThisBot)) {
+            if (bot instanceof createFakePlayer && !frensRemoval && !bot.isDead() && !managerHoldsThisBot) {
+                LOGGER.info("Vanilla removal save skipped for fakeplayer '{}': not the player manager's entry (server={})",
+                        bot.getName().getString(), server != null);
+            }
             return;
         }
         dismountForSave(bot);

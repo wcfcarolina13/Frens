@@ -83,4 +83,60 @@ class PendingCookLedgerTest {
         assertFalse(PendingCookLedger.tripInFlight(bot));
         assertTrue(PendingCookLedger.entriesFor(bot).isEmpty());
     }
+
+    @Test
+    void theBotsOwnTakeLowersTheBaselineSoItIsNotDebitedTwice() {
+        PendingCookLedger.record(bot, OW, 7L, BEEF, STEAK, 4, 100L);
+        assertEquals(4, PendingCookLedger.observe(bot, OW, 7L, 3, 1));
+        assertEquals(1, PendingCookLedger.debit(bot, OW, 7L, STEAK, 3));
+        // Output went 3 -> 0 by the bot's own take: nothing more comes off.
+        assertEquals(1, PendingCookLedger.observe(bot, OW, 7L, 0, 1));
+    }
+
+    @Test
+    void someoneElseTakingTheOutputDebitsAndClosesAtZero() {
+        PendingCookLedger.record(bot, OW, 7L, BEEF, STEAK, 4, 100L);
+        assertEquals(4, PendingCookLedger.observe(bot, OW, 7L, 4, 0));
+        // Owner takes all 4 and loads 8 beef of their own.
+        assertEquals(0, PendingCookLedger.observe(bot, OW, 7L, 0, 8));
+        assertNull(PendingCookLedger.get(bot, OW, 7L));
+    }
+
+    @Test
+    void aFreshLoadResetsTheBaselineAndTripCount() {
+        PendingCookLedger.record(bot, OW, 7L, BEEF, STEAK, 2, 100L);
+        PendingCookLedger.observe(bot, OW, 7L, 2, 0);
+        assertEquals(1, PendingCookLedger.noteTrip(bot, OW, 7L, 0));
+        PendingCookLedger.record(bot, OW, 7L, BEEF, STEAK, 2, 200L);
+        assertEquals(-1, PendingCookLedger.get(bot, OW, 7L).lastSeenOutput());
+        assertEquals(0, PendingCookLedger.get(bot, OW, 7L).failedTrips());
+    }
+
+    @Test
+    void missedTripsCountUpAndATakeResetsThem() {
+        PendingCookLedger.record(bot, OW, 7L, BEEF, STEAK, 4, 100L);
+        assertEquals(1, PendingCookLedger.noteTrip(bot, OW, 7L, -1));
+        assertEquals(2, PendingCookLedger.noteTrip(bot, OW, 7L, 0));
+        assertEquals(0, PendingCookLedger.noteTrip(bot, OW, 7L, 2));
+        assertEquals(1, PendingCookLedger.noteTrip(bot, OW, 7L, 0));
+    }
+
+    @Test
+    void aTripForAGoneEntryIsANoOp() {
+        assertEquals(0, PendingCookLedger.noteTrip(bot, OW, 7L, 0));
+        assertNull(PendingCookLedger.get(bot, OW, 7L));
+    }
+
+    @Test
+    void clearBotForgetsOnlyThatBotAndLeavesItsTripFlag() {
+        UUID other = UUID.randomUUID();
+        PendingCookLedger.record(bot, OW, 7L, BEEF, STEAK, 4, 100L);
+        PendingCookLedger.record(bot, OW, 9L, BEEF, STEAK, 2, 100L);
+        PendingCookLedger.record(other, OW, 7L, BEEF, STEAK, 1, 100L);
+        assertTrue(PendingCookLedger.beginTrip(bot));
+        PendingCookLedger.clearBot(bot);
+        assertFalse(PendingCookLedger.hasEntries(bot));
+        assertTrue(PendingCookLedger.hasEntries(other));
+        assertTrue(PendingCookLedger.tripInFlight(bot));
+    }
 }

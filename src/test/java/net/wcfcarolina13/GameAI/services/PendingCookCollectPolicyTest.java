@@ -80,4 +80,37 @@ class PendingCookCollectPolicyTest {
         assertTrue(PendingCookCollectPolicy.isExpired(10L, 1000L));
         assertEquals(24000L, PendingCookCollectPolicy.EXPIRY_TICKS);
     }
+
+    @Test
+    void unknownBaselineOnlyCapsToWhatIsInTheFurnace() {
+        assertEquals(4, PendingCookCollectPolicy.reconcileOwed(4, -1, 1, 3));
+        assertEquals(2, PendingCookCollectPolicy.reconcileOwed(4, -1, 2, 0));
+    }
+
+    @Test
+    void outputThatDroppedWithoutTheBotComesOffWhatIsOwed() {
+        // 3 steak seen, owner took 2: owed 4 -> 2 (cap 1 + 1 raw = 2 too).
+        assertEquals(2, PendingCookCollectPolicy.reconcileOwed(4, 3, 1, 1));
+        // Owner emptied the output and loaded 8 of their own beef: the cap no longer saves the bot,
+        // the drop does.
+        assertEquals(0, PendingCookCollectPolicy.reconcileOwed(4, 4, 0, 8));
+    }
+
+    @Test
+    void outputThatRoseIsCookingNotATake() {
+        assertEquals(4, PendingCookCollectPolicy.reconcileOwed(4, 1, 3, 1));
+    }
+
+    @Test
+    void owedNeverExceedsOutputPlusRawInput() {
+        assertEquals(3, PendingCookCollectPolicy.reconcileOwed(6, 2, 2, 1));
+        assertEquals(0, PendingCookCollectPolicy.reconcileOwed(6, -1, 0, 0));
+    }
+
+    @Test
+    void threeMissedTripsGiveTheEntryUp() {
+        assertFalse(PendingCookCollectPolicy.tooManyFailedTrips(2));
+        assertTrue(PendingCookCollectPolicy.tooManyFailedTrips(3));
+        assertEquals(3, PendingCookCollectPolicy.MAX_FAILED_TRIPS);
+    }
 }
