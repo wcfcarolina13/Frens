@@ -6,7 +6,7 @@ Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded ha
 
 ## Session Handoff 2026-11-14 (1.1.302) — next session starts here
 
-**State:** 1.1.302 = 1.1.301 plus the quit-save fix, pending-cook collection, their review fixes and PR #139 (changelog.md "1.1.302"). Tests 4688 after the #139 merge, 0 failures (clean build on the Mac). Sandbox-proven: quit save 4 of 4, both cook paths, #139's host steps. Not on Modrinth: Bradley uploads (notes in `.superpowers/releases/`). Not deployed to Nirn: needs Bradley's yes.
+**State:** 1.1.302 = 1.1.301 plus the quit-save fix, pending-cook collection, their review fixes and PR #139 (changelog.md "1.1.302"). Tests 4688 after the #139 merge, 0 failures (clean build on the Mac). Sandbox-proven: quit save 4 of 4, both cook paths, #139's host steps. Not on Modrinth: Bradley uploads (notes in `.superpowers/releases/`). Deployed to Nirn 2026-11-14 after a backup, on Bradley's OK (field Phase 6ci). Modrinth notes OKed; Bradley uploads with `.superpowers/sdd/modrinth/publish-1.1.302.sh`.
 
 **Fix next:**
 - A following bot stops at the top of an 8-block drop with stairs beside it, also on 1.1.300 (pre-existing). Repro: `fix302.py canopy <bot> <run> stairs [notree]` in frens-dev. In the no-tree control the bot stands 1 block from the edge with the commander 8 east and 8 below, and doesn't move for 40 s.
