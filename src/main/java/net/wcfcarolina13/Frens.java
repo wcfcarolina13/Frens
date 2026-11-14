@@ -794,6 +794,7 @@ public class Frens implements ModInitializer {
         configCommand.register();
         net.wcfcarolina13.GameAI.services.supply.SupplyRequestService.register();
         net.wcfcarolina13.Commands.SupplyCommands.register();
+        net.wcfcarolina13.Commands.AllyCommands.register();
         net.wcfcarolina13.Commands.GuideCommands.register();
         // Knowledge graph: project recipes/tags once the data is loaded, and again after /reload
         // swaps datapacks. Build failure installs an empty graph (souls degrade gracefully).
