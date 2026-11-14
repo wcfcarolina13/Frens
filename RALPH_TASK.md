@@ -1406,6 +1406,9 @@ and `3c548bd`) plus the motion-studio skill make a pipeline for showcase content
   sandbox world, record with Flashback, export 4:5 or 16:9 clips with `fbexport.py`, cut with motion-studio. First
   reference: the "Leave No Trace" film (`~/pontus/experiments/frens-leave-no-trace`). Bradley approves every video and
   uploads himself; nothing is posted by Claude.
+- [ ] **A video that catches frens talking** (Bradley, 2026-11-13, "later on the roadmap"): baked-in scripted lines and
+  soul chatter heard in play. The sandbox records muted, so this needs its sound turned on for that one recording.
+  Destination for finished videos: Bradley's personal YouTube channel, embedded on the Modrinth page.
 
 ## Installer portability (Backlogged 2026-09-04 — only ever tested on the M2 Pro Mac)
 
