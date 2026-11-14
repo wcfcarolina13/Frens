@@ -1,9 +1,15 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.AbstractFurnaceBlock;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import org.slf4j.Logger;
@@ -41,6 +47,14 @@ public final class BotAutoCookingService {
      */
     private static final long COOK_SOON_CACHE_TICKS = 100L;
     private static final Map<UUID, long[]> COOK_SOON_CACHE = new ConcurrentHashMap<>();
+    /**
+     * Going back for food the bot left cooking (PendingCookLedger), whatever its hunger: only for a
+     * furnace in this dimension within this range whose chunk is loaded (no chunk loads from the
+     * tick), and after a trip that took nothing, not again for {@link #PENDING_RETRY_TICKS}.
+     */
+    private static final double PENDING_RANGE_SQ = 64.0D * 64.0D;
+    private static final long PENDING_RETRY_TICKS = 20L * 60L;
+    private static final Map<UUID, Long> NEXT_PENDING_TICK = new ConcurrentHashMap<>();
 
     /**
      * Auto-cook decision gate.
@@ -54,6 +68,8 @@ public final class BotAutoCookingService {
         FUEL_GATHER_IN_FLIGHT.clear();
         NEXT_DIAGNOSTIC_TICK.clear();
         COOK_SOON_CACHE.clear();
+        NEXT_PENDING_TICK.clear();
+        PendingCookLedger.clear();
     }
 
 
@@ -83,6 +99,10 @@ public final class BotAutoCookingService {
 
             int hunger = bot.getHungerManager().getFoodLevel();
             ServerCommandSource source = bot.getCommandSource().withSilent();
+            // Food the bot left cooking comes back once it is done, hungry or not; only what it put in.
+            if (tryCollectPendingBatch(server, bot, world, source, nowTick)) {
+                continue;
+            }
             if (shouldCollectReadyFood(hunger, SmeltingService.hasReadyFoodOutput(bot, world))) {
                 if (SmeltingService.startCollectFinishedFood(bot, source)) {
                     NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + COLLECT_COOLDOWN_TICKS + RNG.nextInt(40));
@@ -186,6 +206,85 @@ public final class BotAutoCookingService {
         }
         long nowTick = server.getTicks();
         NEXT_DECISION_TICK.merge(bot.getUuid(), nowTick + Math.max(0L, delayTicks), Math::max);
+    }
+
+    /**
+     * Server thread. Starts a trip back to a furnace holding food this bot left cooking, when
+     * {@link PendingCookCollectPolicy} says it is ready. True when a trip started or one is still on
+     * its way (the rest of this tick's auto-cook waits for it); false lets the usual rules run.
+     */
+    private static boolean tryCollectPendingBatch(MinecraftServer server, ServerPlayerEntity bot, ServerWorld world,
+                                                  ServerCommandSource source, long nowTick) {
+        UUID id = bot.getUuid();
+        if (PendingCookLedger.tripInFlight(id)) {
+            return true;
+        }
+        if (nowTick < NEXT_PENDING_TICK.getOrDefault(id, 0L)) {
+            return false;
+        }
+        java.util.List<PendingCookLedger.Entry> entries = PendingCookLedger.entriesFor(id);
+        if (entries.isEmpty()) {
+            return false;
+        }
+        String botName = bot.getName().getString();
+        String dimension = world.getRegistryKey().getValue().toString();
+        for (PendingCookLedger.Entry entry : entries) {
+            BlockPos pos = BlockPos.fromLong(entry.pos());
+            if (PendingCookCollectPolicy.isExpired(nowTick, entry.recordedTick())) {
+                PendingCookLedger.remove(id, entry.dimension(), entry.pos());
+                LOGGER.info("Auto-cook: pending batch dropped for {} at {}: expired with {} {} owed",
+                        botName, pos.toShortString(), entry.owed(), entry.cookedItem());
+                continue;
+            }
+            if (!entry.dimension().equals(dimension)) {
+                continue;
+            }
+            if (bot.getBlockPos().getSquaredDistance(pos) > PENDING_RANGE_SQ || !world.isPosLoaded(pos)) {
+                continue;
+            }
+            if (!(world.getBlockEntity(pos) instanceof AbstractFurnaceBlockEntity furnace)) {
+                PendingCookLedger.remove(id, entry.dimension(), entry.pos());
+                LOGGER.info("Auto-cook: pending batch dropped for {} at {}: the furnace is gone", botName, pos.toShortString());
+                continue;
+            }
+            ItemStack output = furnace.getStack(FurnaceTakeBackPolicy.OUTPUT_SLOT);
+            ItemStack input = furnace.getStack(FurnaceTakeBackPolicy.INPUT_SLOT);
+            boolean outputIsCooked = !output.isEmpty()
+                    && Registries.ITEM.getId(output.getItem()).toString().equals(entry.cookedItem());
+            boolean inputHoldsRaw = !input.isEmpty()
+                    && Registries.ITEM.getId(input.getItem()).toString().equals(entry.rawItem());
+            BlockState state = world.getBlockState(pos);
+            boolean lit = state.contains(AbstractFurnaceBlock.LIT) && state.get(AbstractFurnaceBlock.LIT);
+            PendingCookCollectPolicy.Decision decision = PendingCookCollectPolicy.decide(entry.owed(), outputIsCooked,
+                    output.getCount(), output.getMaxCount(), inputHoldsRaw, lit);
+            if (decision == PendingCookCollectPolicy.Decision.DROP) {
+                PendingCookLedger.remove(id, entry.dimension(), entry.pos());
+                LOGGER.info("Auto-cook: pending batch dropped for {} at {}: none of its {} is left in the furnace",
+                        botName, pos.toShortString(), entry.cookedItem());
+                continue;
+            }
+            if (decision != PendingCookCollectPolicy.Decision.TAKE || !PendingCookLedger.beginTrip(id)) {
+                continue;
+            }
+            int take = PendingCookCollectPolicy.take(entry.owed(), output.getCount());
+            boolean started = SmeltingService.startCollectPendingFood(bot, source, pos, entry.rawItem(), entry.cookedItem(),
+                    taken -> {
+                        PendingCookLedger.endTrip(id);
+                        if (taken <= 0) {
+                            NEXT_PENDING_TICK.put(id, server.getTicks() + PENDING_RETRY_TICKS);
+                        }
+                    });
+            if (!started) {
+                PendingCookLedger.endTrip(id);
+                NEXT_PENDING_TICK.put(id, nowTick + PENDING_RETRY_TICKS);
+                return false;
+            }
+            LOGGER.info("Auto-cook: collecting pending batch for {}: {} of {} {} at {}",
+                    botName, take, entry.owed(), output.getName().getString(), pos.toShortString());
+            NEXT_DECISION_TICK.put(id, nowTick + COLLECT_COOLDOWN_TICKS + RNG.nextInt(40));
+            return true;
+        }
+        return false;
     }
 
     /**

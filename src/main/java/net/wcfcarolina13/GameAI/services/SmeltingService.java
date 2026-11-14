@@ -710,6 +710,8 @@ public final class SmeltingService {
                 ItemStack output = furnace.getStack(2);
                 if (!output.isEmpty()) {
                     ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
+                    debitPendingFood(liveBot, liveWorld, furnacePos, output.getItem(),
+                            remaining == null ? 0 : output.getCount() - remaining.getCount());
                     if (remaining != null && remaining.isEmpty()) {
                         furnace.setStack(2, ItemStack.EMPTY);
                         ChatUtils.sendSystemMessage(source, "Cleared furnace output.");
@@ -753,12 +755,15 @@ public final class SmeltingService {
                         int topped = topUpInputMatching(liveBot, furnace, liveWorld, state);
                         if (topped > 0) {
                             ChatUtils.sendSystemMessage(source, "Added " + topped + " more " + input.getName().getString() + ".");
+                            recordPendingFood(liveBot, liveWorld, furnacePos, input.getItem(), topped);
                         }
                         return;
                     }
                 }
 
                 int inserted = 0;
+                // Items (not stacks) of each raw food moved in, for the pending-batch ledger.
+                Map<Item, Integer> movedByItem = new LinkedHashMap<>();
                 for (Map.Entry<Item, List<ItemStack>> entry : cookables.entrySet()) {
                     String name = entry.getKey().getName().getString();
                     for (ItemStack stack : entry.getValue()) {
@@ -766,10 +771,12 @@ public final class SmeltingService {
                         if (moved > 0) {
                             consumeFromInventory(liveBot, stack.copyWithCount(moved));
                             inserted++;
+                            movedByItem.merge(entry.getKey(), moved, Integer::sum);
                             ChatUtils.sendSystemMessage(source, "Added raw stack: " + name);
                         }
                     }
                 }
+                movedByItem.forEach((raw, count) -> recordPendingFood(liveBot, liveWorld, furnacePos, raw, count));
 
                 if (inserted == 0) {
                     ChatUtils.sendSystemMessage(source, "No space to add raws.");
@@ -944,6 +951,11 @@ public final class SmeltingService {
                     return;
                 }
                 ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
+                debitPendingFood(liveBot, liveWorld, targetPos, output.getItem(),
+                        remaining == null ? 0 : output.getCount() - remaining.getCount());
+                if (remaining == null) {
+                    return;
+                }
                 if (remaining.isEmpty()) {
                     furnace.setStack(2, ItemStack.EMPTY);
                 } else if (remaining.getCount() < output.getCount()) {
@@ -953,6 +965,148 @@ public final class SmeltingService {
             });
         });
         return true;
+    }
+
+    /**
+     * Goes back for food this bot left cooking ({@link PendingCookLedger}): walks to the furnace off
+     * the server thread, then on the server thread takes at most what the bot is still owed of the
+     * cooked item, never the rest of the output. {@code onDone} runs on the server thread with the
+     * count taken, or -1 when the bot could not get there or the furnace is gone.
+     */
+    public static boolean startCollectPendingFood(ServerPlayerEntity bot, ServerCommandSource source,
+                                                  BlockPos furnacePos, String rawItemId, String cookedItemId,
+                                                  java.util.function.IntConsumer onDone) {
+        if (bot == null || source == null || furnacePos == null || onDone == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos approach = chooseApproach(world, furnacePos);
+        var server = source.getServer();
+        if (approach == null || server == null) {
+            return false;
+        }
+        var worldKey = world.getRegistryKey();
+        UUID botId = bot.getUuid();
+        BlockPos targetPos = furnacePos.toImmutable();
+        BlockPos standPos = approach.toImmutable();
+        boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                        MovementService.Mode.DIRECT, standPos, standPos, null, null, bot.getHorizontalFacing());
+                MovementService.MovementResult moveRes = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
+                if (!moveRes.success() && bot.getBlockPos().getSquaredDistance(standPos) > STATION_REACH_SQ) {
+                    MovementService.clearRecentWalkAttempt(botId);
+                    MovementService.nudgeTowardUntilClose(bot, standPos, STATION_REACH_SQ, 2600L, 0.15, "cook-collect-nudge");
+                }
+            } catch (Throwable t) {
+                // Throwable: the take below must always run, or the trip flag stays set.
+                LOGGER.debug("Pending cook collect movement failed: {}", t.toString());
+            }
+            server.execute(() -> {
+                int taken = -1;
+                try {
+                    taken = takePendingFood(server, worldKey, botId, source, targetPos, rawItemId, cookedItemId);
+                } catch (Throwable t) {
+                    LOGGER.warn("Auto-cook: pending collect failed: {}", t.toString());
+                } finally {
+                    onDone.accept(taken);
+                }
+            });
+        });
+        return true;
+    }
+
+    /** Server thread. The take half of {@link #startCollectPendingFood}; returns the count taken or -1. */
+    private static int takePendingFood(net.minecraft.server.MinecraftServer server,
+                                       net.minecraft.registry.RegistryKey<net.minecraft.world.World> worldKey,
+                                       UUID botId, ServerCommandSource source, BlockPos furnacePos,
+                                       String rawItemId, String cookedItemId) {
+        ServerWorld liveWorld = server.getWorld(worldKey);
+        ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+        if (liveWorld == null || liveBot == null || liveBot.isRemoved() || liveBot.getEntityWorld() != liveWorld) {
+            return -1;
+        }
+        String dimension = dimensionId(liveWorld);
+        long posKey = furnacePos.asLong();
+        if (!(liveWorld.getBlockEntity(furnacePos) instanceof AbstractFurnaceBlockEntity furnace)) {
+            PendingCookLedger.remove(botId, dimension, posKey);
+            return -1;
+        }
+        if (!ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
+            return -1;
+        }
+        ItemStack output = furnace.getStack(FurnaceTakeBackPolicy.OUTPUT_SLOT);
+        if (output.isEmpty() || !itemId(output.getItem()).equals(cookedItemId)) {
+            return 0;
+        }
+        int owed = PendingCookLedger.owed(botId, dimension, posKey, cookedItemId);
+        int want = PendingCookCollectPolicy.take(owed, output.getCount());
+        if (want <= 0) {
+            return 0;
+        }
+        String itemName = output.getName().getString();
+        ItemStack remaining = evacuateOutput(liveBot, source, output.copyWithCount(want), STATION_REACH_SQ);
+        int taken = remaining == null ? 0 : want - remaining.getCount();
+        if (taken > 0) {
+            int left = output.getCount() - taken;
+            furnace.setStack(FurnaceTakeBackPolicy.OUTPUT_SLOT, left <= 0 ? ItemStack.EMPTY : output.copyWithCount(left));
+            furnace.markDirty();
+        }
+        int stillOwed = PendingCookLedger.debit(botId, dimension, posKey, cookedItemId, taken);
+        ItemStack input = furnace.getStack(FurnaceTakeBackPolicy.INPUT_SLOT);
+        boolean inputHoldsRaw = !input.isEmpty() && itemId(input.getItem()).equals(rawItemId);
+        // A take cut short (pack and chests full) keeps the entry for a later try.
+        boolean closed = stillOwed > 0 && PendingCookCollectPolicy.closeAfterTake(stillOwed, inputHoldsRaw, taken < want);
+        if (closed) {
+            PendingCookLedger.remove(botId, dimension, posKey);
+        }
+        LOGGER.info("Auto-cook: collected {} {} for {}, {} still owed{}", taken, itemName,
+                liveBot.getName().getString(), stillOwed,
+                closed ? " (entry closed: none of the raw food is left in the furnace)" : "");
+        return taken;
+    }
+
+    private static String itemId(Item item) {
+        return Registries.ITEM.getId(item).toString();
+    }
+
+    private static String dimensionId(ServerWorld world) {
+        return world.getRegistryKey().getValue().toString();
+    }
+
+    /**
+     * Server thread. Notes {@code count} raw {@code raw} the bot just loaded into the furnace at
+     * {@code pos}, when it cooks into food there, so the bot comes back for it.
+     */
+    private static void recordPendingFood(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, Item raw, int count) {
+        if (bot == null || world == null || pos == null || raw == null || count <= 0) {
+            return;
+        }
+        var cookType = recipeTypeFor(world.getBlockState(pos));
+        var recipe = cookType == null ? null : findMatchingCookingRecipe(new ItemStack(raw), world, cookType);
+        if (recipe == null) {
+            return;
+        }
+        ItemStack cooked = recipe.value().craft(new SingleStackRecipeInput(new ItemStack(raw)), world.getRegistryManager());
+        if (cooked.isEmpty() || cooked.getComponents().get(net.minecraft.component.DataComponentTypes.FOOD) == null) {
+            return;
+        }
+        int owed = PendingCookLedger.record(bot.getUuid(), dimensionId(world), pos.asLong(), itemId(raw),
+                itemId(cooked.getItem()), count, world.getServer().getTicks());
+        LOGGER.info("Auto-cook: pending batch recorded for {}: {} {} at {} ({} owed)",
+                bot.getName().getString(), count, cooked.getName().getString(), pos.toShortString(), owed);
+    }
+
+    /** Server thread. The bot took {@code taken} of {@code item} from this furnace's output by another path. */
+    private static void debitPendingFood(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, Item item, int taken) {
+        if (bot == null || world == null || pos == null || item == null || taken <= 0) {
+            return;
+        }
+        PendingCookLedger.debit(bot.getUuid(), dimensionId(world), pos.asLong(), itemId(item), taken);
     }
 
     private static boolean ensureStationInteractable(ServerPlayerEntity bot, BlockPos stationPos, double reachSq) {
