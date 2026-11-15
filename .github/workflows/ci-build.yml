@@ -40,6 +40,7 @@ jobs:
           name: test-reports
           path: build/reports/tests/test
           if-no-files-found: ignore
+          retention-days: 3
 
       - name: Locate distributable jar
         id: jar
@@ -60,3 +61,4 @@ jobs:
           name: ${{ steps.jar.outputs.jar_name }}
           path: ${{ steps.jar.outputs.jar_path }}
           if-no-files-found: error
+          retention-days: 3

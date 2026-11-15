@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## CI housekeeping (2026-11-15)
+
+- **CI build files now expire after 3 days, not 90.** Both `upload-artifact` steps in `ci-build.yml` set `retention-days: 3`. With a ~33 MB jar per run kept 90 days, 598 copies filled the account's free 0.5 GB of Actions storage (GitHub's 100% notice of 2026-11-12). The same day, with Bradley's yes, 594 old artifacts were deleted and the newest 5 kept. Releases are unaffected; jars can be rebuilt from any commit.
+
 ## 1.1.302 (2026-11-14): quit save, cook collection, PR #139
 
 Bradley asked on 2026-11-13 for the next pile of bugs and tests after 1.1.301. Commits ed95e384, 91396a7a, 0437770e (review fixes) and the #139 merge 845ce889.
