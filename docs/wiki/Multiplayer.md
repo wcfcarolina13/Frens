@@ -74,12 +74,12 @@ You see and can change your own bases. Everyone sees server bases such as Spawn.
 Alliances are mutual. Both players have to agree:
 
 ```
-/bot ally invite <player>     invite, or accept an invitation
-/bot ally revoke <player>     end an alliance, or decline
-/bot ally list
+/frens ally invite <player>     invite, or accept an invitation
+/frens ally revoke <player>     end an alliance, or decline
+/frens ally list
 ```
 
-These are `/bot` commands, so on a server both players need to be operators. There is no button for them yet.
+Any player can use these; they don't need an operator. The invited player gets **[Accept]** and **[Decline]** buttons in chat. `/bot ally` does the same for operators and the host.
 
 ### Walls
 
