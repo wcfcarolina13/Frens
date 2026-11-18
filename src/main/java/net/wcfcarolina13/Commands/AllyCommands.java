@@ -12,6 +12,7 @@ import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
+import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.GameAI.services.PlayerAllianceService;
 import net.wcfcarolina13.GameAI.services.supply.SupplyChestRules;
 
@@ -33,6 +34,8 @@ public final class AllyCommands {
     public static final String COMMAND_REVOKE = "revoke";
     public static final String COMMAND_LIST = "list";
     private static final String ARG_PLAYER = "player";
+    /** Shown when the target is one of the mod's companions, which can never accept an invite. */
+    public static final String MSG_PLAYERS_ONLY = "You can only ally with other players.";
 
     private AllyCommands() {
     }
@@ -66,6 +69,11 @@ public final class AllyCommands {
 
     public static int invite(CommandContext<ServerCommandSource> context, ServerPlayerEntity target) throws CommandSyntaxException {
         ServerPlayerEntity self = context.getSource().getPlayerOrThrow();
+        // EntityArgumentType.player() also matches companions; an invite to one could never be accepted.
+        if (target instanceof createFakePlayer) {
+            ChatUtils.sendSystemMessage(context.getSource(), MSG_PLAYERS_ONLY);
+            return 0;
+        }
         PlayerAllianceService.InviteResult r = PlayerAllianceService.invite(
                 self.getUuid().toString(), self.getName().getString(),
                 target.getUuid().toString(), target.getName().getString());

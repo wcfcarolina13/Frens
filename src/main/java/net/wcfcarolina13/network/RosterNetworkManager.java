@@ -23,6 +23,8 @@ public final class RosterNetworkManager {
 
     private static volatile boolean REGISTERED = false;
     private static final Map<UUID, Long> LAST_REQUEST_MS = new ConcurrentHashMap<>();
+    /** The last list sent to each player, resent when a request comes inside the throttle window. */
+    private static final Map<UUID, RosterListPayload> LAST_LIST = new ConcurrentHashMap<>();
 
     private RosterNetworkManager() {
     }
@@ -39,6 +41,7 @@ public final class RosterNetworkManager {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             if (handler != null && handler.player != null) {
                 LAST_REQUEST_MS.remove(handler.player.getUuid());
+                LAST_LIST.remove(handler.player.getUuid());
             }
         });
     }
@@ -49,7 +52,10 @@ public final class RosterNetworkManager {
         }
         long now = System.currentTimeMillis();
         Long last = LAST_REQUEST_MS.get(player.getUuid());
-        if (!RosterVisibilityPolicy.requestAllowed(last == null ? 0L : last, now)) {
+        RosterListPayload cached = LAST_LIST.get(player.getUuid());
+        if (RosterVisibilityPolicy.requestAction(last == null ? 0L : last, now, cached != null)
+                == RosterVisibilityPolicy.RequestAction.RESEND_CACHED) {
+            ServerPlayNetworking.send(player, cached);
             return;
         }
         LAST_REQUEST_MS.put(player.getUuid(), now);
@@ -71,6 +77,8 @@ public final class RosterNetworkManager {
             Frens.LOGGER.info("[roster] {} companions in this world, sending the first {}",
                     scope.thisWorld().size(), thisWorld.size());
         }
-        ServerPlayNetworking.send(player, new RosterListPayload(thisWorld, otherWorlds, admin));
+        RosterListPayload list = new RosterListPayload(thisWorld, otherWorlds, admin);
+        LAST_LIST.put(player.getUuid(), list);
+        ServerPlayNetworking.send(player, list);
     }
 }

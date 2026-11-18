@@ -77,4 +77,19 @@ class RosterVisibilityPolicyTest {
         // A clock that moved backwards never locks a player out.
         assertTrue(RosterVisibilityPolicy.requestAllowed(5_000L, 1_000L));
     }
+
+    @Test
+    void throttledRequestIsStillAnswered() {
+        long t = 1_000L;
+        long soon = t + RosterVisibilityPolicy.MIN_REQUEST_INTERVAL_MS - 1;
+        assertEquals(RosterVisibilityPolicy.RequestAction.RESEND_CACHED,
+                RosterVisibilityPolicy.requestAction(t, soon, true));
+        // Nothing cached yet: compute, never silence.
+        assertEquals(RosterVisibilityPolicy.RequestAction.COMPUTE,
+                RosterVisibilityPolicy.requestAction(t, soon, false));
+        assertEquals(RosterVisibilityPolicy.RequestAction.COMPUTE,
+                RosterVisibilityPolicy.requestAction(t, t + RosterVisibilityPolicy.MIN_REQUEST_INTERVAL_MS, true));
+        assertEquals(RosterVisibilityPolicy.RequestAction.COMPUTE,
+                RosterVisibilityPolicy.requestAction(0L, 5L, true));
+    }
 }

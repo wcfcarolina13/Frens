@@ -73,4 +73,15 @@ public final class RosterVisibilityPolicy {
     public static boolean requestAllowed(long lastMs, long nowMs) {
         return lastMs <= 0L || nowMs - lastMs >= MIN_REQUEST_INTERVAL_MS || nowMs < lastMs;
     }
+
+    /** What the server does with one roster request. */
+    public enum RequestAction { COMPUTE, RESEND_CACHED }
+
+    /**
+     * A throttled request still gets an answer, because the client always waits for one: it gets
+     * the last list sent to that player, or a fresh one when nothing is cached yet.
+     */
+    public static RequestAction requestAction(long lastMs, long nowMs, boolean hasCached) {
+        return requestAllowed(lastMs, nowMs) || !hasCached ? RequestAction.COMPUTE : RequestAction.RESEND_CACHED;
+    }
 }
