@@ -4,7 +4,13 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-11-18 (1.1.303) — next session starts here
+## Session Handoff 2026-11-18 (1.1.304) — next session starts here
+
+**State:** 1.1.304 = 1.1.303 plus PR #53 (client packet gates), PR #12 (nickname addressing) and review fixes 089b4031. Tests 4741, 0 failures. The 1.1.303 handoff below still lists the open work, except #53 and #12, which shipped here.
+
+**Still open:** #5 (needs a digest to land during an open private scene). Issue #128 (Fortify, six code-read findings; the 1.1.218 "don't touch Fortify" ruling stands until Bradley lifts it). Issue #115 (Guide and wiki screenshots).
+
+## Session Handoff 2026-11-18 (1.1.303) — superseded by 1.1.304 above
 
 **State:** 1.1.303 = 1.1.302 plus the Polymer spawn fix (aec91d7f), PR #88 (server-owned roster), PR #134 (alliances without operator) and one review fix (69e24408). Tests 4703, 0 failures. The Polymer fix went out early as GitHub pre-release v1.1.303-beta.1 for the player who reported it.
 

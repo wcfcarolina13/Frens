@@ -2,6 +2,22 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## 1.1.304 (2026-11-18): multiplayer packet gates and nickname addressing
+
+Two more PRs that were waiting on a second player, checked on the two-player test setup (offline local server, op and non-op clients), reviewed, and fixed.
+
+- **PR #53, client packets are gated** (merge f5876b25). An audit of the packets a client sends for bases, quest topics and cookables. Base labels are capped at 32 characters. Base writes share a per-player throttle ("Slow down, that click was ignored."). Saving a base needs a bot owner, an operator or the host. The bases list adds no home mark or lodestone rows for a bot the viewer can't control. Two-player check: five quick Set here clicks gave three answers and one throttle notice, and a non-op got no rows for the op's bot. Step 1 (a non-op with no bot saving a base) can't be reached from an unmodified client, so it rests on the unit tests.
+- **PR #12, a shortened player name with a comma addresses that player** (merge 14a274cc). "Rob, come here" with a player Robert_99 online is for Robert_99, not the bots. Two-player A/B before the review fix: on 1.1.303 bot Jake answered "Test, did Jake eat today?" with a player Tester2 online, and with the PR it did not.
+- **Review fixes** (089b4031). The base-name boxes now stop at 32 characters, so the server no longer cuts names silently. A nickname yields to a bot named later in the line: "Now, Jake come here" with a player Nowak online is for Jake. A player's exact full name still takes the line ("Nowak, Jake come here" stays with Nowak).
+
+**Rulings (made on Bradley's behalf, 2026-11-18):**
+- A nickname loses to a later bot name. Cost if wrong: "Rob, did Jake eat?" said to another player gets an answer from Jake. The other way, a bot would ignore a real command such as "Now, Jake come here".
+- An earlier report that the Protected Zones list leaked another player's base coordinates was wrong: the two test players were allied, and allies see each other's base zones by design (gated since 1.1.287).
+
+Tests 4703 → 4741, 0 failures.
+
+**Field checks:** none new.
+
 ## 1.1.303 (2026-11-18): bots spawn in Polymer packs, multiplayer roster and alliances
 
 A player on Discord couldn't spawn a fren at all in a large modpack. The cause was Polymer (see the entry below this one). This build ships that fix with two multiplayer PRs that were waiting on a second player. A new two-player test setup (an offline local server with a second game client) proved both. A GitHub pre-release, v1.1.303-beta.1, carried the Polymer fix early for that player.
