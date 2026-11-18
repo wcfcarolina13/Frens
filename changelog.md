@@ -2,6 +2,11 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## Unreleased: bots spawn with Polymer installed (2026-11-18)
+
+- **`/bot spawn` no longer crashes when Polymer is installed.** A player on Discord with a 265-mod pack (Polymer 0.15.2) got a NullPointerException on every spawn. Polymer reads the player from the connection's packet listener (through packet-tweaker's `StaticPacketContext`) whenever a packet is sent. `FakeClientConnection` made `transitionInbound` a no-op, so `getPacketListener()` returned null and the first packet of the bot's join threw. It now keeps the listener in its own field and returns it from `getPacketListener()`. Vanilla's `ClientConnection.tick()` reads its own private field, which stays null, so the bot's handler is not ticked twice. This is also the "Polymer stops spawning" report from April.
+- **Proof (sandbox, Polymer 0.15.2 alone added):** the shipped 1.1.302 jar threw the same `StaticPacketContext.getPlayer` NPE on `/bot spawn Polly admin survival`. The fixed jar spawned Polly and Pip, despawned and respawned Pip, and rejoined both on the next load with no new exceptions. Without Polymer, the fixed jar spawned a third bot cleanly.
+
 ## CI housekeeping (2026-11-15)
 
 - **CI build files now expire after 3 days, not 90.** Both `upload-artifact` steps in `ci-build.yml` set `retention-days: 3`. With a ~33 MB jar per run kept 90 days, 598 copies filled the account's free 0.5 GB of Actions storage (GitHub's 100% notice of 2026-11-12). The same day, with Bradley's yes, 594 old artifacts were deleted and the newest 5 kept. Releases are unaffected; jars can be rebuilt from any commit.

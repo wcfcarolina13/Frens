@@ -1067,7 +1067,7 @@ From the first read of the Frens Discord and the solace #diy-and-tech thread. Re
 - [ ] **Choose which mobs a bot attacks (guy):** per-type setting, separate from the global Attack Named Mobs toggle. Needs a ruling first: does a filtered mob still get hit in self-defense?
 - [ ] **Sandbox test, custom skin URLs (Dev):** the check accepts any http or https host, but `BotSkinService` says the client trusts `textures.minecraft.net`. Hypothesis: other hosts fail with no message. Waiting on Dev's URL.
 - [ ] **Sandbox test, mining a cobblestone generator (Dev):** "No stone block detected within radius 8. Collected 7 out of 1000 requested." (`DirtShovelSkill`). Hypothesis: one empty scan ends the job. Any wait needs a time limit.
-- [ ] **Sandbox test, modded recipes and Polymer (Vance, 2026-04):** bots reportedly ignored a changed stone tool recipe, and Polymer reportedly stopped bots spawning. Retest on the current build, the report may be stale. Where ingredient lists come from is unverified.
+- [ ] **Sandbox test, modded recipes (Vance, 2026-04):** bots reportedly ignored a changed stone tool recipe. Retest on the current build, the report may be stale. Where ingredient lists come from is unverified. (The Polymer half of this report was confirmed and fixed on 2026-11-18, see the changelog: spawn NPE from a null packet listener on the fake connection.)
 
 ## Backlog Lineup 2026-09-03
 
