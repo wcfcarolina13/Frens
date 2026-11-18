@@ -4,7 +4,11 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-11-18 (1.1.305) — next session starts here
+## Session Handoff 2026-11-18 (1.1.306) — next session starts here
+
+**State:** 1.1.306 = 1.1.305 plus PR #5 (digest holds back an open party scene) and its hold log (4f5700e5), proven on the two-player rig. Tests 4752. No open PRs left. Open issues: #128 (Fortify items 1, 2, 3, 6 under the 1.1.218 ruling) and #115 (Guide screenshots). Other next work is in the 1.1.303 handoff below.
+
+## Session Handoff 2026-11-18 (1.1.305) — superseded by 1.1.306 above
 
 **State:** 1.1.305 = 1.1.304 plus two Fortify fixes from issue #128 (5b2fea9a: `patch auto` finds the nearest wall, the out-of-blocks count matches what a wall can place). Tests 4745. Issue #128's other four findings stay open under the 1.1.218 ruling. Everything else is as in the 1.1.304 handoff below.
 

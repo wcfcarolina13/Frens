@@ -2,6 +2,16 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## 1.1.306 (2026-11-18): the memory digest holds back an open group conversation
+
+- **PR #5, the digest holds back an open party scene** (merge 7e52b7e2). If a frens' daily memory digest ran while a group conversation was still being answered, it read the player's line before the frens' replies existed, could make a public memory from a private scene, and moved past the line for good. The digest now stops at the first open scene and reads it whole next time.
+- **The digest log now says when it held a scene back** (4f5700e5): `[souls] memory digest ... held=<sequence or none>`.
+- **Two-player check:** two frens and a second player nearby, one line to both frens, then a forced day rollover. The digest ran 4 seconds before the replies were written and logged `held=6` for both frens. At the next rollover, after the replies, it logged `lines=3 held=none`: the player's line and both replies were read together, once. On 1.1.305 the same setup ran the digest at the same moment with no hold.
+
+Tests 4745 → 4752, 0 failures.
+
+**Field checks:** none new.
+
 ## 1.1.305 (2026-11-18): two small Fortify fixes
 
 Bradley lifted the 1.1.218 "don't touch Fortify" ruling for these two findings from issue #128 only (5b2fea9a). The other four findings in #128 stay open.
