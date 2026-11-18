@@ -761,9 +761,23 @@ public final class BotActionPolicy {
 
     /** Per-player token bucket; not thread-safe (server thread only). */
     public static final class Throttle {
-        private double tokens = THROTTLE_CAPACITY;
+        private final int capacity;
+        private final long refillMs;
+        private double tokens;
         private long lastMs = Long.MIN_VALUE;
         private long lastNoticeMs = Long.MIN_VALUE;
+
+        /** The bot-action bucket: {@link #THROTTLE_CAPACITY} clicks, one back every {@link #THROTTLE_REFILL_MS} ms. */
+        public Throttle() {
+            this(THROTTLE_CAPACITY, THROTTLE_REFILL_MS);
+        }
+
+        /** A bucket of {@code capacity} tokens that earns one back every {@code refillMs} ms. */
+        public Throttle(int capacity, long refillMs) {
+            this.capacity = Math.max(1, capacity);
+            this.refillMs = Math.max(1L, refillMs);
+            this.tokens = this.capacity;
+        }
 
         /**
          * Whether a dropped click at {@code nowMs} should tell the player: the first time, then
@@ -780,7 +794,7 @@ public final class BotActionPolicy {
         /** Takes one token if available at {@code nowMs}. */
         public boolean tryAcquire(long nowMs) {
             if (lastMs != Long.MIN_VALUE && nowMs > lastMs) {
-                tokens = Math.min(THROTTLE_CAPACITY, tokens + (nowMs - lastMs) / (double) THROTTLE_REFILL_MS);
+                tokens = Math.min(capacity, tokens + (nowMs - lastMs) / (double) refillMs);
             }
             lastMs = nowMs;
             if (tokens >= 1.0D) {
