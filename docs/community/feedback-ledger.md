@@ -7,7 +7,7 @@ What has been read and what became of it. Handles and one-line summaries only, n
 | Server | Channel | Last message id | Date (UTC) |
 | --- | --- | --- | --- |
 | Frens | ideas-feedback | 1567696028914679891 | 2026-11-05 |
-| Frens | general | 1572473341124681761 | 2026-11-18 |
+| Frens | general | 1572484951956529252 | 2026-11-18 |
 | Frens | bug-reports | 1559655032532631685 | 2026-11-18 |
 | Frens | install-help | 1506314992910336040 | 2026-05-19 |
 | Frens | dev-discussion | 1476331907707834520 | 2026-02-25 |
@@ -17,7 +17,7 @@ What has been read and what became of it. Handles and one-line summaries only, n
 
 | Date | Handle | Channel | One-line summary | Outcome |
 | --- | --- | --- | --- | --- |
-| 2026-11-18 | crxwn | general | /bot spawn failed with a NullPointerException on first setup (Polymer in their pack) | Cause found in their log: Polymer. Fixed aec91d7f, ships next release |
+| 2026-11-18 | crxwn | general | /bot spawn failed with a NullPointerException on first setup (Polymer in their pack) | Cause found in their log: Polymer. Fixed aec91d7f, GitHub beta v1.1.303-beta.1 linked, ships in 1.1.303 |
 | 2026-11-09 | JulianK | general | Wants bots to run long jobs like strip mining unattended | Answered; wiki built |
 | 2026-10-25 | Jackster | ideas-feedback | LAN friend could not use bots | Backlog: LAN guest toggle; answered 2026-11-05 |
 | 2026-10-25 | Jackster | ideas-feedback | Could not find how to confirm strip mining or building | Backlog: Guide test; answered 2026-11-05 |
