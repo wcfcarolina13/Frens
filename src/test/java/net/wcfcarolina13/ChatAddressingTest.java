@@ -356,8 +356,34 @@ class ChatAddressingTest {
         List<String> humans = List.of("Robert_99", "Steve123");
         assertTrue(resolved("Rob, want some bread?", JAKE_AND_WREN, humans).otherAddressee());
         assertTrue(resolved("steve: over here", JAKE_AND_WREN, humans).otherAddressee());
-        assertTrue(resolved("Rob, ask Jake for wood", JAKE_AND_WREN, humans).otherAddressee(),
-                "a later bot mention is swallowed, as for a full name");
+        ChatAddressing.Resolution askJake = resolved("Rob, ask Jake for wood", JAKE_AND_WREN, humans);
+        assertFalse(askJake.otherAddressee(),
+                "a nickname yields to a bot named later in the line (a full name does not)");
+        assertEquals(0, askJake.matchedNameIndex());
+    }
+
+    @Test
+    void nicknameYieldsToABotNamedLaterInTheLine() {
+        // "Now," is the start of the human Nowak's name, but Jake is named right after it.
+        ChatAddressing.Resolution r = resolved("Now, Jake come here", JAKE_ONLY, List.of("Nowak"));
+        assertFalse(r.otherAddressee());
+        assertEquals(List.of(0), r.matchedNameIndices());
+        assertEquals(0, r.matchedNameIndex());
+        assertEquals("Now, Jake come here", r.prompt());
+    }
+
+    @Test
+    void nicknameWithNoBotLaterStillAddressesTheHuman() {
+        ChatAddressing.Resolution r = resolved("Rob, come here", JAKE_ONLY, List.of("Robert_99"));
+        assertTrue(r.otherAddressee());
+        assertTrue(r.matchedNameIndices().isEmpty());
+    }
+
+    @Test
+    void exactHumanNameStillSwallowsALaterBotName() {
+        ChatAddressing.Resolution r = resolved("Nowak, Jake come here", JAKE_ONLY, List.of("Nowak"));
+        assertTrue(r.otherAddressee());
+        assertTrue(r.matchedNameIndices().isEmpty());
     }
 
     @Test

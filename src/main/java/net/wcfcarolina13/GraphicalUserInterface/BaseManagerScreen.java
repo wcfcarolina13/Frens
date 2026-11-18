@@ -22,6 +22,7 @@ import net.wcfcarolina13.network.BaseGrantWallAccessPayload;
 import net.wcfcarolina13.network.BaseMapVillagePayload;
 import net.wcfcarolina13.network.BaseRemovePayload;
 import net.wcfcarolina13.network.BaseRenamePayload;
+import net.wcfcarolina13.network.BaseScreenLimitPolicy;
 import net.wcfcarolina13.network.BaseSetRadiusPayload;
 import net.wcfcarolina13.network.BaseRevokeWallAccessPayload;
 import net.wcfcarolina13.network.BaseSetHomePayload;
@@ -336,7 +337,7 @@ public class BaseManagerScreen extends Screen {
         // Name field
         this.nameField = new TextFieldWidget(this.textRenderer, 0, 0,
                 COL_W * 3 + COL_GAP * 2, 18, Text.literal("Base name"));
-        this.nameField.setMaxLength(64);
+        this.nameField.setMaxLength(BaseScreenLimitPolicy.MAX_LABEL_CHARS);
         this.nameField.setPlaceholder(Text.literal("Base name or radius...").styled(s -> s.withColor(0xFF666666)));
         this.addDrawableChild(this.nameField);
         controls.add(new ControlSlot(nameField, 0, 3, y));
@@ -452,7 +453,7 @@ public class BaseManagerScreen extends Screen {
 
     private void buildVillagePromptControls() {
         villagePromptField = new TextFieldWidget(this.textRenderer, 0, 0, MODAL_W - 20, 18, Text.literal("Village name"));
-        villagePromptField.setMaxLength(64);
+        villagePromptField.setMaxLength(BaseScreenLimitPolicy.MAX_LABEL_CHARS);
         villagePromptField.setPlaceholder(Text.literal("Village name"));
         villagePromptField.visible = false;
         villagePromptField.active = false;

@@ -40,7 +40,9 @@ import java.util.Set;
  *       over a human name. Names of two characters or fewer, or on a small common-word list,
  *       only count when the token carries a trailing {@code ,} or {@code :}, so a player called
  *       "Hey" does not swallow every greeting. A shortened name ("Rob," for Robert_99) counts
- *       only with that mark too ({@link #isNicknameOfAHuman}).</li>
+ *       only with that mark too ({@link #isNicknameOfAHuman}), and loses to a bot named later in
+ *       the line ("Now, Jake come here" with a human Nowak is for Jake; "Nowak, Jake come here"
+ *       is still for Nowak).</li>
  *   <li><b>Trailing vocative</b> — a non-leading first match loses to a different bot named by
  *       the last token when the token before it ends in a comma ("did Jake eat, Wren" → Wren).
  *       Leading names still win.</li>
@@ -306,13 +308,15 @@ public final class ChatAddressing {
     /**
      * True when the first meaningful token names another online human (and no bot). Exact
      * normalized match only; short or common-word names need a trailing {@code ,} or {@code :}.
+     * A full name swallows a later bot name; a nickname yields to one.
      */
     private static boolean leadsWithOtherHuman(String[] tokens, List<String> botNames,
                                                Collection<String> humanNames) {
         if (humanNames.isEmpty()) {
             return false;
         }
-        for (String token : tokens) {
+        for (int i = 0; i < tokens.length; i++) {
+            String token = tokens[i];
             String first = normalizeToken(token);
             if (first.isEmpty()) {
                 continue;
@@ -327,9 +331,19 @@ public final class ChatAddressing {
                 }
             }
             if (vocative && isNicknameOfAHuman(first, botNames, humanNames)) {
-                return true;
+                return !namesABotAfter(tokens, i, botNames);
             }
             return false;
+        }
+        return false;
+    }
+
+    /** Whether any token after {@code index} is a bot's name ("Now, Jake come here"). */
+    private static boolean namesABotAfter(String[] tokens, int index, List<String> botNames) {
+        for (int j = index + 1; j < tokens.length; j++) {
+            if (botIndex(botNames, normalizeToken(tokens[j])) >= 0) {
+                return true;
+            }
         }
         return false;
     }
@@ -342,7 +356,8 @@ public final class ChatAddressing {
      * Steve123. Only with a trailing {@code ,} or {@code :} (the caller checks), at least
      * {@link #MIN_NICKNAME_CHARS} long, not a common word, the start of some other human's
      * normalized name, and not the start of any bot name (a clipped bot name stays unaddressed
-     * rather than being sent away from the bots).
+     * rather than being sent away from the bots). The caller also drops the match when a later
+     * token names a bot.
      */
     static boolean isNicknameOfAHuman(String normalizedToken, List<String> botNames,
                                       Collection<String> humanNames) {
