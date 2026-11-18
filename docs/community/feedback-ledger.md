@@ -7,8 +7,8 @@ What has been read and what became of it. Handles and one-line summaries only, n
 | Server | Channel | Last message id | Date (UTC) |
 | --- | --- | --- | --- |
 | Frens | ideas-feedback | 1567696028914679891 | 2026-11-05 |
-| Frens | general | 1560144507243335762 | 2026-10-15 |
-| Frens | bug-reports | 1559655032532631685 | 2026-10-13 |
+| Frens | general | 1572473341124681761 | 2026-11-18 |
+| Frens | bug-reports | 1559655032532631685 | 2026-11-18 |
 | Frens | install-help | 1506314992910336040 | 2026-05-19 |
 | Frens | dev-discussion | 1476331907707834520 | 2026-02-25 |
 | solace's third place | diy-and-tech | 1567696141217173645 | 2026-11-05 |
@@ -17,6 +17,8 @@ What has been read and what became of it. Handles and one-line summaries only, n
 
 | Date | Handle | Channel | One-line summary | Outcome |
 | --- | --- | --- | --- | --- |
+| 2026-11-18 | crxwn | general | /bot spawn failed with a NullPointerException on first setup; not reproduced on 1.1.302 with a new config and world | Pending: asked for latest.log 2026-11-18 |
+| 2026-11-09 | JulianK | general | Wants bots to run long jobs like strip mining unattended | Answered; wiki built |
 | 2026-10-25 | Jackster | ideas-feedback | LAN friend could not use bots | Backlog: LAN guest toggle; answered 2026-11-05 |
 | 2026-10-25 | Jackster | ideas-feedback | Could not find how to confirm strip mining or building | Backlog: Guide test; answered 2026-11-05 |
 | 2026-10-25 | Jackster | ideas-feedback | Bots seem faster than players | Parked, no specifics |
