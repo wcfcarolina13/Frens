@@ -42,6 +42,23 @@ final class FortifyLayoutHelper {
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.DIRT
     );
 
+    /** Union of the five fallback lists: every item a wall build or patch can place. */
+    private static final Set<Item> PLACEABLE_BUILD_ITEMS;
+    static {
+        Set<Item> all = new LinkedHashSet<>();
+        all.addAll(STONE_BRICK_FALLBACKS);
+        all.addAll(OAK_LOG_FALLBACKS);
+        all.addAll(CHISELED_FALLBACKS);
+        all.addAll(SLAB_FALLBACKS);
+        all.addAll(COBBLE_FALLBACKS);
+        PLACEABLE_BUILD_ITEMS = Collections.unmodifiableSet(all);
+    }
+
+    /** Items that count as building blocks; derived from the fallback lists so the two can't drift. */
+    static Set<Item> placeableBuildItems() {
+        return PLACEABLE_BUILD_ITEMS;
+    }
+
     private final Set<BlockPos> ignoredCavityPositions;
 
     FortifyLayoutHelper(Set<BlockPos> ignoredCavityPositions) {

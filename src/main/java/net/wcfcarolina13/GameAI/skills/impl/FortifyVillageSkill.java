@@ -319,17 +319,18 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             }
 
             // /bot fortify patch [name]
-            if (lower.equals("patch")) {
-                String wallName = findNearestWallName(server, world, bot.getBlockPos());
+            if (lower.equals("patch") || lower.startsWith("patch ")) {
+                FortifyPatchArgsPolicy.PatchArgs patchArgs =
+                        FortifyPatchArgsPolicy.parse(args.trim().substring(5));
+                String wallName = patchArgs.wallName();
                 if (wallName == null) {
-                    return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
+                    wallName = findNearestWallName(server, world, bot.getBlockPos());
+                    if (wallName == null) {
+                        return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
+                    }
+                    ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
                 }
-                ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
-                return handlePatch(source, bot, world, server, wallName);
-            }
-            if (lower.startsWith("patch ")) {
-                String wallName = args.trim().substring(6).trim();
-                return handlePatch(source, bot, world, server, wallName);
+                return handlePatch(source, bot, world, server, wallName, patchArgs.autoRepeat());
             }
 
             // /bot fortify status [name]
@@ -748,15 +749,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     }
 
     private SkillExecutionResult handlePatch(ServerCommandSource source, ServerPlayerEntity bot,
-                                              ServerWorld world, MinecraftServer server, String wallNameRaw) {
-        // Parse 'auto' flag: "/bot fortify patch mywall auto" → autoRepeat=true, wallName="mywall"
-        boolean autoRepeat = false;
-        String wallName = wallNameRaw;
-        String[] tokens = wallNameRaw.trim().split("\\s+");
-        if (tokens.length >= 2 && tokens[tokens.length - 1].equalsIgnoreCase("auto")) {
-            autoRepeat = true;
-            wallName = wallNameRaw.trim().substring(0, wallNameRaw.trim().lastIndexOf(' ')).trim();
-        }
+                                              ServerWorld world, MinecraftServer server,
+                                              String wallName, boolean autoRepeat) {
 
         String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
         Optional<SavedFortification> opt = FortificationPersistenceService.load(server, worldKey, wallName);
@@ -6433,13 +6427,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     @Override
     public int countBuildingBlocks(ServerPlayerEntity bot) {
         int count = 0;
-        Set<Item> buildItems = Set.of(
-                Items.STONE_BRICKS, Items.COBBLESTONE, Items.STONE, Items.COBBLED_DEEPSLATE,
-                Items.ANDESITE, Items.DIRT, Items.OAK_LOG, Items.SPRUCE_LOG, Items.BIRCH_LOG,
-                Items.JUNGLE_LOG, Items.CHISELED_STONE_BRICKS, Items.STONE_BRICK_SLAB,
-                Items.STONE_BRICK_STAIRS, Items.OAK_PLANKS, Items.SPRUCE_PLANKS,
-                Items.COBBLESTONE_SLAB, Items.STONE_SLAB
-        );
+        Set<Item> buildItems = FortifyLayoutHelper.placeableBuildItems();
         for (int i = 0; i < bot.getInventory().size(); i++) {
             var stack = bot.getInventory().getStack(i);
             if (buildItems.contains(stack.getItem())) {
