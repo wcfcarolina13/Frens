@@ -2,7 +2,25 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
-## Unreleased: bots spawn with Polymer installed (2026-11-18)
+## 1.1.303 (2026-11-18): bots spawn in Polymer packs, multiplayer roster and alliances
+
+A player on Discord couldn't spawn a fren at all in a large modpack. The cause was Polymer (see the entry below this one). This build ships that fix with two multiplayer PRs that were waiting on a second player. A new two-player test setup (an offline local server with a second game client) proved both. A GitHub pre-release, v1.1.303-beta.1, carried the Polymer fix early for that player.
+
+- **`/bot spawn` works with Polymer installed** (aec91d7f, entry "Polymer spawn fix (1.1.303)" below). The bots' fake connection now answers `getPacketListener()` with the bot's handler. New guardrail in docs/GUARDRAILS.md (d89dbedf).
+- **PR #88, server-owned multiplayer roster** (merge 12660924). On a remote server the Companions screen asks the server. A player sees only their own companions and can't restore or create. Operators and the host see and manage all of them. Local-only names no longer show on remote servers. Two-player check: the non-op saw only their own shelved bot with "Only an operator can restore or create companions on this server", and the op saw both and restored one with Spawn Selected.
+- **PR #134, alliances without operator** (merge 4acb8902). Any player can form an alliance with `/frens ally invite`. The invited player gets Accept and Decline buttons in chat. Two-player check: a non-op invited, the op accepted, and `/frens ally list` showed the alliance for both.
+- **Review fixes** (69e24408). A roster request inside the 500 ms throttle now gets the last list sent to that player instead of no answer, so a quick close and reopen no longer leaves the screen stuck on "Asking the server...". `/frens ally invite` refuses a companion as the target ("You can only ally with other players."), since a bot could never accept. Revoke stays open so old invites to bots can be cleared.
+
+**Rulings (made on Bradley's behalf, 2026-11-18):**
+- Shipped #88 and #134 on the offline two-player rig rather than waiting for a real second player. Cost if wrong: a difference between offline-mode and online UUIDs, or a real LAN host, could show up in the field. Ownership is keyed on the UUID in both, so the risk is low.
+
+**Not in this build:** #53 (packet gates) passed its throttle check, but its base-list step is unfinished. #12 (nickname addressing) needs a check that separates its effect. #5 (private scene digest) wasn't run. All three stay open.
+
+Tests 4688 → 4703, 0 failures.
+
+**Field checks:** none new. The Polymer fix, the roster and alliances were all checked in the sandbox (offline server for the two PRs).
+
+## Polymer spawn fix (1.1.303, 2026-11-18)
 
 - **`/bot spawn` no longer crashes when Polymer is installed.** A player on Discord with a 265-mod pack (Polymer 0.15.2) got a NullPointerException on every spawn. Polymer reads the player from the connection's packet listener (through packet-tweaker's `StaticPacketContext`) whenever a packet is sent. `FakeClientConnection` made `transitionInbound` a no-op, so `getPacketListener()` returned null and the first packet of the bot's join threw. It now keeps the listener in its own field and returns it from `getPacketListener()`. Vanilla's `ClientConnection.tick()` reads its own private field, which stays null, so the bot's handler is not ticked twice. This is also the "Polymer stops spawning" report from April.
 - **Proof (sandbox, Polymer 0.15.2 alone added):** the shipped 1.1.302 jar threw the same `StaticPacketContext.getPlayer` NPE on `/bot spawn Polly admin survival`. The fixed jar spawned Polly and Pip, despawned and respawned Pip, and rejoined both on the next load with no new exceptions. Without Polymer, the fixed jar spawned a third bot cleanly.

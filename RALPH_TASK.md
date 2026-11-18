@@ -4,7 +4,25 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-11-14 (1.1.302) — next session starts here
+## Session Handoff 2026-11-18 (1.1.303) — next session starts here
+
+**State:** 1.1.303 = 1.1.302 plus the Polymer spawn fix (aec91d7f), PR #88 (server-owned roster), PR #134 (alliances without operator) and one review fix (69e24408). Tests 4703, 0 failures. The Polymer fix went out early as GitHub pre-release v1.1.303-beta.1 for the player who reported it.
+
+**New on the Mac:** a two-player test rig (offline local server plus a second game client as "Tester2"). Mac sessions use the `frens-two-player` skill. #88 and #134 passed on it.
+
+**Fix next:**
+- A non-op can open the Admin tab and Bot Controls from their own bot's screen. A Unified Pathfinder click there echoed "You (Admin)", but the server logged no change. Check which admin topics a non-op can see and whether any of them reach the server.
+- #139 guest steps (Open Spells refusal, Enchant/Anvil range messages) can now run on the two-player rig.
+- Carried from 1.1.302: a following bot stops at the top of an 8-block drop with stairs beside it.
+
+**Open PRs carried:**
+- #53: its throttle check passed on the rig. Step 3/4 are unfinished: a base the op saved showed in Protected Zones but not in the op's base list after Refresh.
+- #12: needs a check that separates its effect. "Test, come here" got no reply, but the same jar gave no positive control.
+- #5: not run. It needs a digest to land during an open private scene.
+
+**Needs Bradley:** Modrinth upload of 1.1.303 (notes in .superpowers/releases). Nirn deploy on his OK.
+
+## Session Handoff 2026-11-14 (1.1.302) — superseded by 1.1.303 above
 
 **State:** 1.1.302 = 1.1.301 plus the quit-save fix, pending-cook collection, their review fixes and PR #139 (changelog.md "1.1.302"). Tests 4688 after the #139 merge, 0 failures (clean build on the Mac). Sandbox-proven: quit save 4 of 4, both cook paths, #139's host steps. On Modrinth since 2026-11-15 (version 7kq9uDC3). Deployed to Nirn 2026-11-14 after a backup, on Bradley's OK (field Phase 6ci).
 
