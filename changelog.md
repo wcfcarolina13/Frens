@@ -2,6 +2,17 @@
 
 Historical record and reasoning. `RALPH_TASK.md` is the source of truth for what’s next (active lineup at the top, backlog at the bottom).
 
+## 1.1.305 (2026-11-18): two small Fortify fixes
+
+Bradley lifted the 1.1.218 "don't touch Fortify" ruling for these two findings from issue #128 only (5b2fea9a). The other four findings in #128 stay open.
+
+- **`/bot fortify patch auto` with no wall name patches the nearest wall.** It was read as a wall named "auto" and failed with "No saved wall named 'auto'". "patch" arguments now go through `FortifyPatchArgsPolicy.parse` (unit-tested: name and auto flag, "auto" alone, multi-word names, "autowall" stays a name). Sandbox check: with no saved walls, `/bot fortify patch auto` now answers "No saved walls found", the same as plain `patch`.
+- **The out-of-blocks check counts only blocks a wall can place.** `countBuildingBlocks` counted stone brick stairs and oak and spruce planks, which no fallback list places, so a fren holding only those never said it was out of blocks. It now counts `FortifyLayoutHelper.placeableBuildItems()`, the union of the fallback lists, so the two can't drift. Not checked in game (needs a saved wall and a planks-only inventory).
+
+Tests 4741 → 4745, 0 failures.
+
+**Field checks:** none new.
+
 ## 1.1.304 (2026-11-18): multiplayer packet gates and nickname addressing
 
 Two more PRs that were waiting on a second player, checked on the two-player test setup (offline local server, op and non-op clients), reviewed, and fixed.

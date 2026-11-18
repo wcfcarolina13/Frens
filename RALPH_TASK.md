@@ -4,7 +4,11 @@ The newest session handoff comes first, then "Recovered deferrals", then the bac
 Open work is a `- [ ]` line (`grep -n '^\- \[ \]' RALPH_TASK.md`). Superseded handoffs and old session notes are in
 `docs/handoffs/ARCHIVE_2026.md`. History is `changelog.md`.
 
-## Session Handoff 2026-11-18 (1.1.304) — next session starts here
+## Session Handoff 2026-11-18 (1.1.305) — next session starts here
+
+**State:** 1.1.305 = 1.1.304 plus two Fortify fixes from issue #128 (5b2fea9a: `patch auto` finds the nearest wall, the out-of-blocks count matches what a wall can place). Tests 4745. Issue #128's other four findings stay open under the 1.1.218 ruling. Everything else is as in the 1.1.304 handoff below.
+
+## Session Handoff 2026-11-18 (1.1.304) — superseded by 1.1.305 above
 
 **State:** 1.1.304 = 1.1.303 plus PR #53 (client packet gates), PR #12 (nickname addressing) and review fixes 089b4031. Tests 4741, 0 failures. The 1.1.303 handoff below still lists the open work, except #53 and #12, which shipped here.
 
