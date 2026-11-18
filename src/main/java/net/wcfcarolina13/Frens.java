@@ -594,6 +594,8 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(OpenRecruitmentDialoguePayload.ID, OpenRecruitmentDialoguePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(RecruitmentStatePayload.ID, RecruitmentStatePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.OpenRosterPayload.ID, net.wcfcarolina13.network.OpenRosterPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RosterRequestPayload.ID, net.wcfcarolina13.network.RosterRequestPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.RosterListPayload.ID, net.wcfcarolina13.network.RosterListPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RequestRecruitmentDialoguePayload.ID, RequestRecruitmentDialoguePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(ConfirmRecruitmentPayload.ID, ConfirmRecruitmentPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestRecruitmentReplayPayload.ID, net.wcfcarolina13.network.RequestRecruitmentReplayPayload.CODEC);
@@ -666,6 +668,7 @@ public class Frens implements ModInitializer {
         net.wcfcarolina13.network.ChestRegistryNetworkManager.registerReceiversOnce();
         SurvivalRecruitmentNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CompanionQuestNetworkManager.registerReceiversOnce();
+        net.wcfcarolina13.network.RosterNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.RecruitmentAdminNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.BotTaskPeekNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.BotSkinNetworkManager.registerReceiversOnce();

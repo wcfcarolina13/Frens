@@ -58,6 +58,28 @@ public class BotRestoreScreen extends Screen {
 
     private final RosterScreenCopy.State copyState;
 
+    /**
+     * What the viewer can do. A remote server sends its own roster ({@code RosterListPayload}):
+     * an operator or the host manages it, anyone else only sees their own companions.
+     */
+    public enum Mode {
+        /** Tick and spawn saved companions, or create one (singleplayer, host, operator). */
+        MANAGE,
+        /** List only: no Spawn Selected, no Create. */
+        VIEW_ONLY,
+        /** The server's roster has not arrived yet. */
+        LOADING,
+        /** The server's Frens cannot send a roster: no list, Create still sends /bot spawn. */
+        UNSUPPORTED
+    }
+
+    /** After this long without the server's roster, the loading screen says so. */
+    static final long LOADING_OVERDUE_MS = 5000L;
+
+    private final Mode mode;
+    private final long openedAtMs = System.currentTimeMillis();
+    private boolean loadingOverdue = false;
+
     public BotRestoreScreen(Screen parent, List<String> aliases) {
         this(parent, aliases, false);
     }
@@ -88,12 +110,50 @@ public class BotRestoreScreen extends Screen {
      */
     public BotRestoreScreen(Screen parent, List<String> aliases, List<String> otherWorlds, boolean allSavedPresent,
                             int savedCount) {
+        this(parent, aliases, otherWorlds, allSavedPresent, savedCount, Mode.MANAGE);
+    }
+
+    public BotRestoreScreen(Screen parent, List<String> aliases, List<String> otherWorlds, boolean allSavedPresent,
+                            int savedCount, Mode mode) {
         super(Text.literal("Companions"));
+        this.mode = mode == null ? Mode.MANAGE : mode;
         this.parent = parent;
         this.aliases = aliases == null ? List.of() : List.copyOf(aliases);
         this.otherWorlds = otherWorlds == null ? List.of() : List.copyOf(otherWorlds);
         this.copyState = RosterScreenCopy.state(this.aliases.size(), allSavedPresent, this.otherWorlds.size(),
                 savedCount);
+    }
+
+    /** Placeholder shown while a remote server's roster is on its way. */
+    public static BotRestoreScreen loading(Screen parent) {
+        return new BotRestoreScreen(parent, List.of(), List.of(), false, 0, Mode.LOADING);
+    }
+
+    /** Shown on a remote server whose Frens is too old to send its roster. */
+    public static BotRestoreScreen unsupported(Screen parent) {
+        return new BotRestoreScreen(parent, List.of(), List.of(), false, 0, Mode.UNSUPPORTED);
+    }
+
+    public Mode mode() {
+        return mode;
+    }
+
+    private boolean canSelect() {
+        return mode == Mode.MANAGE;
+    }
+
+    private boolean showsCreate() {
+        return mode == Mode.MANAGE || mode == Mode.UNSUPPORTED;
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        if (mode == Mode.LOADING && !loadingOverdue
+                && System.currentTimeMillis() - openedAtMs >= LOADING_OVERDUE_MS) {
+            loadingOverdue = true;
+            this.clearAndInit();
+        }
     }
 
     /** The bot rows currently listed: this world's, or other worlds' while that list is open. */
@@ -102,10 +162,30 @@ public class BotRestoreScreen extends Screen {
     }
 
     private String titleText() {
+        switch (mode) {
+            case LOADING:
+                return RosterScreenCopy.loadingTitle();
+            case UNSUPPORTED:
+                return RosterScreenCopy.unsupportedTitle();
+            case VIEW_ONLY:
+                return RosterScreenCopy.viewOnlyTitle();
+            default:
+                break;
+        }
         return showingOtherWorlds ? RosterScreenCopy.otherWorldsTitle() : RosterScreenCopy.title(copyState);
     }
 
     private String subtitleText() {
+        switch (mode) {
+            case LOADING:
+                return RosterScreenCopy.loadingSubtitle(loadingOverdue);
+            case UNSUPPORTED:
+                return RosterScreenCopy.unsupportedSubtitle();
+            case VIEW_ONLY:
+                return RosterScreenCopy.viewOnlyNotice();
+            default:
+                break;
+        }
         return showingOtherWorlds ? RosterScreenCopy.otherWorldsSubtitle() : RosterScreenCopy.subtitle(copyState,
                 aliases.isEmpty() ? null : aliases.get(0));
     }
@@ -179,11 +259,15 @@ public class BotRestoreScreen extends Screen {
 
         // ── Spawn Selected + Cancel buttons ──
         int actionsY = l.actionsY();
-        spawnSelectedButton = ButtonWidget.builder(Text.literal("Spawn Selected"),
-                btn -> spawnSelected())
-                .dimensions(panelX + 12, actionsY, 160, 20).build();
-        spawnSelectedButton.active = !selected.isEmpty();
-        this.addDrawableChild(spawnSelectedButton);
+        if (canSelect()) {
+            spawnSelectedButton = ButtonWidget.builder(Text.literal("Spawn Selected"),
+                    btn -> spawnSelected())
+                    .dimensions(panelX + 12, actionsY, 160, 20).build();
+            spawnSelectedButton.active = !selected.isEmpty();
+            this.addDrawableChild(spawnSelectedButton);
+        } else {
+            spawnSelectedButton = null;
+        }
 
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Cancel"),
                 btn -> this.close())
@@ -191,19 +275,24 @@ public class BotRestoreScreen extends Screen {
 
         // ── Create new bot section ──
         int createY = l.createY();
-        int nameFieldW = Math.min(168, panelW - 50 - 92 - 6);
-        createNameField = new TextFieldWidget(this.textRenderer,
-                panelX + 50, createY, nameFieldW, 20,
-                Text.literal("Bot name"));
-        createNameField.setMaxLength(MAX_NAME_LEN);
-        createNameField.setChangedListener(s -> updateCreateButtonState());
-        this.addSelectableChild(createNameField);
+        if (showsCreate()) {
+            int nameFieldW = Math.min(168, panelW - 50 - 92 - 6);
+            createNameField = new TextFieldWidget(this.textRenderer,
+                    panelX + 50, createY, nameFieldW, 20,
+                    Text.literal("Bot name"));
+            createNameField.setMaxLength(MAX_NAME_LEN);
+            createNameField.setChangedListener(s -> updateCreateButtonState());
+            this.addSelectableChild(createNameField);
 
-        createButton = ButtonWidget.builder(Text.literal("Create"),
-                btn -> createNewBot())
-                .dimensions(panelX + panelW - 92, createY, 80, 20).build();
-        createButton.active = false;
-        this.addDrawableChild(createButton);
+            createButton = ButtonWidget.builder(Text.literal("Create"),
+                    btn -> createNewBot())
+                    .dimensions(panelX + panelW - 92, createY, 80, 20).build();
+            createButton.active = false;
+            this.addDrawableChild(createButton);
+        } else {
+            createNameField = null;
+            createButton = null;
+        }
 
         // Update spawnSelectedButton label with count
         updateSpawnSelectedButtonLabel();
@@ -332,7 +421,12 @@ public class BotRestoreScreen extends Screen {
         int chkX = rowX + 4;
 
         if (rows.isEmpty()) {
-            String empty = UiFitPolicy.elide(RosterScreenCopy.emptyListLine(copyState), panelW - 16,
+            String emptyText = switch (mode) {
+                case LOADING, UNSUPPORTED -> "";
+                case VIEW_ONLY -> RosterScreenCopy.viewOnlyEmptyLine(copyState);
+                case MANAGE -> RosterScreenCopy.emptyListLine(copyState);
+            };
+            String empty = UiFitPolicy.elide(emptyText, panelW - 16,
                     this.textRenderer::getWidth);
             int eW = this.textRenderer.getWidth(empty);
             context.drawTextWithShadow(this.textRenderer, empty,
@@ -347,16 +441,22 @@ public class BotRestoreScreen extends Screen {
                 context.fill(rowX, rowY, rowX + rowW, rowY + ROW_H,
                         hover ? 0xFF202020 : 0xFF181818);
 
-                int cy = rowY + (ROW_H - CHECKBOX_SIZE) / 2;
-                drawCheckbox(context, chkX, cy, checked);
+                int nameX = chkX;
+                if (canSelect()) {
+                    int cy = rowY + (ROW_H - CHECKBOX_SIZE) / 2;
+                    drawCheckbox(context, chkX, cy, checked);
+                    nameX = chkX + CHECKBOX_SIZE + 8;
+                }
 
                 context.drawText(this.textRenderer,
                         UiFitPolicy.elide(alias, rowW - CHECKBOX_SIZE - 16, this.textRenderer::getWidth),
-                        chkX + CHECKBOX_SIZE + 8,
+                        nameX,
                         rowY + (ROW_H - this.textRenderer.fontHeight) / 2,
                         0xFFEFEFEF, false);
 
-                rowHits.add(new RowHit(alias, rowX, rowY, rowW, ROW_H));
+                if (canSelect()) {
+                    rowHits.add(new RowHit(alias, rowX, rowY, rowW, ROW_H));
+                }
                 rowY += ROW_H;
             }
         }
@@ -371,13 +471,15 @@ public class BotRestoreScreen extends Screen {
 
         // Separator + create-new label
         int createY = l.createY();
-        int sepY = createY - 8;
-        context.fill(panelX + 12, sepY, panelX + panelW - 12, sepY + 1, 0xFF3A3A3A);
-        context.drawText(this.textRenderer, "Name:",
-                panelX + 14, createY + (20 - this.textRenderer.fontHeight) / 2,
-                0xFFB8A76A, false);
-        if (createNameField != null) {
-            createNameField.render(context, mouseX, mouseY, delta);
+        if (showsCreate()) {
+            int sepY = createY - 8;
+            context.fill(panelX + 12, sepY, panelX + panelW - 12, sepY + 1, 0xFF3A3A3A);
+            context.drawText(this.textRenderer, "Name:",
+                    panelX + 14, createY + (20 - this.textRenderer.fontHeight) / 2,
+                    0xFFB8A76A, false);
+            if (createNameField != null) {
+                createNameField.render(context, mouseX, mouseY, delta);
+            }
         }
 
         // Bot Controls link
