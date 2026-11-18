@@ -401,6 +401,29 @@ class SoulMemoryDigestOpsTest {
         assertFalse(m.text().contains("scared"), "the open scene is not digested yet");
         assertFalse(m.text().contains("hungry"), "a scene after it waits too, so nothing is read twice");
         assertEquals(new SoulTypes.ConversationCursor(1L, h2.sequence()), m.next(), "cursor stops at the open scene");
+        assertEquals(h2.sequence(), m.heldFromSequence(), "the hold is reported for the digest log");
+    }
+
+    @Test void aBatchThatStartsWithAnOpenSceneReportsTheHoldToo() {
+        UUID open = UUID.randomUUID();
+        SoulTypes.ConversationRecord h = heardAt("Roti: yes, still scared of the dark", open, NOW.minusSeconds(20));
+        SoulTypes.ConversationCursor from = new SoulTypes.ConversationCursor(1L, h.sequence());
+        SoulMemoryDigestOps.Material m = SoulMemoryDigestOps.gather(
+                List.of(h), from, BOT, "Jake", "Roti", true, PLAYER, NOW);
+        assertEquals("", m.text());
+        assertEquals(from, m.next(), "cursor stays put");
+        assertEquals(h.sequence(), m.heldFromSequence());
+    }
+
+    @Test void nothingHeldReportsNull() {
+        UUID scene = UUID.randomUUID();
+        SoulTypes.ConversationRecord h = heardAt("Roti: I like birch", scene, NOW.minusSeconds(30));
+        SoulTypes.ConversationRecord sp = rec(SoulTypes.TurnKind.SPOKEN, "Jake: birch it is.", scene, List.of());
+        SoulMemoryDigestOps.Material m = SoulMemoryDigestOps.gather(
+                List.of(h, sp), new SoulTypes.ConversationCursor(1L, h.sequence()), BOT, "Jake", "Roti", true, PLAYER, NOW);
+        assertNull(m.heldFromSequence());
+        assertNull(SoulMemoryDigestOps.gather(List.of(h), new SoulTypes.ConversationCursor(1L, h.sequence()),
+                BOT, "Jake", "Roti", false, PLAYER, NOW).heldFromSequence(), "DMs never hold");
     }
 
     @Test void theHeldSceneIsPrivateOnceItsLinesAreWritten() {

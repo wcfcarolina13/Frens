@@ -148,7 +148,7 @@ public final class SoulMemoryDigestService {
                                 since, from, botId, botName, playerName, party, playerId,
                                 java.time.Instant.now());
                         if (material.playerLines() < SoulMemoryDigestOps.MIN_PLAYER_LINES) {
-                            log(botId, playerId, key, "too-few", 0, material.playerLines());
+                            log(botId, playerId, key, "too-few", 0, material.playerLines(), material.heldFromSequence());
                             return CompletableFuture.completedFuture(null);
                         }
                         return generate(botId, botName, day, key, playerId, playerName, cursorKey,
@@ -157,7 +157,7 @@ public final class SoulMemoryDigestService {
                 })
                 .handle((ignored, error) -> {
                     if (error != null) {
-                        log(botId, playerId, key, "error:INTERNAL", 0, 0);
+                        log(botId, playerId, key, "error:INTERNAL", 0, 0, null);
                         LOGGER.warn("[souls] memory digest failed bot={} player={} : {}", botId,
                                 playerId, describe(error));
                     }
@@ -185,7 +185,8 @@ public final class SoulMemoryDigestService {
                 .handle((result, error) -> Outcome.of(result, error, playerName))
                 .thenCompose(outcome -> {
                     if (outcome.skipWrite()) {
-                        log(botId, playerId, key, outcome.label(), 0, material.playerLines());
+                        log(botId, playerId, key, outcome.label(), 0, material.playerLines(),
+                                material.heldFromSequence());
                         return CompletableFuture.completedFuture((Void) null);
                     }
                     // A reset (SoulRuntime.reset -> SoulMemoryDigestOps.archiveFor) that landed
@@ -206,10 +207,11 @@ public final class SoulMemoryDigestService {
                             })
                             .thenAccept(ignored -> {
                                 if (superseded.get()) {
-                                    log(botId, playerId, key, "superseded", 0, material.playerLines());
+                                    log(botId, playerId, key, "superseded", 0, material.playerLines(),
+                                            material.heldFromSequence());
                                 } else {
                                     log(botId, playerId, key, outcome.label(),
-                                            outcome.facts().size(), material.playerLines());
+                                            outcome.facts().size(), material.playerLines(), material.heldFromSequence());
                                 }
                             });
                 });
@@ -279,8 +281,8 @@ public final class SoulMemoryDigestService {
 
     /** Counts and outcomes only -- never transcript text or model output. */
     private static void log(UUID botId, UUID playerId, SoulTypes.ConversationKey key,
-                            String outcome, int kept, int lines) {
-        LOGGER.info("[souls] memory digest bot={} player={} channel={} outcome={} kept={} lines={}",
-                botId, playerId, key.channel(), outcome, kept, lines);
+                            String outcome, int kept, int lines, Long heldFrom) {
+        LOGGER.info("[souls] memory digest bot={} player={} channel={} outcome={} kept={} lines={} held={}",
+                botId, playerId, key.channel(), outcome, kept, lines, heldFrom == null ? "none" : heldFrom);
     }
 }

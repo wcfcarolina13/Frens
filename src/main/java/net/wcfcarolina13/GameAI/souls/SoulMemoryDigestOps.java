@@ -70,13 +70,19 @@ final class SoulMemoryDigestOps {
     /**
      * Transcript material for one (bot, player) pair: the records that survived filtering and
      * the caps, the rendered {@code Name: line} text, how many of the kept records were player
-     * speech, and the cursor to store once this material has been digested.
+     * speech, the cursor to store once this material has been digested, and the sequence an
+     * open party scene was held back from ({@code null} when nothing was held; logged only).
      */
     record Material(List<SoulTypes.ConversationRecord> records, String text, int playerLines,
-                    SoulTypes.ConversationCursor next) {
+                    SoulTypes.ConversationCursor next, Long heldFromSequence) {
         Material {
             records = records == null ? List.of() : List.copyOf(records);
             text = text == null ? "" : text;
+        }
+
+        Material(List<SoulTypes.ConversationRecord> records, String text, int playerLines,
+                 SoulTypes.ConversationCursor next) {
+            this(records, text, playerLines, next, null);
         }
     }
 
@@ -142,7 +148,7 @@ final class SoulMemoryDigestOps {
         // batch, so digestible/digestVisibility treat the owner's own reply as private too.
         List<SoulTypes.ConversationRecord> all = SoulPrivacyPolicy.withInheritedPrivacy(input);
         if (all.isEmpty()) {
-            return new Material(List.of(), "", 0, from);
+            return new Material(List.of(), "", 0, from, holdFrom);
         }
         long maxSequence = all.get(0).sequence();
         for (SoulTypes.ConversationRecord record : all) {
@@ -189,7 +195,7 @@ final class SoulMemoryDigestOps {
                 playerLines++;
             }
         }
-        return new Material(kept, String.join("\n", lines), playerLines, next);
+        return new Material(kept, String.join("\n", lines), playerLines, next, holdFrom);
     }
 
     /**
