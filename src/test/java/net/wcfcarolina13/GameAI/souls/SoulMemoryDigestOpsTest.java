@@ -363,9 +363,10 @@ class SoulMemoryDigestOpsTest {
     }
 
     @Test void heardWhoseSpokenSiblingsFallInALaterBatchIsNotMarkedResidual() {
-        // Documented residual (1.1.296): inheritance is read-time and per batch. If the digest
-        // cursor splits a scene (its HEARD read before its private SPOKEN lines were committed),
-        // the HEARD in the earlier batch has nothing to inherit from and stays PUBLIC.
+        // Inheritance alone is read-time and per batch: with no clock (the overloads without
+        // `now`), a HEARD whose private SPOKEN lines are not written yet has nothing to inherit
+        // from and stays PUBLIC. The digest service passes `now`, which holds such a scene back
+        // (see the open-scene tests below).
         UUID scene = UUID.randomUUID();
         List<SoulTypes.ConversationRecord> r = List.of(
                 rec(SoulTypes.TurnKind.HEARD, "Roti: yes, still scared of the dark", scene, List.of(BOT)));
@@ -373,5 +374,66 @@ class SoulMemoryDigestOpsTest {
                 r, new SoulTypes.ConversationCursor(1L, 0L), BOT, "Jake", "Roti", true, PLAYER);
         assertEquals(SoulTypes.MemoryVisibility.PUBLIC,
                 SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, m.records()));
+    }
+
+    // === Open party scenes are held back until they are answered (1.1.296 cursor split) ===
+
+    private static final Instant NOW = Instant.parse("2026-11-05T12:00:00Z");
+
+    private static SoulTypes.ConversationRecord heardAt(String content, UUID corr, Instant at) {
+        return new SoulTypes.ConversationRecord(corr, 1L, seq++, SoulTypes.TurnKind.HEARD, content, at,
+                "", "", null, null, List.of(BOT));
+    }
+
+    @Test void anOpenSceneAndEverythingAfterItWaitForALaterDigest() {
+        UUID done = UUID.randomUUID();
+        UUID open = UUID.randomUUID();
+        UUID later = UUID.randomUUID();
+        SoulTypes.ConversationRecord h1 = heardAt("Roti: I like birch", done, NOW.minusSeconds(600));
+        SoulTypes.ConversationRecord s1 = rec(SoulTypes.TurnKind.SPOKEN, "Jake: birch it is.", done, List.of());
+        SoulTypes.ConversationRecord h2 = heardAt("Roti: yes, still scared of the dark", open, NOW.minusSeconds(20));
+        SoulTypes.ConversationRecord h3 = heardAt("Roti: anyone hungry?", later, NOW.minusSeconds(10));
+        SoulTypes.ConversationRecord s3 = rec(SoulTypes.TurnKind.SPOKEN, "Jake: always.", later, List.of());
+        List<SoulTypes.ConversationRecord> r = List.of(h1, s1, h2, h3, s3);
+        SoulMemoryDigestOps.Material m = SoulMemoryDigestOps.gather(
+                r, new SoulTypes.ConversationCursor(1L, h1.sequence()), BOT, "Jake", "Roti", true, PLAYER, NOW);
+        assertTrue(m.text().contains("birch"), m.text());
+        assertFalse(m.text().contains("scared"), "the open scene is not digested yet");
+        assertFalse(m.text().contains("hungry"), "a scene after it waits too, so nothing is read twice");
+        assertEquals(new SoulTypes.ConversationCursor(1L, h2.sequence()), m.next(), "cursor stops at the open scene");
+    }
+
+    @Test void theHeldSceneIsPrivateOnceItsLinesAreWritten() {
+        UUID scene = UUID.randomUUID();
+        SoulTypes.ConversationRecord h = heardAt("Roti: yes, still scared of the dark", scene, NOW.minusSeconds(30));
+        SoulTypes.ConversationRecord sp = spokenPrivate("Jake: we will keep a torch lit.", scene, PLAYER);
+        SoulMemoryDigestOps.Material m = SoulMemoryDigestOps.gather(
+                List.of(h, sp), new SoulTypes.ConversationCursor(1L, h.sequence()), BOT, "Jake", "Roti", true, PLAYER, NOW);
+        assertEquals(PLAYER, m.records().get(0).privateTo());
+        assertEquals(SoulTypes.MemoryVisibility.PRIVATE,
+                SoulPrivacyPolicy.digestVisibility(SoulTypes.Channel.PARTY, m.records()));
+    }
+
+    @Test void aSceneThatNeverGotAReplyIsNotHeldForever() {
+        UUID scene = UUID.randomUUID();
+        SoulTypes.ConversationRecord h = heardAt("Roti: hello?", scene,
+                NOW.minus(SoulMemoryDigestOps.OPEN_SCENE_HOLD).minusSeconds(1));
+        assertNull(SoulMemoryDigestOps.openSceneHoldFrom(List.of(h), NOW));
+    }
+
+    @Test void aFailureSettlesTheScene() {
+        UUID scene = UUID.randomUUID();
+        SoulTypes.ConversationRecord h = heardAt("Roti: hello?", scene, NOW.minusSeconds(5));
+        SoulTypes.ConversationRecord f = rec(SoulTypes.TurnKind.FAILURE, "", scene, List.of());
+        assertNull(SoulMemoryDigestOps.openSceneHoldFrom(List.of(h, f), NOW));
+        assertEquals(h.sequence(), SoulMemoryDigestOps.openSceneHoldFrom(List.of(h), NOW));
+    }
+
+    @Test void directMessagesAreNeverHeldBack() {
+        UUID scene = UUID.randomUUID();
+        SoulTypes.ConversationRecord h = heardAt("hello?", scene, NOW.minusSeconds(5));
+        SoulMemoryDigestOps.Material m = SoulMemoryDigestOps.gather(
+                List.of(h), new SoulTypes.ConversationCursor(1L, h.sequence()), BOT, "Jake", "Roti", false, PLAYER, NOW);
+        assertEquals(new SoulTypes.ConversationCursor(1L, h.sequence() + 1), m.next());
     }
 }

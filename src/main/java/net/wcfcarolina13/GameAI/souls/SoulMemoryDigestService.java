@@ -145,7 +145,8 @@ public final class SoulMemoryDigestService {
                     SoulTypes.ConversationCursor from = SoulMemoryDigestOps.cursorFor(mind, cursorKey);
                     return records.recordsSince(key, from).thenCompose(since -> {
                         SoulMemoryDigestOps.Material material = SoulMemoryDigestOps.gather(
-                                since, from, botId, botName, playerName, party, playerId);
+                                since, from, botId, botName, playerName, party, playerId,
+                                java.time.Instant.now());
                         if (material.playerLines() < SoulMemoryDigestOps.MIN_PLAYER_LINES) {
                             log(botId, playerId, key, "too-few", 0, material.playerLines());
                             return CompletableFuture.completedFuture(null);
