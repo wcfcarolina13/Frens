@@ -40,6 +40,11 @@ made wrong were corrected in place (line-of-sight, inventory snapshot).
 
 ## Learned Signs
 
+### Sign: The Fake Connection Must Answer Like a Real One
+- **Trigger**: Any change to `network/FakeClientConnection` or how bots connect
+- **Instruction**: Other mods read the player from the connection while packets are sent (Polymer through packet-tweaker calls `connection.getPacketListener()`). An override that returns null where vanilla returns the handler crashes every `/bot spawn` in packs with those mods. Keep `getPacketListener()` answering with the bot's handler, but don't set vanilla's private `packetListener` field: `ClientConnection.tick()` reads it and would tick the handler twice.
+- **Added after**: Discord report 2026-11-18, every spawn threw an NPE with Polymer 0.15.2 installed (also the April "Polymer stops spawning" report). Fixed in aec91d7f, proven in the sandbox with Polymer alone.
+
 ### Sign: Gate Routing Y — Use Bot's Actual Y
 - **Trigger**: Any code computing gate routing waypoint positions
 - **Instruction**: NEVER use `safeSurfaceY`, `gateCenterY`, or heightmap-derived Y for gate routing waypoints. The heightmap at the gate center hits the lintel (stone bricks at Y+3 above ground), returning a Y that's 2-3 blocks above walkable ground. This makes 3D distance checks fail. Always use `bot.getBlockPos().getY()`.
